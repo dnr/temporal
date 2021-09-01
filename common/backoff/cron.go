@@ -29,8 +29,6 @@ import (
 
 	"github.com/robfig/cron"
 	"go.temporal.io/api/serviceerror"
-
-	"go.temporal.io/server/common/convert"
 )
 
 // NoBackoff is used to represent backoff when no cron backoff is needed
@@ -74,8 +72,7 @@ func GetBackoffForNextSchedule(cronSchedule string, scheduledTime time.Time, now
 	}
 
 	backoffInterval := nextScheduleTime.Sub(nowUTC)
-	roundedInterval := time.Second * time.Duration(convert.Int64Ceil(backoffInterval.Seconds()))
-	return roundedInterval
+	return backoffInterval
 }
 
 // GetBackoffForNextScheduleNonNegative calculates the backoff time and ensures a non-negative duration.

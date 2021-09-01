@@ -135,7 +135,6 @@ func (s *integrationSuite) TestCronWorkflow_Failed() {
 	cronSchedule := "@every 3s"
 
 	targetBackoffDuration := time.Second * 3
-	backoffDurationTolerance := time.Millisecond * 500
 
 	memo := &commonpb.Memo{
 		Fields: map[string]*commonpb.Payload{"memoKey": payload.EncodeString("memoVal")},
@@ -251,7 +250,7 @@ func (s *integrationSuite) TestCronWorkflow_Failed() {
 	s.NoError(err)
 	s.Equal(1, len(listResponse.GetExecutions()))
 	executionInfo := listResponse.GetExecutions()[0]
-	s.Equal(targetBackoffDuration, executionInfo.GetExecutionTime().Sub(timestamp.TimeValue(executionInfo.GetStartTime())))
+	s.Equal(targetBackoffDuration, executionInfo.GetExecutionTime().Sub(timestamp.TimeValue(executionInfo.GetStartTime())).Round(time.Second))
 
 	s.Logger.Info("Process first cron run which fails")
 	_, err = poller.PollAndProcessWorkflowTask(true, false)
@@ -261,8 +260,7 @@ func (s *integrationSuite) TestCronWorkflow_Failed() {
 	// Make sure the cron workflow start running at a proper time, in this case 3 seconds after the
 	// startWorkflowExecution request
 	backoffDuration := time.Now().UTC().Sub(startWorkflowTS)
-	s.True(backoffDuration > targetBackoffDuration)
-	s.True(backoffDuration < targetBackoffDuration+backoffDurationTolerance)
+	s.Equal(targetBackoffDuration, backoffDuration.Round(time.Second))
 
 	s.Logger.Info("Process second cron run which succeeds")
 	_, err = poller.PollAndProcessWorkflowTask(false, false)
@@ -360,7 +358,6 @@ func (s *integrationSuite) TestCronWorkflow() {
 	cronSchedule := "@every 3s"
 
 	targetBackoffDuration := time.Second * 3
-	backoffDurationTolerance := time.Millisecond * 500
 
 	memo := &commonpb.Memo{
 		Fields: map[string]*commonpb.Payload{"memoKey": payload.EncodeString("memoVal")},
@@ -391,14 +388,6 @@ func (s *integrationSuite) TestCronWorkflow() {
 		CronSchedule:        cronSchedule, // minimum interval by standard spec is 1m (* * * * *, use non-standard descriptor for short interval for test
 		Memo:                memo,
 		SearchAttributes:    searchAttr,
-	}
-
-	// Because of rounding in GetBackoffForNextSchedule, we'll tend to stay aligned to whatever
-	// phase we start in relative to second boundaries, but drift slightly later within the second
-	// over time. If we cross a second boundary, one of our intervals will end up being 2s instead
-	// of 3s. To avoid this, wait until we can start early in the second.
-	for time.Now().Nanosecond()/int(time.Millisecond) > 150 {
-		time.Sleep(50 * time.Millisecond)
 	}
 
 	startWorkflowTS := time.Now().UTC()
@@ -483,7 +472,7 @@ func (s *integrationSuite) TestCronWorkflow() {
 	s.NoError(err)
 	s.Equal(1, len(resp.GetExecutions()))
 	executionInfo := resp.GetExecutions()[0]
-	s.Equal(targetBackoffDuration, executionInfo.GetExecutionTime().Sub(timestamp.TimeValue(executionInfo.GetStartTime())))
+	s.Equal(targetBackoffDuration, executionInfo.GetExecutionTime().Sub(timestamp.TimeValue(executionInfo.GetStartTime())).Round(time.Second))
 
 	_, err = poller.PollAndProcessWorkflowTask(false, false)
 	s.NoError(err)
@@ -491,8 +480,7 @@ func (s *integrationSuite) TestCronWorkflow() {
 	// Make sure the cron workflow start running at a proper time, in this case 3 seconds after the
 	// startWorkflowExecution request
 	backoffDuration := time.Now().UTC().Sub(startWorkflowTS)
-	s.True(backoffDuration > targetBackoffDuration)
-	s.True(backoffDuration < targetBackoffDuration+backoffDurationTolerance)
+	s.Equal(targetBackoffDuration, backoffDuration.Round(time.Second))
 
 	_, err = poller.PollAndProcessWorkflowTask(false, false)
 	s.NoError(err)
@@ -581,14 +569,7 @@ func (s *integrationSuite) TestCronWorkflow() {
 		// TODO: Remove this line once we unify the time source
 		executionTimeDiff := executionInfo.GetStartTime().Sub(timestamp.TimeValue(lastExecution.GetCloseTime()))
 		// The backoff between any two executions should be a multiplier of the target backoff duration which is 3 in this test
-		s.Equal(
-			0,
-			int((expectedBackoff-executionTimeDiff).Round(time.Second).Seconds())%int(targetBackoffDuration.Seconds()),
-			"expected backoff %v-%v=%v should be multiplier of target backoff %v",
-			expectedBackoff.Seconds(),
-			executionTimeDiff.Seconds(),
-			(expectedBackoff - executionTimeDiff).Round(time.Second).Seconds(),
-			targetBackoffDuration.Seconds())
+		s.Equal(targetBackoffDuration, (expectedBackoff - executionTimeDiff).Round(time.Second))
 		lastExecution = executionInfo
 	}
 }
@@ -601,7 +582,6 @@ func (s *integrationSuite) TestCronWorkflow_Success() {
 	cronSchedule := "@every 3s"
 
 	targetBackoffDuration := time.Second * 3
-	backoffDurationTolerance := time.Millisecond * 500
 
 	memo := &commonpb.Memo{
 		Fields: map[string]*commonpb.Payload{"memoKey": payload.EncodeString("memoVal")},
@@ -702,7 +682,7 @@ func (s *integrationSuite) TestCronWorkflow_Success() {
 	s.NoError(err)
 	s.Equal(1, len(listResponse.GetExecutions()))
 	executionInfo := listResponse.GetExecutions()[0]
-	s.Equal(targetBackoffDuration, executionInfo.GetExecutionTime().Sub(timestamp.TimeValue(executionInfo.GetStartTime())))
+	s.Equal(targetBackoffDuration, executionInfo.GetExecutionTime().Sub(timestamp.TimeValue(executionInfo.GetStartTime())).Round(time.Second))
 
 	s.Logger.Info("Process first cron run")
 	_, err = poller.PollAndProcessWorkflowTask(true, false)
@@ -712,8 +692,7 @@ func (s *integrationSuite) TestCronWorkflow_Success() {
 	// Make sure the cron workflow start running at a proper time, in this case 3 seconds after the
 	// startWorkflowExecution request
 	backoffDuration := time.Now().UTC().Sub(startWorkflowTS)
-	s.True(backoffDuration > targetBackoffDuration)
-	s.True(backoffDuration < targetBackoffDuration+backoffDurationTolerance)
+	s.Equal(targetBackoffDuration, backoffDuration.Round(time.Second))
 
 	s.Logger.Info("Process second cron run")
 	_, err = poller.PollAndProcessWorkflowTask(false, false)

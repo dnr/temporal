@@ -267,14 +267,6 @@ func (s *integrationSuite) TestCronChildWorkflowExecution() {
 		Identity:            identity,
 	}
 
-	// Because of rounding in GetBackoffForNextSchedule, we'll tend to stay aligned to whatever
-	// phase we start in relative to second boundaries, but drift slightly later within the second
-	// over time. If we cross a second boundary, one of our intervals will end up being 2s instead
-	// of 3s. To avoid this, wait until we can start early in the second.
-	for time.Now().Nanosecond()/int(time.Millisecond) > 150 {
-		time.Sleep(50 * time.Millisecond)
-	}
-
 	startParentWorkflowTS := time.Now().UTC()
 	we, err0 := s.engine.StartWorkflowExecution(NewContext(), request)
 	s.NoError(err0)
@@ -423,7 +415,7 @@ func (s *integrationSuite) TestCronChildWorkflowExecution() {
 		// TODO: Remove this line once we unify the time source.
 		executionTimeDiff := executionInfo.GetStartTime().Sub(timestamp.TimeValue(lastExecution.GetCloseTime()))
 		// The backoff between any two executions should be a multiplier of the target backoff duration which is 3 in this test
-		s.Equal(0, int(expectedBackoff.Seconds()-executionTimeDiff.Seconds())%int(targetBackoffDuration.Seconds()))
+		s.Equal(targetBackoffDuration, (expectedBackoff - executionTimeDiff).Round(time.Second))
 		lastExecution = executionInfo
 	}
 }

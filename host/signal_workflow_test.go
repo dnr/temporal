@@ -669,7 +669,7 @@ func (s *integrationSuite) TestSignalWorkflow_Cron_NoWorkflowTaskCreated() {
 	_, err = poller.PollAndProcessWorkflowTask(false, false)
 	s.Logger.Info("PollAndProcessWorkflowTask", tag.Error(err))
 	s.NoError(err)
-	s.True(workflowTaskDelay > time.Second*2)
+	s.Equal(time.Second*2, workflowTaskDelay.Round(time.Second))
 }
 
 func (s *integrationSuite) TestSignalExternalWorkflowCommand_WithoutRunID() {
