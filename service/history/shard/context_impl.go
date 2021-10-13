@@ -690,9 +690,7 @@ func (s *ContextImpl) closeShard() {
 
 	s.logger.Info("Close shard")
 
-	go func() {
-		s.closeCallback(s.shardID, s.shardItem)
-	}()
+	go s.closeCallback(s.shardID, s.shardItem)
 
 	// fails any writes that may start after this point.
 	s.shardInfo.RangeId = -1
