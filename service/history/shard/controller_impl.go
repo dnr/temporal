@@ -249,24 +249,24 @@ func (c *ControllerImpl) getOrCreateHistoryShardItem(shardID int32) (*historySha
 		return nil, err
 	}
 
-	if info.Identity() == c.GetHostInfo().Identity() {
-		shardItem, err := newHistoryShardsItem(
-			c.Resource,
-			shardID,
-			c.engineFactory,
-			c.config,
-		)
-		if err != nil {
-			return nil, err
-		}
-		c.historyShards[shardID] = shardItem
-		c.metricsScope.IncCounter(metrics.ShardItemCreatedCounter)
-
-		shardItem.logger.Info("", tag.LifeCycleStarted, tag.ComponentShardItem)
-		return shardItem, nil
+	if info.Identity() != c.GetHostInfo().Identity() {
+		return nil, serviceerrors.NewShardOwnershipLost(c.GetHostInfo().Identity(), info.GetAddress())
 	}
 
-	return nil, serviceerrors.NewShardOwnershipLost(c.GetHostInfo().Identity(), info.GetAddress())
+	shardItem, err := newHistoryShardsItem(
+		c.Resource,
+		shardID,
+		c.engineFactory,
+		c.config,
+	)
+	if err != nil {
+		return nil, err
+	}
+	c.historyShards[shardID] = shardItem
+	c.metricsScope.IncCounter(metrics.ShardItemCreatedCounter)
+
+	shardItem.logger.Info("", tag.LifeCycleStarted, tag.ComponentShardItem)
+	return shardItem, nil
 }
 
 func (c *ControllerImpl) removeHistoryShardItem(shardID int32, shardItem *historyShardsItem) (*historyShardsItem, error) {
