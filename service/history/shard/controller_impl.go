@@ -197,28 +197,28 @@ func (c *ControllerImpl) GetEngineForShard(shardID int32) (Engine, error) {
 	return item.getOrCreateEngine(c.shardClosedCallback)
 }
 
-func (c *ControllerImpl) RemoveEngineForShard(shardItem *historyShardsItem) {
+func (c *ControllerImpl) CloseShardByID(shardID int32) {
 	sw := c.metricsScope.StartTimer(metrics.RemoveEngineForShardLatency)
 	defer sw.Stop()
-	currentShardItem, _ := c.removeHistoryShardItem(shardItem.shardID, shardItem)
-	// FIXME: is this right or should it be reversed?
-	if shardItem != nil {
-		// if shardItem is not nil, then currentShardItem either equals to shardItem or is nil
-		// in both cases, we need to stop the engine in shardItem
-		shardItem.stopEngine()
-		return
-	}
-
-	// if shardItem is nil, then stop the engine for the current shardItem, if exists
+	currentShardItem, _ := c.removeHistoryShardItem(shardID, nil)
+	// Stop the engine for the current shardItem, if it exists.
 	if currentShardItem != nil {
 		currentShardItem.stopEngine()
 	}
 }
 
+func (c *ControllerImpl) removeEngineForShard(shardItem *historyShardsItem) {
+	sw := c.metricsScope.StartTimer(metrics.RemoveEngineForShardLatency)
+	defer sw.Stop()
+	c.removeHistoryShardItem(shardItem.shardID, shardItem)
+	// Whether shardItem was in the shards map or not, in both cases we should stop the engine.
+	shardItem.stopEngine()
+}
+
 func (c *ControllerImpl) shardClosedCallback(shardItem *historyShardsItem) {
 	c.metricsScope.IncCounter(metrics.ShardClosedCounter)
 	c.logger.Info("", tag.LifeCycleStopping, tag.ComponentShard, tag.ShardID(shardItem.shardID))
-	c.RemoveEngineForShard(shardItem)
+	c.removeEngineForShard(shardItem)
 }
 
 func (c *ControllerImpl) getOrCreateHistoryShardItem(shardID int32) (*historyShardsItem, error) {
@@ -270,8 +270,7 @@ func (c *ControllerImpl) getOrCreateHistoryShardItem(shardID int32) (*historySha
 	return shardItem, nil
 }
 
-func (c *ControllerImpl) removeHistoryShardItem(shardID int32, shardItem *historyShardsItem) (*historyShardsItem, error) {
-	nShards := 0
+func (c *ControllerImpl) removeHistoryShardItem(shardID int32, expectedShardItem *historyShardsItem) (*historyShardsItem, error) {
 	c.Lock()
 	defer c.Unlock()
 
@@ -279,18 +278,17 @@ func (c *ControllerImpl) removeHistoryShardItem(shardID int32, shardItem *histor
 	if !ok {
 		return nil, fmt.Errorf("No item found to remove for shard: %v", shardID)
 	}
-	if shardItem != nil && currentShardItem != shardItem {
+	if expectedShardItem != nil && currentShardItem != expectedShardItem {
 		// the shardItem comparison is a defensive check to make sure we are deleting
 		// what we intend to delete.
 		return nil, fmt.Errorf("Current shardItem doesn't match the one we intend to delete for shard: %v", shardID)
 	}
 
 	delete(c.historyShards, shardID)
-	nShards = len(c.historyShards)
 
 	c.metricsScope.IncCounter(metrics.ShardItemRemovedCounter)
 
-	currentShardItem.logger.Info("", tag.LifeCycleStopped, tag.ComponentShardItem, tag.Number(int64(nShards)))
+	currentShardItem.logger.Info("", tag.LifeCycleStopped, tag.ComponentShardItem, tag.Number(int64(len(c.historyShards))))
 	return currentShardItem, nil
 }
 
@@ -391,11 +389,9 @@ func (c *ControllerImpl) doShutdown() {
 }
 
 func (c *ControllerImpl) NumShards() int {
-	nShards := 0
 	c.RLock()
-	nShards = len(c.historyShards)
-	c.RUnlock()
-	return nShards
+	defer c.RUnlock()
+	return len(c.historyShards)
 }
 
 func (c *ControllerImpl) ShardIDs() []int32 {
