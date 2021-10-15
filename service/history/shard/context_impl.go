@@ -996,7 +996,7 @@ func (s *ContextImpl) handleErrorLocked(err error) error {
 		// will either see that write, or know for certain that it failed.
 		// This allows the callers to reliably check the outcome by performing
 		// a read.
-		if err := s.renewRangeLocked(false); err != nil {
+		if err1 := s.renewRangeLocked(false); err1 != nil {
 			// At this point we have no choice but to unload the shard, so that it
 			// gets a new RangeID when it's reloaded.
 			s.closeShardLocked()
