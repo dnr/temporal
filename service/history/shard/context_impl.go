@@ -437,10 +437,10 @@ func (s *ContextImpl) CreateWorkflowExecution(
 	}
 	defer s.updateMaxReadLevelLocked(transferMaxReadLevel)
 
-	currentRangeID := s.getRangeID()
+	currentRangeID := s.getRangeIDLocked()
 	request.RangeID = currentRangeID
 	resp, err := s.executionManager.CreateWorkflowExecution(request)
-	if err = s.handleError(err); err != nil {
+	if err = s.handleErrorLocked(err); err != nil {
 		return nil, err
 	}
 	return resp, nil
@@ -492,10 +492,10 @@ func (s *ContextImpl) UpdateWorkflowExecution(
 	}
 	defer s.updateMaxReadLevelLocked(transferMaxReadLevel)
 
-	currentRangeID := s.getRangeID()
+	currentRangeID := s.getRangeIDLocked()
 	request.RangeID = currentRangeID
 	resp, err := s.executionManager.UpdateWorkflowExecution(request)
-	if err = s.handleError(err); err != nil {
+	if err = s.handleErrorLocked(err); err != nil {
 		return nil, err
 	}
 	return resp, nil
@@ -560,10 +560,10 @@ func (s *ContextImpl) ConflictResolveWorkflowExecution(
 	}
 	defer s.updateMaxReadLevelLocked(transferMaxReadLevel)
 
-	currentRangeID := s.getRangeID()
+	currentRangeID := s.getRangeIDLocked()
 	request.RangeID = currentRangeID
 	resp, err := s.executionManager.ConflictResolveWorkflowExecution(request)
-	if err := s.handleError(err); err != nil {
+	if err := s.handleErrorLocked(err); err != nil {
 		return nil, err
 	}
 	return resp, nil
@@ -602,9 +602,9 @@ func (s *ContextImpl) AddTasks(
 	}
 	defer s.updateMaxReadLevelLocked(transferMaxReadLevel)
 
-	request.RangeID = s.getRangeID()
+	request.RangeID = s.getRangeIDLocked()
 	err = s.executionManager.AddTasks(request)
-	if err = s.handleError(err); err != nil {
+	if err = s.handleErrorLocked(err); err != nil {
 		return err
 	}
 	s.engine.NotifyNewTransferTasks(request.TransferTasks)
@@ -671,7 +671,7 @@ func (s *ContextImpl) GetThrottledLogger() log.Logger {
 	return s.throttledLogger
 }
 
-func (s *ContextImpl) getRangeID() int64 {
+func (s *ContextImpl) getRangeIDLocked() int64 {
 	return s.shardInfo.GetRangeId()
 }
 
@@ -679,7 +679,7 @@ func (s *ContextImpl) isStopped() bool {
 	return atomic.LoadInt32(&s.status) == common.DaemonStatusStopped
 }
 
-func (s *ContextImpl) closeShard() {
+func (s *ContextImpl) closeShardLocked() {
 	if !atomic.CompareAndSwapInt32(
 		&s.status,
 		common.DaemonStatusStarted,
@@ -735,7 +735,7 @@ func (s *ContextImpl) renewRangeLocked(isStealing bool) error {
 		)
 		// Shard is stolen, trigger history engine shutdown
 		if _, ok := err.(*persistence.ShardOwnershipLostError); ok {
-			s.closeShard()
+			s.closeShardLocked()
 		}
 		return err
 	}
@@ -784,7 +784,7 @@ func (s *ContextImpl) updateShardInfoLocked() error {
 	if err != nil {
 		// Shard is stolen, trigger history engine shutdown
 		if _, ok := err.(*persistence.ShardOwnershipLostError); ok {
-			s.closeShard()
+			s.closeShardLocked()
 		}
 	} else {
 		s.lastUpdated = now
@@ -972,7 +972,7 @@ func (s *ContextImpl) GetLastUpdatedTime() time.Time {
 	return s.lastUpdated
 }
 
-func (s *ContextImpl) handleError(err error) error {
+func (s *ContextImpl) handleErrorLocked(err error) error {
 	switch err.(type) {
 	case nil:
 		return nil
@@ -986,7 +986,7 @@ func (s *ContextImpl) handleError(err error) error {
 
 	case *persistence.ShardOwnershipLostError:
 		// Shard is stolen, trigger shutdown of history engine
-		s.closeShard()
+		s.closeShardLocked()
 		return err
 
 	default:
@@ -999,7 +999,7 @@ func (s *ContextImpl) handleError(err error) error {
 		if err := s.renewRangeLocked(false); err != nil {
 			// At this point we have no choice but to unload the shard, so that it
 			// gets a new RangeID when it's reloaded.
-			s.closeShard()
+			s.closeShardLocked()
 		}
 		return err
 	}
