@@ -201,6 +201,7 @@ func (c *ControllerImpl) RemoveEngineForShard(shardID int32, shardItem *historyS
 	sw := c.metricsScope.StartTimer(metrics.RemoveEngineForShardLatency)
 	defer sw.Stop()
 	currentShardItem, _ := c.removeHistoryShardItem(shardID, shardItem)
+	// FIXME: is this right or should it be reversed?
 	if shardItem != nil {
 		// if shardItem is not nil, then currentShardItem either equals to shardItem or is nil
 		// in both cases, we need to stop the engine in shardItem
