@@ -734,7 +734,7 @@ func (s *ContextImpl) renewRangeLocked(isStealing bool) error {
 			tag.PreviousShardRangeID(s.shardInfo.GetRangeId()),
 		)
 		// Shard is stolen, trigger history engine shutdown
-		if _, ok := err.(*persistence.ShardOwnershipLostError); ok {
+		if IsShardOwnershipLostError(err) {
 			s.closeShardLocked()
 		}
 		return err
@@ -783,7 +783,7 @@ func (s *ContextImpl) updateShardInfoLocked() error {
 
 	if err != nil {
 		// Shard is stolen, trigger history engine shutdown
-		if _, ok := err.(*persistence.ShardOwnershipLostError); ok {
+		if IsShardOwnershipLostError(err) {
 			s.closeShardLocked()
 		}
 	} else {
