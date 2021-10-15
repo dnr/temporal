@@ -1103,15 +1103,13 @@ func acquireShard(
 		timerMaxReadLevelMap[clusterName] = timerMaxReadLevelMap[clusterName].Truncate(time.Millisecond)
 	}
 
-	executionMgr := shardItem.GetExecutionManager()
-
 	shardContext := &ContextImpl{
 		Resource: shardItem.Resource,
 		// shard context does not have background processing logic
 		status:                         common.DaemonStatusStarted,
 		shardItem:                      shardItem,
 		shardID:                        shardItem.shardID,
-		executionManager:               executionMgr,
+		executionManager:               shardItem.GetExecutionManager(),
 		metricsClient:                  shardItem.GetMetricsClient(),
 		shardInfo:                      updatedShardInfo,
 		closeCallback:                  closeCallback,
