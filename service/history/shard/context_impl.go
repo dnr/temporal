@@ -118,15 +118,15 @@ func (s *ContextImpl) SetEngine(engine Engine) {
 }
 
 func (s *ContextImpl) GenerateTransferTaskID() (int64, error) {
-	s.Lock()
-	defer s.Unlock()
+	s.lock()
+	defer s.unlock()
 
 	return s.generateTransferTaskIDLocked()
 }
 
 func (s *ContextImpl) GenerateTransferTaskIDs(number int) ([]int64, error) {
-	s.Lock()
-	defer s.Unlock()
+	s.lock()
+	defer s.unlock()
 
 	result := []int64{}
 	for i := 0; i < number; i++ {
@@ -140,21 +140,21 @@ func (s *ContextImpl) GenerateTransferTaskIDs(number int) ([]int64, error) {
 }
 
 func (s *ContextImpl) GetTransferMaxReadLevel() int64 {
-	s.RLock()
-	defer s.RUnlock()
+	s.rlock()
+	defer s.runlock()
 	return s.transferMaxReadLevel
 }
 
 func (s *ContextImpl) GetTransferAckLevel() int64 {
-	s.RLock()
-	defer s.RUnlock()
+	s.rlock()
+	defer s.runlock()
 
 	return s.shardInfo.TransferAckLevel
 }
 
 func (s *ContextImpl) UpdateTransferAckLevel(ackLevel int64) error {
-	s.Lock()
-	defer s.Unlock()
+	s.lock()
+	defer s.unlock()
 
 	s.shardInfo.TransferAckLevel = ackLevel
 	s.shardInfo.StolenSinceRenew = 0
@@ -162,8 +162,8 @@ func (s *ContextImpl) UpdateTransferAckLevel(ackLevel int64) error {
 }
 
 func (s *ContextImpl) GetTransferClusterAckLevel(cluster string) int64 {
-	s.RLock()
-	defer s.RUnlock()
+	s.rlock()
+	defer s.runlock()
 
 	// if we can find corresponding ack level
 	if ackLevel, ok := s.shardInfo.ClusterTransferAckLevel[cluster]; ok {
@@ -175,8 +175,8 @@ func (s *ContextImpl) GetTransferClusterAckLevel(cluster string) int64 {
 }
 
 func (s *ContextImpl) UpdateTransferClusterAckLevel(cluster string, ackLevel int64) error {
-	s.Lock()
-	defer s.Unlock()
+	s.lock()
+	defer s.unlock()
 
 	s.shardInfo.ClusterTransferAckLevel[cluster] = ackLevel
 	s.shardInfo.StolenSinceRenew = 0
@@ -184,15 +184,15 @@ func (s *ContextImpl) UpdateTransferClusterAckLevel(cluster string, ackLevel int
 }
 
 func (s *ContextImpl) GetVisibilityAckLevel() int64 {
-	s.RLock()
-	defer s.RUnlock()
+	s.rlock()
+	defer s.runlock()
 
 	return s.shardInfo.VisibilityAckLevel
 }
 
 func (s *ContextImpl) UpdateVisibilityAckLevel(ackLevel int64) error {
-	s.Lock()
-	defer s.Unlock()
+	s.lock()
+	defer s.unlock()
 
 	s.shardInfo.VisibilityAckLevel = ackLevel
 	s.shardInfo.StolenSinceRenew = 0
@@ -200,23 +200,23 @@ func (s *ContextImpl) UpdateVisibilityAckLevel(ackLevel int64) error {
 }
 
 func (s *ContextImpl) GetReplicatorAckLevel() int64 {
-	s.RLock()
-	defer s.RUnlock()
+	s.rlock()
+	defer s.runlock()
 
 	return s.shardInfo.ReplicationAckLevel
 }
 
 func (s *ContextImpl) UpdateReplicatorAckLevel(ackLevel int64) error {
-	s.Lock()
-	defer s.Unlock()
+	s.lock()
+	defer s.unlock()
 	s.shardInfo.ReplicationAckLevel = ackLevel
 	s.shardInfo.StolenSinceRenew = 0
 	return s.updateShardInfoLocked()
 }
 
 func (s *ContextImpl) GetReplicatorDLQAckLevel(sourceCluster string) int64 {
-	s.RLock()
-	defer s.RUnlock()
+	s.rlock()
+	defer s.runlock()
 
 	if ackLevel, ok := s.shardInfo.ReplicationDlqAckLevel[sourceCluster]; ok {
 		return ackLevel
@@ -229,8 +229,8 @@ func (s *ContextImpl) UpdateReplicatorDLQAckLevel(
 	ackLevel int64,
 ) error {
 
-	s.Lock()
-	defer s.Unlock()
+	s.lock()
+	defer s.unlock()
 
 	s.shardInfo.ReplicationDlqAckLevel[sourceCluster] = ackLevel
 	s.shardInfo.StolenSinceRenew = 0
@@ -250,8 +250,8 @@ func (s *ContextImpl) UpdateReplicatorDLQAckLevel(
 }
 
 func (s *ContextImpl) GetClusterReplicationLevel(cluster string) int64 {
-	s.RLock()
-	defer s.RUnlock()
+	s.rlock()
+	defer s.runlock()
 
 	// if we can find corresponding replication level
 	if replicationLevel, ok := s.shardInfo.ClusterReplicationLevel[cluster]; ok {
@@ -263,8 +263,8 @@ func (s *ContextImpl) GetClusterReplicationLevel(cluster string) int64 {
 }
 
 func (s *ContextImpl) UpdateClusterReplicationLevel(cluster string, ackTaskID int64) error {
-	s.Lock()
-	defer s.Unlock()
+	s.lock()
+	defer s.unlock()
 
 	s.shardInfo.ClusterReplicationLevel[cluster] = ackTaskID
 	s.shardInfo.StolenSinceRenew = 0
@@ -272,24 +272,24 @@ func (s *ContextImpl) UpdateClusterReplicationLevel(cluster string, ackTaskID in
 }
 
 func (s *ContextImpl) GetTimerAckLevel() time.Time {
-	s.RLock()
-	defer s.RUnlock()
+	s.rlock()
+	defer s.runlock()
 
 	return timestamp.TimeValue(s.shardInfo.TimerAckLevelTime)
 }
 
 func (s *ContextImpl) UpdateTimerAckLevel(ackLevel time.Time) error {
-	s.Lock()
-	defer s.Unlock()
+	s.lock()
+	defer s.unlock()
 
 	s.shardInfo.TimerAckLevelTime = &ackLevel
 	s.shardInfo.StolenSinceRenew = 0
 	return s.updateShardInfoLocked()
 }
 
-func (s *ContextImpl) GetTimerClusterAckLevel(cluster string) (t time.Time) {
-	s.RLock()
-	defer s.RUnlock()
+func (s *ContextImpl) GetTimerClusterAckLevel(cluster string) time.Time {
+	s.rlock()
+	defer s.runlock()
 
 	// if we can find corresponding ack level
 	if ackLevel, ok := s.shardInfo.ClusterTimerAckLevel[cluster]; ok {
@@ -301,8 +301,8 @@ func (s *ContextImpl) GetTimerClusterAckLevel(cluster string) (t time.Time) {
 }
 
 func (s *ContextImpl) UpdateTimerClusterAckLevel(cluster string, ackLevel time.Time) error {
-	s.Lock()
-	defer s.Unlock()
+	s.lock()
+	defer s.unlock()
 
 	s.shardInfo.ClusterTimerAckLevel[cluster] = &ackLevel
 	s.shardInfo.StolenSinceRenew = 0
@@ -310,16 +310,16 @@ func (s *ContextImpl) UpdateTimerClusterAckLevel(cluster string, ackLevel time.T
 }
 
 func (s *ContextImpl) UpdateTransferFailoverLevel(failoverID string, level persistence.TransferFailoverLevel) error {
-	s.Lock()
-	defer s.Unlock()
+	s.lock()
+	defer s.unlock()
 
 	s.shardInfo.TransferFailoverLevels[failoverID] = level
 	return s.updateShardInfoLocked()
 }
 
 func (s *ContextImpl) DeleteTransferFailoverLevel(failoverID string) error {
-	s.Lock()
-	defer s.Unlock()
+	s.lock()
+	defer s.unlock()
 
 	if level, ok := s.shardInfo.TransferFailoverLevels[failoverID]; ok {
 		s.GetMetricsClient().RecordTimer(metrics.ShardInfoScope, metrics.ShardInfoTransferFailoverLatencyTimer, time.Since(level.StartTime))
@@ -329,8 +329,8 @@ func (s *ContextImpl) DeleteTransferFailoverLevel(failoverID string) error {
 }
 
 func (s *ContextImpl) GetAllTransferFailoverLevels() map[string]persistence.TransferFailoverLevel {
-	s.RLock()
-	defer s.RUnlock()
+	s.rlock()
+	defer s.runlock()
 
 	ret := map[string]persistence.TransferFailoverLevel{}
 	for k, v := range s.shardInfo.TransferFailoverLevels {
@@ -340,16 +340,16 @@ func (s *ContextImpl) GetAllTransferFailoverLevels() map[string]persistence.Tran
 }
 
 func (s *ContextImpl) UpdateTimerFailoverLevel(failoverID string, level persistence.TimerFailoverLevel) error {
-	s.Lock()
-	defer s.Unlock()
+	s.lock()
+	defer s.unlock()
 
 	s.shardInfo.TimerFailoverLevels[failoverID] = level
 	return s.updateShardInfoLocked()
 }
 
 func (s *ContextImpl) DeleteTimerFailoverLevel(failoverID string) error {
-	s.Lock()
-	defer s.Unlock()
+	s.lock()
+	defer s.unlock()
 
 	if level, ok := s.shardInfo.TimerFailoverLevels[failoverID]; ok {
 		s.GetMetricsClient().RecordTimer(metrics.ShardInfoScope, metrics.ShardInfoTimerFailoverLatencyTimer, time.Since(level.StartTime))
@@ -359,8 +359,8 @@ func (s *ContextImpl) DeleteTimerFailoverLevel(failoverID string) error {
 }
 
 func (s *ContextImpl) GetAllTimerFailoverLevels() map[string]persistence.TimerFailoverLevel {
-	s.RLock()
-	defer s.RUnlock()
+	s.rlock()
+	defer s.runlock()
 
 	ret := map[string]persistence.TimerFailoverLevel{}
 	for k, v := range s.shardInfo.TimerFailoverLevels {
@@ -370,30 +370,30 @@ func (s *ContextImpl) GetAllTimerFailoverLevels() map[string]persistence.TimerFa
 }
 
 func (s *ContextImpl) GetNamespaceNotificationVersion() int64 {
-	s.RLock()
-	defer s.RUnlock()
+	s.rlock()
+	defer s.runlock()
 
 	return s.shardInfo.NamespaceNotificationVersion
 }
 
 func (s *ContextImpl) UpdateNamespaceNotificationVersion(namespaceNotificationVersion int64) error {
-	s.Lock()
-	defer s.Unlock()
+	s.lock()
+	defer s.unlock()
 
 	s.shardInfo.NamespaceNotificationVersion = namespaceNotificationVersion
 	return s.updateShardInfoLocked()
 }
 
 func (s *ContextImpl) GetTimerMaxReadLevel(cluster string) time.Time {
-	s.RLock()
-	defer s.RUnlock()
+	s.rlock()
+	defer s.runlock()
 
 	return s.timerMaxReadLevelMap[cluster]
 }
 
 func (s *ContextImpl) UpdateTimerMaxReadLevel(cluster string) time.Time {
-	s.Lock()
-	defer s.Unlock()
+	s.lock()
+	defer s.unlock()
 
 	currentTime := s.GetTimeSource().Now()
 	if cluster != "" && cluster != s.GetClusterMetadata().GetCurrentClusterName() {
@@ -420,8 +420,8 @@ func (s *ContextImpl) CreateWorkflowExecution(
 		return nil, err
 	}
 
-	s.Lock()
-	defer s.Unlock()
+	s.lock()
+	defer s.unlock()
 
 	transferMaxReadLevel := int64(0)
 	if err := s.allocateTaskIDsLocked(
@@ -462,8 +462,8 @@ func (s *ContextImpl) UpdateWorkflowExecution(
 		return nil, err
 	}
 
-	s.Lock()
-	defer s.Unlock()
+	s.lock()
+	defer s.unlock()
 
 	transferMaxReadLevel := int64(0)
 	if err := s.allocateTaskIDsLocked(
@@ -517,8 +517,8 @@ func (s *ContextImpl) ConflictResolveWorkflowExecution(
 		return nil, err
 	}
 
-	s.Lock()
-	defer s.Unlock()
+	s.lock()
+	defer s.unlock()
 
 	transferMaxReadLevel := int64(0)
 	if request.CurrentWorkflowMutation != nil {
@@ -585,8 +585,8 @@ func (s *ContextImpl) AddTasks(
 		return err
 	}
 
-	s.Lock()
-	defer s.Unlock()
+	s.lock()
+	defer s.unlock()
 
 	transferMaxReadLevel := int64(0)
 	if err := s.allocateTaskIDsLocked(
@@ -945,8 +945,8 @@ func (s *ContextImpl) allocateTimerIDsLocked(
 }
 
 func (s *ContextImpl) SetCurrentTime(cluster string, currentTime time.Time) {
-	s.Lock()
-	defer s.Unlock()
+	s.lock()
+	defer s.unlock()
 	if cluster != s.GetClusterMetadata().GetCurrentClusterName() {
 		prevTime := s.remoteClusterCurrentTime[cluster]
 		if prevTime.Before(currentTime) {
@@ -958,8 +958,8 @@ func (s *ContextImpl) SetCurrentTime(cluster string, currentTime time.Time) {
 }
 
 func (s *ContextImpl) GetCurrentTime(cluster string) time.Time {
-	s.RLock()
-	defer s.RUnlock()
+	s.rlock()
+	defer s.runlock()
 	if cluster != s.GetClusterMetadata().GetCurrentClusterName() {
 		return s.remoteClusterCurrentTime[cluster]
 	}
@@ -967,8 +967,8 @@ func (s *ContextImpl) GetCurrentTime(cluster string) time.Time {
 }
 
 func (s *ContextImpl) GetLastUpdatedTime() time.Time {
-	s.RLock()
-	defer s.RUnlock()
+	s.rlock()
+	defer s.runlock()
 	return s.lastUpdated
 }
 
@@ -1005,7 +1005,7 @@ func (s *ContextImpl) handleError(err error) error {
 	}
 }
 
-func (s *ContextImpl) Lock() {
+func (s *ContextImpl) lock() {
 	scope := metrics.ShardInfoScope
 	s.metricsClient.IncCounter(scope, metrics.LockRequests)
 	sw := s.metricsClient.StartTimer(scope, metrics.LockLatency)
@@ -1014,7 +1014,7 @@ func (s *ContextImpl) Lock() {
 	s.rwLock.Lock()
 }
 
-func (s *ContextImpl) RLock() {
+func (s *ContextImpl) rlock() {
 	scope := metrics.ShardInfoScope
 	s.metricsClient.IncCounter(scope, metrics.LockRequests)
 	sw := s.metricsClient.StartTimer(scope, metrics.LockLatency)
@@ -1023,11 +1023,11 @@ func (s *ContextImpl) RLock() {
 	s.rwLock.RLock()
 }
 
-func (s *ContextImpl) Unlock() {
+func (s *ContextImpl) unlock() {
 	s.rwLock.Unlock()
 }
 
-func (s *ContextImpl) RUnlock() {
+func (s *ContextImpl) runlock() {
 	s.rwLock.RUnlock()
 }
 
