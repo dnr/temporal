@@ -197,10 +197,10 @@ func (c *ControllerImpl) GetEngineForShard(shardID int32) (Engine, error) {
 	return item.getOrCreateEngine(c.shardClosedCallback)
 }
 
-func (c *ControllerImpl) RemoveEngineForShard(shardID int32, shardItem *historyShardsItem) {
+func (c *ControllerImpl) RemoveEngineForShard(shardItem *historyShardsItem) {
 	sw := c.metricsScope.StartTimer(metrics.RemoveEngineForShardLatency)
 	defer sw.Stop()
-	currentShardItem, _ := c.removeHistoryShardItem(shardID, shardItem)
+	currentShardItem, _ := c.removeHistoryShardItem(shardItem.shardID, shardItem)
 	// FIXME: is this right or should it be reversed?
 	if shardItem != nil {
 		// if shardItem is not nil, then currentShardItem either equals to shardItem or is nil
@@ -215,10 +215,10 @@ func (c *ControllerImpl) RemoveEngineForShard(shardID int32, shardItem *historyS
 	}
 }
 
-func (c *ControllerImpl) shardClosedCallback(shardID int32, shardItem *historyShardsItem) {
+func (c *ControllerImpl) shardClosedCallback(shardItem *historyShardsItem) {
 	c.metricsScope.IncCounter(metrics.ShardClosedCounter)
-	c.logger.Info("", tag.LifeCycleStopping, tag.ComponentShard, tag.ShardID(shardID))
-	c.RemoveEngineForShard(shardID, shardItem)
+	c.logger.Info("", tag.LifeCycleStopping, tag.ComponentShard, tag.ShardID(shardItem.shardID))
+	c.RemoveEngineForShard(shardItem)
 }
 
 func (c *ControllerImpl) getOrCreateHistoryShardItem(shardID int32) (*historyShardsItem, error) {
@@ -410,7 +410,7 @@ func (c *ControllerImpl) ShardIDs() []int32 {
 }
 
 func (i *historyShardsItem) getOrCreateEngine(
-	closeCallback func(int32, *historyShardsItem),
+	closeCallback func(*historyShardsItem),
 ) (Engine, error) {
 	i.RLock()
 	if i.status == historyShardsItemStatusStarted {
