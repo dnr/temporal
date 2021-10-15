@@ -990,6 +990,7 @@ func (s *ContextImpl) handleError(err error) error {
 		return err
 
 	default:
+		// FIXME: this is the main spot to fix
 		// We have no idea if the write failed or will eventually make it to
 		// persistence. Increment RangeID to guarantee that subsequent reads
 		// will either see that write, or know for certain that it failed.
