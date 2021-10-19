@@ -112,7 +112,7 @@ var (
 	ComponentReplicatorQueue          = component("replicator-queue-processor")
 	ComponentShardController          = component("shard-controller")
 	ComponentShard                    = component("shard")
-	ComponentShardItem                = component("shard-item")
+	ComponentShardContext             = component("shard-item") // FIXME: change to "shard-context"?
 	ComponentShardEngine              = component("shard-engine")
 	ComponentMatchingEngine           = component("matching-engine")
 	ComponentReplicator               = component("replicator")

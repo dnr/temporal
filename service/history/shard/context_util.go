@@ -66,7 +66,7 @@ func NewTestContext(
 		maxTransferSequenceNumber: 100000,
 		timerMaxReadLevelMap:      make(map[string]time.Time),
 		remoteClusterCurrentTime:  make(map[string]time.Time),
-		EventsCache:               eventsCache,
+		eventsCache:               eventsCache,
 	}
 	return &ContextTest{
 		ContextImpl:     shard,

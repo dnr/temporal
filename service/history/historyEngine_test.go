@@ -145,7 +145,7 @@ func (s *engineSuite) SetupTest() {
 		s.mockShard.GetLogger(),
 		s.mockShard.GetMetricsClient(),
 	)
-	s.mockShard.EventsCache = s.eventsCache
+	s.mockShard.SetEventsCacheForTesting(s.eventsCache)
 
 	s.mockMatchingClient = s.mockShard.Resource.MatchingClient
 	s.mockHistoryClient = s.mockShard.Resource.HistoryClient
