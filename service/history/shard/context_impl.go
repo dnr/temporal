@@ -29,7 +29,6 @@ import (
 	"errors"
 	"fmt"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	commonpb "go.temporal.io/api/common/v1"
@@ -58,7 +57,7 @@ var (
 
 const (
 	// These are the possible values of ContextImpl.status
-	contextStatusInitialized int32 = iota
+	contextStatusInitialized contextStatus = iota
 	contextStatusAcquiring
 	contextStatusAcquired
 	contextStatusStopped
@@ -75,11 +74,8 @@ type (
 	contextRequest int
 
 	ContextImpl struct {
-		resource.Resource
-
-		status int32
-
 		// These fields are constant:
+		resource.Resource
 		shardID          int32
 		executionManager persistence.ExecutionManager
 		metricsClient    metrics.Client
@@ -93,6 +89,7 @@ type (
 
 		// All following fields are protected by rwLock, and only valid if status >= Acquiring:
 		rwLock                    sync.RWMutex
+		status                    contextStatus
 		engine                    Engine
 		lastUpdated               time.Time
 		shardInfo                 *persistence.ShardInfoWithFailover
@@ -720,7 +717,9 @@ func (s *ContextImpl) getRangeIDLocked() int64 {
 }
 
 func (s *ContextImpl) errorByStatus() error {
-	switch atomic.LoadInt32(&s.status) {
+	s.rlock()
+	defer s.runlock()
+	switch s.status {
 	case contextStatusInitialized:
 		return ErrShardStatusUnknown
 	case contextStatusAcquiring:
@@ -1065,7 +1064,10 @@ func (s *ContextImpl) createEngineLocked() {
 }
 
 func (s *ContextImpl) getOrCreateEngine() (Engine, error) {
-	switch atomic.LoadInt32(&s.status) {
+	s.rlock()
+	defer s.runlock()
+
+	switch s.status {
 	case contextStatusInitialized:
 		s.requestCh <- contextRequestAcquire
 		// FIXME: should we try to wait a little while for it to acquire?
@@ -1075,8 +1077,6 @@ func (s *ContextImpl) getOrCreateEngine() (Engine, error) {
 		// FIXME: should we try to wait a little while for it to acquire?
 		return nil, ErrShardStatusUnknown
 	case contextStatusAcquired:
-		s.rlock()
-		defer s.runlock()
 		// engine should be set here, but there might be a benign race where it isn't
 		if s.engine == nil {
 			s.logger.Error("engine not set in acquired status")
@@ -1095,7 +1095,10 @@ func (s *ContextImpl) stop() {
 }
 
 func (s *ContextImpl) isValid() bool {
-	return atomic.LoadInt32(&s.status) != contextStatusStopped
+	// FIXME: always call callback when stopping so that we get removed from controller and we don't need this?
+	s.rlock()
+	defer s.runlock()
+	return s.status != contextStatusStopped
 }
 
 func (s *ContextImpl) lock() {
@@ -1145,15 +1148,8 @@ func (s *ContextImpl) lifecycle() {
 		terminal state, no transitions. this goroutine should not be running.
 	*/
 
+	// Context for cancelling acquire goroutine
 	ctx, cancel := context.WithCancel(context.Background())
-
-	acquire := func() {
-		go s.acquireShard(ctx)
-		atomic.StoreInt32(&s.status, contextStatusAcquiring)
-	}
-	acquired := func() {
-		atomic.StoreInt32(&s.status, contextStatusAcquired)
-	}
 
 	for request := range s.requestCh {
 		// We can transition to stop no matter what state we're in
@@ -1161,13 +1157,14 @@ func (s *ContextImpl) lifecycle() {
 			break
 		}
 
-		currentStatus := atomic.LoadInt32(&s.status)
+		s.lock()
 
-		switch currentStatus {
+		switch s.status {
 		case contextStatusInitialized:
 			switch request {
 			case contextRequestAcquire:
-				acquire()
+				go s.acquireShard(ctx)
+				s.status = contextStatusAcquiring
 			default:
 				s.logger.Warn("invalid request for state transition")
 			}
@@ -1176,7 +1173,7 @@ func (s *ContextImpl) lifecycle() {
 			case contextRequestAcquire:
 				// nothing to do, already acquiring
 			case contextRequestAcquired:
-				acquired()
+				s.status = contextStatusAcquired
 			case contextRequestLost:
 				// nothing to do, already acquiring
 			default:
@@ -1187,13 +1184,16 @@ func (s *ContextImpl) lifecycle() {
 			case contextRequestAcquire:
 				// nothing to to do, already acquired
 			case contextRequestLost:
-				acquire()
+				go s.acquireShard(ctx)
+				s.status = contextStatusAcquiring
 			default:
 				s.logger.Warn("invalid request for state transition")
 			}
 		default:
 			s.logger.Warn("in unexpected status")
 		}
+
+		s.unlock()
 	}
 
 	// Stop the acquire goroutine if it was running
@@ -1205,9 +1205,8 @@ func (s *ContextImpl) lifecycle() {
 	s.engine.Stop()
 	s.engine = nil
 	s.logger.Info("", tag.LifeCycleStopped, tag.ComponentShardEngine)
+	s.status = contextStatusStopped
 	s.unlock()
-
-	atomic.StoreInt32(&s.status, contextStatusStopped)
 
 	// FIXME: should we close this?
 	//close(s.requestCh)
