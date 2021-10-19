@@ -719,6 +719,10 @@ func (s *ContextImpl) getRangeIDLocked() int64 {
 func (s *ContextImpl) errorByStatus() error {
 	s.rlock()
 	defer s.runlock()
+	return s.errorByStatusLocked()
+}
+
+func (s *ContextImpl) errorByStatusLocked() error {
 	switch s.status {
 	case contextStatusInitialized:
 		return ErrShardStatusUnknown
@@ -814,7 +818,7 @@ func (s *ContextImpl) updateMaxReadLevelLocked(rl int64) {
 }
 
 func (s *ContextImpl) updateShardInfoLocked() error {
-	if err := s.errorByStatus(); err != nil {
+	if err := s.errorByStatusLocked(); err != nil {
 		return err
 	}
 
@@ -1195,6 +1199,8 @@ func (s *ContextImpl) lifecycle() {
 
 		s.unlock()
 	}
+
+	// FIXME: maybe this should be responsible for calling the close callback here?
 
 	// Stop the acquire goroutine if it was running
 	cancel()
