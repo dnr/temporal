@@ -121,7 +121,7 @@ var (
 	// FIXME: rename this?
 	ErrShardStatusUnknown = errors.New("shard status unknown")
 
-	// errOldGeneration is an internal error
+	// errOldGeneration is an internal error used to scope acquireShard to a single status transition.
 	errOldGeneration = errors.New("old generation")
 )
 
@@ -1202,16 +1202,18 @@ func (s *ContextImpl) setStatusLocked(newStatus contextStatus) {
 func (s *ContextImpl) transitionStoppedLocked() {
 	// FIXME: maybe this should be responsible for calling the close callback here?
 
-	s.setStatusLocked(contextStatusStopped)
-
 	// Stop the acquire goroutine if it was running
 	s.acquireCancel()
 
 	// Stop the engine if it was running
-	s.logger.Info("", tag.LifeCycleStopping, tag.ComponentShardEngine)
-	s.engine.Stop()
-	s.engine = nil
-	s.logger.Info("", tag.LifeCycleStopped, tag.ComponentShardEngine)
+	if s.engine != nil {
+		s.logger.Info("", tag.LifeCycleStopping, tag.ComponentShardEngine)
+		s.engine.Stop()
+		s.engine = nil
+		s.logger.Info("", tag.LifeCycleStopped, tag.ComponentShardEngine)
+	}
+
+	s.setStatusLocked(contextStatusStopped)
 }
 
 func (s *ContextImpl) loadOrCreateShardMetadata() (*persistence.ShardInfoWithFailover, error) {
@@ -1317,7 +1319,6 @@ func (s *ContextImpl) acquireShard(generation int) {
 			return true
 		}
 		// Retry this in case we need to create the shard and race with someone else doing it.
-		// FIXME: that really shouldn't happen, should it?
 		if _, ok := err.(*persistence.ShardAlreadyExistError); ok {
 			return true
 		}
@@ -1356,7 +1357,10 @@ func (s *ContextImpl) acquireShard(generation int) {
 	}
 
 	err := backoff.RetryContext(s.acquireCtx, try, policy, isRetryable)
-	if err != nil {
+	if err == errOldGeneration {
+		// Status changed since this goroutine started, exit silently
+		return
+	} else if err != nil {
 		// We got an unretryable error (perhaps ShardOwnershipLostError, or context cancelled) or timed out.
 		// Stop the shard.
 		s.logger.Error("Couldn't acquire shard", tag.Error(err))
