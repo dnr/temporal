@@ -219,6 +219,7 @@ func (c *ControllerImpl) getOrCreateShardContext(shardID int32) (*ContextImpl, e
 	if err != nil {
 		return nil, err
 	}
+	shard.start()
 	c.historyShards[shardID] = shard
 	c.metricsScope.IncCounter(metrics.ShardContextCreatedCounter)
 

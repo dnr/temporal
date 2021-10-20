@@ -1073,16 +1073,14 @@ func (s *ContextImpl) getOrCreateEngine() (Engine, error) {
 
 	switch s.status {
 	case contextStatusInitialized:
-		s.requestCh <- contextRequestAcquire
 		// FIXME: should we try to wait a little while for it to acquire?
 		return nil, ErrShardStatusUnknown
 	case contextStatusAcquiring:
-		s.requestCh <- contextRequestAcquire
 		// FIXME: should we try to wait a little while for it to acquire?
 		return nil, ErrShardStatusUnknown
 	case contextStatusAcquired:
-		// engine should be set here, but there might be a benign race where it isn't
 		if s.engine == nil {
+			// engine should be set here, but there might be a benign race where it isn't
 			s.logger.Error("engine not set in acquired status")
 			return nil, ErrShardStatusUnknown
 		}
@@ -1092,6 +1090,11 @@ func (s *ContextImpl) getOrCreateEngine() (Engine, error) {
 	default:
 		panic("invalid status")
 	}
+}
+
+func (s *ContextImpl) start() {
+	go s.lifecycle()
+	s.requestCh <- contextRequestAcquire
 }
 
 func (s *ContextImpl) stop() {
@@ -1371,7 +1374,6 @@ func newContext(
 		config:           config,
 		logger:           logger,
 		throttledLogger:  throttledLogger,
-		requestCh:        make(chan contextRequest),
 		engineFactory:    factory,
 	}
 	shardContext.eventsCache = events.NewEventsCache(
@@ -1387,9 +1389,6 @@ func newContext(
 	// Add tag for context itself to loggers
 	shardContext.logger = log.With(shardContext.logger, tag.ShardContext(shardContext))
 	shardContext.throttledLogger = log.With(shardContext.throttledLogger, tag.ShardContext(shardContext))
-
-	// Start goroutine for lifecycle management
-	go shardContext.lifecycle()
 
 	return shardContext, nil
 }
