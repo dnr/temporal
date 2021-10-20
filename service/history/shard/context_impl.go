@@ -85,11 +85,15 @@ type (
 		logger           log.Logger
 		throttledLogger  log.Logger
 		engineFactory    EngineFactory
-		requestCh        chan contextRequest
+
+		// Used for cancelling background shard acquisition during shutdown:
+		acquireCtx    context.Context
+		acquireCancel context.CancelFunc
 
 		// All following fields are protected by rwLock, and only valid if status >= Acquiring:
 		rwLock                    sync.RWMutex
 		status                    contextStatus
+		statusGeneration          int
 		engine                    Engine
 		lastUpdated               time.Time
 		shardInfo                 *persistence.ShardInfoWithFailover
@@ -116,6 +120,9 @@ var (
 	// during short windows at initialization and if we've lost the connection to the database.
 	// FIXME: rename this?
 	ErrShardStatusUnknown = errors.New("shard status unknown")
+
+	// errOldGeneration is an internal error
+	errOldGeneration = errors.New("old generation")
 )
 
 const (
@@ -1049,18 +1056,17 @@ func (s *ContextImpl) handleErrorLocked(err error) error {
 		// will either see that write, or know for certain that it failed.
 		// This allows the callers to reliably check the outcome by performing
 		// a read.
-		s.requestCh <- contextRequestLost
-		// FIXME: need to block until we know that status is updated? or more?
+		s.transitionLocked(contextRequestLost)
 		return err
 	}
 }
 
 func (s *ContextImpl) createEngineLocked() {
-	// FIXME: better way thread this value through?
 	if s.previousShardOwnerWasDifferent {
 		s.GetMetricsClient().RecordTimer(metrics.ShardInfoScope, metrics.ShardContextAcquisitionLatency,
 			s.GetCurrentTime(s.GetClusterMetadata().GetCurrentClusterName()).Sub(s.GetLastUpdatedTime()))
 	}
+
 	s.logger.Info("", tag.LifeCycleStarting, tag.ComponentShardEngine)
 	s.engine = s.engineFactory.CreateEngine(s)
 	s.engine.Start()
@@ -1093,12 +1099,11 @@ func (s *ContextImpl) getOrCreateEngine() (Engine, error) {
 }
 
 func (s *ContextImpl) start() {
-	go s.lifecycle()
-	s.requestCh <- contextRequestAcquire
+	s.transition(contextRequestAcquire)
 }
 
 func (s *ContextImpl) stop() {
-	s.requestCh <- contextRequestStop
+	s.transition(contextRequestStop)
 }
 
 func (s *ContextImpl) isValid() bool {
@@ -1139,86 +1144,74 @@ func (s *ContextImpl) String() string {
 	return fmt.Sprintf("%p", s)
 }
 
-func (s *ContextImpl) lifecycle() {
-	/* State transitions:
-	Initialized
-		on: request to acquire shard -> Acquiring
-		on: request to stop -> Stopped
-	Acquiring
-		on: shard acquired succesfully -> Acquired
-		on: request to stop -> Stopped
-	Acquired
-		on: notification that we might not have shard anymore -> Acquiring
-		on: request to stop -> Stopped
-		before moving to this state, shardInfo, engine, and various other fields must be set
-	Stopped
-		terminal state, no transitions. this goroutine should not be running.
-	*/
+func (s *ContextImpl) transition(request contextRequest) {
+	s.lock()
+	defer s.unlock()
+	s.transitionLocked(request)
+}
 
-	// Context for cancelling acquire goroutine
-	ctx, cancel := context.WithCancel(context.Background())
-
-	for request := range s.requestCh {
-		// We can transition to stop no matter what state we're in
-		if request == contextRequestStop {
-			break
+func (s *ContextImpl) transitionLocked(request contextRequest) {
+	switch s.status {
+	case contextStatusInitialized:
+		switch request {
+		case contextRequestAcquire:
+			s.setStatusLocked(contextStatusAcquiring)
+			go s.acquireShard(s.statusGeneration)
+			return
+		case contextRequestStop:
+			s.transitionStoppedLocked()
+			return
 		}
-
-		s.lock()
-
-		switch s.status {
-		case contextStatusInitialized:
-			switch request {
-			case contextRequestAcquire:
-				go s.acquireShard(ctx)
-				s.status = contextStatusAcquiring
-			default:
-				s.logger.Warn("invalid request for state transition")
-			}
-		case contextStatusAcquiring:
-			switch request {
-			case contextRequestAcquire:
-				// nothing to do, already acquiring
-			case contextRequestAcquired:
-				s.status = contextStatusAcquired
-			case contextRequestLost:
-				// nothing to do, already acquiring
-			default:
-				s.logger.Warn("invalid request for state transition")
-			}
-		case contextStatusAcquired:
-			switch request {
-			case contextRequestAcquire:
-				// nothing to to do, already acquired
-			case contextRequestLost:
-				go s.acquireShard(ctx)
-				s.status = contextStatusAcquiring
-			default:
-				s.logger.Warn("invalid request for state transition")
-			}
-		default:
-			s.logger.Warn("in unexpected status")
+	case contextStatusAcquiring:
+		switch request {
+		case contextRequestAcquire:
+			return // nothing to do, already acquiring
+		case contextRequestAcquired:
+			s.setStatusLocked(contextStatusAcquired)
+			return
+		case contextRequestLost:
+			return // nothing to do, already acquiring
+		case contextRequestStop:
+			s.transitionStoppedLocked()
+			return
 		}
-
-		s.unlock()
+	case contextStatusAcquired:
+		switch request {
+		case contextRequestAcquire:
+			return // nothing to to do, already acquired
+		case contextRequestLost:
+			s.setStatusLocked(contextStatusAcquiring)
+			go s.acquireShard(s.statusGeneration)
+			return
+		case contextRequestStop:
+			s.transitionStoppedLocked()
+			return
+		}
 	}
+	s.logger.Warn("invalid request for state transition",
+		tag.Number(int64(s.status)), // FIXME: make proper tags
+		tag.NextNumber(int64(request)),
+	)
+}
 
+func (s *ContextImpl) setStatusLocked(newStatus contextStatus) {
+	s.statusGeneration++
+	s.status = newStatus
+}
+
+func (s *ContextImpl) transitionStoppedLocked() {
 	// FIXME: maybe this should be responsible for calling the close callback here?
 
+	s.setStatusLocked(contextStatusStopped)
+
 	// Stop the acquire goroutine if it was running
-	cancel()
+	s.acquireCancel()
 
 	// Stop the engine if it was running
-	s.lock()
 	s.logger.Info("", tag.LifeCycleStopping, tag.ComponentShardEngine)
 	s.engine.Stop()
 	s.engine = nil
 	s.logger.Info("", tag.LifeCycleStopped, tag.ComponentShardEngine)
-	s.status = contextStatusStopped
-	s.unlock()
-
-	// FIXME: should we close this?
-	//close(s.requestCh)
 }
 
 func (s *ContextImpl) loadOrCreateShardMetadata() (*persistence.ShardInfoWithFailover, error) {
@@ -1247,14 +1240,23 @@ func (s *ContextImpl) loadOrCreateShardMetadata() (*persistence.ShardInfoWithFai
 	return &persistence.ShardInfoWithFailover{ShardInfo: resp.ShardInfo}, nil
 }
 
-func (s *ContextImpl) loadShardMetadata() error {
-	// Only have to do this once, we can just re-acquire the lock after that.
+func (s *ContextImpl) loadShardMetadata(generation int) error {
+	// Only have to do this once, we can just re-acquire the rangeid lock after that
 	s.rlock()
+
+	if generation != s.statusGeneration {
+		s.runlock()
+		return errOldGeneration
+	}
+
 	if s.shardInfo != nil {
 		s.runlock()
 		return nil
 	}
+
 	s.runlock()
+
+	// We don't have any shardInfo yet, load it (outside of context rwlock)
 
 	shardInfo, err := s.loadOrCreateShardMetadata()
 	if err != nil {
@@ -1292,6 +1294,10 @@ func (s *ContextImpl) loadShardMetadata() error {
 	s.lock()
 	defer s.unlock()
 
+	if generation != s.statusGeneration {
+		return errOldGeneration
+	}
+
 	s.shardInfo = updatedShardInfo
 	s.remoteClusterCurrentTime = remoteClusterCurrentTime
 	s.timerMaxReadLevelMap = timerMaxReadLevelMap
@@ -1300,8 +1306,7 @@ func (s *ContextImpl) loadShardMetadata() error {
 	return nil
 }
 
-func (s *ContextImpl) acquireShard(ctx context.Context) {
-
+func (s *ContextImpl) acquireShard(generation int) {
 	// Retry for 5m, with interval up to 10s (default)
 	// FIXME2: change values?
 	policy := backoff.NewExponentialRetryPolicy(50 * time.Millisecond)
@@ -1321,7 +1326,7 @@ func (s *ContextImpl) acquireShard(ctx context.Context) {
 
 	try := func(ctx context.Context) error {
 		// Initial load of shard metadata
-		err := s.loadShardMetadata()
+		err := s.loadShardMetadata(generation)
 		if err != nil {
 			return err
 		}
@@ -1329,27 +1334,40 @@ func (s *ContextImpl) acquireShard(ctx context.Context) {
 		s.lock()
 		defer s.unlock()
 
+		// Check that generation still matches
+		if generation != s.statusGeneration {
+			return errOldGeneration
+		}
+
 		// Try to acquire rangeid
 		err = s.renewRangeLocked(true)
 
-		// If we got it, create the engine if we don't have it yet
-		if err == nil && s.engine == nil {
+		if err != nil {
+			return err
+		}
+
+		s.logger.Info("Acquired shard")
+		// We got it, create the engine if we don't have it yet
+		if s.engine == nil {
 			s.createEngineLocked()
 		}
-		return err
+		s.transitionLocked(contextRequestAcquired)
+		return nil
 	}
 
-	err := backoff.RetryContext(ctx, try, policy, isRetryable)
-	if err == nil {
-		s.logger.Info("Acquired shard")
-		s.requestCh <- contextRequestAcquired
-		return
-	}
+	err := backoff.RetryContext(s.acquireCtx, try, policy, isRetryable)
+	if err != nil {
+		// We got an unretryable error (perhaps ShardOwnershipLostError, or context cancelled) or timed out.
+		// Stop the shard.
+		s.logger.Error("Couldn't acquire shard", tag.Error(err))
 
-	// We got an unretryable error (perhaps ShardOwnershipLostError, or context cancelled) or timed out.
-	// Stop the shard.
-	s.logger.Error("Couldn't acquire shard", tag.Error(err))
-	s.requestCh <- contextRequestStop
+		// FIXME: are we sure we want to do this here?
+		s.lock()
+		defer s.unlock()
+		if generation == s.statusGeneration {
+			s.closeShardLocked()
+		}
+	}
 }
 
 func newContext(
@@ -1389,6 +1407,9 @@ func newContext(
 	// Add tag for context itself to loggers
 	shardContext.logger = log.With(shardContext.logger, tag.ShardContext(shardContext))
 	shardContext.throttledLogger = log.With(shardContext.throttledLogger, tag.ShardContext(shardContext))
+
+	// Create context for cancelling background goroutine
+	shardContext.acquireCtx, shardContext.acquireCancel = context.WithCancel(context.Background())
 
 	return shardContext, nil
 }
