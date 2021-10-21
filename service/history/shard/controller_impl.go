@@ -173,7 +173,7 @@ func (c *ControllerImpl) removeEngineForShard(shard *ContextImpl) {
 
 func (c *ControllerImpl) shardClosedCallback(shard *ContextImpl) {
 	c.metricsScope.IncCounter(metrics.ShardContextClosedCounter)
-	c.logger.Info("", tag.LifeCycleStopping, tag.ComponentShard, tag.ShardID(shard.shardID))
+	c.logger.Info("", tag.LifeCycleStopping, tag.ComponentShardContext, tag.ShardID(shard.shardID))
 	c.removeEngineForShard(shard)
 }
 
@@ -246,6 +246,7 @@ func (c *ControllerImpl) removeShard(shardID int32, expected *ContextImpl) (*Con
 
 	c.metricsScope.IncCounter(metrics.ShardContextRemovedCounter)
 
+	// FIXME: consolidate this lifecycle stuff
 	current.logger.Info("", tag.LifeCycleStopped, tag.ComponentShardContext, tag.Number(int64(len(c.historyShards))))
 	return current, nil
 }

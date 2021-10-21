@@ -469,8 +469,7 @@ func ShardID(shardID int32) ZapTag {
 
 // ShardContext returns tag for shard.Context
 func ShardContext(shard interface{}) ZapTag {
-	// FIXME: change this to "shard-context"?
-	return NewAnyTag("shard-item", shard)
+	return NewAnyTag("shard-context", shard)
 }
 
 // ShardTime returns tag for ShardTime

@@ -111,8 +111,7 @@ var (
 	ComponentTimerBuilder             = component("timer-builder")
 	ComponentReplicatorQueue          = component("replicator-queue-processor")
 	ComponentShardController          = component("shard-controller")
-	ComponentShard                    = component("shard")
-	ComponentShardContext             = component("shard-item") // FIXME: change to "shard-context"?
+	ComponentShardContext             = component("shard-context")
 	ComponentShardEngine              = component("shard-engine")
 	ComponentMatchingEngine           = component("matching-engine")
 	ComponentReplicator               = component("replicator")

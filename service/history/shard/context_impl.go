@@ -1384,7 +1384,7 @@ func newContext(
 	factory EngineFactory,
 	config *configs.Config,
 	closeCallback func(*ContextImpl),
-) (*ContextImpl, error) { // FIXME2: change back to Context?
+) (*ContextImpl, error) {
 
 	hostIdentity := resource.GetHostInfo().Identity()
 	logger := log.With(resource.GetLogger(), tag.ShardID(shardID), tag.Address(hostIdentity))
