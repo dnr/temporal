@@ -115,7 +115,6 @@ var (
 
 	// ErrShardStatusUnknown means we're not sure if we have the shard lock or not. This may be returned
 	// during short windows at initialization and if we've lost the connection to the database.
-	// FIXME: rename this?
 	ErrShardStatusUnknown = errors.New("shard status unknown")
 
 	// errOldGeneration is an internal error used to scope acquireShard to a single status transition.
@@ -1061,29 +1060,37 @@ func (s *ContextImpl) createEngine() Engine {
 	return engine
 }
 
-func (s *ContextImpl) getOrCreateEngine() (Engine, error) {
-	s.rlock()
-	defer s.runlock()
+func (s *ContextImpl) getOrCreateEngine() (engine Engine, err error) {
+	// Wait on shard acquisition for 1s.
+	// FIXME: tune this number?
+	policy := backoff.NewExponentialRetryPolicy(5 * time.Millisecond)
+	policy.SetExpirationInterval(1 * time.Second)
 
-	switch s.status {
-	case contextStatusInitialized:
-		// FIXME: should we try to wait a little while for it to acquire?
-		return nil, ErrShardStatusUnknown
-	case contextStatusAcquiring:
-		// FIXME: should we try to wait a little while for it to acquire?
-		return nil, ErrShardStatusUnknown
-	case contextStatusAcquired:
-		if s.engine == nil {
-			// engine should be set here, but there might be a benign race where it isn't
-			s.logger.Error("engine not set in acquired status")
-			return nil, ErrShardStatusUnknown
+	isRetryable := func(err1 error) bool { return err1 == ErrShardStatusUnknown }
+
+	try := func() error {
+		s.rlock()
+		defer s.runlock()
+
+		switch s.status {
+		case contextStatusInitialized, contextStatusAcquiring:
+			return ErrShardStatusUnknown
+		case contextStatusAcquired:
+			engine = s.engine
+			return nil
+		case contextStatusStopped:
+			return fmt.Errorf("shard %v for host '%v' is shut down", s.shardID, s.GetHostInfo().Identity())
+		default:
+			panic("invalid status")
 		}
-		return s.engine, nil
-	case contextStatusStopped:
-		return nil, fmt.Errorf("shard %v for host '%v' is shut down", s.shardID, s.GetHostInfo().Identity())
-	default:
-		panic("invalid status")
 	}
+
+	err = backoff.Retry(try, policy, isRetryable)
+	if err == nil && engine == nil {
+		// This shouldn't ever happen, but don't let it return nil error.
+		err = ErrShardStatusUnknown
+	}
+	return
 }
 
 func (s *ContextImpl) start() {
