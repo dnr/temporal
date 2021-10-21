@@ -1049,16 +1049,17 @@ func (s *ContextImpl) handleErrorLocked(err error) error {
 	}
 }
 
-func (s *ContextImpl) createEngineLocked() {
+func (s *ContextImpl) createEngine() Engine {
 	if s.previousShardOwnerWasDifferent {
 		s.GetMetricsClient().RecordTimer(metrics.ShardInfoScope, metrics.ShardContextAcquisitionLatency,
 			s.GetCurrentTime(s.GetClusterMetadata().GetCurrentClusterName()).Sub(s.GetLastUpdatedTime()))
 	}
 
 	s.logger.Info("", tag.LifeCycleStarting, tag.ComponentShardEngine)
-	s.engine = s.engineFactory.CreateEngine(s)
-	s.engine.Start()
+	engine := s.engineFactory.CreateEngine(s)
+	engine.Start()
 	s.logger.Info("", tag.LifeCycleStarted, tag.ComponentShardEngine)
+	return engine
 }
 
 func (s *ContextImpl) getOrCreateEngine() (Engine, error) {
@@ -1330,15 +1331,27 @@ func (s *ContextImpl) acquireShard(generation int) {
 
 		// Try to acquire rangeid
 		err = s.renewRangeLocked(true)
-
 		if err != nil {
 			return err
 		}
 
 		s.logger.Info("Acquired shard")
-		// We got it, create the engine if we don't have it yet
+
+		// The first time we get the shard, we have to create the engine. We have to release the lock to
+		// create the engine, and then reacquire it. This is safe because:
+		// 1. We know we're currently in the Acquiring state. The only thing we can transition to (without
+		//    doing it ourselves) is Stopped. In that case, we'll have to stop the engine that we just
+		//    created, since the stop transition didn't do it.
+		// 2. We don't have an engine yet, so no one should be calling any of our methods that mutate things.
 		if s.engine == nil {
-			s.createEngineLocked()
+			s.unlock()
+			engine := s.createEngine()
+			s.lock()
+			if generation != s.statusGeneration {
+				engine.Stop()
+				return errOldGeneration
+			}
+			s.engine = engine
 		}
 		s.transitionLocked(contextRequestAcquired)
 		return nil
@@ -1346,7 +1359,7 @@ func (s *ContextImpl) acquireShard(generation int) {
 
 	err := backoff.RetryContext(s.acquireCtx, try, policy, isRetryable)
 	if err == errOldGeneration {
-		// Status changed since this goroutine started, exit silently
+		// Status changed since this goroutine started, exit silently.
 		return
 	} else if err != nil {
 		// We got an unretryable error (perhaps ShardOwnershipLostError, or context cancelled) or timed out.
