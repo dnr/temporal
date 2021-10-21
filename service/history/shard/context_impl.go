@@ -104,9 +104,6 @@ type (
 
 		// exist only in memory
 		remoteClusterCurrentTime map[string]time.Time
-
-		// true if previous owner was different from the acquirer's identity.
-		previousShardOwnerWasDifferent bool
 	}
 )
 
@@ -1049,12 +1046,14 @@ func (s *ContextImpl) handleErrorLocked(err error) error {
 	}
 }
 
-func (s *ContextImpl) createEngine() Engine {
-	if s.previousShardOwnerWasDifferent {
+func (s *ContextImpl) maybeRecordShardAcquisitionLatency(ownershipChanged bool) {
+	if ownershipChanged {
 		s.GetMetricsClient().RecordTimer(metrics.ShardInfoScope, metrics.ShardContextAcquisitionLatency,
 			s.GetCurrentTime(s.GetClusterMetadata().GetCurrentClusterName()).Sub(s.GetLastUpdatedTime()))
 	}
+}
 
+func (s *ContextImpl) createEngine() Engine {
 	s.logger.Info("", tag.LifeCycleStarting, tag.ComponentShardEngine)
 	engine := s.engineFactory.CreateEngine(s)
 	engine.Start()
@@ -1231,18 +1230,18 @@ func (s *ContextImpl) loadOrCreateShardMetadata() (*persistence.ShardInfoWithFai
 	return &persistence.ShardInfoWithFailover{ShardInfo: resp.ShardInfo}, nil
 }
 
-func (s *ContextImpl) loadShardMetadata(generation int) error {
+func (s *ContextImpl) loadShardMetadata(ownershipChanged bool, generation int) (bool, error) {
 	// Only have to do this once, we can just re-acquire the rangeid lock after that
 	s.rlock()
 
 	if generation != s.statusGeneration {
 		s.runlock()
-		return errOldGeneration
+		return false, errOldGeneration
 	}
 
 	if s.shardInfo != nil {
 		s.runlock()
-		return nil
+		return ownershipChanged, nil
 	}
 
 	s.runlock()
@@ -1252,11 +1251,11 @@ func (s *ContextImpl) loadShardMetadata(generation int) error {
 	shardInfo, err := s.loadOrCreateShardMetadata()
 	if err != nil {
 		s.logger.Error("Failed to load shard", tag.Error(err))
-		return err
+		return false, err
 	}
 
 	updatedShardInfo := copyShardInfo(shardInfo)
-	ownershipChanged := shardInfo.Owner != s.GetHostInfo().Identity()
+	ownershipChanged = shardInfo.Owner != s.GetHostInfo().Identity()
 	updatedShardInfo.Owner = s.GetHostInfo().Identity()
 
 	// initialize the cluster current time to be the same as ack level
@@ -1286,15 +1285,14 @@ func (s *ContextImpl) loadShardMetadata(generation int) error {
 	defer s.unlock()
 
 	if generation != s.statusGeneration {
-		return errOldGeneration
+		return false, errOldGeneration
 	}
 
 	s.shardInfo = updatedShardInfo
 	s.remoteClusterCurrentTime = remoteClusterCurrentTime
 	s.timerMaxReadLevelMap = timerMaxReadLevelMap
-	s.previousShardOwnerWasDifferent = ownershipChanged
 
-	return nil
+	return ownershipChanged, nil
 }
 
 func (s *ContextImpl) acquireShard(generation int) {
@@ -1314,9 +1312,13 @@ func (s *ContextImpl) acquireShard(generation int) {
 		return false
 	}
 
+	// Remember this value across attempts
+	ownershipChanged := false
+
 	try := func(ctx context.Context) error {
 		// Initial load of shard metadata
-		err := s.loadShardMetadata(generation)
+		var err error
+		ownershipChanged, err = s.loadShardMetadata(ownershipChanged, generation)
 		if err != nil {
 			return err
 		}
@@ -1345,6 +1347,7 @@ func (s *ContextImpl) acquireShard(generation int) {
 		// 2. We don't have an engine yet, so no one should be calling any of our methods that mutate things.
 		if s.engine == nil {
 			s.unlock()
+			s.maybeRecordShardAcquisitionLatency(ownershipChanged)
 			engine := s.createEngine()
 			s.lock()
 			if generation != s.statusGeneration {
