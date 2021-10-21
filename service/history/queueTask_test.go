@@ -94,6 +94,7 @@ func (s *queueTaskSuite) SetupTest() {
 
 func (s *queueTaskSuite) TearDownTest() {
 	s.controller.Finish()
+	s.mockShard.StopForTest()
 }
 
 func (s *queueTaskSuite) TestExecute_TaskFilterErr() {

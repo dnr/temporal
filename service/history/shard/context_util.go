@@ -25,6 +25,7 @@
 package shard
 
 import (
+	"context"
 	"time"
 
 	"github.com/golang/mock/gomock"
@@ -53,24 +54,33 @@ func NewTestContext(
 	resource := resource.NewTest(ctrl, metrics.History)
 	eventsCache := events.NewMockCache(ctrl)
 	shard := &ContextImpl{
-		Resource:                  resource,
-		shardID:                   shardInfo.GetShardId(),
+		Resource:         resource,
+		shardID:          shardInfo.GetShardId(),
+		executionManager: resource.ExecutionMgr,
+		metricsClient:    resource.MetricsClient,
+		eventsCache:      eventsCache,
+		config:           config,
+		logger:           resource.GetLogger(),
+		throttledLogger:  resource.GetThrottledLogger(),
+
+		status:                    contextStatusAcquired,
 		shardInfo:                 shardInfo,
-		metricsClient:             resource.MetricsClient,
-		executionManager:          resource.ExecutionMgr,
-		config:                    config,
-		logger:                    resource.GetLogger(),
-		throttledLogger:           resource.GetThrottledLogger(),
 		transferSequenceNumber:    1,
 		transferMaxReadLevel:      0,
 		maxTransferSequenceNumber: 100000,
 		timerMaxReadLevelMap:      make(map[string]time.Time),
 		remoteClusterCurrentTime:  make(map[string]time.Time),
-		eventsCache:               eventsCache,
 	}
+	shard.acquireCtx, shard.acquireCancel = context.WithCancel(context.Background())
 	return &ContextTest{
 		ContextImpl:     shard,
 		Resource:        resource,
 		MockEventsCache: eventsCache,
 	}
+}
+
+// StopForTest calls private method stop(). In general only the controller should call stop, but integration
+// tests need to do it also to clean up any background acquireShard goroutines that may exist.
+func (s *ContextTest) StopForTest() {
+	s.stop()
 }

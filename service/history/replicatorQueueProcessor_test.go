@@ -120,6 +120,7 @@ func (s *replicatorQueueProcessorSuite) SetupTest() {
 
 func (s *replicatorQueueProcessorSuite) TearDownTest() {
 	s.controller.Finish()
+	s.mockShard.StopForTest()
 }
 
 func (s *replicatorQueueProcessorSuite) TestNotifyNewTasks_NotInitialized() {
