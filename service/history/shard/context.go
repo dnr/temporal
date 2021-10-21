@@ -57,7 +57,6 @@ type (
 		GetTimeSource() clock.TimeSource
 
 		GetEngine() Engine
-		SetEngine(Engine)
 
 		GenerateTransferTaskID() (int64, error)
 		GenerateTransferTaskIDs(number int) ([]int64, error)
@@ -107,8 +106,5 @@ type (
 		ConflictResolveWorkflowExecution(request *persistence.ConflictResolveWorkflowExecutionRequest) (*persistence.ConflictResolveWorkflowExecutionResponse, error)
 		AddTasks(request *persistence.AddTasksRequest) error
 		AppendHistoryEvents(request *persistence.AppendHistoryNodesRequest, namespaceID string, execution commonpb.WorkflowExecution) (int, error)
-
-		// For testing only:
-		SetEventsCacheForTesting(events.Cache)
 	}
 )

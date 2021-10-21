@@ -160,7 +160,7 @@ func (s *visibilityQueueTaskExecutorSuite) SetupTest() {
 		metricsClient:      s.mockShard.GetMetricsClient(),
 		eventNotifier:      events.NewNotifier(clock.NewRealTimeSource(), metrics.NewClient(tally.NoopScope, metrics.History), func(string, string) int32 { return 1 }),
 	}
-	s.mockShard.SetEngine(h)
+	s.mockShard.SetEngineForTesting(h)
 
 	s.visibilityQueueTaskExecutor = newVisibilityQueueTaskExecutor(
 		s.mockShard,

@@ -218,7 +218,7 @@ func (s *transferQueueActiveTaskExecutorSuite) SetupTest() {
 		timerProcessor:     s.mockTimerProcessor,
 		archivalClient:     s.mockArchivalClient,
 	}
-	s.mockShard.SetEngine(h)
+	s.mockShard.SetEngineForTesting(h)
 
 	s.transferQueueActiveTaskExecutor = newTransferQueueActiveTaskExecutor(
 		s.mockShard,

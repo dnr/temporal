@@ -162,7 +162,7 @@ func (s *timerQueueActiveTaskExecutorSuite) SetupTest() {
 		txProcessor:        s.mockTxProcessor,
 		timerProcessor:     s.mockTimerProcessor,
 	}
-	s.mockShard.SetEngine(h)
+	s.mockShard.SetEngineForTesting(h)
 	s.mockHistoryEngine = h
 
 	s.timerQueueActiveTaskExecutor = newTimerQueueActiveTaskExecutor(

@@ -186,7 +186,7 @@ func (s *engineSuite) SetupTest() {
 		eventsReapplier:    s.mockEventsReapplier,
 		workflowResetter:   s.mockWorkflowResetter,
 	}
-	s.mockShard.SetEngine(h)
+	s.mockShard.SetEngineForTesting(h)
 	h.workflowTaskHandler = newWorkflowTaskHandlerCallback(h)
 
 	h.eventNotifier.Start()

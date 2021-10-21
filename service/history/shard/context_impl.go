@@ -153,13 +153,6 @@ func (s *ContextImpl) GetEngine() Engine {
 	return s.engine
 }
 
-func (s *ContextImpl) SetEngine(engine Engine) {
-	s.lock()
-	defer s.unlock()
-
-	s.engine = engine
-}
-
 func (s *ContextImpl) GenerateTransferTaskID() (int64, error) {
 	s.lock()
 	defer s.unlock()
@@ -702,11 +695,6 @@ func (s *ContextImpl) GetConfig() *configs.Config {
 func (s *ContextImpl) GetEventsCache() events.Cache {
 	// constant from initialization (except for tests), no need for locks
 	return s.eventsCache
-}
-
-func (s *ContextImpl) SetEventsCacheForTesting(c events.Cache) {
-	// for testing only, will only be called immediately after initialization
-	s.eventsCache = c
 }
 
 func (s *ContextImpl) GetLogger() log.Logger {

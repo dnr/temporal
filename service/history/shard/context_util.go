@@ -79,6 +79,17 @@ func NewTestContext(
 	}
 }
 
+// SetEngineForTest sets s.engine. Only used by tests.
+func (s *ContextTest) SetEngineForTesting(engine Engine) {
+	s.engine = engine
+}
+
+// SetEventsCacheForTesting sets s.eventsCache. Only used by tests.
+func (s *ContextTest) SetEventsCacheForTesting(c events.Cache) {
+	// for testing only, will only be called immediately after initialization
+	s.eventsCache = c
+}
+
 // StopForTest calls private method stop(). In general only the controller should call stop, but integration
 // tests need to do it also to clean up any background acquireShard goroutines that may exist.
 func (s *ContextTest) StopForTest() {
