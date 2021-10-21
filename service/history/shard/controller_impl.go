@@ -30,6 +30,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"go.temporal.io/server/common/backoff"
 	"go.temporal.io/server/common/convert"
 	"go.temporal.io/server/service/history/configs"
 
@@ -290,6 +291,28 @@ func (c *ControllerImpl) acquireShards() {
 
 	concurrency := common.MaxInt(c.config.AcquireShardConcurrency(), 1)
 	shardActionCh := make(chan int32, c.config.NumberOfShards)
+
+	// Wait on shard acquisition for 1s. Note that even if this fails, we may succeed in acquiring the shard
+	// in the background. This just keeps us from logging errors in the common case during startup, since the
+	// first attempt will always fail with ErrShardStatusUnknown.
+	isRetryable := func(err error) bool {
+		return err == ErrShardStatusUnknown
+	}
+
+	policy := backoff.NewExponentialRetryPolicy(5 * time.Millisecond)
+	policy.SetExpirationInterval(1 * time.Second)
+
+	retryGetShard := func(shardID int32) {
+		getShard := func() error {
+			_, err := c.GetEngineForShard(shardID)
+			return err
+		}
+		if err := backoff.Retry(getShard, policy, isRetryable); err != nil {
+			c.metricsScope.IncCounter(metrics.GetEngineForShardErrorCounter)
+			c.logger.Error("Unable to create history shard engine", tag.Error(err), tag.OperationFailed, tag.ShardID(shardID))
+		}
+	}
+
 	var wg sync.WaitGroup
 	wg.Add(concurrency)
 	// Spawn workers that would lookup and add/remove shards concurrently.
@@ -307,10 +330,7 @@ func (c *ControllerImpl) acquireShards() {
 						c.logger.Error("Error looking up host for shardID", tag.Error(err), tag.OperationFailed, tag.ShardID(shardID))
 					} else {
 						if info.Identity() == c.GetHostInfo().Identity() {
-							if _, err := c.GetEngineForShard(shardID); err != nil {
-								c.metricsScope.IncCounter(metrics.GetEngineForShardErrorCounter)
-								c.logger.Error("Unable to create history shard engine", tag.Error(err), tag.OperationFailed, tag.ShardID(shardID))
-							}
+							retryGetShard(shardID)
 						}
 						// FIXME: do we want to proactively unload shards here?
 					}

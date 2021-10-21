@@ -105,24 +105,6 @@ func (s *controllerSuite) TearDownTest() {
 	s.controller.Finish()
 }
 
-func (s *controllerSuite) waitForBackgroundAcquires() {
-	s.shardController.RLock()
-	defer s.shardController.RUnlock()
-	ready := false
-	for wait := 0; !ready && wait < 1000; wait++ {
-		time.Sleep(1 * time.Millisecond)
-		ready = true
-		for _, shard := range s.shardController.historyShards {
-			if _, err := shard.getOrCreateEngine(); err != nil {
-				ready = false
-			}
-		}
-	}
-	if !ready {
-		s.Fail("couldn't acquire shards")
-	}
-}
-
 func (s *controllerSuite) TestAcquireShardSuccess() {
 	numShards := int32(10)
 	s.config.NumberOfShards = numShards
@@ -194,8 +176,6 @@ func (s *controllerSuite) TestAcquireShardSuccess() {
 	s.mockClusterMetadata.EXPECT().GetCurrentClusterName().Return(cluster.TestCurrentClusterName).AnyTimes()
 	s.mockClusterMetadata.EXPECT().GetAllClusterInfo().Return(cluster.TestSingleDCClusterInfo).AnyTimes()
 	s.shardController.acquireShards()
-
-	s.waitForBackgroundAcquires()
 
 	count := 0
 	for _, shardID := range myShards {
@@ -279,8 +259,6 @@ func (s *controllerSuite) TestAcquireShardsConcurrently() {
 	s.mockClusterMetadata.EXPECT().GetCurrentClusterName().Return(cluster.TestCurrentClusterName).AnyTimes()
 	s.mockClusterMetadata.EXPECT().GetAllClusterInfo().Return(cluster.TestSingleDCClusterInfo).AnyTimes()
 	s.shardController.acquireShards()
-
-	s.waitForBackgroundAcquires()
 
 	count := 0
 	for _, shardID := range myShards {
@@ -368,8 +346,6 @@ func (s *controllerSuite) TestAcquireShardRenewSuccess() {
 	s.mockClusterMetadata.EXPECT().GetAllClusterInfo().Return(cluster.TestSingleDCClusterInfo).AnyTimes()
 	s.shardController.acquireShards()
 
-	s.waitForBackgroundAcquires()
-
 	for shardID := int32(1); shardID <= numShards; shardID++ {
 		s.mockServiceResolver.EXPECT().Lookup(convert.Int32ToString(shardID)).Return(s.hostInfo, nil)
 	}
@@ -443,8 +419,6 @@ func (s *controllerSuite) TestAcquireShardRenewLookupFailed() {
 	s.mockClusterMetadata.EXPECT().GetCurrentClusterName().Return(cluster.TestCurrentClusterName).AnyTimes()
 	s.mockClusterMetadata.EXPECT().GetAllClusterInfo().Return(cluster.TestSingleDCClusterInfo).AnyTimes()
 	s.shardController.acquireShards()
-
-	s.waitForBackgroundAcquires()
 
 	// This shouldn't affect existing shards
 	for shardID := int32(1); shardID <= numShards; shardID++ {
