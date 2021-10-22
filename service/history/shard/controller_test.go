@@ -176,7 +176,6 @@ func (s *controllerSuite) TestAcquireShardSuccess() {
 	s.mockClusterMetadata.EXPECT().GetCurrentClusterName().Return(cluster.TestCurrentClusterName).AnyTimes()
 	s.mockClusterMetadata.EXPECT().GetAllClusterInfo().Return(cluster.TestSingleDCClusterInfo).AnyTimes()
 	s.shardController.acquireShards()
-
 	count := 0
 	for _, shardID := range myShards {
 		s.NotNil(s.shardController.GetEngineForShard(shardID))
@@ -259,7 +258,6 @@ func (s *controllerSuite) TestAcquireShardsConcurrently() {
 	s.mockClusterMetadata.EXPECT().GetCurrentClusterName().Return(cluster.TestCurrentClusterName).AnyTimes()
 	s.mockClusterMetadata.EXPECT().GetAllClusterInfo().Return(cluster.TestSingleDCClusterInfo).AnyTimes()
 	s.shardController.acquireShards()
-
 	count := 0
 	for _, shardID := range myShards {
 		s.NotNil(s.shardController.GetEngineForShard(shardID))
@@ -420,7 +418,6 @@ func (s *controllerSuite) TestAcquireShardRenewLookupFailed() {
 	s.mockClusterMetadata.EXPECT().GetAllClusterInfo().Return(cluster.TestSingleDCClusterInfo).AnyTimes()
 	s.shardController.acquireShards()
 
-	// This shouldn't affect existing shards
 	for shardID := int32(1); shardID <= numShards; shardID++ {
 		s.mockServiceResolver.EXPECT().Lookup(convert.Int32ToString(shardID)).Return(nil, errors.New("ring failure"))
 	}
@@ -448,25 +445,21 @@ func (s *controllerSuite) TestHistoryEngineClosed() {
 	s.mockClusterMetadata.EXPECT().GetCurrentClusterName().Return(cluster.TestCurrentClusterName).AnyTimes()
 	s.mockClusterMetadata.EXPECT().GetAllClusterInfo().Return(cluster.TestSingleDCClusterInfo).AnyTimes()
 	s.shardController.Start()
-
 	var workerWG sync.WaitGroup
 	for w := 0; w < 10; w++ {
 		workerWG.Add(1)
 		go func() {
-			gotShard := false
-			for attempt := 0; !gotShard && attempt < 10; attempt++ {
+			for attempt := 0; attempt < 10; attempt++ {
 				for shardID := int32(1); shardID <= numShards; shardID++ {
 					engine, err := s.shardController.GetEngineForShard(shardID)
-					if err == nil {
-						s.NotNil(engine)
-						gotShard = true
-					}
+					s.Nil(err)
+					s.NotNil(engine)
 				}
 			}
-			s.True(gotShard)
 			workerWG.Done()
 		}()
 	}
+
 	workerWG.Wait()
 
 	differentHostInfo := membership.NewHostInfo("another-host", nil)
@@ -540,32 +533,16 @@ func (s *controllerSuite) TestShardControllerClosed() {
 	s.mockClusterMetadata.EXPECT().GetAllClusterInfo().Return(cluster.TestSingleDCClusterInfo).AnyTimes()
 	s.shardController.Start()
 
-	var gotWG sync.WaitGroup
-	var lostWG sync.WaitGroup
+	var workerWG sync.WaitGroup
 	for w := 0; w < 10; w++ {
-		gotWG.Add(1)
-		lostWG.Add(1)
+		workerWG.Add(1)
 		go func() {
-			gotShard := false
-			for attempt := 0; !gotShard && attempt < 10; attempt++ {
-				for shardID := int32(1); shardID <= numShards; shardID++ {
-					_, err := s.shardController.GetEngineForShard(shardID)
-					if err == nil {
-						s.logger.Info("ShardAcquired", tag.Error(err))
-						gotShard = true
-					}
-					time.Sleep(20 * time.Millisecond)
-				}
-			}
-			s.True(gotShard)
-			gotWG.Done()
-
 			shardLost := false
 			for attempt := 0; !shardLost && attempt < 10; attempt++ {
 				for shardID := int32(1); shardID <= numShards; shardID++ {
 					_, err := s.shardController.GetEngineForShard(shardID)
 					if err != nil {
-						s.logger.Info("ShardLost", tag.Error(err))
+						s.logger.Error("ShardLost", tag.Error(err))
 						shardLost = true
 					}
 					time.Sleep(20 * time.Millisecond)
@@ -573,12 +550,9 @@ func (s *controllerSuite) TestShardControllerClosed() {
 			}
 
 			s.True(shardLost)
-			lostWG.Done()
+			workerWG.Done()
 		}()
 	}
-
-	// Wait for the shards to get acquired in the background
-	gotWG.Wait()
 
 	s.mockServiceResolver.EXPECT().RemoveListener(shardControllerMembershipUpdateListenerName).Return(nil).AnyTimes()
 	for shardID := int32(1); shardID <= numShards; shardID++ {
@@ -587,8 +561,7 @@ func (s *controllerSuite) TestShardControllerClosed() {
 		s.mockServiceResolver.EXPECT().Lookup(convert.Int32ToString(shardID)).Return(s.hostInfo, nil).AnyTimes()
 	}
 	s.shardController.Stop()
-	// Wait for them to all be stopped
-	lostWG.Wait()
+	workerWG.Wait()
 }
 
 func (s *controllerSuite) setupMocksForAcquireShard(shardID int32, mockEngine *MockEngine, currentRangeID,
