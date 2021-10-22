@@ -1157,15 +1157,27 @@ func (s *ContextImpl) transition(request contextRequest) {
 }
 
 func (s *ContextImpl) transitionLocked(request contextRequest) {
+	setStatus := func(newStatus contextStatus) {
+		s.statusGeneration++
+		s.status = newStatus
+	}
+
+	setStatusStopped := func() {
+		// Stop the acquire goroutine if it was running
+		s.acquireCancel()
+		// Move to Stopped (and increment generation so that acquire goroutine will not do anything anymore)
+		setStatus(contextStatusStopped)
+	}
+
 	switch s.status {
 	case contextStatusInitialized:
 		switch request {
 		case contextRequestAcquire:
-			s.setStatusLocked(contextStatusAcquiring)
+			setStatus(contextStatusAcquiring)
 			go s.acquireShard(s.statusGeneration)
 			return
 		case contextRequestStop:
-			s.transitionStoppedLocked()
+			setStatusStopped()
 			return
 		}
 	case contextStatusAcquiring:
@@ -1173,12 +1185,12 @@ func (s *ContextImpl) transitionLocked(request contextRequest) {
 		case contextRequestAcquire:
 			return // nothing to do, already acquiring
 		case contextRequestAcquired:
-			s.setStatusLocked(contextStatusAcquired)
+			setStatus(contextStatusAcquired)
 			return
 		case contextRequestLost:
 			return // nothing to do, already acquiring
 		case contextRequestStop:
-			s.transitionStoppedLocked()
+			setStatusStopped()
 			return
 		}
 	case contextStatusAcquired:
@@ -1186,11 +1198,11 @@ func (s *ContextImpl) transitionLocked(request contextRequest) {
 		case contextRequestAcquire:
 			return // nothing to to do, already acquired
 		case contextRequestLost:
-			s.setStatusLocked(contextStatusAcquiring)
+			setStatus(contextStatusAcquiring)
 			go s.acquireShard(s.statusGeneration)
 			return
 		case contextRequestStop:
-			s.transitionStoppedLocked()
+			setStatusStopped()
 			return
 		}
 	}
@@ -1198,18 +1210,6 @@ func (s *ContextImpl) transitionLocked(request contextRequest) {
 		tag.Number(int64(s.status)), // FIXME: make proper tags
 		tag.NextNumber(int64(request)),
 	)
-}
-
-func (s *ContextImpl) setStatusLocked(newStatus contextStatus) {
-	s.statusGeneration++
-	s.status = newStatus
-}
-
-func (s *ContextImpl) transitionStoppedLocked() {
-	// Stop the acquire goroutine if it was running
-	s.acquireCancel()
-	// Move to Stopped (and increment generation so that acquire goroutine will not do anything anymore)
-	s.setStatusLocked(contextStatusStopped)
 }
 
 func (s *ContextImpl) loadOrCreateShardMetadata() (*persistence.ShardInfoWithFailover, error) {
