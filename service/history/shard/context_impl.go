@@ -1098,7 +1098,18 @@ func (s *ContextImpl) start() {
 }
 
 func (s *ContextImpl) stop() {
-	s.transition(contextRequestStop)
+	s.lock()
+	s.transitionLocked(contextRequestStop)
+	engine := s.engine
+	s.engine = nil
+	s.unlock()
+
+	// Stop the engine if it was running (outside the lock but before this returns)
+	if engine != nil {
+		s.logger.Info("", tag.LifeCycleStopping, tag.ComponentShardEngine)
+		engine.Stop()
+		s.logger.Info("", tag.LifeCycleStopped, tag.ComponentShardEngine)
+	}
 }
 
 func (s *ContextImpl) isValid() bool {
@@ -1195,19 +1206,9 @@ func (s *ContextImpl) setStatusLocked(newStatus contextStatus) {
 }
 
 func (s *ContextImpl) transitionStoppedLocked() {
-	// FIXME: maybe this should be responsible for calling the close callback here?
-
 	// Stop the acquire goroutine if it was running
 	s.acquireCancel()
-
-	// Stop the engine if it was running
-	if s.engine != nil {
-		s.logger.Info("", tag.LifeCycleStopping, tag.ComponentShardEngine)
-		s.engine.Stop()
-		s.engine = nil
-		s.logger.Info("", tag.LifeCycleStopped, tag.ComponentShardEngine)
-	}
-
+	// Move to Stopped (and increment generation so that acquire goroutine will not do anything anymore)
 	s.setStatusLocked(contextStatusStopped)
 }
 
