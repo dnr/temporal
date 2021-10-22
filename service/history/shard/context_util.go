@@ -63,7 +63,7 @@ func NewTestContext(
 		logger:           resource.GetLogger(),
 		throttledLogger:  resource.GetThrottledLogger(),
 
-		status:                    contextStatusAcquired,
+		state:                     contextStateAcquired,
 		shardInfo:                 shardInfo,
 		transferSequenceNumber:    1,
 		transferMaxReadLevel:      0,

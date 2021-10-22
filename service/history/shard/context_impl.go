@@ -57,10 +57,10 @@ var (
 
 const (
 	// These are the possible values of ContextImpl.status
-	contextStatusInitialized contextStatus = iota
-	contextStatusAcquiring
-	contextStatusAcquired
-	contextStatusStopped
+	contextStateInitialized contextState = iota
+	contextStateAcquiring
+	contextStateAcquired
+	contextStateStopped
 
 	// These are the requests that can be sent to the context lifecycle
 	contextRequestAcquire contextRequest = iota
@@ -70,7 +70,7 @@ const (
 )
 
 type (
-	contextStatus  int32
+	contextState   int32
 	contextRequest int
 
 	ContextImpl struct {
@@ -92,8 +92,8 @@ type (
 
 		// All following fields are protected by rwLock, and only valid if status >= Acquiring:
 		rwLock                    sync.RWMutex
-		status                    contextStatus
-		statusGeneration          int
+		state                     contextState
+		stateGeneration           int
 		engine                    Engine
 		lastUpdated               time.Time
 		shardInfo                 *persistence.ShardInfoWithFailover
@@ -439,7 +439,7 @@ func (s *ContextImpl) UpdateTimerMaxReadLevel(cluster string) time.Time {
 func (s *ContextImpl) CreateWorkflowExecution(
 	request *persistence.CreateWorkflowExecutionRequest,
 ) (*persistence.CreateWorkflowExecutionResponse, error) {
-	if err := s.errorByStatus(); err != nil {
+	if err := s.errorByState(); err != nil {
 		return nil, err
 	}
 
@@ -481,7 +481,7 @@ func (s *ContextImpl) CreateWorkflowExecution(
 func (s *ContextImpl) UpdateWorkflowExecution(
 	request *persistence.UpdateWorkflowExecutionRequest,
 ) (*persistence.UpdateWorkflowExecutionResponse, error) {
-	if err := s.errorByStatus(); err != nil {
+	if err := s.errorByState(); err != nil {
 		return nil, err
 	}
 
@@ -536,7 +536,7 @@ func (s *ContextImpl) UpdateWorkflowExecution(
 func (s *ContextImpl) ConflictResolveWorkflowExecution(
 	request *persistence.ConflictResolveWorkflowExecutionRequest,
 ) (*persistence.ConflictResolveWorkflowExecutionResponse, error) {
-	if err := s.errorByStatus(); err != nil {
+	if err := s.errorByState(); err != nil {
 		return nil, err
 	}
 
@@ -604,7 +604,7 @@ func (s *ContextImpl) ConflictResolveWorkflowExecution(
 func (s *ContextImpl) AddTasks(
 	request *persistence.AddTasksRequest,
 ) error {
-	if err := s.errorByStatus(); err != nil {
+	if err := s.errorByState(); err != nil {
 		return err
 	}
 
@@ -651,7 +651,7 @@ func (s *ContextImpl) AppendHistoryEvents(
 	namespaceID string,
 	execution commonpb.WorkflowExecution,
 ) (int, error) {
-	if err := s.errorByStatus(); err != nil {
+	if err := s.errorByState(); err != nil {
 		return 0, err
 	}
 
@@ -707,21 +707,21 @@ func (s *ContextImpl) getRangeIDLocked() int64 {
 	return s.shardInfo.GetRangeId()
 }
 
-func (s *ContextImpl) errorByStatus() error {
+func (s *ContextImpl) errorByState() error {
 	s.rlock()
 	defer s.runlock()
-	return s.errorByStatusLocked()
+	return s.errorByStateLocked()
 }
 
-func (s *ContextImpl) errorByStatusLocked() error {
-	switch s.status {
-	case contextStatusInitialized:
+func (s *ContextImpl) errorByStateLocked() error {
+	switch s.state {
+	case contextStateInitialized:
 		return ErrShardStatusUnknown
-	case contextStatusAcquiring:
+	case contextStateAcquiring:
 		return ErrShardStatusUnknown
-	case contextStatusAcquired:
+	case contextStateAcquired:
 		return nil
-	case contextStatusStopped:
+	case contextStateStopped:
 		return ErrShardClosed
 	default:
 		panic("invalid status")
@@ -809,7 +809,7 @@ func (s *ContextImpl) updateMaxReadLevelLocked(rl int64) {
 }
 
 func (s *ContextImpl) updateShardInfoLocked() error {
-	if err := s.errorByStatusLocked(); err != nil {
+	if err := s.errorByStateLocked(); err != nil {
 		return err
 	}
 
@@ -1072,13 +1072,13 @@ func (s *ContextImpl) getOrCreateEngine() (engine Engine, err error) {
 		s.rlock()
 		defer s.runlock()
 
-		switch s.status {
-		case contextStatusInitialized, contextStatusAcquiring:
+		switch s.state {
+		case contextStateInitialized, contextStateAcquiring:
 			return ErrShardStatusUnknown
-		case contextStatusAcquired:
+		case contextStateAcquired:
 			engine = s.engine
 			return nil
-		case contextStatusStopped:
+		case contextStateStopped:
 			return fmt.Errorf("shard %v for host '%v' is shut down", s.shardID, s.GetHostInfo().Identity())
 		default:
 			panic("invalid status")
@@ -1116,7 +1116,7 @@ func (s *ContextImpl) isValid() bool {
 	// FIXME: always call callback when stopping so that we get removed from controller and we don't need this?
 	s.rlock()
 	defer s.runlock()
-	return s.status != contextStatusStopped
+	return s.state != contextStateStopped
 }
 
 func (s *ContextImpl) lock() {
@@ -1157,57 +1157,57 @@ func (s *ContextImpl) transition(request contextRequest) {
 }
 
 func (s *ContextImpl) transitionLocked(request contextRequest) {
-	setStatus := func(newStatus contextStatus) {
-		s.statusGeneration++
-		s.status = newStatus
+	setState := func(newState contextState) {
+		s.stateGeneration++
+		s.state = newState
 	}
 
-	setStatusStopped := func() {
+	setStateStopped := func() {
 		// Stop the acquire goroutine if it was running
 		s.acquireCancel()
 		// Move to Stopped (and increment generation so that acquire goroutine will not do anything anymore)
-		setStatus(contextStatusStopped)
+		setState(contextStateStopped)
 	}
 
-	switch s.status {
-	case contextStatusInitialized:
+	switch s.state {
+	case contextStateInitialized:
 		switch request {
 		case contextRequestAcquire:
-			setStatus(contextStatusAcquiring)
-			go s.acquireShard(s.statusGeneration)
+			setState(contextStateAcquiring)
+			go s.acquireShard(s.stateGeneration)
 			return
 		case contextRequestStop:
-			setStatusStopped()
+			setStateStopped()
 			return
 		}
-	case contextStatusAcquiring:
+	case contextStateAcquiring:
 		switch request {
 		case contextRequestAcquire:
 			return // nothing to do, already acquiring
 		case contextRequestAcquired:
-			setStatus(contextStatusAcquired)
+			setState(contextStateAcquired)
 			return
 		case contextRequestLost:
 			return // nothing to do, already acquiring
 		case contextRequestStop:
-			setStatusStopped()
+			setStateStopped()
 			return
 		}
-	case contextStatusAcquired:
+	case contextStateAcquired:
 		switch request {
 		case contextRequestAcquire:
 			return // nothing to to do, already acquired
 		case contextRequestLost:
-			setStatus(contextStatusAcquiring)
-			go s.acquireShard(s.statusGeneration)
+			setState(contextStateAcquiring)
+			go s.acquireShard(s.stateGeneration)
 			return
 		case contextRequestStop:
-			setStatusStopped()
+			setStateStopped()
 			return
 		}
 	}
 	s.logger.Warn("invalid request for state transition",
-		tag.Number(int64(s.status)), // FIXME: make proper tags
+		tag.Number(int64(s.state)), // FIXME: make proper tags
 		tag.NextNumber(int64(request)),
 	)
 }
@@ -1242,7 +1242,7 @@ func (s *ContextImpl) loadShardMetadata(ownershipChanged bool, generation int) (
 	// Only have to do this once, we can just re-acquire the rangeid lock after that
 	s.rlock()
 
-	if generation != s.statusGeneration {
+	if generation != s.stateGeneration {
 		s.runlock()
 		return false, errOldGeneration
 	}
@@ -1292,7 +1292,7 @@ func (s *ContextImpl) loadShardMetadata(ownershipChanged bool, generation int) (
 	s.lock()
 	defer s.unlock()
 
-	if generation != s.statusGeneration {
+	if generation != s.stateGeneration {
 		return false, errOldGeneration
 	}
 
@@ -1335,7 +1335,7 @@ func (s *ContextImpl) acquireShard(generation int) {
 		defer s.unlock()
 
 		// Check that generation still matches
-		if generation != s.statusGeneration {
+		if generation != s.stateGeneration {
 			return errOldGeneration
 		}
 
@@ -1358,7 +1358,7 @@ func (s *ContextImpl) acquireShard(generation int) {
 			s.maybeRecordShardAcquisitionLatency(ownershipChanged)
 			engine := s.createEngine()
 			s.lock()
-			if generation != s.statusGeneration {
+			if generation != s.stateGeneration {
 				engine.Stop()
 				return errOldGeneration
 			}
@@ -1370,7 +1370,7 @@ func (s *ContextImpl) acquireShard(generation int) {
 
 	err := backoff.RetryContext(s.acquireCtx, try, policy, isRetryable)
 	if err == errOldGeneration {
-		// Status changed since this goroutine started, exit silently.
+		// State changed since this goroutine started, exit silently.
 		return
 	} else if err != nil {
 		// We got an unretryable error (perhaps ShardOwnershipLostError, or context cancelled) or timed out.
@@ -1380,7 +1380,7 @@ func (s *ContextImpl) acquireShard(generation int) {
 		// FIXME: are we sure we want to do this here?
 		s.lock()
 		defer s.unlock()
-		if generation == s.statusGeneration {
+		if generation == s.stateGeneration {
 			s.closeShardLocked()
 		}
 	}
@@ -1400,7 +1400,7 @@ func newContext(
 
 	shardContext := &ContextImpl{
 		Resource:         resource,
-		status:           contextStatusInitialized,
+		state:            contextStateInitialized,
 		shardID:          shardID,
 		executionManager: resource.GetExecutionManager(),
 		metricsClient:    resource.GetMetricsClient(),
