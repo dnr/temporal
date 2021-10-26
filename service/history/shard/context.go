@@ -55,7 +55,6 @@ type (
 		GetThrottledLogger() log.Logger
 		GetMetricsClient() metrics.Client
 		GetTimeSource() clock.TimeSource
-		PreviousShardOwnerWasDifferent() bool
 
 		GetEngine() Engine
 
