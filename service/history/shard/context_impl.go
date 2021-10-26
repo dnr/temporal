@@ -1104,7 +1104,7 @@ func (s *ContextImpl) stop() {
 	s.engine = nil
 	s.wUnlock()
 
-	// Stop the engine if it was running (outside the lock but before this returns)
+	// Stop the engine if it was running (outside the lock but before returning)
 	if engine != nil {
 		s.logger.Info("", tag.LifeCycleStopping, tag.ComponentShardEngine)
 		engine.Stop()

@@ -155,25 +155,30 @@ func (c *ControllerImpl) GetEngineForShard(shardID int32) (Engine, error) {
 func (c *ControllerImpl) CloseShardByID(shardID int32) {
 	sw := c.metricsScope.StartTimer(metrics.RemoveEngineForShardLatency)
 	defer sw.Stop()
-	shard, _ := c.removeShard(shardID, nil)
-	// Stop the engine for the current shard, if it exists.
+
+	shard, newNumShards, _ := c.removeShard(shardID, nil)
+	// Stop the current shard, if it exists.
 	if shard != nil {
+		shard.logger.Info("", tag.LifeCycleStopping, tag.ComponentShardContext, tag.ShardID(shardID))
 		shard.stop()
+		c.metricsScope.IncCounter(metrics.ShardContextRemovedCounter)
+		shard.logger.Info("", tag.LifeCycleStopped, tag.ComponentShardContext, tag.Number(newNumShards))
 	}
 }
 
-func (c *ControllerImpl) removeEngineForShard(shard *ContextImpl) {
+func (c *ControllerImpl) shardClosedCallback(shard *ContextImpl) {
 	sw := c.metricsScope.StartTimer(metrics.RemoveEngineForShardLatency)
 	defer sw.Stop()
-	c.removeShard(shard.shardID, shard)
-	// Whether shard was in the shards map or not, in both cases we should stop the engine.
-	shard.stop()
-}
 
-func (c *ControllerImpl) shardClosedCallback(shard *ContextImpl) {
 	c.metricsScope.IncCounter(metrics.ShardContextClosedCounter)
-	c.logger.Info("", tag.LifeCycleStopping, tag.ComponentShardContext, tag.ShardID(shard.shardID))
-	c.removeEngineForShard(shard)
+
+	_, newNumShards, _ := c.removeShard(shard.shardID, shard)
+
+	// Whether shard was in the shards map or not, in both cases we should stop it.
+	shard.logger.Info("", tag.LifeCycleStopping, tag.ComponentShardContext, tag.ShardID(shard.shardID))
+	shard.stop()
+	c.metricsScope.IncCounter(metrics.ShardContextRemovedCounter)
+	current.logger.Info("", tag.LifeCycleStopped, tag.ComponentShardContext, tag.Number(newNumShards))
 }
 
 func (c *ControllerImpl) getOrCreateShardContext(shardID int32) (*ContextImpl, error) {
@@ -227,27 +232,24 @@ func (c *ControllerImpl) getOrCreateShardContext(shardID int32) (*ContextImpl, e
 	return shard, nil
 }
 
-func (c *ControllerImpl) removeShard(shardID int32, expected *ContextImpl) (*ContextImpl, error) {
+func (c *ControllerImpl) removeShard(shardID int32, expected *ContextImpl) (*ContextImpl, int64, error) {
 	c.Lock()
 	defer c.Unlock()
 
+	nShards := int64(len(c.historyShards))
 	current, ok := c.historyShards[shardID]
 	if !ok {
-		return nil, fmt.Errorf("No shard found to remove for shard: %v", shardID)
+		return nil, nShards, fmt.Errorf("No shard found to remove for shard: %v", shardID)
 	}
 	if expected != nil && current != expected {
 		// the shard comparison is a defensive check to make sure we are deleting
 		// what we intend to delete.
-		return nil, fmt.Errorf("Current shard doesn't match the one we intend to delete for shard: %v", shardID)
+		return nil, nShards, fmt.Errorf("Current shard doesn't match the one we intend to delete for shard: %v", shardID)
 	}
 
 	delete(c.historyShards, shardID)
 
-	c.metricsScope.IncCounter(metrics.ShardContextRemovedCounter)
-
-	// FIXME: consolidate this lifecycle stuff
-	current.logger.Info("", tag.LifeCycleStopped, tag.ComponentShardContext, tag.Number(int64(len(c.historyShards))))
-	return current, nil
+	return current, nShards - 1, nil
 }
 
 // shardManagementPump is the main event loop for
