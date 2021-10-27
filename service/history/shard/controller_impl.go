@@ -178,7 +178,7 @@ func (c *ControllerImpl) shardClosedCallback(shard *ContextImpl) {
 	shard.logger.Info("", tag.LifeCycleStopping, tag.ComponentShardContext, tag.ShardID(shard.shardID))
 	shard.stop()
 	c.metricsScope.IncCounter(metrics.ShardContextRemovedCounter)
-	current.logger.Info("", tag.LifeCycleStopped, tag.ComponentShardContext, tag.Number(newNumShards))
+	shard.logger.Info("", tag.LifeCycleStopped, tag.ComponentShardContext, tag.Number(newNumShards))
 }
 
 func (c *ControllerImpl) getOrCreateShardContext(shardID int32) (*ContextImpl, error) {

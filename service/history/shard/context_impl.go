@@ -1061,8 +1061,9 @@ func (s *ContextImpl) createEngine() Engine {
 }
 
 func (s *ContextImpl) getOrCreateEngine() (engine Engine, err error) {
-	// Wait on shard acquisition for 1s.
-	// FIXME: tune this number?
+	// Wait on shard acquisition for 1s. Note that this retry is just polling a value in memory.
+	// Another goroutine is doing the actual work.
+	// QUESTION: should the 1s limit go in dynamic config?
 	policy := backoff.NewExponentialRetryPolicy(5 * time.Millisecond)
 	policy.SetExpirationInterval(1 * time.Second)
 
@@ -1305,7 +1306,7 @@ func (s *ContextImpl) loadShardMetadata(ownershipChanged bool, generation int) (
 
 func (s *ContextImpl) acquireShard(generation int) {
 	// Retry for 5m, with interval up to 10s (default)
-	// FIXME2: change values?
+	// QUESTION: should the 5m limit go in dynamic config?
 	policy := backoff.NewExponentialRetryPolicy(50 * time.Millisecond)
 	policy.SetExpirationInterval(5 * time.Minute)
 
