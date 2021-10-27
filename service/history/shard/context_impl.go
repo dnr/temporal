@@ -25,7 +25,6 @@
 package shard
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"sync"
@@ -60,6 +59,7 @@ const (
 	contextStateInitialized contextState = iota
 	contextStateAcquiring
 	contextStateAcquired
+	contextStateStopping
 	contextStateStopped
 
 	// These are the requests that can be sent to the context lifecycle
@@ -67,6 +67,7 @@ const (
 	contextRequestAcquired
 	contextRequestLost
 	contextRequestStop
+	contextRequestFinishStop
 )
 
 type (
@@ -85,10 +86,6 @@ type (
 		logger           log.Logger
 		throttledLogger  log.Logger
 		engineFactory    EngineFactory
-
-		// Used for cancelling background shard acquisition during shutdown:
-		acquireCtx    context.Context
-		acquireCancel context.CancelFunc
 
 		// All following fields are protected by rwLock, and only valid if status >= Acquiring:
 		rwLock                    sync.RWMutex
@@ -715,28 +712,15 @@ func (s *ContextImpl) errorByState() error {
 
 func (s *ContextImpl) errorByStateLocked() error {
 	switch s.state {
-	case contextStateInitialized:
-		return ErrShardStatusUnknown
-	case contextStateAcquiring:
+	case contextStateInitialized, contextStateAcquiring:
 		return ErrShardStatusUnknown
 	case contextStateAcquired:
 		return nil
-	case contextStateStopped:
+	case contextStateStopping, contextStateStopped:
 		return ErrShardClosed
 	default:
 		panic("invalid status")
 	}
-}
-
-func (s *ContextImpl) closeShardLocked() {
-	// FIXME: is this enough? should we do anything else here?
-	s.logger.Info("Close shard")
-
-	// will cause controller to call s.stop()
-	go s.closeCallback(s)
-
-	// fails any writes that may start after this point.
-	s.shardInfo.RangeId = -1
 }
 
 func (s *ContextImpl) generateTransferTaskIDLocked() (int64, error) {
@@ -759,8 +743,6 @@ func (s *ContextImpl) updateRangeIfNeededLocked() error {
 }
 
 func (s *ContextImpl) renewRangeLocked(isStealing bool) error {
-	// FIXME: review this carefully
-
 	updatedShardInfo := copyShardInfo(s.shardInfo)
 	updatedShardInfo.RangeId++
 	if isStealing {
@@ -778,11 +760,7 @@ func (s *ContextImpl) renewRangeLocked(isStealing bool) error {
 			tag.ShardRangeID(updatedShardInfo.GetRangeId()),
 			tag.PreviousShardRangeID(s.shardInfo.GetRangeId()),
 		)
-		// Shard is stolen, trigger history engine shutdown
-		if IsShardOwnershipLostError(err) {
-			s.closeShardLocked()
-		}
-		return err
+		return s.handleErrorLocked(err)
 	}
 
 	// Range is successfully updated in cassandra now update shard context to reflect new range
@@ -825,17 +803,12 @@ func (s *ContextImpl) updateShardInfoLocked() error {
 		ShardInfo:       updatedShardInfo.ShardInfo,
 		PreviousRangeID: s.shardInfo.GetRangeId(),
 	})
-
 	if err != nil {
-		// Shard is stolen, trigger history engine shutdown
-		if IsShardOwnershipLostError(err) {
-			s.closeShardLocked()
-		}
-	} else {
-		s.lastUpdated = now
+		return s.handleErrorLocked(err)
 	}
 
-	return err
+	s.lastUpdated = now
+	return nil
 }
 
 func (s *ContextImpl) emitShardInfoMetricsLogsLocked() {
@@ -1031,15 +1004,14 @@ func (s *ContextImpl) handleErrorLocked(err error) error {
 
 	case *persistence.ShardOwnershipLostError:
 		// Shard is stolen, trigger shutdown of history engine
-		s.closeShardLocked()
+		s.transitionLocked(contextRequestStop)
 		return err
 
 	default:
-		// We have no idea if the write failed or will eventually make it to
-		// persistence. Increment RangeID to guarantee that subsequent reads
-		// will either see that write, or know for certain that it failed.
-		// This allows the callers to reliably check the outcome by performing
-		// a read.
+		// We have no idea if the write failed or will eventually make it to persistence. Try to re-acquire
+		// the shard in the background. If successful, we'll get a new RangeID, to guarantee that subsequent
+		// reads will either see that write, or know for certain that it failed. This allows the callers to
+		// reliably check the outcome by performing a read. If we fail, we'll shut down the shard.
 		s.transitionLocked(contextRequestLost)
 		return err
 	}
@@ -1060,47 +1032,44 @@ func (s *ContextImpl) createEngine() Engine {
 	return engine
 }
 
-func (s *ContextImpl) getOrCreateEngine() (engine Engine, err error) {
+func (s *ContextImpl) getOrCreateEngine() (engine Engine, retErr error) {
 	// Wait on shard acquisition for 1s. Note that this retry is just polling a value in memory.
 	// Another goroutine is doing the actual work.
 	// QUESTION: should the 1s limit go in dynamic config?
 	policy := backoff.NewExponentialRetryPolicy(5 * time.Millisecond)
 	policy.SetExpirationInterval(1 * time.Second)
 
-	isRetryable := func(err1 error) bool { return err1 == ErrShardStatusUnknown }
+	isRetryable := func(err error) bool { return err == ErrShardStatusUnknown }
 
 	try := func() error {
 		s.rLock()
 		defer s.rUnlock()
-
-		switch s.state {
-		case contextStateInitialized, contextStateAcquiring:
-			return ErrShardStatusUnknown
-		case contextStateAcquired:
+		err := s.errorByStateLocked()
+		if err == nil {
 			engine = s.engine
-			return nil
-		case contextStateStopped:
-			return fmt.Errorf("shard %v for host '%v' is shut down", s.shardID, s.GetHostInfo().Identity())
-		default:
-			panic("invalid status")
 		}
+		return err
 	}
 
-	err = backoff.Retry(try, policy, isRetryable)
-	if err == nil && engine == nil {
+	retErr = backoff.Retry(try, policy, isRetryable)
+	if retErr == nil && engine == nil {
 		// This shouldn't ever happen, but don't let it return nil error.
-		err = ErrShardStatusUnknown
+		retErr = ErrShardStatusUnknown
 	}
 	return
 }
 
+// start should only be called by the controller.
 func (s *ContextImpl) start() {
-	s.transition(contextRequestAcquire)
+	s.wLock()
+	defer s.wUnlock()
+	s.transitionLocked(contextRequestAcquire)
 }
 
+// stop should only be called by the controller.
 func (s *ContextImpl) stop() {
 	s.wLock()
-	s.transitionLocked(contextRequestStop)
+	s.transitionLocked(contextRequestFinishStop)
 	engine := s.engine
 	s.engine = nil
 	s.wUnlock()
@@ -1114,10 +1083,9 @@ func (s *ContextImpl) stop() {
 }
 
 func (s *ContextImpl) isValid() bool {
-	// FIXME: always call callback when stopping so that we get removed from controller and we don't need this?
 	s.rLock()
 	defer s.rUnlock()
-	return s.state != contextStateStopped
+	return s.state < contextStateStopping
 }
 
 func (s *ContextImpl) wLock() {
@@ -1151,22 +1119,70 @@ func (s *ContextImpl) String() string {
 	return fmt.Sprintf("%p", s)
 }
 
-func (s *ContextImpl) transition(request contextRequest) {
-	s.wLock()
-	defer s.wUnlock()
-	s.transitionLocked(request)
-}
-
 func (s *ContextImpl) transitionLocked(request contextRequest) {
+	/* State transitions:
+
+	The normal pattern:
+		Initialized
+			controller calls start()
+		Acquiring
+			acquireShard gets the shard
+		Acquired
+
+	If we get a transient error from persistence:
+		Acquired
+			transient error: handleErrorLocked calls transitionLocked(contextRequestLost)
+		Acquiring
+			acquireShard gets the shard
+		Acquired
+
+	Shard ownership lost:
+		Acquired
+			ShardOwnershipLostError: handleErrorLocked calls transitionLocked(contextRequestStop)
+		Stopping
+			controller removes from map and calls stop()
+		Stopped
+
+	The controller may call stop() from any state, and we'll skip over Stopping and go straight to Stopped.
+	We use the Stopping state to ensure that for a stop initiated by the Context, we notify the controller.
+
+	we can't kill the acquireShard goroutine, so we use a generation number to make sure that if we have a
+	state change that was not initiated by acquireShard, then acquireShard exits without doing anything else.
+
+	Invariants:
+	- Any time state is changed, stateGeneration is incremented.
+	- Once state is Stopping, it can only go to Stopped.
+	- Once state is Stopped, it can't go anywhere else.
+	- At the start of acquireShard, state must be Acquiring.
+	- By the end of acquireShard, it must have set state to something else (unless generation changed).
+	- If state is Acquiring, acquireShard should be running in the background.
+	- Only acquireShard can use contextRequestAcquired (i.e. transition from Acquiring to Acquired).
+	- Once state has reached Acquired at least once, and not reached Stopped, engine must be non-nil.
+	- Only the controller may call start() and stop().
+	- The controller must call stop() for every ContextImpl it creates.
+
+	*/
+
 	setState := func(newState contextState) {
 		s.stateGeneration++
 		s.state = newState
 	}
 
+	setStateAcquiring := func() {
+		setState(contextStateAcquiring)
+		go s.acquireShard(s.stateGeneration)
+	}
+
+	setStateStopping := func() {
+		setState(contextStateStopping)
+		// The change in state should cause all write methods to fail, but just in case, set this also,
+		// which will cause failures at the persistence level
+		s.shardInfo.RangeId = -1
+		// This will cause the controller to remove this shard from the map and then call s.stop()
+		go s.closeCallback(s)
+	}
+
 	setStateStopped := func() {
-		// Stop the acquire goroutine if it was running
-		s.acquireCancel()
-		// Move to Stopped (and increment generation so that acquire goroutine will not do anything anymore)
 		setState(contextStateStopped)
 	}
 
@@ -1174,10 +1190,12 @@ func (s *ContextImpl) transitionLocked(request contextRequest) {
 	case contextStateInitialized:
 		switch request {
 		case contextRequestAcquire:
-			setState(contextStateAcquiring)
-			go s.acquireShard(s.stateGeneration)
+			setStateAcquiring()
 			return
 		case contextRequestStop:
+			setStateStopping()
+			return
+		case contextRequestFinishStop:
 			setStateStopped()
 			return
 		}
@@ -1191,6 +1209,9 @@ func (s *ContextImpl) transitionLocked(request contextRequest) {
 		case contextRequestLost:
 			return // nothing to do, already acquiring
 		case contextRequestStop:
+			setStateStopping()
+			return
+		case contextRequestFinishStop:
 			setStateStopped()
 			return
 		}
@@ -1199,10 +1220,21 @@ func (s *ContextImpl) transitionLocked(request contextRequest) {
 		case contextRequestAcquire:
 			return // nothing to to do, already acquired
 		case contextRequestLost:
-			setState(contextStateAcquiring)
-			go s.acquireShard(s.stateGeneration)
+			setStateAcquiring()
 			return
 		case contextRequestStop:
+			setStateStopping()
+			return
+		case contextRequestFinishStop:
+			setStateStopped()
+			return
+		}
+	case contextStateStopping:
+		switch request {
+		case contextRequestStop:
+			// nothing to do, already stopping
+			return
+		case contextRequestFinishStop:
 			setStateStopped()
 			return
 		}
@@ -1324,7 +1356,7 @@ func (s *ContextImpl) acquireShard(generation int) {
 	// Remember this value across attempts
 	ownershipChanged := false
 
-	try := func(ctx context.Context) error {
+	try := func() error {
 		// Initial load of shard metadata
 		var err error
 		ownershipChanged, err = s.loadShardMetadata(ownershipChanged, generation)
@@ -1340,7 +1372,12 @@ func (s *ContextImpl) acquireShard(generation int) {
 			return errOldGeneration
 		}
 
-		// Try to acquire rangeid
+		// Try to acquire RangeID lock. If this gets a persistence error, it may call:
+		// transitionLocked(contextRequestStop) for ShardOwnershipLostError:
+		//   This will transition to Stopping right here, and the transitionLocked call at the end of the
+		//   outer function will do nothing, since the state was already changed.
+		// transitionLocked(contextRequestLost) for other transient errors:
+		//   This will do nothing, since state is already Acquiring.
 		err = s.renewRangeLocked(true)
 		if err != nil {
 			return err
@@ -1369,20 +1406,20 @@ func (s *ContextImpl) acquireShard(generation int) {
 		return nil
 	}
 
-	err := backoff.RetryContext(s.acquireCtx, try, policy, isRetryable)
+	err := backoff.Retry(try, policy, isRetryable)
 	if err == errOldGeneration {
 		// State changed since this goroutine started, exit silently.
 		return
 	} else if err != nil {
-		// We got an unretryable error (perhaps ShardOwnershipLostError, or context cancelled) or timed out.
-		// Stop the shard.
+		// We got an unretryable error (perhaps ShardOwnershipLostError) or timed out.
 		s.logger.Error("Couldn't acquire shard", tag.Error(err))
 
-		// FIXME: are we sure we want to do this here?
+		// If there's been another state change since we started (e.g. to Stopping), then don't do anything
+		// here. But if not (i.e. timed out or error), initiate shutting down the shard.
 		s.wLock()
 		defer s.wUnlock()
 		if generation == s.stateGeneration {
-			s.closeShardLocked()
+			s.transitionLocked(contextRequestStop)
 		}
 	}
 }
@@ -1424,9 +1461,6 @@ func newContext(
 	// Add tag for context itself to loggers
 	shardContext.logger = log.With(shardContext.logger, tag.ShardContext(shardContext))
 	shardContext.throttledLogger = log.With(shardContext.throttledLogger, tag.ShardContext(shardContext))
-
-	// Create context for cancelling background goroutine
-	shardContext.acquireCtx, shardContext.acquireCancel = context.WithCancel(context.Background())
 
 	return shardContext, nil
 }

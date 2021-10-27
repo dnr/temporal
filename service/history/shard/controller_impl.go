@@ -315,7 +315,7 @@ func (c *ControllerImpl) acquireShards() {
 								c.logger.Error("Unable to create history shard engine", tag.Error(err), tag.OperationFailed, tag.ShardID(shardID))
 							}
 						}
-						// FIXME: do we want to proactively unload shards here?
+						// QUESTION: do we want to proactively unload shards here?
 					}
 				}
 			}

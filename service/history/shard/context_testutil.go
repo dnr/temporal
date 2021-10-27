@@ -25,7 +25,6 @@
 package shard
 
 import (
-	"context"
 	"time"
 
 	"github.com/golang/mock/gomock"
@@ -71,7 +70,6 @@ func NewTestContext(
 		timerMaxReadLevelMap:      make(map[string]time.Time),
 		remoteClusterCurrentTime:  make(map[string]time.Time),
 	}
-	shard.acquireCtx, shard.acquireCancel = context.WithCancel(context.Background())
 	return &ContextTest{
 		ContextImpl:     shard,
 		Resource:        resource,
