@@ -55,14 +55,16 @@ var (
 )
 
 const (
-	// These are the possible values of ContextImpl.status
+	// See transitionLocked for overview of state transitions.
+
+	// These are the possible values of ContextImpl.state:
 	contextStateInitialized contextState = iota
 	contextStateAcquiring
 	contextStateAcquired
 	contextStateStopping
 	contextStateStopped
 
-	// These are the requests that can be sent to the context lifecycle
+	// These are the requests that can be passed to transitionLocked to change state:
 	contextRequestAcquire contextRequest = iota
 	contextRequestAcquired
 	contextRequestLost
