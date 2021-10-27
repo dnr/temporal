@@ -1239,9 +1239,9 @@ func (s *ContextImpl) transitionLocked(request contextRequest) {
 			return
 		}
 	}
-	s.logger.Warn("invalid request for state transition",
-		tag.Number(int64(s.state)), // FIXME: make proper tags
-		tag.NextNumber(int64(request)),
+	s.logger.Warn("invalid state transition request",
+		tag.ShardContextState(int(s.state)),
+		tag.ShardContextStateRequest(int(request)),
 	)
 }
 

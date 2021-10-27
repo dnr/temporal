@@ -492,6 +492,16 @@ func ShardRangeID(id int64) ZapTag {
 	return NewInt64("shard-range-id", id)
 }
 
+// ShardContextState returns tag for ShardContextState
+func ShardContextState(state int) ZapTag {
+	return NewInt("shard-context-state", state)
+}
+
+// ShardContextStateRequest returns tag for ShardContextStateRequest
+func ShardContextStateRequest(r int) ZapTag {
+	return NewInt("shard-context-state-request", r)
+}
+
 // ReadLevel returns tag for ReadLevel
 func ReadLevel(lv int64) ZapTag {
 	return NewInt64("read-level", lv)
