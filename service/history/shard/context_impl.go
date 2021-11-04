@@ -108,7 +108,7 @@ var _ Context = (*ContextImpl)(nil)
 
 var (
 	// ErrShardClosed is returned when shard is closed and a req cannot be processed
-	ErrShardClosed = errors.New("shard closed")
+	ErrShardClosed = serviceerror.NewUnavailable("shard closed, please retry")
 
 	// ErrShardStatusUnknown means we're not sure if we have the shard lock or not. This may be returned
 	// during short windows at initialization and if we've lost the connection to the database.
