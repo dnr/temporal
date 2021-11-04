@@ -73,8 +73,7 @@ func (t *TransactionImpl) CreateWorkflowExecution(
 ) (int64, error) {
 
 	resp, err := createWorkflowExecutionWithRetry(t.shard, &persistence.CreateWorkflowExecutionRequest{
-		ShardID: t.shard.GetShardID(),
-		// RangeID , this is set by shard context
+		// ShardID and RangeID are set by shard context
 		Mode:                createMode,
 		NewWorkflowSnapshot: *newWorkflowSnapshot,
 		NewWorkflowEvents:   newWorkflowEventsSeq,
@@ -106,8 +105,7 @@ func (t *TransactionImpl) ConflictResolveWorkflowExecution(
 ) (int64, int64, int64, error) {
 
 	resp, err := conflictResolveWorkflowExecutionWithRetry(t.shard, &persistence.ConflictResolveWorkflowExecutionRequest{
-		ShardID: t.shard.GetShardID(),
-		// RangeID , this is set by shard context
+		// ShardID and RangeID are set by shard context
 		Mode:                    conflictResolveMode,
 		ResetWorkflowSnapshot:   *resetWorkflowSnapshot,
 		ResetWorkflowEvents:     resetWorkflowEventsSeq,
@@ -157,8 +155,7 @@ func (t *TransactionImpl) UpdateWorkflowExecution(
 ) (int64, int64, error) {
 
 	resp, err := updateWorkflowExecutionWithRetry(t.shard, &persistence.UpdateWorkflowExecutionRequest{
-		ShardID: t.shard.GetShardID(),
-		// RangeID , this is set by shard context
+		// ShardID and RangeID are set by shard context
 		Mode:                   updateMode,
 		UpdateWorkflowMutation: *currentWorkflowMutation,
 		UpdateWorkflowEvents:   currentWorkflowEventsSeq,

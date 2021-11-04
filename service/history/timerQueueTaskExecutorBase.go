@@ -292,8 +292,7 @@ func (t *timerQueueTaskExecutorBase) deleteWorkflowVisibility(
 ) error {
 
 	return t.shard.AddTasks(&persistence.AddTasksRequest{
-		ShardID: t.shard.GetShardID(),
-		// RangeID is set by shard
+		// ShardID and RangeID are set by shard
 		NamespaceID: task.NamespaceID,
 		WorkflowID:  task.WorkflowID,
 		RunID:       task.RunID,

@@ -470,8 +470,8 @@ func (s *ContextImpl) CreateWorkflowExecution(
 	}
 	defer s.updateMaxReadLevelLocked(transferMaxReadLevel)
 
-	currentRangeID := s.getRangeIDLocked()
-	request.RangeID = currentRangeID
+	request.ShardID = s.shardID
+	request.RangeID = s.getRangeIDLocked()
 	resp, err := s.executionManager.CreateWorkflowExecution(request)
 	if err = s.handleErrorLocked(err); err != nil {
 		return nil, err
@@ -525,8 +525,8 @@ func (s *ContextImpl) UpdateWorkflowExecution(
 	}
 	defer s.updateMaxReadLevelLocked(transferMaxReadLevel)
 
-	currentRangeID := s.getRangeIDLocked()
-	request.RangeID = currentRangeID
+	request.ShardID = s.shardID
+	request.RangeID = s.getRangeIDLocked()
 	resp, err := s.executionManager.UpdateWorkflowExecution(request)
 	if err = s.handleErrorLocked(err); err != nil {
 		return nil, err
@@ -593,8 +593,8 @@ func (s *ContextImpl) ConflictResolveWorkflowExecution(
 	}
 	defer s.updateMaxReadLevelLocked(transferMaxReadLevel)
 
-	currentRangeID := s.getRangeIDLocked()
-	request.RangeID = currentRangeID
+	request.ShardID = s.shardID
+	request.RangeID = s.getRangeIDLocked()
 	resp, err := s.executionManager.ConflictResolveWorkflowExecution(request)
 	if err := s.handleErrorLocked(err); err != nil {
 		return nil, err
@@ -610,7 +610,6 @@ func (s *ContextImpl) AddTasks(
 	}
 
 	namespaceID := namespace.ID(request.NamespaceID)
-	workflowID := request.WorkflowID
 
 	// do not try to get namespace cache within shard lock
 	namespaceEntry, err := s.GetNamespaceRegistry().GetNamespaceByID(namespaceID)
@@ -624,7 +623,7 @@ func (s *ContextImpl) AddTasks(
 	transferMaxReadLevel := int64(0)
 	if err := s.allocateTaskIDsLocked(
 		namespaceEntry,
-		workflowID,
+		request.WorkflowID,
 		request.TransferTasks,
 		request.ReplicationTasks,
 		request.TimerTasks,
@@ -635,6 +634,7 @@ func (s *ContextImpl) AddTasks(
 	}
 	defer s.updateMaxReadLevelLocked(transferMaxReadLevel)
 
+	request.ShardID = s.shardID
 	request.RangeID = s.getRangeIDLocked()
 	err = s.executionManager.AddTasks(request)
 	if err = s.handleErrorLocked(err); err != nil {

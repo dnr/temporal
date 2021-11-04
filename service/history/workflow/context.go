@@ -412,7 +412,6 @@ func (c *ContextImpl) CreateWorkflowExecution(
 	}()
 
 	createRequest := &persistence.CreateWorkflowExecutionRequest{
-		ShardID: c.shard.GetShardID(),
 		// workflow create mode & prev run ID & version
 		Mode:                     createMode,
 		PreviousRunID:            prevRunID,
