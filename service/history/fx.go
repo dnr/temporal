@@ -59,12 +59,14 @@ import (
 	"go.temporal.io/server/common/searchattribute"
 	"go.temporal.io/server/service"
 	"go.temporal.io/server/service/history/configs"
+	"go.temporal.io/server/service/history/shard"
 	"go.temporal.io/server/service/history/workflow"
 )
 
 var Module = fx.Options(
 	resource.Module,
 	workflow.Module,
+	shard.Module,
 	fx.Provide(ParamsExpandProvider), // BootstrapParams should be deprecated
 	fx.Provide(dynamicconfig.NewCollection),
 	fx.Provide(ConfigProvider), // might be worth just using provider for configs.Config directly
@@ -133,6 +135,7 @@ func HandlerProvider(
 	archivalMetadata archiver.ArchivalMetadata,
 	hostInfoProvider resource.HostInfoProvider,
 	archiverProvider provider.ArchiverProvider,
+	shardController *shard.ControllerImpl,
 ) *Handler {
 	args := NewHandlerArgs{
 		config,
@@ -158,6 +161,7 @@ func HandlerProvider(
 		archivalMetadata,
 		hostInfoProvider,
 		archiverProvider,
+		shardController,
 	}
 	return NewHandler(args)
 }
