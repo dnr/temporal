@@ -31,7 +31,6 @@ import (
 	"time"
 
 	"github.com/uber-go/tally/v4"
-	"go.uber.org/fx"
 	"google.golang.org/grpc"
 	healthpb "google.golang.org/grpc/health/grpc_health_v1"
 
@@ -49,8 +48,6 @@ import (
 // Service represents the history service
 type (
 	Service struct {
-		self *fx.App
-
 		status            int32
 		handler           *Handler
 		visibilityManager manager.VisibilityManager
