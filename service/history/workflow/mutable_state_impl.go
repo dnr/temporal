@@ -171,13 +171,14 @@ type (
 		workflowTaskManager *workflowTaskStateMachine
 		QueryRegistry       QueryRegistry
 
-		shard           shard.Context
-		clusterMetadata cluster.Metadata
-		eventsCache     events.Cache
-		config          *configs.Config
-		timeSource      clock.TimeSource
-		logger          log.Logger
-		metricsClient   metrics.Client
+		shard             shard.Context
+		clusterMetadata   cluster.Metadata
+		eventsCache       events.Cache
+		config            *configs.Config
+		timeSource        clock.TimeSource
+		logger            log.Logger
+		metricsClient     metrics.Client
+		namespaceRegistry namespace.Registry
 	}
 )
 
@@ -189,6 +190,11 @@ func NewMutableState(
 	logger log.Logger,
 	namespaceEntry *namespace.Namespace,
 	startTime time.Time,
+	clusterMetadata cluster.Metadata,
+	config *configs.Config,
+	timeSource clock.TimeSource,
+	metricsClient metrics.Client,
+	namespaceRegistry namespace.Registry,
 ) *MutableStateImpl {
 	s := &MutableStateImpl{
 		updateActivityInfos:            make(map[int64]*persistencespb.ActivityInfo),
@@ -229,13 +235,14 @@ func NewMutableState(
 
 		QueryRegistry: NewQueryRegistry(),
 
-		shard:           shard,
-		clusterMetadata: shard.GetClusterMetadata(),
-		eventsCache:     eventsCache,
-		config:          shard.GetConfig(),
-		timeSource:      shard.GetTimeSource(),
-		logger:          logger,
-		metricsClient:   shard.GetMetricsClient(),
+		shard:             shard,
+		clusterMetadata:   clusterMetadata,
+		eventsCache:       eventsCache,
+		config:            config,
+		timeSource:        timeSource,
+		logger:            logger,
+		metricsClient:     metricsClient,
+		namespaceRegistry: namespaceRegistry,
 	}
 
 	s.executionInfo = &persistencespb.WorkflowExecutionInfo{
@@ -262,7 +269,7 @@ func NewMutableState(
 		common.FirstEventID,
 		s.bufferEventsInDB,
 	)
-	s.taskGenerator = NewTaskGenerator(shard.GetNamespaceRegistry(), s.logger, s)
+	s.taskGenerator = NewTaskGenerator(namespaceRegistry, s.logger, s)
 	s.workflowTaskManager = newWorkflowTaskStateMachine(s)
 
 	return s
@@ -275,11 +282,27 @@ func newMutableStateBuilderFromDB(
 	namespaceEntry *namespace.Namespace,
 	dbRecord *persistencespb.WorkflowMutableState,
 	dbRecordVersion int64,
+	clusterMetadata cluster.Metadata,
+	config *configs.Config,
+	timeSource clock.TimeSource,
+	metricsClient metrics.Client,
+	namespaceRegistry namespace.Registry,
 ) (*MutableStateImpl, error) {
 
 	// startTime will be overridden by DB record
 	startTime := time.Time{}
-	mutableState := NewMutableState(shard, eventsCache, logger, namespaceEntry, startTime)
+	mutableState := NewMutableState(
+		shard,
+		eventsCache,
+		logger,
+		namespaceEntry,
+		startTime,
+		clusterMetadata,
+		config,
+		timeSource,
+		metricsClient,
+		namespaceRegistry,
+	)
 
 	if dbRecord.ActivityInfos != nil {
 		mutableState.pendingActivityInfoIDs = dbRecord.ActivityInfos
@@ -1700,7 +1723,7 @@ func (e *MutableStateImpl) addBinaryCheckSumIfNotExists(
 		exeInfo.SearchAttributes = make(map[string]*commonpb.Payload, 1)
 	}
 	exeInfo.SearchAttributes[searchattribute.BinaryChecksums] = checksumsPayload
-	if e.shard.GetConfig().AdvancedVisibilityWritingMode() != visibility.AdvancedVisibilityWritingModeOff {
+	if e.config.AdvancedVisibilityWritingMode() != visibility.AdvancedVisibilityWritingModeOff {
 		return e.taskGenerator.GenerateWorkflowSearchAttrTasks(timestamp.TimeValue(event.GetEventTime()))
 	}
 	return nil
@@ -1838,7 +1861,7 @@ func (e *MutableStateImpl) ReplicateActivityTaskScheduledEvent(
 	attributes := event.GetActivityTaskScheduledEventAttributes()
 	targetNamespaceID := namespace.ID(e.executionInfo.NamespaceId)
 	if attributes.GetNamespace() != "" {
-		targetNamespaceEntry, err := e.shard.GetNamespaceRegistry().GetNamespace(namespace.Name(attributes.GetNamespace()))
+		targetNamespaceEntry, err := e.namespaceRegistry.GetNamespace(namespace.Name(attributes.GetNamespace()))
 		if err != nil {
 			return nil, err
 		}
@@ -3068,6 +3091,11 @@ func (e *MutableStateImpl) AddContinueAsNewEvent(
 		e.logger,
 		e.namespaceEntry,
 		timestamp.TimeValue(continueAsNewEvent.GetEventTime()),
+		e.clusterMetadata,
+		e.config,
+		e.timeSource,
+		e.metricsClient,
+		e.namespaceRegistry,
 	)
 
 	if err = newStateBuilder.SetHistoryTree(newRunID); err != nil {
@@ -4323,7 +4351,7 @@ func (e *MutableStateImpl) closeTransactionHandleWorkflowReset(
 		return nil
 	}
 
-	namespaceEntry, err := e.shard.GetNamespaceRegistry().GetNamespaceByID(namespace.ID(e.executionInfo.NamespaceId))
+	namespaceEntry, err := e.namespaceRegistry.GetNamespaceByID(namespace.ID(e.executionInfo.NamespaceId))
 	if err != nil {
 		return err
 	}

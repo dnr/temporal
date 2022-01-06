@@ -169,11 +169,6 @@ func (s *ContextImpl) GetShardID() int32 {
 	return s.shardID
 }
 
-func (s *ContextImpl) GetExecutionManager() persistence.ExecutionManager {
-	// constant from initialization, no need for locks
-	return s.executionManager
-}
-
 func (s *ContextImpl) GetEngine() (Engine, error) {
 	s.rLock()
 	defer s.rUnlock()
@@ -322,7 +317,7 @@ func (s *ContextImpl) UpdateReplicatorDLQAckLevel(
 		return err
 	}
 
-	s.GetMetricsClient().Scope(
+	s.metricsClient.Scope(
 		metrics.ReplicationDLQStatsScope,
 		metrics.TargetClusterTag(sourceCluster),
 		metrics.InstanceTag(convert.Int32ToString(s.shardID)),
@@ -408,7 +403,7 @@ func (s *ContextImpl) DeleteTransferFailoverLevel(failoverID string) error {
 	defer s.wUnlock()
 
 	if level, ok := s.shardInfo.TransferFailoverLevels[failoverID]; ok {
-		s.GetMetricsClient().RecordTimer(metrics.ShardInfoScope, metrics.ShardInfoTransferFailoverLatencyTimer, time.Since(level.StartTime))
+		s.metricsClient.RecordTimer(metrics.ShardInfoScope, metrics.ShardInfoTransferFailoverLatencyTimer, time.Since(level.StartTime))
 		delete(s.shardInfo.TransferFailoverLevels, failoverID)
 	}
 	return s.updateShardInfoLocked()
@@ -438,7 +433,7 @@ func (s *ContextImpl) DeleteTimerFailoverLevel(failoverID string) error {
 	defer s.wUnlock()
 
 	if level, ok := s.shardInfo.TimerFailoverLevels[failoverID]; ok {
-		s.GetMetricsClient().RecordTimer(metrics.ShardInfoScope, metrics.ShardInfoTimerFailoverLatencyTimer, time.Since(level.StartTime))
+		s.metricsClient.RecordTimer(metrics.ShardInfoScope, metrics.ShardInfoTimerFailoverLatencyTimer, time.Since(level.StartTime))
 		delete(s.shardInfo.TimerFailoverLevels, failoverID)
 	}
 	return s.updateShardInfoLocked()
@@ -517,7 +512,7 @@ func (s *ContextImpl) UpdateTimerMaxReadLevel(cluster string) time.Time {
 	defer s.wUnlock()
 
 	currentTime := s.timeSource.Now()
-	if cluster != "" && cluster != s.GetClusterMetadata().GetCurrentClusterName() {
+	if cluster != "" && cluster != s.clusterMetadata.GetCurrentClusterName() {
 		currentTime = s.getRemoteClusterInfoLocked(cluster).CurrentTime
 	}
 
@@ -536,7 +531,7 @@ func (s *ContextImpl) CreateWorkflowExecution(
 	workflowID := request.NewWorkflowSnapshot.ExecutionInfo.WorkflowId
 
 	// do not try to get namespace cache within shard lock
-	namespaceEntry, err := s.GetNamespaceRegistry().GetNamespaceByID(namespaceID)
+	namespaceEntry, err := s.namespaceRegistry.GetNamespaceByID(namespaceID)
 	if err != nil {
 		return nil, err
 	}
@@ -577,7 +572,7 @@ func (s *ContextImpl) UpdateWorkflowExecution(
 	workflowID := request.UpdateWorkflowMutation.ExecutionInfo.WorkflowId
 
 	// do not try to get namespace cache within shard lock
-	namespaceEntry, err := s.GetNamespaceRegistry().GetNamespaceByID(namespaceID)
+	namespaceEntry, err := s.namespaceRegistry.GetNamespaceByID(namespaceID)
 	if err != nil {
 		return nil, err
 	}
@@ -631,7 +626,7 @@ func (s *ContextImpl) ConflictResolveWorkflowExecution(
 	workflowID := request.ResetWorkflowSnapshot.ExecutionInfo.WorkflowId
 
 	// do not try to get namespace cache within shard lock
-	namespaceEntry, err := s.GetNamespaceRegistry().GetNamespaceByID(namespaceID)
+	namespaceEntry, err := s.namespaceRegistry.GetNamespaceByID(namespaceID)
 	if err != nil {
 		return nil, err
 	}
@@ -697,7 +692,7 @@ func (s *ContextImpl) AddTasks(
 	namespaceID := namespace.ID(request.NamespaceID)
 
 	// do not try to get namespace cache within shard lock
-	namespaceEntry, err := s.GetNamespaceRegistry().GetNamespaceByID(namespaceID)
+	namespaceEntry, err := s.namespaceRegistry.GetNamespaceByID(namespaceID)
 	if err != nil {
 		return err
 	}
@@ -752,9 +747,9 @@ func (s *ContextImpl) AppendHistoryEvents(
 	defer func() {
 		// N.B. - Dual emit here makes sense so that we can see aggregate timer stats across all
 		// namespaces along with the individual namespaces stats
-		s.GetMetricsClient().RecordDistribution(metrics.SessionSizeStatsScope, metrics.HistorySize, size)
-		if entry, err := s.GetNamespaceRegistry().GetNamespaceByID(namespaceID); err == nil && entry != nil {
-			s.GetMetricsClient().Scope(
+		s.metricsClient.RecordDistribution(metrics.SessionSizeStatsScope, metrics.HistorySize, size)
+		if entry, err := s.namespaceRegistry.GetNamespaceByID(namespaceID); err == nil && entry != nil {
+			s.metricsClient.Scope(
 				metrics.SessionSizeStatsScope,
 				metrics.NamespaceTag(entry.Name().String()),
 			).RecordDistribution(metrics.HistorySize, size)
@@ -767,7 +762,7 @@ func (s *ContextImpl) AppendHistoryEvents(
 				tag.WorkflowHistorySizeBytes(size))
 		}
 	}()
-	resp, err0 := s.GetExecutionManager().AppendHistoryNodes(request)
+	resp, err0 := s.executionManager.AppendHistoryNodes(request)
 	if resp != nil {
 		size = resp.Size
 	}
@@ -784,7 +779,7 @@ func (s *ContextImpl) DeleteWorkflowExecution(
 	}
 
 	// do not try to get namespace cache within shard lock
-	namespaceEntry, err := s.GetNamespaceRegistry().GetNamespaceByID(namespace.ID(key.NamespaceID))
+	namespaceEntry, err := s.namespaceRegistry.GetNamespaceByID(namespace.ID(key.NamespaceID))
 	if err != nil {
 		return err
 	}
@@ -799,7 +794,7 @@ func (s *ContextImpl) DeleteWorkflowExecution(
 		RunID:       key.RunID,
 	}
 	op := func() error {
-		return s.GetExecutionManager().DeleteCurrentWorkflowExecution(delCurRequest)
+		return s.executionManager.DeleteCurrentWorkflowExecution(delCurRequest)
 	}
 	err = backoff.Retry(op, persistenceOperationRetryPolicy, common.IsPersistenceTransientError)
 	if err != nil {
@@ -813,7 +808,7 @@ func (s *ContextImpl) DeleteWorkflowExecution(
 		RunID:       key.RunID,
 	}
 	op = func() error {
-		return s.GetExecutionManager().DeleteWorkflowExecution(delRequest)
+		return s.executionManager.DeleteWorkflowExecution(delRequest)
 	}
 	err = backoff.Retry(op, persistenceOperationRetryPolicy, common.IsPersistenceTransientError)
 	if err != nil {
@@ -826,7 +821,7 @@ func (s *ContextImpl) DeleteWorkflowExecution(
 			ShardID:     s.shardID,
 		}
 		op := func() error {
-			return s.GetExecutionManager().DeleteHistoryBranch(delHistoryRequest)
+			return s.executionManager.DeleteHistoryBranch(delHistoryRequest)
 		}
 		err = backoff.Retry(op, persistenceOperationRetryPolicy, common.IsPersistenceTransientError)
 		if err != nil {
@@ -859,24 +854,9 @@ func (s *ContextImpl) DeleteWorkflowExecution(
 	return nil
 }
 
-func (s *ContextImpl) GetConfig() *configs.Config {
-	// constant from initialization, no need for locks
-	return s.config
-}
-
 func (s *ContextImpl) GetEventsCache() events.Cache {
 	// constant from initialization (except for tests), no need for locks
 	return s.eventsCache
-}
-
-func (s *ContextImpl) GetLogger() log.Logger {
-	// constant from initialization, no need for locks
-	return s.contextTaggedLogger
-}
-
-func (s *ContextImpl) GetThrottledLogger() log.Logger {
-	// constant from initialization, no need for locks
-	return s.throttledLogger
 }
 
 func (s *ContextImpl) getRangeIDLocked() int64 {
@@ -991,8 +971,8 @@ func (s *ContextImpl) updateShardInfoLocked() error {
 }
 
 func (s *ContextImpl) emitShardInfoMetricsLogsLocked() {
-	currentCluster := s.GetClusterMetadata().GetCurrentClusterName()
-	clusterInfo := s.GetClusterMetadata().GetAllClusterInfo()
+	currentCluster := s.clusterMetadata.GetCurrentClusterName()
+	clusterInfo := s.clusterMetadata.GetAllClusterInfo()
 
 	minTransferLevel := s.shardInfo.ClusterTransferAckLevel[currentCluster]
 	maxTransferLevel := s.shardInfo.ClusterTransferAckLevel[currentCluster]
@@ -1047,7 +1027,7 @@ func (s *ContextImpl) emitShardInfoMetricsLogsLocked() {
 			tag.ShardTransferAcks(s.shardInfo.ClusterTransferAckLevel))
 	}
 
-	metricsScope := s.GetMetricsClient().Scope(metrics.ShardInfoScope)
+	metricsScope := s.metricsClient.Scope(metrics.ShardInfoScope)
 	metricsScope.RecordDistribution(metrics.ShardInfoTransferDiffHistogram, int(diffTransferLevel))
 	metricsScope.RecordTimer(metrics.ShardInfoTimerDiffTimer, diffTimerLevel)
 
@@ -1118,7 +1098,7 @@ func (s *ContextImpl) allocateTimerIDsLocked(
 ) error {
 
 	// assign IDs for the timer tasks. They need to be assigned under shard lock.
-	currentCluster := s.GetClusterMetadata().GetCurrentClusterName()
+	currentCluster := s.clusterMetadata.GetCurrentClusterName()
 	for _, task := range timerTasks {
 		ts := task.GetVisibilityTime()
 		if task.GetVersion() != common.EmptyVersion {
@@ -1155,7 +1135,7 @@ func (s *ContextImpl) allocateTimerIDsLocked(
 func (s *ContextImpl) SetCurrentTime(cluster string, currentTime time.Time) {
 	s.wLock()
 	defer s.wUnlock()
-	if cluster != s.GetClusterMetadata().GetCurrentClusterName() {
+	if cluster != s.clusterMetadata.GetCurrentClusterName() {
 		prevTime := s.getRemoteClusterInfoLocked(cluster).CurrentTime
 		if prevTime.Before(currentTime) {
 			s.getRemoteClusterInfoLocked(cluster).CurrentTime = currentTime
@@ -1168,7 +1148,7 @@ func (s *ContextImpl) SetCurrentTime(cluster string, currentTime time.Time) {
 func (s *ContextImpl) GetCurrentTime(cluster string) time.Time {
 	s.rLock()
 	defer s.rUnlock()
-	if cluster != s.GetClusterMetadata().GetCurrentClusterName() {
+	if cluster != s.clusterMetadata.GetCurrentClusterName() {
 		return s.getRemoteClusterInfoLocked(cluster).CurrentTime
 	}
 	return s.timeSource.Now().UTC()
@@ -1223,8 +1203,8 @@ func (s *ContextImpl) handleErrorAndUpdateMaxReadLevelLocked(err error, newMaxRe
 
 func (s *ContextImpl) maybeRecordShardAcquisitionLatency(ownershipChanged bool) {
 	if ownershipChanged {
-		s.GetMetricsClient().RecordTimer(metrics.ShardInfoScope, metrics.ShardContextAcquisitionLatency,
-			s.GetCurrentTime(s.GetClusterMetadata().GetCurrentClusterName()).Sub(s.GetLastUpdatedTime()))
+		s.metricsClient.RecordTimer(metrics.ShardInfoScope, metrics.ShardContextAcquisitionLatency,
+			s.GetCurrentTime(s.clusterMetadata.GetCurrentClusterName()).Sub(s.GetLastUpdatedTime()))
 	}
 }
 
@@ -1484,13 +1464,13 @@ func (s *ContextImpl) loadShardMetadata(ownershipChanged *bool) error {
 	// initialize the cluster current time to be the same as ack level
 	remoteClusterInfos := make(map[string]*remoteClusterInfo)
 	timerMaxReadLevelMap := make(map[string]time.Time)
-	for clusterName, info := range s.GetClusterMetadata().GetAllClusterInfo() {
+	for clusterName, info := range s.clusterMetadata.GetAllClusterInfo() {
 		if !info.Enabled {
 			continue
 		}
 
 		currentReadTime := timestamp.TimeValue(shardInfo.TimerAckLevelTime)
-		if clusterName != s.GetClusterMetadata().GetCurrentClusterName() {
+		if clusterName != s.clusterMetadata.GetCurrentClusterName() {
 			if currentTime, ok := shardInfo.ClusterTimerAckLevel[clusterName]; ok {
 				currentReadTime = timestamp.TimeValue(currentTime)
 			}
@@ -1697,13 +1677,13 @@ func newContext(
 	}
 	shardContext.eventsCache = events.NewEventsCache(
 		shardContext.GetShardID(),
-		shardContext.GetConfig().EventsCacheInitialSize(),
-		shardContext.GetConfig().EventsCacheMaxSize(),
-		shardContext.GetConfig().EventsCacheTTL(),
-		shardContext.GetExecutionManager(),
+		shardContext.config.EventsCacheInitialSize(),
+		shardContext.config.EventsCacheMaxSize(),
+		shardContext.config.EventsCacheTTL(),
+		shardContext.executionManager,
 		false,
-		shardContext.GetLogger(),
-		shardContext.GetMetricsClient(),
+		shardContext.contextTaggedLogger,
+		shardContext.metricsClient,
 	)
 
 	return shardContext, nil
@@ -1766,37 +1746,4 @@ func copyShardInfo(shardInfo *persistence.ShardInfoWithFailover) *persistence.Sh
 
 func (s *ContextImpl) GetRemoteAdminClient(cluster string) adminservice.AdminServiceClient {
 	return s.clientBean.GetRemoteAdminClient(cluster)
-}
-func (s *ContextImpl) GetPayloadSerializer() serialization.Serializer {
-	return s.payloadSerializer
-}
-
-func (s *ContextImpl) GetHistoryClient() historyservice.HistoryServiceClient {
-	return s.historyClient
-}
-
-func (s *ContextImpl) GetMetricsClient() metrics.Client {
-	return s.metricsClient
-}
-
-func (s *ContextImpl) GetTimeSource() clock.TimeSource {
-	return s.timeSource
-}
-
-func (s *ContextImpl) GetNamespaceRegistry() namespace.Registry {
-	return s.namespaceRegistry
-}
-
-func (s *ContextImpl) GetSearchAttributesProvider() searchattribute.Provider {
-	return s.saProvider
-}
-func (s *ContextImpl) GetSearchAttributesMapper() searchattribute.Mapper {
-	return s.saMapper
-}
-func (s *ContextImpl) GetClusterMetadata() cluster.Metadata {
-	return s.clusterMetadata
-}
-
-func (h *ContextImpl) GetArchivalMetadata() archiver.ArchivalMetadata {
-	return h.archivalMetadata
 }

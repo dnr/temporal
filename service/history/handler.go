@@ -257,6 +257,16 @@ func (h *Handler) CreateEngine(
 		h.clientBean,
 		h.archiverProvider,
 		h.namespaceRegistry,
+		h.clusterMetadata,
+		h.timeSource,
+		h.logger,
+		h.throttledLogger,
+		h.persistenceExecutionManager,
+		h.metricsClient,
+		h.saProvider,
+		h.saMapper,
+		h.namespaceRegistry,
+		h.payloadSerializer,
 	)
 }
 

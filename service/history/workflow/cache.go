@@ -36,12 +36,15 @@ import (
 	"go.temporal.io/server/common"
 	"go.temporal.io/server/common/backoff"
 	"go.temporal.io/server/common/cache"
+	"go.temporal.io/server/common/clock"
+	"go.temporal.io/server/common/cluster"
 	"go.temporal.io/server/common/definition"
 	"go.temporal.io/server/common/log"
 	"go.temporal.io/server/common/log/tag"
 	"go.temporal.io/server/common/metrics"
 	"go.temporal.io/server/common/namespace"
 	"go.temporal.io/server/common/persistence"
+	"go.temporal.io/server/common/persistence/serialization"
 	"go.temporal.io/server/service/history/configs"
 	"go.temporal.io/server/service/history/shard"
 )
@@ -66,11 +69,15 @@ type (
 
 	CacheImpl struct {
 		cache.Cache
-		shard            shard.Context
-		executionManager persistence.ExecutionManager
-		logger           log.Logger
-		metricsClient    metrics.Client
-		config           *configs.Config
+		shard             shard.Context
+		executionManager  persistence.ExecutionManager
+		logger            log.Logger
+		metricsClient     metrics.Client
+		config            *configs.Config
+		timeSource        clock.TimeSource
+		namespaceRegistry namespace.Registry
+		clusterMetadata   cluster.Metadata
+		payloadSerializer serialization.Serializer
 	}
 
 	NewCacheFn func(shard shard.Context) Cache
@@ -83,9 +90,14 @@ const (
 	cacheReleased    int32 = 1
 )
 
-func NewCache(shard shard.Context) Cache {
+func NewCache(
+	shard shard.Context,
+	config *configs.Config,
+	executionManager persistence.ExecutionManager,
+	logger log.Logger,
+	metricsClient metrics.Client,
+) Cache {
 	opts := &cache.Options{}
-	config := shard.GetConfig()
 	opts.InitialCapacity = config.HistoryCacheInitialSize()
 	opts.TTL = config.HistoryCacheTTL()
 	opts.Pin = true
@@ -93,9 +105,9 @@ func NewCache(shard shard.Context) Cache {
 	return &CacheImpl{
 		Cache:            cache.New(config.HistoryCacheMaxSize(), opts),
 		shard:            shard,
-		executionManager: shard.GetExecutionManager(),
-		logger:           log.With(shard.GetLogger(), tag.ComponentHistoryCache),
-		metricsClient:    shard.GetMetricsClient(),
+		executionManager: executionManager,
+		logger:           log.With(logger, tag.ComponentHistoryCache),
+		metricsClient:    metricsClient,
 		config:           config,
 	}
 }
@@ -173,7 +185,11 @@ func (c *CacheImpl) getOrCreateWorkflowExecutionInternal(
 	if !cacheHit {
 		c.metricsClient.IncCounter(scope, metrics.CacheMissCounter)
 		// Let's create the workflow execution workflowCtx
-		workflowCtx = NewContext(namespaceID, execution, c.shard, c.logger)
+		workflowCtx = NewContext(
+			namespaceID, execution, c.shard, c.logger,
+			c.metricsClient, c.timeSource, c.config, c.namespaceRegistry,
+			c.clusterMetadata, c.payloadSerializer, c.executionManager,
+		)
 		elem, err := c.PutIfNotExist(key, workflowCtx)
 		if err != nil {
 			c.metricsClient.IncCounter(scope, metrics.CacheFailures)

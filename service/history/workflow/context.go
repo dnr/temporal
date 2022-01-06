@@ -40,12 +40,14 @@ import (
 	persistencespb "go.temporal.io/server/api/persistence/v1"
 	"go.temporal.io/server/common"
 	"go.temporal.io/server/common/clock"
+	"go.temporal.io/server/common/cluster"
 	"go.temporal.io/server/common/locks"
 	"go.temporal.io/server/common/log"
 	"go.temporal.io/server/common/log/tag"
 	"go.temporal.io/server/common/metrics"
 	"go.temporal.io/server/common/namespace"
 	"go.temporal.io/server/common/persistence"
+	"go.temporal.io/server/common/persistence/serialization"
 	"go.temporal.io/server/common/rpc"
 	"go.temporal.io/server/service/history/configs"
 	"go.temporal.io/server/service/history/consts"
@@ -144,6 +146,10 @@ type (
 		metricsClient     metrics.Client
 		timeSource        clock.TimeSource
 		config            *configs.Config
+		namespaceRegistry namespace.Registry
+		clusterMetadata   cluster.Metadata
+		payloadSerializer serialization.Serializer
+		executionManager  persistence.ExecutionManager
 		transaction       Transaction
 
 		mutex        locks.PriorityMutex
@@ -163,17 +169,33 @@ func NewContext(
 	execution commonpb.WorkflowExecution,
 	shard shard.Context,
 	logger log.Logger,
+	metricsClient metrics.Client,
+	timeSource clock.TimeSource,
+	config *configs.Config,
+	namespaceRegistry namespace.Registry,
+	clusterMetadata cluster.Metadata,
+	payloadSerializer serialization.Serializer,
+	executionManager persistence.ExecutionManager,
 ) *ContextImpl {
 	return &ContextImpl{
 		namespaceID:       namespaceID,
 		workflowExecution: execution,
 		shard:             shard,
 		logger:            logger,
-		metricsClient:     shard.GetMetricsClient(),
-		timeSource:        shard.GetTimeSource(),
-		config:            shard.GetConfig(),
+		metricsClient:     metricsClient,
+		timeSource:        timeSource,
+		config:            config,
+		namespaceRegistry: namespaceRegistry,
+		clusterMetadata:   clusterMetadata,
+		payloadSerializer: payloadSerializer,
+		executionManager:  executionManager,
 		mutex:             locks.NewPriorityMutex(),
-		transaction:       NewTransaction(shard),
+		transaction: NewTransaction(
+			shard,
+			logger,
+			metricsClient,
+			namespaceRegistry,
+		),
 		stats: &persistencespb.ExecutionStats{
 			HistorySize: 0,
 		},
@@ -227,7 +249,7 @@ func (c *ContextImpl) GetExecution() *commonpb.WorkflowExecution {
 }
 
 func (c *ContextImpl) GetNamespace() namespace.Name {
-	namespaceEntry, err := c.shard.GetNamespaceRegistry().GetNamespaceByID(c.namespaceID)
+	namespaceEntry, err := c.namespaceRegistry.GetNamespaceByID(c.namespaceID)
 	if err != nil {
 		return ""
 	}
@@ -254,18 +276,24 @@ func (c *ContextImpl) LoadWorkflowExecutionForReplication(
 	incomingVersion int64,
 ) (MutableState, error) {
 
-	namespaceEntry, err := c.shard.GetNamespaceRegistry().GetNamespaceByID(c.namespaceID)
+	namespaceEntry, err := c.namespaceRegistry.GetNamespaceByID(c.namespaceID)
 	if err != nil {
 		return nil, err
 	}
 
 	if c.MutableState == nil {
-		response, err := getWorkflowExecutionWithRetry(c.shard, &persistence.GetWorkflowExecutionRequest{
-			ShardID:     c.shard.GetShardID(),
-			NamespaceID: c.namespaceID.String(),
-			WorkflowID:  c.workflowExecution.GetWorkflowId(),
-			RunID:       c.workflowExecution.GetRunId(),
-		})
+		response, err := getWorkflowExecutionWithRetry(
+			c.shard,
+			c.namespaceRegistry,
+			c.executionManager,
+			c.logger,
+			c.metricsClient,
+			&persistence.GetWorkflowExecutionRequest{
+				ShardID:     c.shard.GetShardID(),
+				NamespaceID: c.namespaceID.String(),
+				WorkflowID:  c.workflowExecution.GetWorkflowId(),
+				RunID:       c.workflowExecution.GetRunId(),
+			})
 		if err != nil {
 			return nil, err
 		}
@@ -277,6 +305,11 @@ func (c *ContextImpl) LoadWorkflowExecutionForReplication(
 			namespaceEntry,
 			response.State,
 			response.DBRecordVersion,
+			c.clusterMetadata,
+			c.config,
+			c.timeSource,
+			c.metricsClient,
+			c.namespaceRegistry,
 		)
 		if err != nil {
 			return nil, err
@@ -305,7 +338,7 @@ func (c *ContextImpl) LoadWorkflowExecutionForReplication(
 		}
 
 		if err = c.UpdateWorkflowExecutionAsActive(
-			c.shard.GetTimeSource().Now(),
+			c.timeSource.Now(),
 		); err != nil {
 			return nil, err
 		}
@@ -323,18 +356,24 @@ func (c *ContextImpl) LoadWorkflowExecutionForReplication(
 
 func (c *ContextImpl) LoadWorkflowExecution() (MutableState, error) {
 
-	namespaceEntry, err := c.shard.GetNamespaceRegistry().GetNamespaceByID(c.namespaceID)
+	namespaceEntry, err := c.namespaceRegistry.GetNamespaceByID(c.namespaceID)
 	if err != nil {
 		return nil, err
 	}
 
 	if c.MutableState == nil {
-		response, err := getWorkflowExecutionWithRetry(c.shard, &persistence.GetWorkflowExecutionRequest{
-			ShardID:     c.shard.GetShardID(),
-			NamespaceID: c.namespaceID.String(),
-			WorkflowID:  c.workflowExecution.GetWorkflowId(),
-			RunID:       c.workflowExecution.GetRunId(),
-		})
+		response, err := getWorkflowExecutionWithRetry(
+			c.shard,
+			c.namespaceRegistry,
+			c.executionManager,
+			c.logger,
+			c.metricsClient,
+			&persistence.GetWorkflowExecutionRequest{
+				ShardID:     c.shard.GetShardID(),
+				NamespaceID: c.namespaceID.String(),
+				WorkflowID:  c.workflowExecution.GetWorkflowId(),
+				RunID:       c.workflowExecution.GetRunId(),
+			})
 		if err != nil {
 			return nil, err
 		}
@@ -346,6 +385,11 @@ func (c *ContextImpl) LoadWorkflowExecution() (MutableState, error) {
 			namespaceEntry,
 			response.State,
 			response.DBRecordVersion,
+			c.clusterMetadata,
+			c.config,
+			c.timeSource,
+			c.metricsClient,
+			c.namespaceRegistry,
 		)
 		if err != nil {
 			return nil, err
@@ -363,7 +407,7 @@ func (c *ContextImpl) LoadWorkflowExecution() (MutableState, error) {
 	}
 
 	if err = c.UpdateWorkflowExecutionAsActive(
-		c.shard.GetTimeSource().Now(),
+		c.timeSource.Now(),
 	); err != nil {
 		return nil, err
 	}
@@ -414,6 +458,9 @@ func (c *ContextImpl) CreateWorkflowExecution(
 
 	resp, err := createWorkflowExecutionWithRetry(
 		c.shard,
+		c.namespaceRegistry,
+		c.logger,
+		c.metricsClient,
 		createRequest,
 	)
 	if err != nil {
@@ -824,9 +871,7 @@ func (c *ContextImpl) ReapplyEvents(
 		WorkflowId: workflowID,
 		RunId:      runID,
 	}
-	namespaceRegistry := c.shard.GetNamespaceRegistry()
-	serializer := c.shard.GetPayloadSerializer()
-	namespaceEntry, err := namespaceRegistry.GetNamespaceByID(namespaceID)
+	namespaceEntry, err := c.namespaceRegistry.GetNamespaceByID(namespaceID)
 	if err != nil {
 		return err
 	}
@@ -835,7 +880,7 @@ func (c *ContextImpl) ReapplyEvents(
 	defer cancel()
 
 	activeCluster := namespaceEntry.ActiveClusterName()
-	if activeCluster == c.shard.GetClusterMetadata().GetCurrentClusterName() {
+	if activeCluster == c.clusterMetadata.GetCurrentClusterName() {
 		engine, err := c.shard.GetEngine()
 		if err != nil {
 			return err
@@ -851,7 +896,7 @@ func (c *ContextImpl) ReapplyEvents(
 
 	// The active cluster of the namespace is the same as current cluster.
 	// Use the history from the same cluster to reapply events
-	reapplyEventsDataBlob, err := serializer.SerializeEvents(reapplyEvents, enumspb.ENCODING_TYPE_PROTO3)
+	reapplyEventsDataBlob, err := c.payloadSerializer.SerializeEvents(reapplyEvents, enumspb.ENCODING_TYPE_PROTO3)
 	if err != nil {
 		return err
 	}

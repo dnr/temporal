@@ -45,6 +45,7 @@ import (
 
 	"go.temporal.io/server/client"
 	"go.temporal.io/server/common/archiver/provider"
+	"go.temporal.io/server/common/persistence/serialization"
 	"go.temporal.io/server/common/persistence/visibility/manager"
 	"go.temporal.io/server/service/history/tasks"
 
@@ -121,6 +122,9 @@ type (
 		replicationDLQHandler         replicationDLQHandler
 		searchAttributesValidator     *searchattribute.Validator
 		searchAttributesMapper        searchattribute.Mapper
+		namespaceRegistry             namespace.Registry
+		historyClient                 historyservice.HistoryServiceClient
+		payloadSerializer             serialization.Serializer
 	}
 )
 
@@ -139,32 +143,40 @@ func NewEngineWithShardContext(
 	clientBean client.Bean,
 	archiverProvider provider.ArchiverProvider,
 	registry namespace.Registry,
+	clusterMetadata cluster.Metadata,
+	timeSource clock.TimeSource,
+	logger log.Logger,
+	throttledLogger log.Logger,
+	executionManager persistence.ExecutionManager,
+	metricsClient metrics.Client,
+	saProvider searchattribute.Provider,
+	saMapper searchattribute.Mapper,
+	namespaceRegistry namespace.Registry,
+	payloadSerializer serialization.Serializer,
 ) *historyEngineImpl {
-	currentClusterName := shard.GetClusterMetadata().GetCurrentClusterName()
+	currentClusterName := clusterMetadata.GetCurrentClusterName()
 
-	logger := shard.GetLogger()
-	executionManager := shard.GetExecutionManager()
 	historyCache := newCacheFn(shard)
 	historyEngImpl := &historyEngineImpl{
 		status:             common.DaemonStatusInitialized,
 		currentClusterName: currentClusterName,
 		shard:              shard,
-		clusterMetadata:    shard.GetClusterMetadata(),
-		timeSource:         shard.GetTimeSource(),
+		clusterMetadata:    clusterMetadata,
+		timeSource:         timeSource,
 		executionManager:   executionManager,
 		tokenSerializer:    common.NewProtoTaskTokenSerializer(),
 		historyCache:       historyCache,
 		logger:             log.With(logger, tag.ComponentHistoryEngine),
-		throttledLogger:    log.With(shard.GetThrottledLogger(), tag.ComponentHistoryEngine),
-		metricsClient:      shard.GetMetricsClient(),
+		throttledLogger:    log.With(throttledLogger, tag.ComponentHistoryEngine),
+		metricsClient:      metricsClient,
 		eventNotifier:      eventNotifier,
 		config:             config,
 		archivalClient: archiver.NewClient(
-			shard.GetMetricsClient(),
+			metricsClient,
 			logger,
 			publicClient,
-			shard.GetConfig().NumArchiveSystemWorkflows,
-			shard.GetConfig().ArchiveRequestRPS,
+			config.NumArchiveSystemWorkflows,
+			config.ArchiveRequestRPS,
 			archiverProvider,
 		),
 		publicClient:              publicClient,
@@ -172,6 +184,9 @@ func NewEngineWithShardContext(
 		rawMatchingClient:         rawMatchingClient,
 		replicationTaskProcessors: make(map[string]ReplicationTaskProcessor),
 		replicationTaskFetchers:   replicationTaskFetchers,
+		namespaceRegistry:         namespaceRegistry,
+		historyClient:             historyClient,
+		payloadSerializer:         payloadSerializer,
 	}
 
 	historyEngImpl.txProcessor = newTransferQueueProcessor(shard, historyEngImpl,
@@ -182,9 +197,9 @@ func NewEngineWithShardContext(
 		matchingClient, historyClient, logger)
 	historyEngImpl.tieredStorageProcessor = newTieredStorageQueueProcessor(shard, historyEngImpl,
 		matchingClient, historyClient, logger)
-	historyEngImpl.eventsReapplier = newNDCEventsReapplier(shard.GetMetricsClient(), logger)
+	historyEngImpl.eventsReapplier = newNDCEventsReapplier(metricsClient, logger)
 
-	if shard.GetClusterMetadata().IsGlobalNamespaceEnabled() {
+	if clusterMetadata.IsGlobalNamespaceEnabled() {
 		historyEngImpl.replicatorProcessor = newReplicatorQueueProcessor(
 			shard,
 			historyCache,
@@ -210,14 +225,14 @@ func NewEngineWithShardContext(
 	)
 
 	historyEngImpl.searchAttributesValidator = searchattribute.NewValidator(
-		shard.GetSearchAttributesProvider(),
-		shard.GetSearchAttributesMapper(),
+		saProvider,
+		saMapper,
 		config.SearchAttributesNumberOfKeysLimit,
 		config.SearchAttributesSizeOfValueLimit,
 		config.SearchAttributesTotalSizeLimit,
 	)
 
-	historyEngImpl.searchAttributesMapper = shard.GetSearchAttributesMapper()
+	historyEngImpl.searchAttributesMapper = saMapper
 
 	historyEngImpl.workflowTaskHandler = newWorkflowTaskHandlerCallback(historyEngImpl)
 	historyEngImpl.replicationDLQHandler = newLazyReplicationDLQHandler(shard)
@@ -284,7 +299,7 @@ func (e *historyEngineImpl) Stop() {
 	e.replicationTaskProcessorsLock.Unlock()
 
 	// unset the failover callback
-	e.shard.GetNamespaceRegistry().UnregisterNamespaceChangeCallback(e.shard.GetShardID())
+	e.namespaceRegistry.UnregisterNamespaceChangeCallback(e.shard.GetShardID())
 }
 
 func (e *historyEngineImpl) registerNamespaceFailoverCallback() {
@@ -320,7 +335,7 @@ func (e *historyEngineImpl) registerNamespaceFailoverCallback() {
 	}
 
 	// first set the failover callback
-	e.shard.GetNamespaceRegistry().RegisterNamespaceChangeCallback(
+	e.namespaceRegistry.RegisterNamespaceChangeCallback(
 		e.shard.GetShardID(),
 		0, /* always want callback so UpdateHandoverNamespaces() can be called after shard reload */
 		func() {
@@ -337,7 +352,7 @@ func (e *historyEngineImpl) registerNamespaceFailoverCallback() {
 				return
 			}
 
-			if e.shard.GetClusterMetadata().IsGlobalNamespaceEnabled() {
+			if e.clusterMetadata.IsGlobalNamespaceEnabled() {
 				e.shard.UpdateHandoverNamespaces(nextNamespaces, e.replicatorProcessor.GetMaxReplicationTaskID())
 			}
 
@@ -362,7 +377,7 @@ func (e *historyEngineImpl) registerNamespaceFailoverCallback() {
 				e.txProcessor.FailoverNamespace(failoverNamespaceIDs)
 				e.timerProcessor.FailoverNamespace(failoverNamespaceIDs)
 
-				now := e.shard.GetTimeSource().Now()
+				now := e.timeSource.Now()
 				// the fake tasks will not be actually used, we just need to make sure
 				// its length > 0 and has correct timestamp, to trigger a db scan
 				fakeWorkflowTask := []tasks.Task{&tasks.WorkflowTask{}}
@@ -415,36 +430,35 @@ func (e *historyEngineImpl) handleClusterMetadataUpdate(
 				common.IsResourceExhausted,
 			)
 			// Intentionally use the raw client to create its own retry policy
-			historyClient := e.shard.GetHistoryClient()
 			historyRetryableClient := history.NewRetryableClient(
-				historyClient,
+				e.historyClient,
 				common.CreateReplicationServiceBusyRetryPolicy(),
 				common.IsResourceExhausted,
 			)
 			nDCHistoryResender := xdc.NewNDCHistoryResender(
-				e.shard.GetNamespaceRegistry(),
+				e.namespaceRegistry,
 				adminRetryableClient,
 				func(ctx context.Context, request *historyservice.ReplicateEventsV2Request) error {
 					_, err := historyRetryableClient.ReplicateEventsV2(ctx, request)
 					return err
 				},
-				e.shard.GetPayloadSerializer(),
-				e.shard.GetConfig().StandbyTaskReReplicationContextTimeout,
-				e.shard.GetLogger(),
+				e.payloadSerializer,
+				e.config.StandbyTaskReReplicationContextTimeout,
+				e.logger,
 			)
 			replicationTaskExecutor := newReplicationTaskExecutor(
 				e.shard,
-				e.shard.GetNamespaceRegistry(),
+				e.namespaceRegistry,
 				nDCHistoryResender,
 				e,
-				e.shard.GetMetricsClient(),
-				e.shard.GetLogger(),
+				e.metricsClient,
+				e.logger,
 			)
 			replicationTaskProcessor := NewReplicationTaskProcessor(
 				e.shard,
 				e,
 				e.config,
-				e.shard.GetMetricsClient(),
+				e.metricsClient,
 				fetcher,
 				replicationTaskExecutor,
 			)
@@ -464,7 +478,7 @@ func createMutableState(
 	// version history applies to both local and global namespace
 	newMutableState = workflow.NewMutableState(
 		shard,
-		shard.GetEventsCache(),
+		shard.GetEventsCache(), // FIXME: this sucks, remote it all?
 		shard.GetLogger(),
 		namespaceEntry,
 		shard.GetTimeSource().Now(),
@@ -535,7 +549,6 @@ func (e *historyEngineImpl) StartWorkflowExecution(
 		WorkflowId: workflowID,
 		RunId:      uuid.New(),
 	}
-	clusterMetadata := e.shard.GetClusterMetadata()
 	mutableState, err := createMutableState(e.shard, namespaceEntry, execution.GetRunId())
 	if err != nil {
 		return nil, err
@@ -597,8 +610,8 @@ func (e *historyEngineImpl) StartWorkflowExecution(
 			if mutableState.GetCurrentVersion() < t.LastWriteVersion {
 				return nil, serviceerror.NewNamespaceNotActive(
 					request.GetNamespace(),
-					clusterMetadata.GetCurrentClusterName(),
-					clusterMetadata.ClusterNameForFailoverVersion(namespaceEntry.IsGlobalNamespace(), t.LastWriteVersion),
+					e.clusterMetadata.GetCurrentClusterName(),
+					e.clusterMetadata.ClusterNameForFailoverVersion(namespaceEntry.IsGlobalNamespace(), t.LastWriteVersion),
 				)
 			}
 
@@ -2036,7 +2049,6 @@ func (e *historyEngineImpl) SignalWithStartWorkflowExecution(
 		RunId:      uuid.New(),
 	}
 
-	clusterMetadata := e.shard.GetClusterMetadata()
 	mutableState, err := createMutableState(e.shard, namespaceEntry, execution.GetRunId())
 	if err != nil {
 		return nil, err
@@ -2050,8 +2062,8 @@ func (e *historyEngineImpl) SignalWithStartWorkflowExecution(
 		if prevLastWriteVersion > mutableState.GetCurrentVersion() {
 			return nil, serviceerror.NewNamespaceNotActive(
 				namespace.String(),
-				clusterMetadata.GetCurrentClusterName(),
-				clusterMetadata.ClusterNameForFailoverVersion(namespaceEntry.IsGlobalNamespace(), prevLastWriteVersion),
+				e.clusterMetadata.GetCurrentClusterName(),
+				e.clusterMetadata.ClusterNameForFailoverVersion(namespaceEntry.IsGlobalNamespace(), prevLastWriteVersion),
 			)
 		}
 
@@ -2450,8 +2462,8 @@ func (e *historyEngineImpl) ResetWorkflowExecution(
 		request.GetRequestId(),
 		newNDCWorkflow(
 			ctx,
-			e.shard.GetNamespaceRegistry(),
-			e.shard.GetClusterMetadata(),
+			e.namespaceRegistry,
+			e.clusterMetadata,
 			currentContext,
 			currentMutableState,
 			currentReleaseFn,
@@ -2543,7 +2555,7 @@ UpdateHistoryLoop:
 			}
 		}
 
-		err = workflowContext.getContext().UpdateWorkflowExecutionAsActive(e.shard.GetTimeSource().Now())
+		err = workflowContext.getContext().UpdateWorkflowExecutionAsActive(e.timeSource.Now())
 		if err == consts.ErrConflict {
 			if attempt != conditionalRetryCount {
 				_, err = workflowContext.reloadMutableState()
@@ -2789,6 +2801,7 @@ func getActiveNamespaceEntryFromShard(
 		return nil, err
 	}
 
+	// FIXME: afsdfasdfasfd
 	namespaceEntry, err := shard.GetNamespaceRegistry().GetNamespaceByID(namespaceUUID)
 	if err != nil {
 		return nil, err
@@ -2841,7 +2854,7 @@ func (e *historyEngineImpl) getStartRequest(
 		Header:                   request.GetHeader(),
 	}
 
-	return common.CreateHistoryStartWorkflowRequest(namespaceID.String(), req, nil, e.shard.GetTimeSource().Now())
+	return common.CreateHistoryStartWorkflowRequest(namespaceID.String(), req, nil, e.timeSource.Now())
 }
 
 // for startWorkflowExecution & signalWithStart to handle workflow reuse policy
@@ -3063,8 +3076,8 @@ func (e *historyEngineImpl) ReapplyEvents(
 					uuid.New(),
 					newNDCWorkflow(
 						ctx,
-						e.shard.GetNamespaceRegistry(),
-						e.shard.GetClusterMetadata(),
+						e.namespaceRegistry,
+						e.clusterMetadata,
 						context,
 						mutableState,
 						workflow.NoopReleaseFn,
@@ -3210,13 +3223,13 @@ func (e *historyEngineImpl) RefreshWorkflowTasks(
 	}
 
 	mutableStateTaskRefresher := workflow.NewTaskRefresher(
-		e.shard.GetConfig(),
-		e.shard.GetNamespaceRegistry(),
-		e.shard.GetEventsCache(),
-		e.shard.GetLogger(),
+		e.config,
+		e.namespaceRegistry,
+		e.shard.GetEventsCache(), // FIXME: hmm
+		e.logger,
 	)
 
-	now := e.shard.GetTimeSource().Now()
+	now := e.timeSource.Now()
 
 	err = mutableStateTaskRefresher.RefreshTasks(now, mutableState)
 	if err != nil {
@@ -3256,7 +3269,7 @@ func (e *historyEngineImpl) GenerateLastHistoryReplicationTasks(
 		return nil, err
 	}
 
-	now := e.shard.GetTimeSource().Now()
+	now := e.timeSource.Now()
 	task, err := mutableState.GenerateLastHistoryReplicationTasks(now)
 	if err != nil {
 		return nil, err
@@ -3283,7 +3296,7 @@ func (e *historyEngineImpl) GetReplicationStatus(
 
 	resp := &historyservice.ShardReplicationStatus{
 		ShardId:        e.shard.GetShardID(),
-		ShardLocalTime: timestamp.TimePtr(e.shard.GetTimeSource().Now()),
+		ShardLocalTime: timestamp.TimePtr(e.timeSource.Now()),
 	}
 	if e.replicatorProcessor.maxTaskID != nil {
 		resp.MaxReplicationTaskId = *e.replicatorProcessor.maxTaskID
@@ -3350,7 +3363,7 @@ func (e *historyEngineImpl) loadWorkflow(
 		}
 
 		// workflow not running, need to check current record
-		resp, err := e.shard.GetExecutionManager().GetCurrentExecution(
+		resp, err := e.executionManager.GetCurrentExecution(
 			&persistence.GetCurrentExecutionRequest{
 				ShardID:     e.shard.GetShardID(),
 				NamespaceID: namespaceID.String(),

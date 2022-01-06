@@ -36,11 +36,14 @@ import (
 	historypb "go.temporal.io/api/history/v1"
 	"go.temporal.io/api/serviceerror"
 
+	"go.temporal.io/server/common/clock"
 	"go.temporal.io/server/common/cluster"
 	"go.temporal.io/server/common/log"
+	"go.temporal.io/server/common/metrics"
 	"go.temporal.io/server/common/namespace"
 	"go.temporal.io/server/common/persistence/versionhistory"
 	"go.temporal.io/server/common/primitives/timestamp"
+	"go.temporal.io/server/service/history/configs"
 	"go.temporal.io/server/service/history/shard"
 )
 
@@ -62,6 +65,9 @@ type (
 		clusterMetadata   cluster.Metadata
 		namespaceRegistry namespace.Registry
 		logger            log.Logger
+		config            *configs.Config
+		timeSource        clock.TimeSource
+		metricsClient     metrics.Client
 
 		mutableState          MutableState
 		taskGeneratorProvider taskGeneratorProvider
@@ -80,13 +86,21 @@ func NewMutableStateRebuilder(
 	logger log.Logger,
 	mutableState MutableState,
 	taskGeneratorProvider taskGeneratorProvider,
+	clusterMetadata cluster.Metadata,
+	namespaceRegistry namespace.Registry,
+	config *configs.Config,
+	timeSource clock.TimeSource,
+	metricsClient metrics.Client,
 ) *MutableStateRebuilderImpl {
 
 	return &MutableStateRebuilderImpl{
 		shard:                 shard,
-		clusterMetadata:       shard.GetClusterMetadata(),
-		namespaceRegistry:     shard.GetNamespaceRegistry(),
+		clusterMetadata:       clusterMetadata,
+		namespaceRegistry:     namespaceRegistry,
 		logger:                logger,
+		config:                config,
+		timeSource:            timeSource,
+		metricsClient:         metricsClient,
 		mutableState:          mutableState,
 		taskGeneratorProvider: taskGeneratorProvider,
 	}
@@ -600,9 +614,24 @@ func (b *MutableStateRebuilderImpl) ApplyEvents(
 					b.logger,
 					b.mutableState.GetNamespaceEntry(),
 					timestamp.TimeValue(newRunHistory[0].GetEventTime()),
+					b.clusterMetadata,
+					b.config,
+					b.timeSource,
+					b.metricsClient,
+					b.namespaceRegistry,
 				)
 
-				newRunStateBuilder := NewMutableStateRebuilder(b.shard, b.logger, newRunMutableStateBuilder, b.taskGeneratorProvider)
+				newRunStateBuilder := NewMutableStateRebuilder(
+					b.shard,
+					b.logger,
+					newRunMutableStateBuilder,
+					b.taskGeneratorProvider,
+					b.clusterMetadata,
+					b.namespaceRegistry,
+					b.config,
+					b.timeSource,
+					b.metricsClient,
+				)
 
 				newRunID := event.GetWorkflowExecutionContinuedAsNewEventAttributes().GetNewExecutionRunId()
 				newExecution := commonpb.WorkflowExecution{

@@ -31,17 +31,9 @@ import (
 
 	"go.temporal.io/server/api/adminservice/v1"
 	"go.temporal.io/server/api/historyservice/v1"
-	"go.temporal.io/server/common/archiver"
-	"go.temporal.io/server/common/clock"
-	"go.temporal.io/server/common/cluster"
 	"go.temporal.io/server/common/definition"
-	"go.temporal.io/server/common/log"
-	"go.temporal.io/server/common/metrics"
 	"go.temporal.io/server/common/namespace"
 	"go.temporal.io/server/common/persistence"
-	"go.temporal.io/server/common/persistence/serialization"
-	"go.temporal.io/server/common/searchattribute"
-	"go.temporal.io/server/service/history/configs"
 	"go.temporal.io/server/service/history/events"
 )
 
@@ -51,16 +43,7 @@ type (
 	// Context represents a history engine shard
 	Context interface {
 		GetShardID() int32
-		GetExecutionManager() persistence.ExecutionManager
-		GetNamespaceRegistry() namespace.Registry
-		GetClusterMetadata() cluster.Metadata
-		GetConfig() *configs.Config
-		GetEventsCache() events.Cache
-		GetLogger() log.Logger
-		GetThrottledLogger() log.Logger
-		GetMetricsClient() metrics.Client
-		GetTimeSource() clock.TimeSource
-
+		GetEventsCache() events.Cache // FIXME
 		GetEngine() (Engine, error)
 
 		GenerateTransferTaskID() (int64, error)
@@ -121,12 +104,7 @@ type (
 		AddTasks(request *persistence.AddTasksRequest) error
 		AppendHistoryEvents(request *persistence.AppendHistoryNodesRequest, namespaceID namespace.ID, execution commonpb.WorkflowExecution) (int, error)
 
+		// FIXME: try this too
 		GetRemoteAdminClient(cluster string) adminservice.AdminServiceClient
-		GetHistoryClient() historyservice.HistoryServiceClient
-		GetPayloadSerializer() serialization.Serializer
-
-		GetSearchAttributesProvider() searchattribute.Provider
-		GetSearchAttributesMapper() searchattribute.Mapper
-		GetArchivalMetadata() archiver.ArchivalMetadata
 	}
 )
