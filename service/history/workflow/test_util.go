@@ -36,14 +36,17 @@ import (
 )
 
 func TestLocalMutableState(
-	shard shard.Context,
+	shardCtx shard.Context,
 	eventsCache events.Cache,
 	ns *namespace.Namespace,
 	logger log.Logger,
 	runID string,
 ) *MutableStateImpl {
 
-	msBuilder := NewMutableState(shard, eventsCache, logger, ns, time.Now().UTC())
+	testShard := shardCtx.(*shard.ContextTest)
+	msBuilder := NewMutableState(shardCtx, eventsCache, logger, ns, time.Now().UTC(),
+		testShard.GetClusterMetadata(), testShard.GetConfig(), testShard.GetTimeSource(), testShard.GetMetricsClient(),
+		testShard.GetNamespaceRegistry())
 	msBuilder.GetExecutionInfo().ExecutionTime = msBuilder.GetExecutionInfo().StartTime
 	_ = msBuilder.SetHistoryTree(runID)
 
@@ -51,14 +54,17 @@ func TestLocalMutableState(
 }
 
 func TestGlobalMutableState(
-	shard shard.Context,
+	shardCtx shard.Context,
 	eventsCache events.Cache,
 	logger log.Logger,
 	version int64,
 	runID string,
 ) *MutableStateImpl {
 
-	msBuilder := NewMutableState(shard, eventsCache, logger, tests.GlobalNamespaceEntry, time.Now().UTC())
+	testShard := shardCtx.(*shard.ContextTest)
+	msBuilder := NewMutableState(shardCtx, eventsCache, logger, tests.GlobalNamespaceEntry, time.Now().UTC(),
+		testShard.GetClusterMetadata(), testShard.GetConfig(), testShard.GetTimeSource(), testShard.GetMetricsClient(),
+		testShard.GetNamespaceRegistry())
 	msBuilder.GetExecutionInfo().ExecutionTime = msBuilder.GetExecutionInfo().StartTime
 	_ = msBuilder.UpdateCurrentVersion(version, false)
 	_ = msBuilder.SetHistoryTree(runID)

@@ -31,7 +31,9 @@ import (
 	"github.com/golang/mock/gomock"
 
 	"go.temporal.io/server/common/clock"
+	"go.temporal.io/server/common/cluster"
 	"go.temporal.io/server/common/metrics"
+	"go.temporal.io/server/common/namespace"
 	"go.temporal.io/server/common/persistence"
 	"go.temporal.io/server/common/resource"
 	"go.temporal.io/server/service/history/configs"
@@ -120,3 +122,9 @@ func (s *ContextTest) SetEventsCacheForTesting(c events.Cache) {
 func (s *ContextTest) StopForTest() {
 	s.stop()
 }
+
+func (s *ContextTest) GetClusterMetadata() cluster.Metadata     { return s.clusterMetadata }
+func (s *ContextTest) GetConfig() *configs.Config               { return s.config }
+func (s *ContextTest) GetTimeSource() clock.TimeSource          { return s.timeSource }
+func (s *ContextTest) GetMetricsClient() metrics.Client         { return s.metricsClient }
+func (s *ContextTest) GetNamespaceRegistry() namespace.Registry { return s.namespaceRegistry }

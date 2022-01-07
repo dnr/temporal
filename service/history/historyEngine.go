@@ -745,11 +745,11 @@ func (e *historyEngineImpl) getMutableStateOrPolling(
 			return response, nil
 		}
 
-		namespaceRegistry, err := e.shard.GetNamespaceRegistry().GetNamespaceByID(namespaceID)
+		namespaceRegistry, err := e.namespaceRegistry.GetNamespaceByID(namespaceID)
 		if err != nil {
 			return nil, err
 		}
-		timer := time.NewTimer(e.shard.GetConfig().LongPollExpirationInterval(namespaceRegistry.Name().String()))
+		timer := time.NewTimer(e.config.LongPollExpirationInterval(namespaceRegistry.Name().String()))
 		defer timer.Stop()
 		for {
 			select {
@@ -805,7 +805,7 @@ func (e *historyEngineImpl) QueryWorkflow(
 		}
 	}
 
-	de, err := e.shard.GetNamespaceRegistry().GetNamespaceByID(namespaceID)
+	de, err := e.namespaceRegistry.GetNamespaceByID(namespaceID)
 	if err != nil {
 		return nil, err
 	}
@@ -1986,7 +1986,7 @@ func (e *historyEngineImpl) SignalWithStartWorkflowExecution(
 
 			// We apply the update to execution using optimistic concurrency.  If it fails due to a conflict then reload
 			// the history and try the operation again.
-			if err := context.UpdateWorkflowExecutionAsActive(e.shard.GetTimeSource().Now()); err != nil {
+			if err := context.UpdateWorkflowExecutionAsActive(e.timeSource.Now()); err != nil {
 				if err == consts.ErrConflict {
 					continue Just_Signal_Loop
 				}
