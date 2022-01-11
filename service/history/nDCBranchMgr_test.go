@@ -106,6 +106,9 @@ func (s *nDCBranchMgrSuite) SetupTest() {
 	s.branchIndex = 0
 	s.nDCBranchMgr = newNDCBranchMgr(
 		s.mockShard, s.mockContext, s.mockMutableState, s.logger,
+		s.mockShard.GetNamespaceRegistry(),
+		s.mockShard.GetClusterMetadata(),
+		s.mockShard.Resource.GetExecutionManager(),
 	)
 }
 

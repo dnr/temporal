@@ -211,11 +211,18 @@ func NewEngineWithShardContext(
 			historyCache,
 			historyEngImpl.eventsReapplier,
 			logger,
+			metricsClient,
+			namespaceRegistry,
+			clusterMetadata,
+			executionManager,
+			timeSource,
+			config,
 		)
 		historyEngImpl.nDCActivityReplicator = newNDCActivityReplicator(
 			shard,
 			historyCache,
 			logger,
+			clusterMetadata,
 		)
 	}
 	historyEngImpl.workflowResetter = newWorkflowResetter(
@@ -571,7 +578,10 @@ func (e *historyEngineImpl) StartWorkflowExecution(
 		return nil, err
 	}
 
-	weContext := workflow.NewContext(namespaceID, execution, e.shard, e.logger)
+	weContext := workflow.NewContext(namespaceID, execution, e.shard, e.logger,
+		e.metricsClient, e.timeSource, e.config, e.namespaceRegistry,
+		e.clusterMetadata, e.payloadSerializer, e.executionManager,
+	)
 
 	now := e.timeSource.Now()
 	newWorkflow, newWorkflowEventsSeq, err := mutableState.CloseTransactionAsSnapshot(
@@ -2099,7 +2109,10 @@ func (e *historyEngineImpl) SignalWithStartWorkflowExecution(
 		return nil, err
 	}
 
-	context = workflow.NewContext(namespaceID, execution, e.shard, e.logger)
+	context = workflow.NewContext(namespaceID, execution, e.shard, e.logger,
+		e.metricsClient, e.timeSource, e.config, e.namespaceRegistry,
+		e.clusterMetadata, e.payloadSerializer, e.executionManager,
+	)
 
 	now := e.timeSource.Now()
 	newWorkflow, newWorkflowEventsSeq, err := mutableState.CloseTransactionAsSnapshot(

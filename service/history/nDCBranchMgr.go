@@ -33,6 +33,7 @@ import (
 	"go.temporal.io/api/serviceerror"
 
 	historyspb "go.temporal.io/server/api/history/v1"
+	"go.temporal.io/server/common/clock"
 	"go.temporal.io/server/common/cluster"
 	"go.temporal.io/server/common/log"
 	"go.temporal.io/server/common/namespace"
@@ -62,6 +63,7 @@ type (
 		namespaceRegistry namespace.Registry
 		clusterMetadata   cluster.Metadata
 		executionMgr      persistence.ExecutionManager
+		timeSource        clock.TimeSource
 
 		context      workflow.Context
 		mutableState workflow.MutableState
@@ -76,13 +78,18 @@ func newNDCBranchMgr(
 	context workflow.Context,
 	mutableState workflow.MutableState,
 	logger log.Logger,
+	namespaceRegistry namespace.Registry,
+	clusterMetadata cluster.Metadata,
+	executionManager persistence.ExecutionManager,
+	timeSource clock.TimeSource,
 ) *nDCBranchMgrImpl {
 
 	return &nDCBranchMgrImpl{
 		shard:             shard,
-		namespaceRegistry: shard.GetNamespaceRegistry(),
-		clusterMetadata:   shard.GetClusterMetadata(),
-		executionMgr:      shard.GetExecutionManager(),
+		namespaceRegistry: namespaceRegistry,
+		clusterMetadata:   clusterMetadata,
+		executionMgr:      executionManager,
+		timeSource:        timeSource,
 
 		context:      context,
 		mutableState: mutableState,
@@ -185,7 +192,7 @@ func (r *nDCBranchMgrImpl) flushBufferedEvents(
 	}
 	// the workflow must be updated as active, to send out replication tasks
 	if err := targetWorkflow.context.UpdateWorkflowExecutionAsActive(
-		r.shard.GetTimeSource().Now(),
+		r.timeSource.Now(),
 	); err != nil {
 		return nil, 0, err
 	}

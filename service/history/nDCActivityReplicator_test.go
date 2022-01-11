@@ -146,6 +146,7 @@ func (s *activityReplicatorSuite) SetupTest() {
 		s.mockShard,
 		s.historyCache,
 		s.logger,
+		s.mockClusterMetadata,
 	)
 }
 

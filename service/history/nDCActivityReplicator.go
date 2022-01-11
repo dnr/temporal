@@ -75,11 +75,12 @@ func newNDCActivityReplicator(
 	shard shard.Context,
 	historyCache workflow.Cache,
 	logger log.Logger,
+	clusterMetadata cluster.Metadata,
 ) *nDCActivityReplicatorImpl {
 
 	return &nDCActivityReplicatorImpl{
 		historyCache:    historyCache,
-		clusterMetadata: shard.GetClusterMetadata(),
+		clusterMetadata: clusterMetadata,
 		logger:          log.With(logger, tag.ComponentHistoryReplicator),
 	}
 }
