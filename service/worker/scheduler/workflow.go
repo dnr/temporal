@@ -74,15 +74,7 @@ func SchedulerWorkflow(ctx workflow.Context, id string, s *schedpb.Schedule) err
 func (s *scheduler) run() error {
 	s.logger.Info("Schedule started", "schedule-id", s.id)
 
-	if s.Policies == nil {
-		s.Policies = &schedpb.SchedulePolicies{}
-	}
-	if s.State == nil {
-		s.State = &schedpb.ScheduleState{}
-	}
-	if s.Info == nil {
-		s.Info = &schedpb.ScheduleInfo{}
-	}
+	s.ensureFields()
 
 	if err := workflow.SetQueryHandler(s.ctx, "describe", s.describe); err != nil {
 		return err
@@ -93,11 +85,10 @@ func (s *scheduler) run() error {
 
 	s.processRequest()
 
-	// FIXME: register signals
-
 	// FIXME: from dynconfig, or estimate event count
 	for iters := 1000; iters >= 0; iters-- {
 		t2 := s.now()
+		// FIXME: what if time went backwards?
 		s.sleepUntil(
 			s.processTimeRange(
 				t1, t2,
@@ -110,6 +101,24 @@ func (s *scheduler) run() error {
 
 	s.logger.Info("Schedule doing continue-as-new", "schedule-id", s.id)
 	return workflow.NewContinueAsNewError(s.ctx, WorkflowName, s.id, &s.Schedule)
+}
+
+func (s *scheduler) ensureFields() {
+	if s.Spec == nil {
+		s.Spec = &schedpb.ScheduleSpec{}
+	}
+	if s.Action == nil {
+		s.Action = &schedpb.ScheduleAction{}
+	}
+	if s.Policies == nil {
+		s.Policies = &schedpb.SchedulePolicies{}
+	}
+	if s.State == nil {
+		s.State = &schedpb.ScheduleState{}
+	}
+	if s.Info == nil {
+		s.Info = &schedpb.ScheduleInfo{}
+	}
 }
 
 func (s *scheduler) now() time.Time {
@@ -145,16 +154,15 @@ func (s *scheduler) processTimeRange(
 	if overlapPolicy == enumspb.SCHEDULE_OVERLAP_POLICY_UNSPECIFIED {
 		overlapPolicy = s.Policies.OverlapPolicy
 	}
-	if overlapPolicy == enumspb.SCHEDULE_OVERLAP_POLICY_UNSPECIFIED {
-		overlapPolicy = enumspb.SCHEDULE_OVERLAP_POLICY_SKIP
-	}
 
 	for {
 		nominalTime, nextTime, hasNextTime = getNextTime(s.Spec, s.State, t1)
 		if !hasNextTime || nextTime.After(t2) {
 			return
 		}
-		if catchupWindow >= 0 && t2.Sub(nominalTime) > catchupWindow {
+		// FIXME: should this be nextTime or nominalTime? what if someone sets
+		// jitter above catchup window?
+		if catchupWindow >= 0 && t2.Sub(nextTime) > catchupWindow {
 			s.logger.Warn("Schedule missed catchup window", "schedule-id", s.id, "now", t2, "nominal-time", nominalTime)
 			// FIXME: s.State.MissedCatchupWindow++
 			continue
@@ -166,11 +174,36 @@ func (s *scheduler) processTimeRange(
 }
 
 func (s *scheduler) sleepUntil(nominalTime, nextTime time.Time, hasNextTime bool) {
+	sel := workflow.NewSelector(s.ctx)
+
+	sch := workflow.GetSignalChannel(s.ctx, "update")
+	sel.AddReceive(sch, s.update)
+
 	if hasNextTime {
-		// sleep until nextTime or signal
-	} else {
-		// sleep until signal
+		// FIXME: use t2 instead of s.now()
+		tmr := workflow.NewTimer(s.ctx, s.now().Sub(nextTime))
+		sel.AddFuture(tmr, func(_) {})
 	}
+
+	sel.Select(s.ctx)
+}
+
+func (s *scheduler) update(ch workflow.ReceiveChannel, _ bool) {
+	var newSchedule schedpb.Schedule
+	ch.Receive(s.ctx, &newSchedule)
+
+	// FIXME: any special transition handling here?
+
+	s.Schedule.Spec = newSchedule.Spec
+	s.Schedule.Action = newSchedule.Action
+	s.Schedule.Policies = newSchedule.Policies
+	s.Schedule.State = newSchedule.State
+	s.Schedule.Request = newSchedule.Request
+	// not Info
+
+	s.ensureFields()
+
+	s.processRequest()
 }
 
 func (s *scheduler) describe() (*schedpb.Schedule, error) {
@@ -189,6 +222,9 @@ func (s *scheduler) getCatchupWindow() time.Duration {
 }
 
 func (s *scheduler) action(nominalTime time.Time, overlapPolicy enumspb.ScheduleOverlapPolicy) {
+	if overlapPolicy == enumspb.SCHEDULE_OVERLAP_POLICY_UNSPECIFIED {
+		overlapPolicy = enumspb.SCHEDULE_OVERLAP_POLICY_SKIP
+	}
 	appendTime := overlapPolicy == enumspb.SCHEDULE_OVERLAP_POLICY_ALLOW_ALL
 
 	if s.Action.GetStartWorkflow() != nil {
