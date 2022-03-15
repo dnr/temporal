@@ -156,6 +156,7 @@ func (s *scheduler) processTimeRange(
 	catchupWindow := s.getCatchupWindow()
 
 	for {
+		// FIXME: consider wrapping in side effect so it can be changed easily?
 		nominalTime, nextTime, hasNext := getNextTime(s.Spec, s.State, t1, doingBackfill)
 		if !hasNext {
 			return 0, false

@@ -24,26 +24,35 @@ func getNextTime(
 	}
 
 	for {
-		// consider all calendarspecs
+		nominal = rawNextTime(spec, after)
 
-		// consider all intervalspecs
+		if spec.NotAfter != nil && nominal.After(*spec.NotAfter) {
+			has = false
+			return
+		}
 
 		// check against excludes
 		if !excluded(nominal, spec.ExcludeCalendar) {
 			break
 		}
+
+		after = nominal
 	}
 
-	if spec.NotAfter != nil && nominal.After(*spec.NotAfter) {
-		has = false
-		return
-	}
-
-	next = addJitter(spec, nominal)
-
-	// FIXME: but what if jitter pushes one time past the one ahead of it?
+	// Ensure that jitter doesn't push this time past the _next_ nominal start time
+	following := rawNextTime(spec, nominal)
+	next = addJitter(spec, nominal, following.Sub(nominal))
 
 	return
+}
+
+func rawNextTime(
+	spec *schedpb.ScheduleSpec,
+	after time.Time,
+) (nominal time.Time) {
+	// FIXME: consider all calendarspecs
+
+	// FIXME: consider all intervalspecs
 }
 
 func excluded(nominal time.Time, excludes []*schedpb.CalendarSpec) bool {
@@ -51,16 +60,22 @@ func excluded(nominal time.Time, excludes []*schedpb.CalendarSpec) bool {
 	return false
 }
 
-func addJitter(spec *schedpb.ScheduleSpec, nominal time.Time) time.Time {
-	if timestamp.DurationValue(spec.Jitter) == 0 {
-		def := 1 * time.Second
-		spec.Jitter = &def
+func addJitter(spec *schedpb.ScheduleSpec, nominal time.Time, limit time.Duration) time.Time {
+	maxJitter := timestamp.DurationValue(spec.Jitter)
+	if maxJitter == 0 {
+		maxJitter = 1 * time.Second // FIXME: constant
 	}
+	if maxJitter > limit {
+		maxJitter = limit
+	}
+
 	bin, err := nominal.MarshalBinary()
 	if err != nil {
 		return nominal
 	}
-	j := (int64(farm.Fingerprint32(bin)) * spec.Jitter.Milliseconds()) / 1 << 32
-	jitter := j * time.Millisecond
+
+	fp := int64(farm.Fingerprint32(bin))
+	ms := int64(maxJitter.Milliseconds())
+	jitter := time.Duration((fp*ms)>>32) * time.Millisecond
 	return nominal.Add(jitter)
 }
