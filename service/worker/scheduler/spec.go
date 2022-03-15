@@ -1,6 +1,7 @@
 package scheduler
 
 import (
+	"math"
 	"time"
 
 	"github.com/dgryski/go-farm"
@@ -26,7 +27,7 @@ func getNextTime(
 	for {
 		nominal = rawNextTime(spec, after)
 
-		if spec.NotAfter != nil && nominal.After(*spec.NotAfter) {
+		if nominal.IsZero() || (spec.NotAfter != nil && nominal.After(*spec.NotAfter)) {
 			has = false
 			return
 		}
@@ -50,9 +51,56 @@ func rawNextTime(
 	spec *schedpb.ScheduleSpec,
 	after time.Time,
 ) (nominal time.Time) {
-	// FIXME: consider all calendarspecs
+	minTimestamp := math.MaxInt64 // unix seconds-since-epoch as int64
 
-	// FIXME: consider all intervalspecs
+	ts := after.Unix()
+	tz, err := loadTimezone(spec)
+	if err != nil {
+		// FIXME: log error
+		return time.Time{}
+	}
+
+	for _, cal := range spec.CalendarSpec {
+		next := nextCalendarTime(tz, cal, ts)
+		if next < minTimestamp {
+			minTimestamp = next
+		}
+	}
+
+	for _, iv := range spec.Interval {
+		next := nextIntervalTime(iv, ts)
+		if next < minTimestamp {
+			minTimestamp = next
+		}
+	}
+
+	if minTimestamp == math.MaxInt64 {
+		return time.Time{}
+	}
+	return time.Unix(minTimestamp, 0)
+}
+
+func loadTimezone(spec *schedpb.ScheduleSpec) (*time.Location, error) {
+	if spec.TimezoneData != nil {
+		return time.LoadLocationFromTZData(spec.TimezoneName, spec.TimezoneData)
+	}
+	return time.LoadLocation(spec.TimezoneName)
+}
+
+func nextCalendarTime(cal *schedpb.CalendarSpec, ts int64) int64 {
+	// FIXME
+}
+
+func nextIntervalTime(iv *schedpb.IntervalSpec, ts int64) int64 {
+	interval := int64(timestamp.DurationValue(iv.Interval) / time.Second)
+	if interval < 1 {
+		interval = 1
+	}
+	phase := int64(timestamp.DurationValue(iv.Phase) / time.Second)
+	if phase < 0 {
+		phase = 0
+	}
+	return (((ts-phase)/interval)+1)*interval + phase
 }
 
 func excluded(nominal time.Time, excludes []*schedpb.CalendarSpec) bool {
