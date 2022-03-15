@@ -32,6 +32,7 @@ import (
 	enumspb "go.temporal.io/api/enums/v1"
 	schedpb "go.temporal.io/api/schedule/v1"
 	"go.temporal.io/api/workflowservice/v1"
+	sdklog "go.temporal.io/sdk/log"
 	"go.temporal.io/sdk/temporal"
 	"go.temporal.io/sdk/workflow"
 
@@ -51,9 +52,10 @@ type (
 	}
 
 	scheduler struct {
-		ctx workflow.Context
-		id  string
-		a   *activities
+		ctx    workflow.Context
+		id     string
+		a      *activities
+		logger sdklog.Logger
 		schedpb.Schedule
 	}
 )
@@ -63,14 +65,14 @@ func SchedulerWorkflow(ctx workflow.Context, id string, s *schedpb.Schedule) err
 		ctx:      ctx,
 		id:       id,
 		a:        nil,
+		logger:   workflow.GetLogger(ctx),
 		Schedule: *s,
 	}
-	return scheduler.Run()
+	return scheduler.run()
 }
 
-func (s *scheduler) Run() error {
-	logger := workflow.GetLogger(s.ctx)
-	logger.Info("Schedule started", "wf-type", WorkflowName)
+func (s *scheduler) run() error {
+	s.logger.Info("Schedule started", "schedule-id", s.id)
 
 	if s.Policies == nil {
 		s.Policies = &schedpb.SchedulePolicies{}
@@ -82,62 +84,93 @@ func (s *scheduler) Run() error {
 		s.Info = &schedpb.ScheduleInfo{}
 	}
 
-	t1 := workflow.Now(s.ctx)
-	s.Info.CreateTime = timestamp.TimePtr(t1)
-
 	if err := workflow.SetQueryHandler(s.ctx, "describe", s.describe); err != nil {
 		return err
 	}
+
+	t1 := s.now()
+	s.Info.CreateTime = timestamp.TimePtr(t1)
+
+	s.processRequest()
 
 	// FIXME: register signals
 
 	// FIXME: from dynconfig, or estimate event count
 	for iters := 1000; iters >= 0; iters-- {
-		t2 := workflow.Now(s.ctx)
-		s.processTimeRange(t1, t2)
+		t2 := s.now()
+		s.sleepUntil(
+			s.processTimeRange(
+				t1, t2,
+				s.Policies.OverlapPolicy,
+				s.getCatchupWindow(),
+			),
+		)
 		t1 = t2
 	}
 
+	s.logger.Info("Schedule doing continue-as-new", "schedule-id", s.id)
 	return workflow.NewContinueAsNewError(s.ctx, WorkflowName, s.id, &s.Schedule)
 }
 
-func (s *scheduler) processTimeRange(t1, t2 time.Time) (nominal, next time.Time, has bool) {
+func (s *scheduler) now() time.Time {
+	return workflow.Now(s.ctx)
+}
+
+func (s *scheduler) processRequest() {
+	if s.Request == nil {
+		return
+	}
+
+	if s.Request.TriggerImmediately {
+		s.action(s.now(), s.Policies.OverlapPolicy)
+	}
+
+	for _, bfr := range s.Request.BackfillRequest {
+		s.processTimeRange(
+			timestamp.TimeValue(bfr.GetFromTime()),
+			timestamp.TimeValue(bfr.GetToTime()),
+			bfr.GetOverlapPolicy(),
+			-1, // ignore catchup policy
+		)
+	}
+
+	s.Request = nil
+}
+
+func (s *scheduler) processTimeRange(
+	t1, t2 time.Time,
+	overlapPolicy enumspb.ScheduleOverlapPolicy,
+	catchupWindow time.Duration, // -1 means ignore
+) (nominalTime, nextTime time.Time, hasNextTime bool) {
+	if overlapPolicy == enumspb.SCHEDULE_OVERLAP_POLICY_UNSPECIFIED {
+		overlapPolicy = s.Policies.OverlapPolicy
+	}
+	if overlapPolicy == enumspb.SCHEDULE_OVERLAP_POLICY_UNSPECIFIED {
+		overlapPolicy = enumspb.SCHEDULE_OVERLAP_POLICY_SKIP
+	}
+
 	for {
-		nominalTime, nextTime, hasNextTime := getNextTime(s.Spec, s.State, t1)
+		nominalTime, nextTime, hasNextTime = getNextTime(s.Spec, s.State, t1)
 		if !hasNextTime || nextTime.After(t2) {
-			return nominalTime, nextTime, hasNextTime
+			return
 		}
-		s.action(nominalTime)
+		if catchupWindow >= 0 && t2.Sub(nominalTime) > catchupWindow {
+			s.logger.Warn("Schedule missed catchup window", "schedule-id", s.id, "now", t2, "nominal-time", nominalTime)
+			// FIXME: s.State.MissedCatchupWindow++
+			continue
+		}
+		s.action(nominalTime, overlapPolicy)
+		// FIXME: if pause-after-failure, set up goroutine to watch this one
 		t1 = nextTime
 	}
 }
 
-func (s *scheduler) processTimeRangeAndSleep(t1, t2 time.Time) {
-	nominalTime, nextTime, hasNextTime := s.processTimeRange(t1, t2)
-
+func (s *scheduler) sleepUntil(nominalTime, nextTime time.Time, hasNextTime bool) {
 	if hasNextTime {
 		// sleep until nextTime or signal
 	} else {
 		// sleep until signal
 	}
-
-	if not_manual_trigger {
-		// catchups
-		now := workflow.Now(s.ctx)
-		if now.Sub(nominalTime) > s.getCatchupWindow() {
-			// missed catchup!
-			// log error
-			return
-		}
-	}
-
-	s.Info.ActionCount++
-
-	if s.State.LimitedActions && s.State.RemainingActions > 0 {
-		s.State.RemainingActions--
-	}
-
-	// FIXME: if pause-after-failure, set up goroutine to watch this one
 }
 
 func (s *scheduler) describe() (*schedpb.Schedule, error) {
@@ -145,18 +178,18 @@ func (s *scheduler) describe() (*schedpb.Schedule, error) {
 }
 
 func (s *scheduler) getCatchupWindow() time.Duration {
-	t := s.Policies.CatchupWindow
-	if t == nil {
+	cw := s.Policies.CatchupWindow
+	if cw == nil {
 		return 60 * time.Second
-	} else if *t < 10*time.Second {
+	} else if *cw < 10*time.Second {
 		return 10 * time.Second
 	} else {
-		return *t
+		return *cw
 	}
 }
 
-func (s *scheduler) action(nominalTime time.Time) {
-	appendTime := s.Policies.OverlapPolicy == enumspb.SCHEDULE_OVERLAP_POLICY_ALLOW_ALL
+func (s *scheduler) action(nominalTime time.Time, overlapPolicy enumspb.ScheduleOverlapPolicy) {
+	appendTime := overlapPolicy == enumspb.SCHEDULE_OVERLAP_POLICY_ALLOW_ALL
 
 	if s.Action.GetStartWorkflow() != nil {
 		// Validation
@@ -172,8 +205,14 @@ func (s *scheduler) action(nominalTime time.Time) {
 			},
 		})
 		var result error
-		err := workflow.ExecuteActivity(ctx1, s.a.StartWorkflow, req).Get(ctx, &result)
+		err := workflow.ExecuteActivity(ctx1, s.a.StartWorkflow, req).Get(s.ctx, &result)
 		// FIXME: do something with err, result
+	}
+
+	s.Info.ActionCount++
+
+	if s.State.LimitedActions && s.State.RemainingActions > 0 {
+		s.State.RemainingActions--
 	}
 }
 
