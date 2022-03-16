@@ -55,7 +55,7 @@ func rawNextTime(
 	spec *schedpb.ScheduleSpec,
 	after time.Time,
 ) (nominal time.Time) {
-	minTimestamp := math.MaxInt64 // unix seconds-since-epoch as int64
+	var minTimestamp int64 = math.MaxInt64 // unix seconds-since-epoch as int64
 
 	tz, err := loadTimezone(spec)
 	if err != nil {
@@ -63,11 +63,11 @@ func rawNextTime(
 		return time.Time{}
 	}
 
-	for _, cal := range spec.CalendarSpec {
+	for _, cal := range spec.Calendar {
 		if next := nextCalendarTime(tz, cal, after); !next.IsZero() {
 			nextTs := next.Unix()
-			if next < minTimestamp {
-				minTimestamp = next
+			if nextTs < minTimestamp {
+				minTimestamp = nextTs
 			}
 		}
 	}

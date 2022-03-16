@@ -216,12 +216,12 @@ func (s *scheduler) describe() (*schedpb.Schedule, error) {
 	s.Info.FutureActions = make([]*time.Time, 0, 10)
 	t1 := s.now()
 	for len(s.Info.FutureActions) < cap(s.Info.FutureActions) {
-		nominal, next, has := getNextTime(s.Spec, s.State, t1)
+		_, next, has := getNextTime(s.Spec, s.State, t1, false)
 		if !has {
 			break
 		}
 		// FIXME: next or nominal here?
-		s.Info.FutureActions = append(s.Info.FutureActions, next)
+		s.Info.FutureActions = append(s.Info.FutureActions, timestamp.TimePtr(next))
 		t1 = next
 	}
 
@@ -264,7 +264,7 @@ func (s *scheduler) action(nominalTime time.Time, overlapPolicy enumspb.Schedule
 	}
 
 	s.Info.ActionCount++
-	s.Info.RecentActions = append(s.Info.RecentActions, nominalTime)
+	s.Info.RecentActions = append(s.Info.RecentActions, timestamp.TimePtr(nominalTime))
 	extra := len(s.Info.RecentActions) - 10
 	if extra > 0 {
 		s.Info.RecentActions = s.Info.RecentActions[extra:]
