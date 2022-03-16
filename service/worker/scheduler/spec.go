@@ -9,6 +9,10 @@ import (
 	"go.temporal.io/server/common/primitives/timestamp"
 )
 
+const (
+	defaultJitter = 1 * time.Second
+)
+
 func getNextTime(
 	spec *schedpb.ScheduleSpec,
 	state *schedpb.ScheduleState,
@@ -53,7 +57,6 @@ func rawNextTime(
 ) (nominal time.Time) {
 	minTimestamp := math.MaxInt64 // unix seconds-since-epoch as int64
 
-	ts := after.Unix()
 	tz, err := loadTimezone(spec)
 	if err != nil {
 		// FIXME: log error
@@ -61,12 +64,15 @@ func rawNextTime(
 	}
 
 	for _, cal := range spec.CalendarSpec {
-		next := nextCalendarTime(tz, cal, ts)
-		if next < minTimestamp {
-			minTimestamp = next
+		if next := nextCalendarTime(tz, cal, after); !next.IsZero() {
+			nextTs := next.Unix()
+			if next < minTimestamp {
+				minTimestamp = next
+			}
 		}
 	}
 
+	ts := after.Unix()
 	for _, iv := range spec.Interval {
 		next := nextIntervalTime(iv, ts)
 		if next < minTimestamp {
@@ -77,18 +83,7 @@ func rawNextTime(
 	if minTimestamp == math.MaxInt64 {
 		return time.Time{}
 	}
-	return time.Unix(minTimestamp, 0)
-}
-
-func loadTimezone(spec *schedpb.ScheduleSpec) (*time.Location, error) {
-	if spec.TimezoneData != nil {
-		return time.LoadLocationFromTZData(spec.TimezoneName, spec.TimezoneData)
-	}
-	return time.LoadLocation(spec.TimezoneName)
-}
-
-func nextCalendarTime(cal *schedpb.CalendarSpec, ts int64) int64 {
-	// FIXME
+	return time.Unix(minTimestamp, 0).UTC()
 }
 
 func nextIntervalTime(iv *schedpb.IntervalSpec, ts int64) int64 {
@@ -111,7 +106,7 @@ func excluded(nominal time.Time, excludes []*schedpb.CalendarSpec) bool {
 func addJitter(spec *schedpb.ScheduleSpec, nominal time.Time, limit time.Duration) time.Time {
 	maxJitter := timestamp.DurationValue(spec.Jitter)
 	if maxJitter == 0 {
-		maxJitter = 1 * time.Second // FIXME: constant
+		maxJitter = defaultJitter
 	}
 	if maxJitter > limit {
 		maxJitter = limit
@@ -123,7 +118,7 @@ func addJitter(spec *schedpb.ScheduleSpec, nominal time.Time, limit time.Duratio
 	}
 
 	fp := int64(farm.Fingerprint32(bin))
-	ms := int64(maxJitter.Milliseconds())
+	ms := maxJitter.Milliseconds()
 	jitter := time.Duration((fp*ms)>>32) * time.Millisecond
 	return nominal.Add(jitter)
 }
