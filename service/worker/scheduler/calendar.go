@@ -13,7 +13,9 @@ import (
 type (
 	parseMode int
 
-	matchers struct {
+	calendarMatcher struct {
+		tz *time.Location
+
 		year, month, dayOfMonth, dayOfWeek, hour, minute, second func(int) bool
 	}
 )
@@ -70,16 +72,43 @@ func loadTimezone(spec *schedpb.ScheduleSpec) (*time.Location, error) {
 
 // FIXME: test with fuzzing
 
-// FIXME: should return err?
-func nextCalendarTime(tz *time.Location, cal *schedpb.CalendarSpec, ts time.Time) time.Time {
-	// set time zone
-	ts = ts.In(tz)
-
-	// make matchers
-	ms, err := makeMatchers(cal)
-	if err != nil {
-		return time.Time{}
+func newCalendarMatcher(cal *schedpb.CalendarSpec, tz *time.Location) (*calendarMatcher, error) {
+	ms := &calendarMatcher{tz: tz}
+	var err error
+	if ms.year, err = makeMatcher(cal.Year, "*", minCalendarYear, maxCalendarYear, parseModeInt); err != nil {
+		return nil, err
+	} else if ms.month, err = makeMatcher(cal.Month, "*", 1, 12, parseModeMonth); err != nil {
+		return nil, err
+	} else if ms.dayOfMonth, err = makeMatcher(cal.DayOfMonth, "*", 1, 31, parseModeInt); err != nil {
+		return nil, err
+	} else if ms.dayOfWeek, err = makeMatcher(cal.DayOfWeek, "*", 0, 7, parseModeDow); err != nil {
+		return nil, err
+	} else if ms.hour, err = makeMatcher(cal.Hour, "0", 0, 23, parseModeInt); err != nil {
+		return nil, err
+	} else if ms.minute, err = makeMatcher(cal.Minute, "0", 0, 59, parseModeInt); err != nil {
+		return nil, err
+	} else if ms.second, err = makeMatcher(cal.Second, "0", 0, 59, parseModeInt); err != nil {
+		return nil, err
 	}
+	return ms, nil
+}
+
+func (ms *calendarMatcher) matches(ts time.Time) bool {
+	// set time zone
+	ts = ts.In(ms.tz)
+
+	// get ymdhms from ts
+	y, mo, d := ts.Date()
+	h, m, s := ts.Clock()
+
+	return ms.year(y) && ms.month(int(mo)) && ms.dayOfMonth(d) &&
+		ms.dayOfWeek(int(ts.Weekday())) &&
+		ms.hour(h) && ms.minute(m) && ms.second(s)
+}
+
+func (ms *calendarMatcher) nextCalendarTime(ts time.Time) time.Time {
+	// set time zone
+	ts = ts.In(ms.tz)
 
 	// get ymdhms from ts
 	y, mo, d := ts.Date()
@@ -119,7 +148,7 @@ Outer:
 				continue Outer
 			}
 		}
-		for !ms.dayOfMonth(d) || !ms.dayOfWeek(int(time.Date(y, mo, d, h, m, s, 0, tz).Weekday())) {
+		for !ms.dayOfMonth(d) || !ms.dayOfWeek(int(time.Date(y, mo, d, h, m, s, 0, ms.tz).Weekday())) {
 			d, h, m, s = d+1, 0, 0, 0
 			if d > daysInMonth(mo, y) {
 				continue Outer
@@ -144,32 +173,11 @@ Outer:
 			}
 		}
 		// everything matches
-		return time.Date(y, mo, d, h, m, s, 0, tz)
+		return time.Date(y, mo, d, h, m, s, 0, ms.tz)
 	}
 
 	// no more matching times (up to max we checked)
 	return time.Time{}
-}
-
-func makeMatchers(cal *schedpb.CalendarSpec) (*matchers, error) {
-	ms := &matchers{}
-	var err error
-	if ms.year, err = makeMatcher(cal.Year, "*", minCalendarYear, maxCalendarYear, parseModeInt); err != nil {
-		return nil, err
-	} else if ms.month, err = makeMatcher(cal.Month, "*", 1, 12, parseModeMonth); err != nil {
-		return nil, err
-	} else if ms.dayOfMonth, err = makeMatcher(cal.DayOfMonth, "*", 1, 31, parseModeInt); err != nil {
-		return nil, err
-	} else if ms.dayOfWeek, err = makeMatcher(cal.DayOfWeek, "*", 0, 7, parseModeDow); err != nil {
-		return nil, err
-	} else if ms.hour, err = makeMatcher(cal.Hour, "0", 0, 23, parseModeInt); err != nil {
-		return nil, err
-	} else if ms.minute, err = makeMatcher(cal.Minute, "0", 0, 59, parseModeInt); err != nil {
-		return nil, err
-	} else if ms.second, err = makeMatcher(cal.Second, "0", 0, 59, parseModeInt); err != nil {
-		return nil, err
-	}
-	return ms, nil
 }
 
 // Returns a function that matches the given integer range/skip spec.
@@ -225,6 +233,7 @@ func parseStringSpec(s string, min, max int, parseMode parseMode, f func(int)) e
 	for _, part := range strings.Split(s, ",") {
 		var err error
 		skipBy := 1
+		hasSkipBy := false
 		if strings.Contains(part, "/") {
 			skipParts := strings.Split(part, "/")
 			if len(skipParts) != 2 {
@@ -238,6 +247,7 @@ func parseStringSpec(s string, min, max int, parseMode parseMode, f func(int)) e
 			if skipBy < 1 {
 				return errMalformed
 			}
+			hasSkipBy = true
 		}
 
 		start, end := min, max
@@ -257,7 +267,11 @@ func parseStringSpec(s string, min, max int, parseMode parseMode, f func(int)) e
 				if start, err = parseValue(part, min, max, parseMode); err != nil {
 					return err
 				}
-				end = start
+				if !hasSkipBy {
+					// if / is present, a single value is treated as that value to the
+					// end. otherwise a single value is just the single value.
+					end = start
+				}
 			}
 		}
 
@@ -297,4 +311,21 @@ func parseValue(s string, min, max int, parseMode parseMode) (int, error) {
 		return i, errOutOfRange
 	}
 	return i, nil
+}
+
+// same as Go's version
+func isLeapYear(y int) bool {
+	return y%4 == 0 && (y%100 != 0 || y%400 == 0)
+}
+
+func daysInMonth(m time.Month, y int) int {
+	if m == time.February {
+		if isLeapYear(y) {
+			return 29
+		} else {
+			return 28
+		}
+	}
+	const bits = 0b1010110101010
+	return 30 + (bits>>m)&1
 }

@@ -24,12 +24,19 @@ func getNextTime(
 		return
 	}
 
+	tz, err := loadTimezone(spec)
+	if err != nil {
+		// FIXME: log error
+		has = false
+		return
+	}
+
 	if spec.NotBefore != nil && after.Before(*spec.NotBefore) {
 		after = spec.NotBefore.Add(-time.Second)
 	}
 
 	for {
-		nominal = rawNextTime(spec, after)
+		nominal = rawNextTime(spec, after, tz)
 
 		if nominal.IsZero() || (spec.NotAfter != nil && nominal.After(*spec.NotAfter)) {
 			has = false
@@ -37,7 +44,7 @@ func getNextTime(
 		}
 
 		// check against excludes
-		if !excluded(nominal, spec.ExcludeCalendar) {
+		if !excluded(nominal, spec.ExcludeCalendar, tz) {
 			break
 		}
 
@@ -45,7 +52,7 @@ func getNextTime(
 	}
 
 	// Ensure that jitter doesn't push this time past the _next_ nominal start time
-	following := rawNextTime(spec, nominal)
+	following := rawNextTime(spec, nominal, tz)
 	next = addJitter(spec, nominal, following.Sub(nominal))
 
 	return
@@ -54,20 +61,17 @@ func getNextTime(
 func rawNextTime(
 	spec *schedpb.ScheduleSpec,
 	after time.Time,
+	tz *time.Location,
 ) (nominal time.Time) {
 	var minTimestamp int64 = math.MaxInt64 // unix seconds-since-epoch as int64
 
-	tz, err := loadTimezone(spec)
-	if err != nil {
-		// FIXME: log error
-		return time.Time{}
-	}
-
 	for _, cal := range spec.Calendar {
-		if next := nextCalendarTime(tz, cal, after); !next.IsZero() {
-			nextTs := next.Unix()
-			if nextTs < minTimestamp {
-				minTimestamp = nextTs
+		if matcher, err := newCalendarMatcher(cal, tz); err == nil {
+			if next := matcher.nextCalendarTime(after); !next.IsZero() {
+				nextTs := next.Unix()
+				if nextTs < minTimestamp {
+					minTimestamp = nextTs
+				}
 			}
 		}
 	}
@@ -98,8 +102,14 @@ func nextIntervalTime(iv *schedpb.IntervalSpec, ts int64) int64 {
 	return (((ts-phase)/interval)+1)*interval + phase
 }
 
-func excluded(nominal time.Time, excludes []*schedpb.CalendarSpec) bool {
-	// FIXME
+func excluded(nominal time.Time, excludes []*schedpb.CalendarSpec, tz *time.Location) bool {
+	for _, exclude := range excludes {
+		if ms, err := newCalendarMatcher(exclude, tz); err == nil {
+			if ms.matches(nominal) {
+				return true
+			}
+		}
+	}
 	return false
 }
 
