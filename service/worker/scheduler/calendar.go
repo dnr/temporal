@@ -63,7 +63,7 @@ var (
 	}
 )
 
-// FIXME: test with fuzzing
+// TODO: test with fuzzing
 
 func newCalendarMatcher(cal *schedpb.CalendarSpec, tz *time.Location) (*calendarMatcher, error) {
 	ms := &calendarMatcher{tz: tz}
