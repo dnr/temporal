@@ -63,13 +63,6 @@ var (
 	}
 )
 
-func loadTimezone(spec *schedpb.ScheduleSpec) (*time.Location, error) {
-	if spec.TimezoneData != nil {
-		return time.LoadLocationFromTZData(spec.TimezoneName, spec.TimezoneData)
-	}
-	return time.LoadLocation(spec.TimezoneName)
-}
-
 // FIXME: test with fuzzing
 
 func newCalendarMatcher(cal *schedpb.CalendarSpec, tz *time.Location) (*calendarMatcher, error) {

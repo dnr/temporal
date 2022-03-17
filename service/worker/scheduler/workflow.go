@@ -43,6 +43,13 @@ import (
 
 const (
 	WorkflowName = "temporal-sys-scheduler-workflow"
+
+	// The number of future action times to include in Describe.
+	futureActionCount = 10
+	// The number of recent actual action results to include in Describe.
+	recentActionCount = 10
+
+	iterationsBeforeContinueAsNew = 500
 )
 
 type (
@@ -57,6 +64,7 @@ type (
 		a      *activities
 		logger sdklog.Logger
 		schedpb.Schedule
+		cspec *compiledSpec
 	}
 )
 
@@ -75,6 +83,7 @@ func (s *scheduler) run() error {
 	s.logger.Info("Schedule started")
 
 	s.ensureFields()
+	s.compile()
 
 	if err := workflow.SetQueryHandler(s.ctx, "describe", s.describe); err != nil {
 		return err
@@ -85,8 +94,7 @@ func (s *scheduler) run() error {
 
 	s.processRequest()
 
-	// FIXME: from dynconfig, or estimate event count
-	for iters := 1000; iters >= 0; iters-- {
+	for iters := iterationsBeforeContinueAsNew; iters >= 0; iters-- {
 		t2 := s.now()
 		// FIXME: what if time went backwards?
 		nextSleep, hasNext := s.processTimeRange(
@@ -120,6 +128,18 @@ func (s *scheduler) ensureFields() {
 	}
 }
 
+func (s *scheduler) compile() {
+	cspec, err := newCompiledSpec(s.Spec)
+	if err != nil {
+		s.logger.Error("Invalid schedule", "error", err)
+		s.Info.InvalidScheduleError = err.Error()
+		s.cspec = nil
+	} else {
+		s.Info.InvalidScheduleError = ""
+		s.cspec = cspec
+	}
+}
+
 func (s *scheduler) now() time.Time {
 	return workflow.Now(s.ctx)
 }
@@ -130,7 +150,8 @@ func (s *scheduler) processRequest() {
 	}
 
 	if s.Request.TriggerImmediately {
-		s.action(s.now(), s.Policies.OverlapPolicy)
+		now := s.now()
+		s.action(now, now, s.Policies.OverlapPolicy)
 	}
 
 	for _, bfr := range s.Request.BackfillRequest {
@@ -150,6 +171,10 @@ func (s *scheduler) processTimeRange(
 	overlapPolicy enumspb.ScheduleOverlapPolicy,
 	doingBackfill bool,
 ) (nextSleep time.Duration, hasNext bool) {
+	if s.cspec == nil {
+		return 0, false
+	}
+
 	if overlapPolicy == enumspb.SCHEDULE_OVERLAP_POLICY_UNSPECIFIED {
 		overlapPolicy = s.Policies.OverlapPolicy
 	}
@@ -157,7 +182,7 @@ func (s *scheduler) processTimeRange(
 
 	for {
 		// FIXME: consider wrapping in side effect so it can be changed easily?
-		nominalTime, nextTime, hasNext := getNextTime(s.Spec, s.State, t1, doingBackfill)
+		nominalTime, nextTime, hasNext := s.cspec.getNextTime(s.State, t1, doingBackfill)
 		if !hasNext {
 			return 0, false
 		} else if nextTime.After(t2) {
@@ -165,11 +190,11 @@ func (s *scheduler) processTimeRange(
 		}
 		// FIXME: should this be nextTime or nominalTime? what if someone sets jitter above catchup window?
 		if !doingBackfill && t2.Sub(nextTime) > catchupWindow {
-			s.logger.Warn("Schedule missed catchup window", "now", t2, "nominal-time", nominalTime)
-			// FIXME: s.Info.MissedCatchupWindow++
+			s.logger.Warn("Schedule missed catchup window", "now", t2, "time", nextTime)
+			s.Info.MissedCatchupWindow++
 			continue
 		}
-		s.action(nominalTime, overlapPolicy)
+		s.action(nominalTime, nextTime, overlapPolicy)
 		// FIXME: if pause-after-failure, set up goroutine to watch this one
 		t1 = nextTime
 	}
@@ -195,6 +220,7 @@ func (s *scheduler) update(ch workflow.ReceiveChannel, _ bool) {
 
 	s.logger.Info("Schedule update", "new-schedule", newSchedule.String())
 
+	// FIXME: notes
 	// FIXME: any special transition handling here?
 
 	s.Schedule.Spec = newSchedule.Spec
@@ -205,6 +231,7 @@ func (s *scheduler) update(ch workflow.ReceiveChannel, _ bool) {
 	// don't touch Info
 
 	s.ensureFields()
+	s.compile()
 
 	s.Info.UpdateTime = timestamp.TimePtr(s.now())
 
@@ -213,16 +240,21 @@ func (s *scheduler) update(ch workflow.ReceiveChannel, _ bool) {
 
 func (s *scheduler) describe() (*schedpb.Schedule, error) {
 	// update future actions
-	s.Info.FutureActions = make([]*time.Time, 0, 10)
-	t1 := s.now()
-	for len(s.Info.FutureActions) < cap(s.Info.FutureActions) {
-		_, next, has := getNextTime(s.Spec, s.State, t1, false)
-		if !has {
-			break
+	if s.cspec != nil {
+		s.Info.FutureActions = make([]*time.Time, 0, 10)
+		t1 := s.now()
+		s.Info.InvalidScheduleError = ""
+		for len(s.Info.FutureActions) < cap(s.Info.FutureActions) {
+			_, next, has := s.cspec.getNextTime(s.Spec, s.State, t1, false)
+			if !has {
+				break
+			}
+			// FIXME: next or nominal here?
+			s.Info.FutureActions = append(s.Info.FutureActions, timestamp.TimePtr(next))
+			t1 = next
 		}
-		// FIXME: next or nominal here?
-		s.Info.FutureActions = append(s.Info.FutureActions, timestamp.TimePtr(next))
-		t1 = next
+	} else {
+		s.Info.FutureActions = nil
 	}
 
 	return &s.Schedule, nil
@@ -239,7 +271,7 @@ func (s *scheduler) getCatchupWindow() time.Duration {
 	}
 }
 
-func (s *scheduler) action(nominalTime time.Time, overlapPolicy enumspb.ScheduleOverlapPolicy) {
+func (s *scheduler) action(nominalTime, actualTime time.Time, overlapPolicy enumspb.ScheduleOverlapPolicy) {
 	if overlapPolicy == enumspb.SCHEDULE_OVERLAP_POLICY_UNSPECIFIED {
 		overlapPolicy = enumspb.SCHEDULE_OVERLAP_POLICY_SKIP
 	}
@@ -264,7 +296,8 @@ func (s *scheduler) action(nominalTime time.Time, overlapPolicy enumspb.Schedule
 	}
 
 	s.Info.ActionCount++
-	s.Info.RecentActions = append(s.Info.RecentActions, timestamp.TimePtr(nominalTime))
+	// FIXME: append action result
+	// s.Info.RecentActions = append(s.Info.RecentActions, timestamp.TimePtr(actualTime))
 	extra := len(s.Info.RecentActions) - 10
 	if extra > 0 {
 		s.Info.RecentActions = s.Info.RecentActions[extra:]

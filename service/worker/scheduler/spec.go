@@ -13,8 +13,50 @@ const (
 	defaultJitter = 1 * time.Second
 )
 
-func getNextTime(
-	spec *schedpb.ScheduleSpec,
+type (
+	compiledSpec struct {
+		spec     *schedpb.ScheduleSpec
+		tz       *time.Location
+		calendar []*calendarMatcher
+		excludes []*calendarMatcher
+	}
+)
+
+func newCompiledSpec(spec *schedpb.ScheduleSpec) (*compiledSpec, error) {
+	tz, err := loadTimezone(spec)
+	if err != nil {
+		return nil, err
+	}
+
+	cspec := &compiledSpec{
+		spec:     spec,
+		tz:       tz,
+		calendar: make([]*calendarMatcher, len(spec.Calendar)),
+		excludes: make([]*calendarMatcher, len(spec.ExcludeCalendar)),
+	}
+
+	for i, cal := range spec.Calendar {
+		if cspec.calendar[i], err = newCalendarMatcher(cal, tz); err != nil {
+			return nil, err
+		}
+	}
+	for i, excal := range spec.ExcludeCalendar {
+		if cspec.excludes[i], err = newCalendarMatcher(excal, tz); err != nil {
+			return nil, err
+		}
+	}
+
+	return cspec, nil
+}
+
+func loadTimezone(spec *schedpb.ScheduleSpec) (*time.Location, error) {
+	if spec.TimezoneData != nil {
+		return time.LoadLocationFromTZData(spec.TimezoneName, spec.TimezoneData)
+	}
+	return time.LoadLocation(spec.TimezoneName)
+}
+
+func (cs *compiledSpec) getNextTime(
 	state *schedpb.ScheduleState,
 	after time.Time,
 	doingBackfill bool,
@@ -24,27 +66,20 @@ func getNextTime(
 		return
 	}
 
-	tz, err := loadTimezone(spec)
-	if err != nil {
-		// FIXME: log error
-		has = false
-		return
-	}
-
-	if spec.NotBefore != nil && after.Before(*spec.NotBefore) {
-		after = spec.NotBefore.Add(-time.Second)
+	if cs.spec.NotBefore != nil && after.Before(*cs.spec.NotBefore) {
+		after = cs.spec.NotBefore.Add(-time.Second)
 	}
 
 	for {
-		nominal = rawNextTime(spec, after, tz)
+		nominal = cs.rawNextTime(after)
 
-		if nominal.IsZero() || (spec.NotAfter != nil && nominal.After(*spec.NotAfter)) {
+		if nominal.IsZero() || (cs.spec.NotAfter != nil && nominal.After(*cs.spec.NotAfter)) {
 			has = false
 			return
 		}
 
 		// check against excludes
-		if !excluded(nominal, spec.ExcludeCalendar, tz) {
+		if !cs.excluded(nominal) {
 			break
 		}
 
@@ -52,33 +87,27 @@ func getNextTime(
 	}
 
 	// Ensure that jitter doesn't push this time past the _next_ nominal start time
-	following := rawNextTime(spec, nominal, tz)
-	next = addJitter(spec, nominal, following.Sub(nominal))
+	following := cs.rawNextTime(nominal)
+	next = cs.addJitter(nominal, following.Sub(nominal))
 
 	return
 }
 
-func rawNextTime(
-	spec *schedpb.ScheduleSpec,
-	after time.Time,
-	tz *time.Location,
-) (nominal time.Time) {
+func (cs *compiledSpec) rawNextTime(after time.Time) (nominal time.Time) {
 	var minTimestamp int64 = math.MaxInt64 // unix seconds-since-epoch as int64
 
-	for _, cal := range spec.Calendar {
-		if matcher, err := newCalendarMatcher(cal, tz); err == nil {
-			if next := matcher.nextCalendarTime(after); !next.IsZero() {
-				nextTs := next.Unix()
-				if nextTs < minTimestamp {
-					minTimestamp = nextTs
-				}
+	for _, cal := range cs.calendar {
+		if next := cal.nextCalendarTime(after); !next.IsZero() {
+			nextTs := next.Unix()
+			if nextTs < minTimestamp {
+				minTimestamp = nextTs
 			}
 		}
 	}
 
 	ts := after.Unix()
-	for _, iv := range spec.Interval {
-		next := nextIntervalTime(iv, ts)
+	for _, iv := range cs.spec.Interval {
+		next := cs.nextIntervalTime(iv, ts)
 		if next < minTimestamp {
 			minTimestamp = next
 		}
@@ -90,7 +119,7 @@ func rawNextTime(
 	return time.Unix(minTimestamp, 0).UTC()
 }
 
-func nextIntervalTime(iv *schedpb.IntervalSpec, ts int64) int64 {
+func (cs *compiledSpec) nextIntervalTime(iv *schedpb.IntervalSpec, ts int64) int64 {
 	interval := int64(timestamp.DurationValue(iv.Interval) / time.Second)
 	if interval < 1 {
 		interval = 1
@@ -102,19 +131,17 @@ func nextIntervalTime(iv *schedpb.IntervalSpec, ts int64) int64 {
 	return (((ts-phase)/interval)+1)*interval + phase
 }
 
-func excluded(nominal time.Time, excludes []*schedpb.CalendarSpec, tz *time.Location) bool {
-	for _, exclude := range excludes {
-		if ms, err := newCalendarMatcher(exclude, tz); err == nil {
-			if ms.matches(nominal) {
-				return true
-			}
+func (cs *compiledSpec) excluded(nominal time.Time) bool {
+	for _, excal := range cs.excludes {
+		if excal.matches(nominal) {
+			return true
 		}
 	}
 	return false
 }
 
-func addJitter(spec *schedpb.ScheduleSpec, nominal time.Time, limit time.Duration) time.Time {
-	maxJitter := timestamp.DurationValue(spec.Jitter)
+func (cs *compiledSpec) addJitter(nominal time.Time, limit time.Duration) time.Time {
+	maxJitter := timestamp.DurationValue(cs.spec.Jitter)
 	if maxJitter == 0 {
 		maxJitter = defaultJitter
 	}
