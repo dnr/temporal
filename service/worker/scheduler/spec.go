@@ -17,8 +17,8 @@ type (
 	compiledSpec struct {
 		spec     *schedpb.ScheduleSpec
 		tz       *time.Location
-		calendar []*calendarMatcher
-		excludes []*calendarMatcher
+		calendar []*compiledCalendar
+		excludes []*compiledCalendar
 	}
 )
 
@@ -31,17 +31,17 @@ func newCompiledSpec(spec *schedpb.ScheduleSpec) (*compiledSpec, error) {
 	cspec := &compiledSpec{
 		spec:     spec,
 		tz:       tz,
-		calendar: make([]*calendarMatcher, len(spec.Calendar)),
-		excludes: make([]*calendarMatcher, len(spec.ExcludeCalendar)),
+		calendar: make([]*compiledCalendar, len(spec.Calendar)),
+		excludes: make([]*compiledCalendar, len(spec.ExcludeCalendar)),
 	}
 
 	for i, cal := range spec.Calendar {
-		if cspec.calendar[i], err = newCalendarMatcher(cal, tz); err != nil {
+		if cspec.calendar[i], err = newCompiledCalendar(cal, tz); err != nil {
 			return nil, err
 		}
 	}
 	for i, excal := range spec.ExcludeCalendar {
-		if cspec.excludes[i], err = newCalendarMatcher(excal, tz); err != nil {
+		if cspec.excludes[i], err = newCompiledCalendar(excal, tz); err != nil {
 			return nil, err
 		}
 	}

@@ -13,7 +13,7 @@ import (
 type (
 	parseMode int
 
-	calendarMatcher struct {
+	compiledCalendar struct {
 		tz *time.Location
 
 		year, month, dayOfMonth, dayOfWeek, hour, minute, second func(int) bool
@@ -64,44 +64,46 @@ var (
 )
 
 // TODO: test with fuzzing
+// TODO: days from end of month
+// TODO: nth weekday of month
 
-func newCalendarMatcher(cal *schedpb.CalendarSpec, tz *time.Location) (*calendarMatcher, error) {
-	ms := &calendarMatcher{tz: tz}
+func newCompiledCalendar(cal *schedpb.CalendarSpec, tz *time.Location) (*compiledCalendar, error) {
+	cc := &compiledCalendar{tz: tz}
 	var err error
-	if ms.year, err = makeMatcher(cal.Year, "*", minCalendarYear, maxCalendarYear, parseModeInt); err != nil {
+	if cc.year, err = makeMatcher(cal.Year, "*", minCalendarYear, maxCalendarYear, parseModeInt); err != nil {
 		return nil, err
-	} else if ms.month, err = makeMatcher(cal.Month, "*", 1, 12, parseModeMonth); err != nil {
+	} else if cc.month, err = makeMatcher(cal.Month, "*", 1, 12, parseModeMonth); err != nil {
 		return nil, err
-	} else if ms.dayOfMonth, err = makeMatcher(cal.DayOfMonth, "*", 1, 31, parseModeInt); err != nil {
+	} else if cc.dayOfMonth, err = makeMatcher(cal.DayOfMonth, "*", 1, 31, parseModeInt); err != nil {
 		return nil, err
-	} else if ms.dayOfWeek, err = makeMatcher(cal.DayOfWeek, "*", 0, 7, parseModeDow); err != nil {
+	} else if cc.dayOfWeek, err = makeMatcher(cal.DayOfWeek, "*", 0, 7, parseModeDow); err != nil {
 		return nil, err
-	} else if ms.hour, err = makeMatcher(cal.Hour, "0", 0, 23, parseModeInt); err != nil {
+	} else if cc.hour, err = makeMatcher(cal.Hour, "0", 0, 23, parseModeInt); err != nil {
 		return nil, err
-	} else if ms.minute, err = makeMatcher(cal.Minute, "0", 0, 59, parseModeInt); err != nil {
+	} else if cc.minute, err = makeMatcher(cal.Minute, "0", 0, 59, parseModeInt); err != nil {
 		return nil, err
-	} else if ms.second, err = makeMatcher(cal.Second, "0", 0, 59, parseModeInt); err != nil {
+	} else if cc.second, err = makeMatcher(cal.Second, "0", 0, 59, parseModeInt); err != nil {
 		return nil, err
 	}
-	return ms, nil
+	return cc, nil
 }
 
-func (ms *calendarMatcher) matches(ts time.Time) bool {
+func (cc *compiledCalendar) matches(ts time.Time) bool {
 	// set time zone
-	ts = ts.In(ms.tz)
+	ts = ts.In(cc.tz)
 
 	// get ymdhms from ts
 	y, mo, d := ts.Date()
 	h, m, s := ts.Clock()
 
-	return ms.year(y) && ms.month(int(mo)) && ms.dayOfMonth(d) &&
-		ms.dayOfWeek(int(ts.Weekday())) &&
-		ms.hour(h) && ms.minute(m) && ms.second(s)
+	return cc.year(y) && cc.month(int(mo)) && cc.dayOfMonth(d) &&
+		cc.dayOfWeek(int(ts.Weekday())) &&
+		cc.hour(h) && cc.minute(m) && cc.second(s)
 }
 
-func (ms *calendarMatcher) nextCalendarTime(ts time.Time) time.Time {
+func (cc *compiledCalendar) nextCalendarTime(ts time.Time) time.Time {
 	// set time zone
-	ts = ts.In(ms.tz)
+	ts = ts.In(cc.tz)
 
 	// get ymdhms from ts
 	y, mo, d := ts.Date()
@@ -131,42 +133,42 @@ Outer:
 			break Outer
 		}
 		// try to match year, month, etc. from outside in
-		if !ms.year(y) {
+		if !cc.year(y) {
 			y, mo, d, h, m, s = y+1, time.January, 1, 0, 0, 0
 			continue Outer
 		}
-		for !ms.month(int(mo)) {
+		for !cc.month(int(mo)) {
 			mo, d, h, m, s = mo+1, 1, 0, 0, 0
 			if mo > time.December {
 				continue Outer
 			}
 		}
-		for !ms.dayOfMonth(d) || !ms.dayOfWeek(int(time.Date(y, mo, d, h, m, s, 0, ms.tz).Weekday())) {
+		for !cc.dayOfMonth(d) || !cc.dayOfWeek(int(time.Date(y, mo, d, h, m, s, 0, cc.tz).Weekday())) {
 			d, h, m, s = d+1, 0, 0, 0
 			if d > daysInMonth(mo, y) {
 				continue Outer
 			}
 		}
-		for !ms.hour(h) {
+		for !cc.hour(h) {
 			h, m, s = h+1, 0, 0
 			if h >= 24 {
 				continue Outer
 			}
 		}
-		for !ms.minute(m) {
+		for !cc.minute(m) {
 			m, s = m+1, 0
 			if m >= 60 {
 				continue Outer
 			}
 		}
-		for !ms.second(s) {
+		for !cc.second(s) {
 			s = s + 1
 			if s >= 60 {
 				continue Outer
 			}
 		}
 		// everything matches
-		return time.Date(y, mo, d, h, m, s, 0, ms.tz)
+		return time.Date(y, mo, d, h, m, s, 0, cc.tz)
 	}
 
 	// no more matching times (up to max we checked)
