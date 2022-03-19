@@ -25,15 +25,12 @@
 package scheduler
 
 import (
-	"context"
-	"errors"
 	"fmt"
 	"time"
 
 	enumspb "go.temporal.io/api/enums/v1"
 	schedpb "go.temporal.io/api/schedule/v1"
 	"go.temporal.io/api/workflowservice/v1"
-	sdkclient "go.temporal.io/sdk/client"
 	sdklog "go.temporal.io/sdk/log"
 	"go.temporal.io/sdk/temporal"
 	"go.temporal.io/sdk/workflow"
@@ -77,8 +74,11 @@ type (
 		ctx    workflow.Context
 		a      *activities
 		logger sdklog.Logger
+
 		schedpb.Schedule
+
 		internalState
+
 		cspec *compiledSpec
 
 		// Invariant: wfWatcher != nil iff [we think] a workflow is running
@@ -88,29 +88,6 @@ type (
 
 		// FIXME: conflict token
 		// FIXME: request id list for deduping
-	}
-
-	watchWorkflowRequest struct {
-		WorkflowID string
-		RunID      string
-	}
-
-	watchWorkflowResponse struct {
-		// failed is true iff workflow "failed" or "timed out" (cancel and terminate do not count)
-		Failed bool
-		// err has error details if any
-		WorkflowError string
-		// unretriable client error
-		Error error
-	}
-
-	startWorkflowRequest struct {
-		Request *workflowservice.StartWorkflowExecutionRequest
-	}
-
-	startWorkflowResponse struct {
-		Response workflowservice.StartWorkflowExecutionResponse
-		Error    error
 	}
 )
 
@@ -590,20 +567,4 @@ func (s *scheduler) startWorkflowWithAllowAll(
 	timeStr := nominalTime.UTC().Format(time.RFC3339)
 
 	// No watcher needed
-}
-
-func (a *activities) StartWorkflow(ctx context.Context, req *startWorkflowRequest) *startWorkflowResponse {
-	// send req directly to frontend, or to history?
-	return &startWorkflowResponse{Error: errors.New("FIXME")}
-}
-
-func (a *activities) WatchWorkflow(ctx context.Context, req *watchWorkflowRequest) *watchWorkflowResponse {
-	// FIXME: don't forget to heartbeat
-	return &watchWorkflowResponse{Error: errors.New("FIXME")}
-}
-
-func (a *activities) CancelWorkflow(ctx context.Context, id string) error {
-	return nil, errors.New("FIXME")
-	cli := sdkclient.Client()
-	err := cli.CancelWorkflow(id, "")
 }
