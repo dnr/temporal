@@ -27,6 +27,7 @@ package scheduler
 import (
 	"go.uber.org/fx"
 
+	sdkclient "go.temporal.io/sdk/client"
 	sdkworker "go.temporal.io/sdk/worker"
 	"go.temporal.io/sdk/workflow"
 	"go.temporal.io/server/common/log"
@@ -43,6 +44,7 @@ type (
 		fx.In
 		MetricsClient metrics.Client
 		Logger        log.Logger
+		SdkClient     sdkclient.Client
 	}
 
 	fxResult struct {
@@ -78,5 +80,6 @@ func (s *schedulerWorker) activities() *activities {
 	return &activities{
 		metricsClient: s.MetricsClient,
 		logger:        s.Logger,
+		sdkClient:     s.SdkClient,
 	}
 }

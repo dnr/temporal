@@ -28,6 +28,7 @@ import (
 	"fmt"
 	"time"
 
+	commonpb "go.temporal.io/api/common/v1"
 	enumspb "go.temporal.io/api/enums/v1"
 	schedpb "go.temporal.io/api/schedule/v1"
 	"go.temporal.io/api/workflowservice/v1"
@@ -35,8 +36,6 @@ import (
 	"go.temporal.io/sdk/temporal"
 	"go.temporal.io/sdk/workflow"
 
-	"go.temporal.io/server/common/log"
-	"go.temporal.io/server/common/metrics"
 	"go.temporal.io/server/common/primitives/timestamp"
 )
 
@@ -53,11 +52,6 @@ const (
 )
 
 type (
-	activities struct {
-		metricsClient metrics.Client
-		logger        log.Logger
-	}
-
 	bufferedStart struct {
 		Nominal, Actual time.Time
 		Overlap         enumspb.ScheduleOverlapPolicy
@@ -418,7 +412,7 @@ func (s *scheduler) processBuffer() {
 	// Just run everything with allow all since they can't conflict. Filter them
 	// out of the buffer at the same time.
 	var nextBufferedStarts []*bufferedStart
-	for i, start := range s.BufferedStarts {
+	for _, start := range s.BufferedStarts {
 		if s.resolveOverlapPolicy(start.Overlap) != enumspb.SCHEDULE_OVERLAP_POLICY_ALLOW_ALL {
 			// pass through to loop below
 			nextBufferedStarts = append(nextBufferedStarts, start)
@@ -446,7 +440,7 @@ func (s *scheduler) processBuffer() {
 
 	// Recreate the rest of the buffer in here as we're processing
 	nextBufferedStarts = nil
-	for i, start := range s.BufferedStarts {
+	for _, start := range s.BufferedStarts {
 		// If there's nothing running, we can start this one no matter what the policy is
 		if !s.isRunning() && pendingStart == nil {
 			pendingStart = start
@@ -527,15 +521,15 @@ func (s *scheduler) startWorkflow(
 	// cron_schedule: FIXME
 
 	actCtx1 := workflow.WithActivityOptions(s.ctx, workflow.ActivityOptions{RetryPolicy: defaultActivityRetryPolicy})
-	var result error
-	err := workflow.ExecuteActivity(actCtx1, s.a.StartWorkflow, req).Get(s.ctx, &result)
+	var response startWorkflowResponse
+	err := workflow.ExecuteActivity(actCtx1, s.a.StartWorkflow, req).Get(s.ctx, &response)
 	if err != nil {
 		// FIXME
-		return
+		return nil, err
 	}
-	if result != nil {
+	if response.Error != nil {
 		// FIXME
-		return
+		return nil, response.Error
 	}
 
 	// Start background activity to watch the workflow
@@ -545,16 +539,16 @@ func (s *scheduler) startWorkflow(
 	})
 	actCtx2, s.wfWatcherCancel = workflow.WithCancel(actCtx2)
 	s.wfWatcher = workflow.ExecuteActivity(actCtx2, s.a.WatchWorkflow, &watchWorkflowRequest{
-		WorkflowID: id,
-		RunID:      runid,
+		WorkflowID: req.WorkflowId,
+		RunID:      response.Response.RunId,
 	})
 
 	return &schedpb.ScheduleActionResult{
-		ScheduleTime: asdf,
-		ActualTime:   adsf,
-		&schedpb.StartWorkflowResult{
-			WorkflowId: asdf,
-			RunId:      asdf,
+		ScheduleTime: timestamp.TimePtr(start.Actual),
+		ActualTime:   timestamp.TimePtr(response.RealTime),
+		StartWorkflowResult: &commonpb.WorkflowExecution{
+			WorkflowId: req.WorkflowId,
+			RunId:      response.Response.RunId,
 		},
 	}, nil
 }
@@ -564,7 +558,13 @@ func (s *scheduler) startWorkflowWithAllowAll(
 	req *workflowservice.StartWorkflowExecutionRequest,
 ) (*schedpb.ScheduleActionResult, error) {
 	// We append the nominal time to the workflow id
-	timeStr := nominalTime.UTC().Format(time.RFC3339)
+	timeStr := start.Nominal.UTC().Format(time.RFC3339)
+	_ = timeStr
 
 	// No watcher needed
+	return nil, nil // FIXME
+}
+
+func (s *scheduler) cancelWorkflow() {
+	// FIXME: start and wait for cancel activity
 }

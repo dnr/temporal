@@ -27,12 +27,21 @@ package scheduler
 import (
 	"context"
 	"errors"
+	"time"
 
 	"go.temporal.io/api/workflowservice/v1"
 	sdkclient "go.temporal.io/sdk/client"
+	"go.temporal.io/server/common/log"
+	"go.temporal.io/server/common/metrics"
 )
 
 type (
+	activities struct {
+		metricsClient metrics.Client
+		logger        log.Logger
+		sdkClient     sdkclient.Client
+	}
+
 	watchWorkflowRequest struct {
 		WorkflowID string
 		RunID      string
@@ -52,7 +61,8 @@ type (
 	}
 
 	startWorkflowResponse struct {
-		Response workflowservice.StartWorkflowExecutionResponse
+		Response *workflowservice.StartWorkflowExecutionResponse
+		RealTime time.Time
 		Error    error
 	}
 )
@@ -68,7 +78,5 @@ func (a *activities) WatchWorkflow(ctx context.Context, req *watchWorkflowReques
 }
 
 func (a *activities) CancelWorkflow(ctx context.Context, id string) error {
-	return nil, errors.New("FIXME")
-	cli := sdkclient.Client()
-	err := cli.CancelWorkflow(id, "")
+	return a.sdkClient.CancelWorkflow(ctx, id, "")
 }

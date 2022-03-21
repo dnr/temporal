@@ -67,6 +67,7 @@ var (
 		"february",
 		"march",
 		"april",
+		"may",
 		"june",
 		"july",
 		"august",
@@ -308,15 +309,22 @@ func parseValue(s string, min, max int, parseMode parseMode) (int, error) {
 			s = strings.ToLower(s)
 			for i, month := range monthStrings {
 				if strings.HasPrefix(month, s) {
-					return i + 1, nil
+					i++
+					if i < min || i > max {
+						return i, errOutOfRange
+					}
+					return i, nil
 				}
 			}
 		}
 	} else if parseMode == parseModeDow {
 		if len(s) >= 2 {
 			s = strings.ToLower(s)
-			for i, dow := range monthStrings {
+			for i, dow := range dowStrings {
 				if strings.HasPrefix(dow, s) {
+					if i < min || i > max {
+						return i, errOutOfRange
+					}
 					return i, nil
 				}
 			}
