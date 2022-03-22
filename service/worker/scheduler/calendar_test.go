@@ -121,6 +121,23 @@ func (s *calendarSuite) TestCalendarNextBasic() {
 	s.Equal(time.Date(2022, time.March, 16, 5, 55, 55, 0, pacific), next)
 }
 
+func (s *calendarSuite) TestCalendarNextDST() {
+	pacific, err := time.LoadLocation("US/Pacific")
+	s.NoError(err)
+	cc, err := newCompiledCalendar(&schedpb.CalendarSpec{
+		Second: "33",
+		Minute: "33",
+		Hour:   "2",
+	}, pacific)
+	next := cc.nextCalendarTime(time.Date(2022, time.March, 11, 20, 0, 0, 0, pacific))
+	s.Equal(time.Date(2022, time.March, 12, 2, 33, 33, 0, pacific), next)
+	// march 13 has no 2:33:33
+	next = cc.nextCalendarTime(time.Date(2022, time.March, 13, 1, 15, 15, 0, pacific))
+	s.Equal(time.Date(2022, time.March, 14, 2, 33, 33, 0, pacific), next)
+	// next = cc.nextCalendarTime(time.Date(2022, time.March, 13, 1, 59, 59, 0, pacific))
+	// s.Equal(time.Date(2022, time.March, 14, 2, 33, 33, 0, pacific), next)
+}
+
 func (s *calendarSuite) TestMakeMatcher() {
 	check := func(str string, min, max int, parseMode parseMode, expected ...int) {
 		s.T().Helper()

@@ -175,7 +175,13 @@ Outer:
 			}
 		}
 		for !cc.hour(h) {
+			// we might cross a dst transition. make sure we're increasing real time monotonically.
+			// TODO: handle DST transitions that happen right at midnight
+			prevTs := time.Date(y, mo, d, h, m, s, 0, cc.tz).Unix()
 			h, m, s = h+1, 0, 0
+			if time.Date(y, mo, d, h, m, s, 0, cc.tz).Unix() <= prevTs {
+				h++
+			}
 			if h >= 24 {
 				continue Outer
 			}
