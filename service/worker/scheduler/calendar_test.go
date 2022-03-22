@@ -51,6 +51,7 @@ func (s *calendarSuite) TestCalendarMatch() {
 	s.True(cc.matches(time.Date(2022, time.March, 18, 0, 0, 0, 0, time.UTC)))
 	s.False(cc.matches(time.Date(2022, time.March, 18, 5, 15, 0, 0, time.UTC)))
 
+	// match another tz
 	s.False(cc.matches(time.Date(2022, time.March, 17, 0, 0, 0, 0, pacific)))
 	s.True(cc.matches(time.Date(2022, time.March, 17, 17, 0, 0, 0, pacific)))
 
@@ -62,8 +63,8 @@ func (s *calendarSuite) TestCalendarMatch() {
 	s.True(cc.matches(time.Date(2022, time.March, 17, 14, 5, 0, 0, time.UTC)))
 	s.False(cc.matches(time.Date(2022, time.March, 17, 14, 5, 33, 0, time.UTC)))
 	s.False(cc.matches(time.Date(2022, time.March, 17, 14, 15, 0, 0, time.UTC)))
-	s.True(cc.matches(time.Date(2022, time.March, 18, 03, 9, 0, 0, pacific)))
-	s.False(cc.matches(time.Date(2022, time.March, 18, 03, 9, 0, 0, time.UTC)))
+	s.True(cc.matches(time.Date(2022, time.March, 18, 3, 9, 0, 0, pacific)))
+	s.False(cc.matches(time.Date(2022, time.March, 18, 3, 9, 0, 0, time.UTC)))
 
 	cc, err = newCompiledCalendar(&schedpb.CalendarSpec{
 		Second:     "55",
@@ -80,14 +81,44 @@ func (s *calendarSuite) TestCalendarMatch() {
 	s.False(cc.matches(time.Date(2022, time.February, 9, 5, 55, 55, 0, pacific)))
 	s.True(cc.matches(time.Date(2022, time.February, 10, 5, 55, 55, 0, pacific)))
 	s.False(cc.matches(time.Date(2022, time.February, 10, 1, 55, 55, 0, pacific)))
+	// match another zone
 	s.True(cc.matches(time.Date(2022, time.March, 10, 13, 55, 55, 0, time.UTC)))
+	// offset changes between march 10 and 16
 	s.False(cc.matches(time.Date(2022, time.March, 16, 13, 55, 55, 0, time.UTC)))
+	// correct offset
 	s.True(cc.matches(time.Date(2022, time.March, 16, 12, 55, 55, 0, time.UTC)))
 }
 
 func (s *calendarSuite) TestCalendarNextBasic() {
 	pacific, err := time.LoadLocation("US/Pacific")
 	s.NoError(err)
+
+	cc, err := newCompiledCalendar(&schedpb.CalendarSpec{
+		Second:     "55",
+		Minute:     "55",
+		Hour:       "5",
+		DayOfWeek:  "wed-thurs",
+		DayOfMonth: "2/2",
+	}, pacific)
+	s.NoError(err)
+	// only increment second
+	next := cc.nextCalendarTime(time.Date(2022, time.March, 2, 5, 55, 33, 0, pacific))
+	s.Equal(time.Date(2022, time.March, 2, 5, 55, 55, 0, pacific), next)
+	// increment minute, second
+	next = cc.nextCalendarTime(time.Date(2022, time.March, 2, 5, 33, 33, 0, pacific))
+	s.Equal(time.Date(2022, time.March, 2, 5, 55, 55, 0, pacific), next)
+	// increment hour, minute, second
+	next = cc.nextCalendarTime(time.Date(2022, time.March, 2, 3, 33, 33, 0, pacific))
+	s.Equal(time.Date(2022, time.March, 2, 5, 55, 55, 0, pacific), next)
+	// increment days
+	next = cc.nextCalendarTime(time.Date(2022, time.March, 1, 1, 11, 11, 0, pacific))
+	s.Equal(time.Date(2022, time.March, 2, 5, 55, 55, 0, pacific), next)
+	// from exact match
+	next = cc.nextCalendarTime(time.Date(2022, time.March, 2, 5, 55, 55, 0, pacific))
+	s.Equal(time.Date(2022, time.March, 10, 5, 55, 55, 0, pacific), next)
+	// crossing dst but not near it
+	next = cc.nextCalendarTime(time.Date(2022, time.March, 10, 5, 55, 55, 0, pacific))
+	s.Equal(time.Date(2022, time.March, 16, 5, 55, 55, 0, pacific), next)
 }
 
 func (s *calendarSuite) TestMakeMatcher() {
