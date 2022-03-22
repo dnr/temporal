@@ -40,17 +40,53 @@ func TestCalendar(t *testing.T) {
 	suite.Run(t, new(calendarSuite))
 }
 
-func (s *calendarSuite) TestCalendarMatchBasic() {
+func (s *calendarSuite) TestCalendarMatch() {
+	pacific, err := time.LoadLocation("US/Pacific")
+	s.NoError(err)
+
 	// default is midnight once a day
 	cc, err := newCompiledCalendar(&schedpb.CalendarSpec{}, time.UTC)
 	s.NoError(err)
+	s.True(cc.matches(time.Date(2022, time.March, 17, 0, 0, 0, 0, time.UTC)))
 	s.True(cc.matches(time.Date(2022, time.March, 18, 0, 0, 0, 0, time.UTC)))
 	s.False(cc.matches(time.Date(2022, time.March, 18, 5, 15, 0, 0, time.UTC)))
+
+	s.False(cc.matches(time.Date(2022, time.March, 17, 0, 0, 0, 0, pacific)))
+	s.True(cc.matches(time.Date(2022, time.March, 17, 17, 0, 0, 0, pacific)))
 
 	cc, err = newCompiledCalendar(&schedpb.CalendarSpec{
 		Minute: "5,9",
 		Hour:   "*/2",
 	}, time.UTC)
+	s.NoError(err)
+	s.True(cc.matches(time.Date(2022, time.March, 17, 14, 5, 0, 0, time.UTC)))
+	s.False(cc.matches(time.Date(2022, time.March, 17, 14, 5, 33, 0, time.UTC)))
+	s.False(cc.matches(time.Date(2022, time.March, 17, 14, 15, 0, 0, time.UTC)))
+	s.True(cc.matches(time.Date(2022, time.March, 18, 03, 9, 0, 0, pacific)))
+	s.False(cc.matches(time.Date(2022, time.March, 18, 03, 9, 0, 0, time.UTC)))
+
+	cc, err = newCompiledCalendar(&schedpb.CalendarSpec{
+		Second:     "55",
+		Minute:     "55",
+		Hour:       "5",
+		DayOfWeek:  "wed-thurs",
+		DayOfMonth: "2/2",
+	}, pacific)
+	s.NoError(err)
+	s.False(cc.matches(time.Date(2022, time.March, 9, 5, 55, 55, 0, pacific)))
+	s.True(cc.matches(time.Date(2022, time.March, 10, 5, 55, 55, 0, pacific)))
+	s.False(cc.matches(time.Date(2022, time.March, 14, 5, 55, 55, 0, pacific)))
+	s.True(cc.matches(time.Date(2022, time.March, 16, 5, 55, 55, 0, pacific)))
+	s.False(cc.matches(time.Date(2022, time.February, 9, 5, 55, 55, 0, pacific)))
+	s.True(cc.matches(time.Date(2022, time.February, 10, 5, 55, 55, 0, pacific)))
+	s.False(cc.matches(time.Date(2022, time.February, 10, 1, 55, 55, 0, pacific)))
+	s.True(cc.matches(time.Date(2022, time.March, 10, 13, 55, 55, 0, time.UTC)))
+	s.False(cc.matches(time.Date(2022, time.March, 16, 13, 55, 55, 0, time.UTC)))
+	s.True(cc.matches(time.Date(2022, time.March, 16, 12, 55, 55, 0, time.UTC)))
+}
+
+func (s *calendarSuite) TestCalendarNextBasic() {
+	pacific, err := time.LoadLocation("US/Pacific")
 	s.NoError(err)
 }
 

@@ -240,6 +240,7 @@ func (s *scheduler) processTimeRange(
 		return 0, false
 	}
 
+	// FIXME: consider wrapping in modifiable side effect so it can be changed easily?
 	catchupWindow := s.getCatchupWindow()
 
 	for {
