@@ -133,6 +133,11 @@ func (cc *compiledCalendar) next(ts time.Time) time.Time {
 	// get ymdhms from ts
 	y, mo, d := ts.Date()
 	h, m, s := ts.Clock()
+	dstoffset := 0 * time.Hour
+	if ts.Add(-time.Hour).Hour() == h {
+		// we're in the second copy of a dst repeated hour
+		dstoffset = 1 * time.Hour
+	}
 
 	// looking for first matching time after ts, so add 1 second
 	s++
@@ -143,7 +148,17 @@ Outer:
 			m, s = m+1, 0
 		}
 		if m >= 60 {
+			prev := time.Date(y, mo, d, h, 0, 0, 0, cc.tz)
 			h, m = h+1, 0
+			next := time.Date(y, mo, d, h, 0, 0, 0, cc.tz)
+			// if we moved to the next hour but it's two hours later, then we skipped over
+			// a dst repeated hour. try it again with an offset.
+			if dstoffset == 0 && next.Sub(prev) > time.Hour {
+				h = h - 1
+				dstoffset = 1 * time.Hour
+			} else {
+				dstoffset = 0
+			}
 		}
 		if h >= 24 {
 			d, h = d+1, 0
@@ -193,14 +208,14 @@ Outer:
 			}
 		}
 		// everything matches
-		ts := time.Date(y, mo, d, h, m, s, 0, cc.tz)
+		nextTs := time.Date(y, mo, d, h, m, s, 0, cc.tz)
 		// we might have reached a nonexistent time that got jumped over by a dst transition.
 		// we can tell if the hour is different from what we think it should be.
-		if ts.Hour() != h {
-			h = h + 1
+		if nextTs.Hour() != h {
+			h, m, s = h+1, 0, 0
 			continue Outer
 		}
-		return ts
+		return nextTs.Add(dstoffset)
 	}
 
 	// no more matching times (up to max we checked)

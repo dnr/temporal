@@ -138,7 +138,7 @@ func (s *calendarSuite) TestGoDSTBehavior() {
 }
 
 func (s *calendarSuite) TestCalendarNextDST() {
-	pacific, err := time.LoadLocation("US/Pacific")
+	pacific, err := time.LoadLocation("US/Pacific") // switches at 2am
 	s.NoError(err)
 
 	// spring forward
@@ -158,16 +158,24 @@ func (s *calendarSuite) TestCalendarNextDST() {
 	// jump back
 	cc, err = newCompiledCalendar(&schedpb.CalendarSpec{
 		Second: "33",
-		Minute: "33",
+		Minute: "33,44",
 		Hour:   "1",
 	}, pacific)
-	next = cc.next(time.Date(2021, time.November, 7, 0, 0, 0, 0, pacific))
+	// nov 7 has two 1:33:33s and 1:44:33s
+	next = cc.next(time.Date(2021, time.November, 7, 0, 15, 15, 0, pacific))
 	s.Equal(time.Date(2021, time.November, 7, 1, 33, 33, 0, pacific), next)
-	// nov 7 has two 1:33:33s, 1636274013 and 1636277613.
-	next = cc.next(time.Date(2021, time.November, 7, 1, 15, 15, 0, pacific))
-	s.Equal(int64(1636274013), next.Unix())
-	// next = cc.next(next)
-	// s.Equal(int64(1636277613), next.Unix())
+	next = cc.next(next)
+	s.Equal(time.Date(2021, time.November, 7, 1, 44, 33, 0, pacific), next)
+	next = cc.next(next)
+	s.Equal(time.Date(2021, time.November, 7, 1, 33, 33, 0, pacific).Add(time.Hour), next)
+	next = cc.next(next)
+	s.Equal(time.Date(2021, time.November, 7, 1, 44, 33, 0, pacific).Add(time.Hour), next)
+	next = cc.next(next)
+	s.Equal(time.Date(2021, time.November, 8, 1, 33, 33, 0, pacific), next)
+}
+
+func (s *calendarSuite) TestCalendarNextDSTInZoneThatSwitchesAtMidnight() {
+	// TODO
 }
 
 func (s *calendarSuite) TestMakeMatcher() {
