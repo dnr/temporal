@@ -121,9 +121,27 @@ func (s *calendarSuite) TestCalendarNextBasic() {
 	s.Equal(time.Date(2022, time.March, 16, 5, 55, 55, 0, pacific), next)
 }
 
+func (s *calendarSuite) TestGoDSTBehavior() {
+	pacific, err := time.LoadLocation("US/Pacific")
+	s.NoError(err)
+	// The time package's behavior when given a nonexistent time like 2022-03-13T02:33 is
+	// to return the previous hour. We depend on this, so check it here.
+	t1 := time.Date(2022, time.March, 13, 1, 33, 33, 0, pacific)
+	t2 := time.Date(2022, time.March, 13, 2, 33, 33, 0, pacific)
+	s.Equal(t1, t2)
+	// When given a time that occurs twice like 2021-11-07T01:33, it returns the earlier one.
+	t4 := time.Date(2021, time.November, 7, 0, 33, 33, 0, pacific)
+	t5 := time.Date(2021, time.November, 7, 1, 33, 33, 0, pacific)
+	t6 := time.Date(2021, time.November, 7, 2, 33, 33, 0, pacific)
+	s.Equal(1*time.Hour, t5.Sub(t4))
+	s.Equal(2*time.Hour, t6.Sub(t5))
+}
+
 func (s *calendarSuite) TestCalendarNextDST() {
 	pacific, err := time.LoadLocation("US/Pacific")
 	s.NoError(err)
+
+	// spring forward
 	cc, err := newCompiledCalendar(&schedpb.CalendarSpec{
 		Second: "33",
 		Minute: "33",
@@ -136,6 +154,20 @@ func (s *calendarSuite) TestCalendarNextDST() {
 	s.Equal(time.Date(2022, time.March, 14, 2, 33, 33, 0, pacific), next)
 	next = cc.nextCalendarTime(time.Date(2022, time.March, 13, 1, 59, 59, 0, pacific))
 	s.Equal(time.Date(2022, time.March, 14, 2, 33, 33, 0, pacific), next)
+
+	// jump back
+	cc, err = newCompiledCalendar(&schedpb.CalendarSpec{
+		Second: "33",
+		Minute: "33",
+		Hour:   "1",
+	}, pacific)
+	next = cc.nextCalendarTime(time.Date(2021, time.November, 7, 0, 0, 0, 0, pacific))
+	s.Equal(time.Date(2021, time.November, 7, 1, 33, 33, 0, pacific), next)
+	// nov 7 has two 1:33:33s, 1636274013 and 1636277613.
+	next = cc.nextCalendarTime(time.Date(2021, time.November, 7, 1, 15, 15, 0, pacific))
+	s.Equal(int64(1636274013), next.Unix())
+	// next = cc.nextCalendarTime(next)
+	// s.Equal(int64(1636277613), next.Unix())
 }
 
 func (s *calendarSuite) TestMakeMatcher() {

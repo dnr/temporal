@@ -135,7 +135,6 @@ func (cc *compiledCalendar) nextCalendarTime(ts time.Time) time.Time {
 	h, m, s := ts.Clock()
 
 	// looking for first matching time after ts, so add 1 second
-	prevTs := time.Date(y, mo, d, h, m, s, 0, cc.tz).Unix()
 	s++
 Outer:
 	for {
@@ -158,13 +157,6 @@ Outer:
 		if y > maxCalendarYear {
 			break Outer
 		}
-		// we might cross a dst transition. make sure we're increasing real time monotonically.
-		// TODO: handle DST transitions that happen right at midnight
-		newTs := time.Date(y, mo, d, h, m, s, 0, cc.tz).Unix()
-		if newTs <= prevTs {
-			h++
-		}
-		prevTs = newTs
 		// try to match year, month, etc. from outside in
 		if !cc.year(y) {
 			y, mo, d, h, m, s = y+1, time.January, 1, 0, 0, 0
@@ -184,10 +176,6 @@ Outer:
 		}
 		for !cc.hour(h) {
 			h, m, s = h+1, 0, 0
-			newTs := time.Date(y, mo, d, h, m, s, 0, cc.tz).Unix()
-			if newTs <= prevTs {
-				h++
-			}
 			if h >= 24 {
 				continue Outer
 			}
@@ -205,7 +193,14 @@ Outer:
 			}
 		}
 		// everything matches
-		return time.Date(y, mo, d, h, m, s, 0, cc.tz)
+		ts := time.Date(y, mo, d, h, m, s, 0, cc.tz)
+		// we might have reached a nonexistent time that got jumped over by a dst transition.
+		// we can tell if the hour is different from what we think it should be.
+		if ts.Hour() != h {
+			h = h + 1
+			continue Outer
+		}
+		return ts
 	}
 
 	// no more matching times (up to max we checked)
