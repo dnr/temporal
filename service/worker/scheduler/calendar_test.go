@@ -137,41 +137,52 @@ func (s *calendarSuite) TestGoDSTBehavior() {
 	s.Equal(2*time.Hour, t6.Sub(t5))
 }
 
+func (s *calendarSuite) checkSequence(spec *schedpb.CalendarSpec, tz *time.Location, start time.Time, seq ...time.Time) {
+	cc, err := newCompiledCalendar(spec, tz)
+	s.NoError(err)
+	for _, exp := range seq {
+		next := cc.next(start)
+		s.Equal(exp, next)
+		// every second between start and next should also end up at next
+		for ts := start.Unix(); ts < next.Unix(); ts++ {
+			s.Equal(exp, cc.next(time.Unix(ts, 0)), "failed on %v", ts)
+		}
+		start = next
+	}
+}
+
 func (s *calendarSuite) TestCalendarNextDST() {
 	pacific, err := time.LoadLocation("US/Pacific") // switches at 2am
 	s.NoError(err)
 
 	// spring forward
-	cc, err := newCompiledCalendar(&schedpb.CalendarSpec{
-		Second: "33",
-		Minute: "33",
-		Hour:   "2",
-	}, pacific)
-	next := cc.next(time.Date(2022, time.March, 11, 20, 0, 0, 0, pacific))
-	s.Equal(time.Date(2022, time.March, 12, 2, 33, 33, 0, pacific), next)
-	// march 13 has no 2:33:33
-	next = cc.next(time.Date(2022, time.March, 13, 1, 15, 15, 0, pacific))
-	s.Equal(time.Date(2022, time.March, 14, 2, 33, 33, 0, pacific), next)
-	next = cc.next(time.Date(2022, time.March, 13, 1, 59, 59, 0, pacific))
-	s.Equal(time.Date(2022, time.March, 14, 2, 33, 33, 0, pacific), next)
+	s.checkSequence(
+		&schedpb.CalendarSpec{
+			Second: "33",
+			Minute: "33",
+			Hour:   "2",
+		}, pacific,
+		time.Date(2022, time.March, 11, 20, 0, 0, 0, pacific),
+		time.Date(2022, time.March, 12, 2, 33, 33, 0, pacific),
+		// march 13 has no 2:33:33
+		time.Date(2022, time.March, 14, 2, 33, 33, 0, pacific),
+	)
 
 	// jump back
-	cc, err = newCompiledCalendar(&schedpb.CalendarSpec{
-		Second: "33",
-		Minute: "33,44",
-		Hour:   "1",
-	}, pacific)
-	// nov 7 has two 1:33:33s and 1:44:33s
-	next = cc.next(time.Date(2021, time.November, 7, 0, 15, 15, 0, pacific))
-	s.Equal(time.Date(2021, time.November, 7, 1, 33, 33, 0, pacific), next)
-	next = cc.next(next)
-	s.Equal(time.Date(2021, time.November, 7, 1, 44, 33, 0, pacific), next)
-	next = cc.next(next)
-	s.Equal(time.Date(2021, time.November, 7, 1, 33, 33, 0, pacific).Add(time.Hour), next)
-	next = cc.next(next)
-	s.Equal(time.Date(2021, time.November, 7, 1, 44, 33, 0, pacific).Add(time.Hour), next)
-	next = cc.next(next)
-	s.Equal(time.Date(2021, time.November, 8, 1, 33, 33, 0, pacific), next)
+	s.checkSequence(
+		&schedpb.CalendarSpec{
+			Second: "33",
+			Minute: "33,44",
+			Hour:   "1",
+		}, pacific,
+		time.Date(2021, time.November, 7, 0, 15, 15, 0, pacific),
+		time.Date(2021, time.November, 7, 1, 33, 33, 0, pacific),
+		time.Date(2021, time.November, 7, 1, 44, 33, 0, pacific),
+		// nov 7 has two 1:33:33s and 1:44:33s
+		time.Date(2021, time.November, 7, 1, 33, 33, 0, pacific).Add(time.Hour),
+		time.Date(2021, time.November, 7, 1, 44, 33, 0, pacific).Add(time.Hour),
+		time.Date(2021, time.November, 8, 1, 33, 33, 0, pacific),
+	)
 }
 
 func (s *calendarSuite) TestCalendarNextDSTInZoneThatSwitchesAtMidnight() {
