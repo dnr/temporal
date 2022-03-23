@@ -138,6 +138,7 @@ func (s *calendarSuite) TestGoDSTBehavior() {
 }
 
 func (s *calendarSuite) checkSequence(spec *schedpb.CalendarSpec, tz *time.Location, start time.Time, seq ...time.Time) {
+	s.T().Helper()
 	cc, err := newCompiledCalendar(spec, tz)
 	s.NoError(err)
 	for _, exp := range seq {
