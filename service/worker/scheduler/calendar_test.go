@@ -208,6 +208,7 @@ func (s *calendarSuite) TestMakeMatcher() {
 	check("February/5", 1, 12, parseModeMonth, -1, 2, -3, -4, -5, -6, 7, -8, -9, -10, -11, 12)
 	check("*", 0, 7, parseModeDow, 0, 1, 2, 3, 4, 5, 6, 7)
 	check("0", 0, 7, parseModeDow, 0, -1, -2, -3, -4, -5, -6, -7)
+	check("6,7", 0, 7, parseModeDow, 0, -1, -2, -3, -4, -5, 6) // 7 means sunday (0)
 	check("2020-2022,2024,2026/3", 2000, 2100, parseModeInt, -2019, 2020, 2021, 2022, -2023, 2024, -2025, 2026, -2027, -2028, 2029, -2030, 2032, 2098, -2101)
 }
 

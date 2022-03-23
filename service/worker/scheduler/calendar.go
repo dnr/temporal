@@ -141,6 +141,7 @@ func (cc *compiledCalendar) next(ts time.Time) time.Time {
 
 	// looking for first matching time after ts, so add 1 second
 	s++
+
 Outer:
 	for {
 		// normalize after carries
