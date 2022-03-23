@@ -102,22 +102,22 @@ func (s *calendarSuite) TestCalendarNextBasic() {
 	}, pacific)
 	s.NoError(err)
 	// only increment second
-	next := cc.nextCalendarTime(time.Date(2022, time.March, 2, 5, 55, 33, 0, pacific))
+	next := cc.next(time.Date(2022, time.March, 2, 5, 55, 33, 0, pacific))
 	s.Equal(time.Date(2022, time.March, 2, 5, 55, 55, 0, pacific), next)
 	// increment minute, second
-	next = cc.nextCalendarTime(time.Date(2022, time.March, 2, 5, 33, 33, 0, pacific))
+	next = cc.next(time.Date(2022, time.March, 2, 5, 33, 33, 0, pacific))
 	s.Equal(time.Date(2022, time.March, 2, 5, 55, 55, 0, pacific), next)
 	// increment hour, minute, second
-	next = cc.nextCalendarTime(time.Date(2022, time.March, 2, 3, 33, 33, 0, pacific))
+	next = cc.next(time.Date(2022, time.March, 2, 3, 33, 33, 0, pacific))
 	s.Equal(time.Date(2022, time.March, 2, 5, 55, 55, 0, pacific), next)
 	// increment days
-	next = cc.nextCalendarTime(time.Date(2022, time.March, 1, 1, 11, 11, 0, pacific))
+	next = cc.next(time.Date(2022, time.March, 1, 1, 11, 11, 0, pacific))
 	s.Equal(time.Date(2022, time.March, 2, 5, 55, 55, 0, pacific), next)
 	// from exact match
-	next = cc.nextCalendarTime(time.Date(2022, time.March, 2, 5, 55, 55, 0, pacific))
+	next = cc.next(time.Date(2022, time.March, 2, 5, 55, 55, 0, pacific))
 	s.Equal(time.Date(2022, time.March, 10, 5, 55, 55, 0, pacific), next)
 	// crossing dst but not near it
-	next = cc.nextCalendarTime(time.Date(2022, time.March, 10, 5, 55, 55, 0, pacific))
+	next = cc.next(time.Date(2022, time.March, 10, 5, 55, 55, 0, pacific))
 	s.Equal(time.Date(2022, time.March, 16, 5, 55, 55, 0, pacific), next)
 }
 
@@ -147,12 +147,12 @@ func (s *calendarSuite) TestCalendarNextDST() {
 		Minute: "33",
 		Hour:   "2",
 	}, pacific)
-	next := cc.nextCalendarTime(time.Date(2022, time.March, 11, 20, 0, 0, 0, pacific))
+	next := cc.next(time.Date(2022, time.March, 11, 20, 0, 0, 0, pacific))
 	s.Equal(time.Date(2022, time.March, 12, 2, 33, 33, 0, pacific), next)
 	// march 13 has no 2:33:33
-	next = cc.nextCalendarTime(time.Date(2022, time.March, 13, 1, 15, 15, 0, pacific))
+	next = cc.next(time.Date(2022, time.March, 13, 1, 15, 15, 0, pacific))
 	s.Equal(time.Date(2022, time.March, 14, 2, 33, 33, 0, pacific), next)
-	next = cc.nextCalendarTime(time.Date(2022, time.March, 13, 1, 59, 59, 0, pacific))
+	next = cc.next(time.Date(2022, time.March, 13, 1, 59, 59, 0, pacific))
 	s.Equal(time.Date(2022, time.March, 14, 2, 33, 33, 0, pacific), next)
 
 	// jump back
@@ -161,12 +161,12 @@ func (s *calendarSuite) TestCalendarNextDST() {
 		Minute: "33",
 		Hour:   "1",
 	}, pacific)
-	next = cc.nextCalendarTime(time.Date(2021, time.November, 7, 0, 0, 0, 0, pacific))
+	next = cc.next(time.Date(2021, time.November, 7, 0, 0, 0, 0, pacific))
 	s.Equal(time.Date(2021, time.November, 7, 1, 33, 33, 0, pacific), next)
 	// nov 7 has two 1:33:33s, 1636274013 and 1636277613.
-	next = cc.nextCalendarTime(time.Date(2021, time.November, 7, 1, 15, 15, 0, pacific))
+	next = cc.next(time.Date(2021, time.November, 7, 1, 15, 15, 0, pacific))
 	s.Equal(int64(1636274013), next.Unix())
-	// next = cc.nextCalendarTime(next)
+	// next = cc.next(next)
 	// s.Equal(int64(1636277613), next.Unix())
 }
 

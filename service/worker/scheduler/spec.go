@@ -121,7 +121,7 @@ func (cs *compiledSpec) rawNextTime(after time.Time) (nominal time.Time) {
 	var minTimestamp int64 = math.MaxInt64 // unix seconds-since-epoch as int64
 
 	for _, cal := range cs.calendar {
-		if next := cal.nextCalendarTime(after); !next.IsZero() {
+		if next := cal.next(after); !next.IsZero() {
 			nextTs := next.Unix()
 			if nextTs < minTimestamp {
 				minTimestamp = nextTs

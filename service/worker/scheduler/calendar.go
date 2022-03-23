@@ -126,7 +126,7 @@ func (cc *compiledCalendar) matches(ts time.Time) bool {
 		cc.hour(h) && cc.minute(m) && cc.second(s)
 }
 
-func (cc *compiledCalendar) nextCalendarTime(ts time.Time) time.Time {
+func (cc *compiledCalendar) next(ts time.Time) time.Time {
 	// set time zone
 	ts = ts.In(cc.tz)
 
