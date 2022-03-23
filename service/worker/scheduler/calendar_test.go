@@ -134,8 +134,8 @@ func (s *calendarSuite) TestCalendarNextDST() {
 	// march 13 has no 2:33:33
 	next = cc.nextCalendarTime(time.Date(2022, time.March, 13, 1, 15, 15, 0, pacific))
 	s.Equal(time.Date(2022, time.March, 14, 2, 33, 33, 0, pacific), next)
-	// next = cc.nextCalendarTime(time.Date(2022, time.March, 13, 1, 59, 59, 0, pacific))
-	// s.Equal(time.Date(2022, time.March, 14, 2, 33, 33, 0, pacific), next)
+	next = cc.nextCalendarTime(time.Date(2022, time.March, 13, 1, 59, 59, 0, pacific))
+	s.Equal(time.Date(2022, time.March, 14, 2, 33, 33, 0, pacific), next)
 }
 
 func (s *calendarSuite) TestMakeMatcher() {
