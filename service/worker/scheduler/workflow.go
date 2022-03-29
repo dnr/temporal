@@ -25,6 +25,9 @@
 package scheduler
 
 import (
+	"bytes"
+	"encoding/binary"
+	"errors"
 	"fmt"
 	"time"
 
@@ -57,30 +60,40 @@ type (
 		Overlap         enumspb.ScheduleOverlapPolicy
 	}
 
-	// FIXME: should this be a proto? pass Schedule in here too?
 	internalState struct {
 		ID                string
 		LastProcessedTime time.Time
 		BufferedStarts    []*bufferedStart
+		// conflict token is implemented as simple sequence number
+		SequenceNumber uint64
+		ConflictToken  []byte
+	}
+
+	StartArgs struct {
+		Schedule       *schedpb.Schedule
+		InitialRequest *schedpb.ScheduleRequest
+		Internal       internalState
+	}
+
+	UpdateArgs struct {
+		Schedule      *schedpb.Schedule
+		ConflictToken []byte
 	}
 
 	scheduler struct {
+		StartArgs
+
 		ctx    workflow.Context
 		a      *activities
 		logger sdklog.Logger
 
-		schedpb.Schedule
-
-		internalState
-
 		cspec *compiledSpec
 
-		// Invariant: wfWatcher != nil iff [we think] a workflow is running
+		// wfWatcher != nil iff [we think] a workflow is running.
 		// "we think" because there will be some delay before we're notified
 		wfWatcher       workflow.Future
 		wfWatcherCancel workflow.CancelFunc
 
-		// FIXME: conflict token
 		// FIXME: request id list for deduping
 	}
 )
@@ -90,15 +103,16 @@ var (
 		InitialInterval: 1 * time.Second,
 		MaximumInterval: 30 * time.Second,
 	}
+
+	errUpdateConflict = errors.New("Conflicting concurrent update")
 )
 
-func SchedulerWorkflow(ctx workflow.Context, sched *schedpb.Schedule, internal *internalState) error {
+func SchedulerWorkflow(ctx workflow.Context, args *StartArgs) error {
 	scheduler := &scheduler{
-		ctx:           ctx,
-		a:             nil,
-		logger:        sdklog.With(workflow.GetLogger(ctx), "schedule-id", internal.ID),
-		Schedule:      *sched,
-		internalState: *internal,
+		StartArgs: *args,
+		ctx:       ctx,
+		a:         nil,
+		logger:    sdklog.With(workflow.GetLogger(ctx), "schedule-id", args.Internal.ID),
 	}
 	return scheduler.run()
 }
@@ -113,33 +127,34 @@ func (s *scheduler) run() error {
 		return err
 	}
 
-	if s.LastProcessedTime.IsZero() {
-		s.logger.Debug("Initializing processed time")
-		s.LastProcessedTime = s.now()
-		s.Info.CreateTime = timestamp.TimePtr(s.LastProcessedTime)
+	if s.Internal.LastProcessedTime.IsZero() {
+		s.logger.Debug("Initializing internal state")
+		s.Internal.LastProcessedTime = s.now()
+		s.Schedule.Info.CreateTime = timestamp.TimePtr(s.Internal.LastProcessedTime)
+		s.incSeqNo()
 	}
 
 	// A schedule may be created with an initial Request, e.g. start one
 	// immediately. Handle that now.
-	s.processRequest(s.Request)
-	s.Request = nil
+	s.processRequest(s.InitialRequest)
+	s.InitialRequest = nil
 
 	for iters := iterationsBeforeContinueAsNew; iters >= 0; iters-- {
 		t2 := s.now()
-		if t2.Before(s.LastProcessedTime) {
+		if t2.Before(s.Internal.LastProcessedTime) {
 			// Time went backwards. If this is a large jump, we may want to
 			// handle it differently, but for now, do nothing until we get back
 			// up to the last processed time.
-			s.logger.Warn("Time went backwards", "from", s.LastProcessedTime, "to", t2)
-			t2 = s.LastProcessedTime
+			s.logger.Warn("Time went backwards", "from", s.Internal.LastProcessedTime, "to", t2)
+			t2 = s.Internal.LastProcessedTime
 		}
 		nextSleep, hasNext := s.processTimeRange(
-			s.LastProcessedTime, t2,
+			s.Internal.LastProcessedTime, t2,
 			// resolve this to the schedule's policy as late as possible
 			enumspb.SCHEDULE_OVERLAP_POLICY_UNSPECIFIED,
 			false,
 		)
-		s.LastProcessedTime = t2
+		s.Internal.LastProcessedTime = t2
 		s.processBuffer()
 		// sleep returns on any of:
 		// 1. requested time elapsed
@@ -151,35 +166,35 @@ func (s *scheduler) run() error {
 	// FIXME: what do we do about our outstanding activity? cancel it?
 
 	s.logger.Info("Schedule doing continue-as-new")
-	return workflow.NewContinueAsNewError(s.ctx, WorkflowName, &s.Schedule, &s.internalState)
+	return workflow.NewContinueAsNewError(s.ctx, WorkflowName, &s.StartArgs)
 }
 
 func (s *scheduler) ensureFields() {
-	if s.Spec == nil {
-		s.Spec = &schedpb.ScheduleSpec{}
+	if s.Schedule.Spec == nil {
+		s.Schedule.Spec = &schedpb.ScheduleSpec{}
 	}
-	if s.Action == nil {
-		s.Action = &schedpb.ScheduleAction{}
+	if s.Schedule.Action == nil {
+		s.Schedule.Action = &schedpb.ScheduleAction{}
 	}
-	if s.Policies == nil {
-		s.Policies = &schedpb.SchedulePolicies{}
+	if s.Schedule.Policies == nil {
+		s.Schedule.Policies = &schedpb.SchedulePolicies{}
 	}
-	if s.State == nil {
-		s.State = &schedpb.ScheduleState{}
+	if s.Schedule.State == nil {
+		s.Schedule.State = &schedpb.ScheduleState{}
 	}
-	if s.Info == nil {
-		s.Info = &schedpb.ScheduleInfo{}
+	if s.Schedule.Info == nil {
+		s.Schedule.Info = &schedpb.ScheduleInfo{}
 	}
 }
 
 func (s *scheduler) compileSpec() {
-	cspec, err := newCompiledSpec(s.Spec)
+	cspec, err := newCompiledSpec(s.Schedule.Spec)
 	if err != nil {
 		s.logger.Error("Invalid schedule", "error", err)
-		s.Info.InvalidScheduleError = err.Error()
+		s.Schedule.Info.InvalidScheduleError = err.Error()
 		s.cspec = nil
 	} else {
-		s.Info.InvalidScheduleError = ""
+		s.Schedule.Info.InvalidScheduleError = ""
 		s.cspec = cspec
 	}
 }
@@ -222,12 +237,14 @@ func (s *scheduler) processRequest(req *schedpb.ScheduleRequest) {
 	}
 
 	if req.Pause != "" {
-		s.State.Paused = true
-		s.State.Notes = req.Pause
+		s.Schedule.State.Paused = true
+		s.Schedule.State.Notes = req.Pause
+		s.incSeqNo()
 	}
 	if req.Unpause != "" {
-		s.State.Paused = false
-		s.State.Notes = req.Unpause
+		s.Schedule.State.Paused = false
+		s.Schedule.State.Notes = req.Unpause
+		s.incSeqNo()
 	}
 }
 
@@ -245,7 +262,7 @@ func (s *scheduler) processTimeRange(
 
 	for {
 		// FIXME: consider wrapping in side effect so it can be changed easily?
-		nominalTime, nextTime, hasNext := s.cspec.getNextTime(s.State, t1, doingBackfill)
+		nominalTime, nextTime, hasNext := s.cspec.getNextTime(s.Schedule.State, t1, doingBackfill)
 		if !hasNext {
 			return 0, false
 		} else if nextTime.After(t2) {
@@ -254,7 +271,7 @@ func (s *scheduler) processTimeRange(
 		// FIXME: should this be nextTime or nominalTime? what if someone sets jitter above catchup window?
 		if !doingBackfill && t2.Sub(nextTime) > catchupWindow {
 			s.logger.Warn("Schedule missed catchup window", "now", t2, "time", nextTime)
-			s.Info.MissedCatchupWindow++
+			s.Schedule.Info.MissedCatchupWindow++
 			continue
 		}
 		s.action(nominalTime, nextTime, overlapPolicy)
@@ -299,12 +316,13 @@ func (s *scheduler) wfWatcherReturned(f workflow.Future) {
 	s.wfWatcher = nil
 
 	// handle pause-on-failure
-	pauseAfterFailure := s.Policies.PauseAfterFailure && res.Failed && !s.State.Paused
+	pauseAfterFailure := s.Schedule.Policies.PauseAfterFailure && res.Failed && !s.Schedule.State.Paused
 	if pauseAfterFailure {
-		s.State.Paused = true
-		s.State.Notes = fmt.Sprintf("paused due to failure (%s)", res.WorkflowError)
+		s.Schedule.State.Paused = true
+		s.Schedule.State.Notes = fmt.Sprintf("paused due to failure (%s)", res.WorkflowError)
 		s.logger.Info("paused due to failure", "error", res.WorkflowError)
 		// FIXME: clear buffer here? or let it drain elsewhere?
+		s.incSeqNo()
 	}
 
 	s.logger.Info("started workflow finished",
@@ -312,24 +330,26 @@ func (s *scheduler) wfWatcherReturned(f workflow.Future) {
 }
 
 func (s *scheduler) update(ch workflow.ReceiveChannel, _ bool) {
-	var newSchedule schedpb.Schedule
-	ch.Receive(s.ctx, &newSchedule)
+	var req UpdateArgs
+	ch.Receive(s.ctx, &req)
+	if err := s.checkConflict(req.ConflictToken); err != nil {
+		s.logger.Warn("Update conflicted with concurrent change")
+		return
+	}
 
-	s.logger.Info("Schedule update", "new-schedule", newSchedule.String())
+	s.logger.Info("Schedule update", "new-schedule", req.Schedule.String())
 
-	s.Spec = newSchedule.Spec
-	s.Action = newSchedule.Action
-	s.Policies = newSchedule.Policies
-	s.State = newSchedule.State
-	// don't touch Info or Request
+	s.Schedule.Spec = req.Schedule.Spec
+	s.Schedule.Action = req.Schedule.Action
+	s.Schedule.Policies = req.Schedule.Policies
+	s.Schedule.State = req.Schedule.State
+	// don't touch Info
 
 	s.ensureFields()
 	s.compileSpec()
 
-	s.Info.UpdateTime = timestamp.TimePtr(s.now())
-
-	// If the update had a request, handle it
-	s.processRequest(newSchedule.Request)
+	s.Schedule.Info.UpdateTime = timestamp.TimePtr(s.now())
+	s.incSeqNo()
 }
 
 func (s *scheduler) request(ch workflow.ReceiveChannel, _ bool) {
@@ -342,24 +362,42 @@ func (s *scheduler) request(ch workflow.ReceiveChannel, _ bool) {
 func (s *scheduler) describe() (*schedpb.Schedule, error) {
 	// update future actions
 	if s.cspec != nil {
-		s.Info.FutureActions = make([]*time.Time, 0, futureActionCount)
+		s.Schedule.Info.FutureActions = make([]*time.Time, 0, futureActionCount)
 		t1 := s.now()
-		for len(s.Info.FutureActions) < cap(s.Info.FutureActions) {
-			_, t1, has := s.cspec.getNextTime(s.State, t1, false)
+		for len(s.Schedule.Info.FutureActions) < cap(s.Schedule.Info.FutureActions) {
+			_, t1, has := s.cspec.getNextTime(s.Schedule.State, t1, false)
 			if !has {
 				break
 			}
-			s.Info.FutureActions = append(s.Info.FutureActions, timestamp.TimePtr(t1))
+			s.Schedule.Info.FutureActions = append(s.Schedule.Info.FutureActions, timestamp.TimePtr(t1))
 		}
 	} else {
-		s.Info.FutureActions = nil
+		s.Schedule.Info.FutureActions = nil
 	}
 
-	return &s.Schedule, nil
+	return s.Schedule, nil
+}
+
+func (s *scheduler) incSeqNo() {
+	s.Internal.SequenceNumber++
+	buf := make([]byte, 8)
+	binary.BigEndian.PutUint64(buf, s.Internal.SequenceNumber)
+	s.Internal.ConflictToken = buf
+}
+
+func (s *scheduler) checkConflict(token []byte) error {
+	if token == nil {
+		// User wants to ignore conflicts
+		return nil
+	}
+	if !bytes.Equal(token, s.Internal.ConflictToken) {
+		return errUpdateConflict
+	}
+	return nil
 }
 
 func (s *scheduler) getCatchupWindow() time.Duration {
-	cw := s.Policies.CatchupWindow
+	cw := s.Schedule.Policies.CatchupWindow
 	if cw == nil {
 		return 60 * time.Second
 	} else if *cw < 10*time.Second {
@@ -371,7 +409,7 @@ func (s *scheduler) getCatchupWindow() time.Duration {
 
 func (s *scheduler) resolveOverlapPolicy(overlapPolicy enumspb.ScheduleOverlapPolicy) enumspb.ScheduleOverlapPolicy {
 	if overlapPolicy == enumspb.SCHEDULE_OVERLAP_POLICY_UNSPECIFIED {
-		overlapPolicy = s.Policies.OverlapPolicy
+		overlapPolicy = s.Schedule.Policies.OverlapPolicy
 	}
 	if overlapPolicy == enumspb.SCHEDULE_OVERLAP_POLICY_UNSPECIFIED {
 		overlapPolicy = enumspb.SCHEDULE_OVERLAP_POLICY_SKIP
@@ -384,7 +422,7 @@ func (s *scheduler) isRunning() bool {
 }
 
 func (s *scheduler) action(nominalTime, actualTime time.Time, overlapPolicy enumspb.ScheduleOverlapPolicy) {
-	s.BufferedStarts = append(s.BufferedStarts, &bufferedStart{
+	s.Internal.BufferedStarts = append(s.Internal.BufferedStarts, &bufferedStart{
 		Nominal: nominalTime,
 		Actual:  actualTime,
 		Overlap: overlapPolicy,
@@ -404,16 +442,16 @@ func (s *scheduler) processBuffer() {
 	// TODO: what about actions that don't start a workflow? if they start
 	// activities, they should all be treated as allow all. what if they start
 	// both? does it need to be oneof?
-	req := s.Action.GetStartWorkflow()
+	req := s.Schedule.Action.GetStartWorkflow()
 	if req == nil {
-		s.BufferedStarts = nil
+		s.Internal.BufferedStarts = nil
 		return
 	}
 
 	// Just run everything with allow all since they can't conflict. Filter them
 	// out of the buffer at the same time.
 	var nextBufferedStarts []*bufferedStart
-	for _, start := range s.BufferedStarts {
+	for _, start := range s.Internal.BufferedStarts {
 		if s.resolveOverlapPolicy(start.Overlap) != enumspb.SCHEDULE_OVERLAP_POLICY_ALLOW_ALL {
 			// pass through to loop below
 			nextBufferedStarts = append(nextBufferedStarts, start)
@@ -428,10 +466,10 @@ func (s *scheduler) processBuffer() {
 			s.finishAction(result)
 		}
 	}
-	s.BufferedStarts = nextBufferedStarts
+	s.Internal.BufferedStarts = nextBufferedStarts
 
 	// Maybe we're done
-	if len(s.BufferedStarts) == 0 {
+	if len(s.Internal.BufferedStarts) == 0 {
 		return
 	}
 
@@ -441,7 +479,7 @@ func (s *scheduler) processBuffer() {
 
 	// Recreate the rest of the buffer in here as we're processing
 	nextBufferedStarts = nil
-	for _, start := range s.BufferedStarts {
+	for _, start := range s.Internal.BufferedStarts {
 		// If there's nothing running, we can start this one no matter what the policy is
 		if !s.isRunning() && pendingStart == nil {
 			pendingStart = start
@@ -452,13 +490,13 @@ func (s *scheduler) processBuffer() {
 		switch s.resolveOverlapPolicy(start.Overlap) {
 		case enumspb.SCHEDULE_OVERLAP_POLICY_SKIP:
 			// just skip
-			s.Info.OverlapSkipped++
+			s.Schedule.Info.OverlapSkipped++
 		case enumspb.SCHEDULE_OVERLAP_POLICY_BUFFER_ONE:
 			// allow one (the first one) in the buffer
 			if len(nextBufferedStarts) == 0 {
 				nextBufferedStarts = append(nextBufferedStarts, start)
 			} else {
-				s.Info.OverlapSkipped++
+				s.Schedule.Info.OverlapSkipped++
 			}
 		case enumspb.SCHEDULE_OVERLAP_POLICY_BUFFER_ALL:
 			// always add to buffer
@@ -479,7 +517,7 @@ func (s *scheduler) processBuffer() {
 			pendingStart = start
 		}
 	}
-	s.BufferedStarts = nextBufferedStarts
+	s.Internal.BufferedStarts = nextBufferedStarts
 
 	if pendingStart == nil {
 		return
@@ -495,18 +533,19 @@ func (s *scheduler) processBuffer() {
 }
 
 func (s *scheduler) finishAction(result *schedpb.ScheduleActionResult) {
-	s.Info.ActionCount++
-	s.Info.RecentActions = append(s.Info.RecentActions, result)
-	extra := len(s.Info.RecentActions) - 10
+	s.Schedule.Info.ActionCount++
+	s.Schedule.Info.RecentActions = append(s.Schedule.Info.RecentActions, result)
+	extra := len(s.Schedule.Info.RecentActions) - 10
 	if extra > 0 {
-		s.Info.RecentActions = s.Info.RecentActions[extra:]
+		s.Schedule.Info.RecentActions = s.Schedule.Info.RecentActions[extra:]
 	}
 
-	if s.State.LimitedActions && s.State.RemainingActions > 0 {
-		s.State.RemainingActions--
+	if s.Schedule.State.LimitedActions && s.Schedule.State.RemainingActions > 0 {
+		s.Schedule.State.RemainingActions--
 		// FIXME: what if this drops to zero while we have stuff in the buffer?
 		// need to clear it. but only natural scheduled starts, not requested
 		// ones... kind of a mess
+		s.incSeqNo()
 	}
 }
 
