@@ -88,10 +88,6 @@ var (
 	}
 )
 
-// TODO: test with fuzzing
-// TODO: days from end of month
-// TODO: nth weekday of month
-
 func newCompiledCalendar(cal *schedpb.CalendarSpec, tz *time.Location) (*compiledCalendar, error) {
 	cc := &compiledCalendar{tz: tz}
 	var err error
@@ -121,9 +117,13 @@ func (cc *compiledCalendar) matches(ts time.Time) bool {
 	y, mo, d := ts.Date()
 	h, m, s := ts.Clock()
 
-	return cc.year(y) && cc.month(int(mo)) && cc.dayOfMonth(d) &&
+	return cc.year(y) &&
+		cc.month(int(mo)) &&
+		cc.dayOfMonth(d) &&
 		cc.dayOfWeek(int(ts.Weekday())) &&
-		cc.hour(h) && cc.minute(m) && cc.second(s)
+		cc.hour(h) &&
+		cc.minute(m) &&
+		cc.second(s)
 }
 
 func (cc *compiledCalendar) next(ts time.Time) time.Time {

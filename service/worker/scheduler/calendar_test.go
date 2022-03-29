@@ -29,6 +29,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/suite"
+
 	schedpb "go.temporal.io/api/schedule/v1"
 )
 
@@ -184,10 +185,6 @@ func (s *calendarSuite) TestCalendarNextDST() {
 		time.Date(2021, time.November, 7, 1, 44, 33, 0, pacific).Add(time.Hour),
 		time.Date(2021, time.November, 8, 1, 33, 33, 0, pacific),
 	)
-}
-
-func (s *calendarSuite) TestCalendarNextDSTInZoneThatSwitchesAtMidnight() {
-	// TODO
 }
 
 func (s *calendarSuite) TestMakeMatcher() {
