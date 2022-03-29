@@ -288,3 +288,55 @@ func (s *calendarSuite) TestDaysInMonth() {
 	s.Equal(30, daysInMonth(time.November, 2022))
 	s.Equal(31, daysInMonth(time.December, 2022))
 }
+
+func FuzzCalendar(f *testing.F) {
+	zones := []string{ // random selection
+		"UTC",
+		"US/Pacific",
+		"America/Montreal",
+		"Asia/Urumqi",
+		"Asia/Samarkand",
+		"America/Indiana/Knox",
+		"Africa/Kinshasa",
+		"Etc/GMT-10",
+		"Europe/London",
+		"Asia/Vientiane",
+		"Cuba",
+	}
+	f.Fuzz(func(t *testing.T, s, m, h, dom, mo, y, dow string, tz uint, now int64) {
+		name := zones[tz%uint(len(zones))]
+		loc, err := time.LoadLocation(name)
+		if err != nil {
+			return
+		}
+		cc, err := newCompiledCalendar(&schedpb.CalendarSpec{
+			Second:     s,
+			Minute:     m,
+			Hour:       h,
+			DayOfMonth: dom,
+			Month:      m,
+			Year:       y,
+			DayOfWeek:  dow,
+		}, loc)
+		if err == nil {
+			now := time.Unix(now, 0)
+			next := cc.next(now)
+			if next.IsZero() {
+				return
+			}
+			if next.Before(now) {
+				t.Errorf("next %v not before now %v", next, now)
+			}
+			for ts1 := now; ts1.Before(next); ts1 = ts1.Add(1234 * time.Second) {
+				if !cc.next(ts1).Equal(next) {
+					t.Errorf("next(%v) = %v should equal next(%v) = %v", ts1, cc.next(ts1), now, next)
+				}
+			}
+			for ts1 := next; ts1.Sub(next) < 5*time.Hour; ts1 = ts1.Add(1234 * time.Second) {
+				if !cc.next(ts1).After(next) {
+					t.Errorf("next(%v) = %v should be after next(%v) = %v", ts1, cc.next(ts1), now, next)
+				}
+			}
+		}
+	})
+}

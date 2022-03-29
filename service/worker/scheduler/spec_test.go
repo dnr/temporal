@@ -252,6 +252,6 @@ func (s *specSuite) TestSpecBoundedJitter() {
 		time.Date(2022, 3, 23, 11, 00, 0, 0, time.UTC),
 		time.Date(2022, 3, 23, 12, 14, 36, 524000000, time.UTC),
 		time.Date(2022, 3, 23, 14, 22, 54, 562000000, time.UTC),
-		time.Date(2022, 3, 23, 15, 8, 3, 72400000, time.UTC),
+		time.Date(2022, 3, 23, 15, 8, 3, 724000000, time.UTC),
 	)
 }
