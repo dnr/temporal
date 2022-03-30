@@ -84,13 +84,7 @@ func loadTimezone(spec *schedpb.ScheduleSpec) (*time.Location, error) {
 func (cs *compiledSpec) getNextTime(
 	state *schedpb.ScheduleState,
 	after time.Time,
-	doingBackfill bool,
 ) (nominal, next time.Time, has bool) {
-	if (state.Paused || state.LimitedActions && state.RemainingActions == 0) && !doingBackfill {
-		has = false
-		return
-	}
-
 	if cs.spec.NotBefore != nil && after.Before(*cs.spec.NotBefore) {
 		after = cs.spec.NotBefore.Add(-time.Second)
 	}

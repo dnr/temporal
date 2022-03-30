@@ -58,7 +58,7 @@ func (s *specSuite) checkSequenceFull(spec *schedpb.ScheduleSpec, state *schedpb
 	cs, err := newCompiledSpec(spec)
 	s.NoError(err)
 	for _, exp := range seq {
-		_, next, has := cs.getNextTime(state, start, false)
+		_, next, has := cs.getNextTime(state, start)
 		if exp.IsZero() {
 			s.Require().False(has)
 			break
