@@ -52,6 +52,9 @@ const (
 
 	// TODO: can we estimate event count and do it that way?
 	iterationsBeforeContinueAsNew = 500
+
+	defaultCatchupWindow = 60 * time.Second
+	minCatchupWindow     = 10 * time.Second
 )
 
 type (
@@ -238,7 +241,7 @@ func (s *scheduler) processRequest(req *schedpb.ScheduleRequest) {
 
 	if trigger := req.TriggerImmediately; trigger != nil {
 		now := s.now()
-		s.action(now, now, trigger.OverlapPolicy)
+		s.addStart(now, now, trigger.OverlapPolicy)
 	}
 
 	for _, bfr := range req.BackfillRequest {
@@ -271,25 +274,22 @@ func (s *scheduler) processTimeRange(
 		return 0, false
 	}
 
-	// FIXME: consider wrapping in modifiable side effect so it can be changed easily?
 	catchupWindow := s.getCatchupWindow()
 
 	for {
-		// FIXME: consider wrapping in side effect so it can be changed easily?
 		nominalTime, nextTime, hasNext := s.cspec.getNextTime(s.Schedule.State, t1, doingBackfill)
+		t1 = nextTime
 		if !hasNext {
 			return 0, false
 		} else if nextTime.After(t2) {
 			return nextTime.Sub(t2), true
 		}
-		// FIXME: should this be nextTime or nominalTime? what if someone sets jitter above catchup window?
 		if !doingBackfill && t2.Sub(nextTime) > catchupWindow {
 			s.logger.Warn("Schedule missed catchup window", "now", t2, "time", nextTime)
 			s.Info.MissedCatchupWindow++
 			continue
 		}
-		s.action(nominalTime, nextTime, overlapPolicy)
-		t1 = nextTime
+		s.addStart(nominalTime, nextTime, overlapPolicy)
 	}
 }
 
@@ -404,25 +404,33 @@ func (s *scheduler) incSeqNo() {
 }
 
 func (s *scheduler) checkConflict(token []byte) error {
-	if token == nil {
-		// User wants to ignore conflicts
+	if token == nil || bytes.Equal(token, s.Internal.ConflictToken) {
 		return nil
 	}
-	if !bytes.Equal(token, s.Internal.ConflictToken) {
-		return errUpdateConflict
-	}
-	return nil
+	return errUpdateConflict
 }
 
 func (s *scheduler) getCatchupWindow() time.Duration {
-	cw := s.Schedule.Policies.CatchupWindow
-	if cw == nil {
-		return 60 * time.Second
-	} else if *cw < 10*time.Second {
-		return 10 * time.Second
-	} else {
-		return *cw
+	// Use MutableSideEffect so that we can change the defaults without breaking determinism.
+	get := func(ctx workflow.Context) interface{} {
+		cw := s.Schedule.Policies.CatchupWindow
+		if cw == nil {
+			return defaultCatchupWindow
+		} else if *cw < minCatchupWindow {
+			return minCatchupWindow
+		} else {
+			return *cw
+		}
 	}
+	eq := func(a, b interface{}) bool {
+		return a.(time.Duration) == b.(time.Duration)
+	}
+	var cw time.Duration
+	if workflow.MutableSideEffect(s.ctx, "getCatchupWindow", get, eq).Get(&cw) != nil {
+		return defaultCatchupWindow
+	}
+	return cw
+
 }
 
 func (s *scheduler) resolveOverlapPolicy(overlapPolicy enumspb.ScheduleOverlapPolicy) enumspb.ScheduleOverlapPolicy {
@@ -439,7 +447,7 @@ func (s *scheduler) isRunning() bool {
 	return s.watcherFuture != nil
 }
 
-func (s *scheduler) action(nominalTime, actualTime time.Time, overlapPolicy enumspb.ScheduleOverlapPolicy) {
+func (s *scheduler) addStart(nominalTime, actualTime time.Time, overlapPolicy enumspb.ScheduleOverlapPolicy) {
 	s.Internal.BufferedStarts = append(s.Internal.BufferedStarts, &bufferedStart{
 		Nominal: nominalTime,
 		Actual:  actualTime,
@@ -457,29 +465,28 @@ func (s *scheduler) processBuffer() {
 	// affect them.
 
 	// Make sure we have something to start. If not, we can clear the buffer.
-	// TODO: what about actions that don't start a workflow? if they start
-	// activities, they should all be treated as allow all. what if they start
-	// both? does it need to be oneof?
+	// TODO: This part will have to change when we support more actions.
 	req := s.Schedule.Action.GetStartWorkflow()
 	if req == nil {
 		s.Internal.BufferedStarts = nil
 		return
 	}
 
-	// Just run everything with allow all since they can't conflict. Filter them
+	// Just run everything with allow-all since they can't conflict. Filter them
 	// out of the buffer at the same time.
 	var nextBufferedStarts []*bufferedStart
 	for _, start := range s.Internal.BufferedStarts {
 		if s.resolveOverlapPolicy(start.Overlap) != enumspb.SCHEDULE_OVERLAP_POLICY_ALLOW_ALL {
 			// pass through to loop below
 			nextBufferedStarts = append(nextBufferedStarts, start)
+			continue
 		}
 
 		result, err := s.startWorkflowWithAllowAll(start, req)
 		if err != nil {
-			// failed to start somehow
-			// FIXME: log here? we can't just add it to the buffer again
-			// because then the loop below will have to deal with it
+			s.logger.Error("Failed to start workflow", "error", err)
+			// The "start workflow" activity has an unlimited retry policy, so if we get an
+			// error here, it must be an unretryable one. Drop this from the buffer.
 		} else {
 			s.finishAction(result)
 		}
@@ -491,7 +498,7 @@ func (s *scheduler) processBuffer() {
 		return
 	}
 
-	// We can start either zero or one workflows now (since we handled allow all above).
+	// We can start either zero or one workflows now (since we handled allow-all above).
 	// This is the one that we want to start, or nil.
 	var pendingStart *bufferedStart
 
