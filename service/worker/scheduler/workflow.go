@@ -63,6 +63,8 @@ type (
 		Nominal, Actual time.Time
 		// Overridden overlap policy
 		Overlap enumspb.ScheduleOverlapPolicy
+		// Trigger-immediately or backfill
+		Manual bool
 	}
 
 	internalState struct {
@@ -104,8 +106,6 @@ type (
 
 		// watcherFuture != nil iff watcher activity is running
 		watcherFuture workflow.Future
-
-		// FIXME: request id list for deduping
 	}
 )
 
@@ -174,7 +174,8 @@ func (s *scheduler) run() error {
 			false,
 		)
 		s.Internal.LastProcessedTime = t2
-		s.processBuffer()
+		for s.processBuffer() {
+		}
 		// sleep returns on any of:
 		// 1. requested time elapsed
 		// 2. we got a signal (an update or request)
@@ -243,7 +244,7 @@ func (s *scheduler) processRequest(req *schedpb.ScheduleRequest) {
 
 	if trigger := req.TriggerImmediately; trigger != nil {
 		now := s.now()
-		s.addStart(now, now, trigger.OverlapPolicy)
+		s.addStart(now, now, trigger.OverlapPolicy, true)
 	}
 
 	for _, bfr := range req.BackfillRequest {
@@ -278,8 +279,7 @@ func (s *scheduler) processTimeRange(
 
 	catchupWindow := s.getCatchupWindow()
 
-	// If manual (trigger immediately or backfill), always allow. Otherwise look at Paused/RemainingActions
-	for manual || s.canTakeScheduledAction() {
+	for {
 		nominalTime, nextTime, hasNext := s.cspec.getNextTime(s.Schedule.State, t1)
 		t1 = nextTime
 		if !hasNext {
@@ -292,12 +292,16 @@ func (s *scheduler) processTimeRange(
 			s.Info.MissedCatchupWindow++
 			continue
 		}
-		s.addStart(nominalTime, nextTime, overlapPolicy)
+		s.addStart(nominalTime, nextTime, overlapPolicy, manual)
 	}
 	return 0, false
 }
 
-func (s *scheduler) canTakeScheduledAction() bool {
+func (s *scheduler) canTakeScheduledAction(manual bool) bool {
+	// If manual (trigger immediately or backfill), always allow
+	if manual {
+		return true
+	}
 	// If paused, don't do anything
 	if s.Schedule.State.Paused {
 		return false
@@ -359,7 +363,6 @@ func (s *scheduler) wfWatcherReturned(f workflow.Future) {
 		s.Schedule.State.Paused = true
 		s.Schedule.State.Notes = fmt.Sprintf("paused due to failure (%s)", res.WorkflowError)
 		s.logger.Info("paused due to failure", "error", res.WorkflowError)
-		// FIXME: clear buffer here? or let it drain elsewhere?
 		s.incSeqNo()
 	}
 
@@ -401,8 +404,8 @@ func (s *scheduler) describe() (*DescribeResult, error) {
 	// update future actions
 	if s.cspec != nil {
 		s.Info.FutureActions = make([]*time.Time, 0, futureActionCount)
-		t1 := s.now()
-		for len(s.Info.FutureActions) < cap(s.Info.FutureActions) {
+		t1 := s.Internal.LastProcessedTime
+		for len(s.Info.FutureActions) < futureActionCount {
 			_, t1, has := s.cspec.getNextTime(s.Schedule.State, t1)
 			if !has {
 				break
@@ -466,15 +469,17 @@ func (s *scheduler) resolveOverlapPolicy(overlapPolicy enumspb.ScheduleOverlapPo
 	return overlapPolicy
 }
 
-func (s *scheduler) addStart(nominalTime, actualTime time.Time, overlapPolicy enumspb.ScheduleOverlapPolicy) {
+func (s *scheduler) addStart(nominalTime, actualTime time.Time, overlapPolicy enumspb.ScheduleOverlapPolicy, manual bool) {
 	s.Internal.BufferedStarts = append(s.Internal.BufferedStarts, &bufferedStart{
 		Nominal: nominalTime,
 		Actual:  actualTime,
 		Overlap: overlapPolicy,
+		Manual:  manual,
 	})
 }
 
-func (s *scheduler) processBuffer() {
+// processBuffer should return true if there might be more work to do right now.
+func (s *scheduler) processBuffer() bool {
 	// We should try to do something reasonable with any combination of overlap
 	// policies in the buffer, although some combinations don't make much sense
 	// and would require a convoluted series of calls to set up.
@@ -488,7 +493,7 @@ func (s *scheduler) processBuffer() {
 	req := s.Schedule.Action.GetStartWorkflow()
 	if req == nil {
 		s.Internal.BufferedStarts = nil
-		return
+		return false
 	}
 
 	// Just run everything with allow-all since they can't conflict. Filter them
@@ -498,6 +503,10 @@ func (s *scheduler) processBuffer() {
 		if s.resolveOverlapPolicy(start.Overlap) != enumspb.SCHEDULE_OVERLAP_POLICY_ALLOW_ALL {
 			// pass through to loop below
 			nextBufferedStarts = append(nextBufferedStarts, start)
+			continue
+		}
+
+		if !s.canTakeScheduledAction(start.Manual) {
 			continue
 		}
 
@@ -565,15 +574,22 @@ func (s *scheduler) processBuffer() {
 	s.Internal.BufferedStarts = nextBufferedStarts
 
 	if pendingStart == nil {
-		return
+		return false
+	}
+
+	if !s.canTakeScheduledAction(pendingStart.Manual) {
+		return true
 	}
 
 	result, err := s.startWorkflow(pendingStart, req)
 	if err != nil {
 		s.logger.Error("Failed to start workflow", "error", err)
-		return
+		// The "start workflow" activity has an unlimited retry policy, so if we get an
+		// error here, it must be an unretryable one. Drop this from the buffer.
+		return true
 	}
 	s.finishAction(result)
+	return false
 }
 
 func (s *scheduler) finishAction(result *schedpb.ScheduleActionResult) {
