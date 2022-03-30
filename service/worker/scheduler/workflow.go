@@ -71,6 +71,7 @@ type (
 
 	StartArgs struct {
 		Schedule       *schedpb.Schedule
+		Info           *schedpb.ScheduleInfo
 		InitialRequest *schedpb.ScheduleRequest
 		Internal       internalState
 	}
@@ -78,6 +79,11 @@ type (
 	UpdateArgs struct {
 		Schedule      *schedpb.Schedule
 		ConflictToken []byte
+	}
+
+	DescribeResult struct {
+		Schedule *schedpb.Schedule
+		Info     *schedpb.ScheduleInfo
 	}
 
 	scheduler struct {
@@ -130,7 +136,9 @@ func (s *scheduler) run() error {
 	if s.Internal.LastProcessedTime.IsZero() {
 		s.logger.Debug("Initializing internal state")
 		s.Internal.LastProcessedTime = s.now()
-		s.Schedule.Info.CreateTime = timestamp.TimePtr(s.Internal.LastProcessedTime)
+		s.Info = &schedpb.ScheduleInfo{
+			CreateTime: timestamp.TimePtr(s.Internal.LastProcessedTime),
+		}
 		s.incSeqNo()
 	}
 
@@ -182,8 +190,8 @@ func (s *scheduler) ensureFields() {
 	if s.Schedule.State == nil {
 		s.Schedule.State = &schedpb.ScheduleState{}
 	}
-	if s.Schedule.Info == nil {
-		s.Schedule.Info = &schedpb.ScheduleInfo{}
+	if s.Info == nil {
+		s.Info = &schedpb.ScheduleInfo{}
 	}
 }
 
@@ -191,10 +199,10 @@ func (s *scheduler) compileSpec() {
 	cspec, err := newCompiledSpec(s.Schedule.Spec)
 	if err != nil {
 		s.logger.Error("Invalid schedule", "error", err)
-		s.Schedule.Info.InvalidScheduleError = err.Error()
+		s.Info.InvalidScheduleError = err.Error()
 		s.cspec = nil
 	} else {
-		s.Schedule.Info.InvalidScheduleError = ""
+		s.Info.InvalidScheduleError = ""
 		s.cspec = cspec
 	}
 }
@@ -271,7 +279,7 @@ func (s *scheduler) processTimeRange(
 		// FIXME: should this be nextTime or nominalTime? what if someone sets jitter above catchup window?
 		if !doingBackfill && t2.Sub(nextTime) > catchupWindow {
 			s.logger.Warn("Schedule missed catchup window", "now", t2, "time", nextTime)
-			s.Schedule.Info.MissedCatchupWindow++
+			s.Info.MissedCatchupWindow++
 			continue
 		}
 		s.action(nominalTime, nextTime, overlapPolicy)
@@ -348,7 +356,7 @@ func (s *scheduler) update(ch workflow.ReceiveChannel, _ bool) {
 	s.ensureFields()
 	s.compileSpec()
 
-	s.Schedule.Info.UpdateTime = timestamp.TimePtr(s.now())
+	s.Info.UpdateTime = timestamp.TimePtr(s.now())
 	s.incSeqNo()
 }
 
@@ -359,23 +367,26 @@ func (s *scheduler) request(ch workflow.ReceiveChannel, _ bool) {
 	s.processRequest(&req)
 }
 
-func (s *scheduler) describe() (*schedpb.Schedule, error) {
+func (s *scheduler) describe() (*DescribeResult, error) {
 	// update future actions
 	if s.cspec != nil {
-		s.Schedule.Info.FutureActions = make([]*time.Time, 0, futureActionCount)
+		s.Info.FutureActions = make([]*time.Time, 0, futureActionCount)
 		t1 := s.now()
-		for len(s.Schedule.Info.FutureActions) < cap(s.Schedule.Info.FutureActions) {
+		for len(s.Info.FutureActions) < cap(s.Info.FutureActions) {
 			_, t1, has := s.cspec.getNextTime(s.Schedule.State, t1, false)
 			if !has {
 				break
 			}
-			s.Schedule.Info.FutureActions = append(s.Schedule.Info.FutureActions, timestamp.TimePtr(t1))
+			s.Info.FutureActions = append(s.Info.FutureActions, timestamp.TimePtr(t1))
 		}
 	} else {
-		s.Schedule.Info.FutureActions = nil
+		s.Info.FutureActions = nil
 	}
 
-	return s.Schedule, nil
+	return &DescribeResult{
+		Schedule: s.Schedule,
+		Info:     s.Info,
+	}, nil
 }
 
 func (s *scheduler) incSeqNo() {
@@ -490,13 +501,13 @@ func (s *scheduler) processBuffer() {
 		switch s.resolveOverlapPolicy(start.Overlap) {
 		case enumspb.SCHEDULE_OVERLAP_POLICY_SKIP:
 			// just skip
-			s.Schedule.Info.OverlapSkipped++
+			s.Info.OverlapSkipped++
 		case enumspb.SCHEDULE_OVERLAP_POLICY_BUFFER_ONE:
 			// allow one (the first one) in the buffer
 			if len(nextBufferedStarts) == 0 {
 				nextBufferedStarts = append(nextBufferedStarts, start)
 			} else {
-				s.Schedule.Info.OverlapSkipped++
+				s.Info.OverlapSkipped++
 			}
 		case enumspb.SCHEDULE_OVERLAP_POLICY_BUFFER_ALL:
 			// always add to buffer
@@ -533,11 +544,11 @@ func (s *scheduler) processBuffer() {
 }
 
 func (s *scheduler) finishAction(result *schedpb.ScheduleActionResult) {
-	s.Schedule.Info.ActionCount++
-	s.Schedule.Info.RecentActions = append(s.Schedule.Info.RecentActions, result)
-	extra := len(s.Schedule.Info.RecentActions) - 10
+	s.Info.ActionCount++
+	s.Info.RecentActions = append(s.Info.RecentActions, result)
+	extra := len(s.Info.RecentActions) - 10
 	if extra > 0 {
-		s.Schedule.Info.RecentActions = s.Schedule.Info.RecentActions[extra:]
+		s.Info.RecentActions = s.Info.RecentActions[extra:]
 	}
 
 	if s.Schedule.State.LimitedActions && s.Schedule.State.RemainingActions > 0 {
