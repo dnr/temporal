@@ -517,7 +517,7 @@ func (s *scheduler) processBuffer() bool {
 			// error here, it must be an unretryable one. Drop this from the buffer.
 			continue
 		}
-		s.finishAction(result)
+		s.recordAction(result)
 	}
 	s.Internal.BufferedStarts = nextBufferedStarts
 
@@ -557,8 +557,8 @@ func (s *scheduler) processBuffer() bool {
 			nextBufferedStarts = append(nextBufferedStarts, start)
 		case enumspb.SCHEDULE_OVERLAP_POLICY_CANCEL_OTHER:
 			if isRunning {
-				// an actual workflow is running, cancel it
-				s.cancelWorkflow()
+				// an actual workflow is running, cancel it (asynchronously)
+				s.cancelWorkflow(req)
 				// keep in buffer so it will get started once cancel completes
 				nextBufferedStarts = append(nextBufferedStarts, start)
 			} else {
@@ -588,17 +588,29 @@ func (s *scheduler) processBuffer() bool {
 		// error here, it must be an unretryable one. Drop this from the buffer.
 		return true
 	}
-	s.finishAction(result)
+	s.recordAction(result)
 	return false
 }
 
-func (s *scheduler) finishAction(result *schedpb.ScheduleActionResult) {
+func (s *scheduler) recordAction(result *schedpb.ScheduleActionResult) {
 	s.Info.ActionCount++
 	s.Info.RecentActions = append(s.Info.RecentActions, result)
 	extra := len(s.Info.RecentActions) - 10
 	if extra > 0 {
 		s.Info.RecentActions = s.Info.RecentActions[extra:]
 	}
+}
+
+func (s *scheduler) startWorkflowWithAllowAll(
+	start *bufferedStart,
+	req *workflowservice.StartWorkflowExecutionRequest,
+) (*schedpb.ScheduleActionResult, error) {
+	// We append the nominal time to the workflow id
+	timeStr := start.Nominal.UTC().Format(time.RFC3339)
+	_ = timeStr
+
+	// No watcher needed
+	return nil, nil // FIXME
 }
 
 func (s *scheduler) startWorkflow(
@@ -624,10 +636,6 @@ func (s *scheduler) startWorkflow(
 		// FIXME
 		return nil, err
 	}
-	if res.Error != nil {
-		// FIXME
-		return nil, res.Error
-	}
 
 	// Start background activity to watch the workflow
 	s.Internal.WatcherReq = &watchWorkflowRequest{
@@ -648,24 +656,21 @@ func (s *scheduler) startWorkflow(
 
 func (s *scheduler) startWatcher() {
 	ctx := workflow.WithActivityOptions(s.ctx, workflow.ActivityOptions{
-		RetryPolicy:      defaultActivityRetryPolicy,
-		HeartbeatTimeout: 1 * time.Minute,
+		StartToCloseTimeout: 365 * 24 * time.Hour,
+		RetryPolicy:         defaultActivityRetryPolicy,
+		HeartbeatTimeout:    65 * time.Second,
 	})
 	s.watcherFuture = workflow.ExecuteActivity(ctx, s.a.WatchWorkflow, s.Internal.WatcherReq)
 }
 
-func (s *scheduler) startWorkflowWithAllowAll(
-	start *bufferedStart,
-	req *workflowservice.StartWorkflowExecutionRequest,
-) (*schedpb.ScheduleActionResult, error) {
-	// We append the nominal time to the workflow id
-	timeStr := start.Nominal.UTC().Format(time.RFC3339)
-	_ = timeStr
-
-	// No watcher needed
-	return nil, nil // FIXME
-}
-
-func (s *scheduler) cancelWorkflow() {
-	// FIXME: start and wait for cancel activity
+func (s *scheduler) cancelWorkflow(req *workflowservice.StartWorkflowExecutionRequest) {
+	ctx := workflow.WithActivityOptions(s.ctx, workflow.ActivityOptions{
+		StartToCloseTimeout: 1 * time.Minute,
+		RetryPolicy:         defaultActivityRetryPolicy,
+	})
+	areq := &cancelWorkflowRequest{
+		WorkflowID: req.WorkflowId,
+	}
+	workflow.ExecuteActivity(ctx, s.a.CancelWorkflow, areq)
+	// do not wait for cancel to complete
 }
