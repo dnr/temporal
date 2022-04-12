@@ -38,10 +38,10 @@ import (
 
 type (
 	schedulerWorker struct {
-		initParams
+		activityDeps
 	}
 
-	initParams struct {
+	activityDeps struct {
 		fx.In
 		MetricsClient metrics.Client
 		Logger        log.Logger
@@ -59,9 +59,9 @@ var Module = fx.Options(
 	fx.Provide(NewResult),
 )
 
-func NewResult(params initParams) fxResult {
+func NewResult(params activityDeps) fxResult {
 	component := &schedulerWorker{
-		initParams: params,
+		activityDeps: params,
 	}
 	return fxResult{
 		Component: component,
@@ -79,10 +79,5 @@ func (s *schedulerWorker) DedicatedWorkerOptions() *workercommon.DedicatedWorker
 }
 
 func (s *schedulerWorker) activities() *activities {
-	return &activities{
-		metricsClient: s.MetricsClient,
-		logger:        s.Logger,
-		sdkClient:     s.SdkClient,
-		historyClient: s.HistoryClient,
-	}
+	return &activities{activityDeps: s.activityDeps}
 }

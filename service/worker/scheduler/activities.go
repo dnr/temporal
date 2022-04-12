@@ -32,22 +32,15 @@ import (
 	"go.temporal.io/api/serviceerror"
 	"go.temporal.io/api/workflowservice/v1"
 	"go.temporal.io/sdk/activity"
-	sdkclient "go.temporal.io/sdk/client"
 	"go.temporal.io/sdk/temporal"
-	"go.temporal.io/server/api/historyservice/v1"
 	"go.temporal.io/server/common"
-	"go.temporal.io/server/common/log"
 	"go.temporal.io/server/common/log/tag"
-	"go.temporal.io/server/common/metrics"
 	"go.temporal.io/server/common/namespace"
 )
 
 type (
 	activities struct {
-		metricsClient metrics.Client
-		logger        log.Logger
-		sdkClient     sdkclient.Client
-		historyClient historyservice.HistoryServiceClient
+		activityDeps
 	}
 
 	watchWorkflowRequest struct {
@@ -90,7 +83,7 @@ func (a *activities) StartWorkflow(ctx context.Context, req *startWorkflowReques
 	// instead of this one, which will be close but not the same
 	now := time.Now()
 
-	res, err := a.historyClient.StartWorkflowExecution(ctx, request)
+	res, err := a.HistoryClient.StartWorkflowExecution(ctx, request)
 	if err != nil {
 		if common.IsPersistenceTransientError(err) {
 			return nil, temporal.NewApplicationError(err.Error(), reflect.TypeOf(err).Name())
@@ -109,7 +102,7 @@ func (a *activities) tryWatchWorkflow(ctx context.Context, req *watchWorkflowReq
 	// calls and heartbeat in between, so we should set a slightly smaller timeout.
 	ctx2, cancel := context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()
-	err := a.sdkClient.GetWorkflow(ctx2, req.WorkflowID, req.RunID).Get(ctx2, nil)
+	err := a.SdkClient.GetWorkflow(ctx2, req.WorkflowID, req.RunID).Get(ctx2, nil)
 	if ctx2.Err() != nil { // FIXME: is that the best way to tell if the call timed out? what will Get actually return?
 		return nil, ctx2.Err()
 	}
@@ -129,7 +122,7 @@ func (a *activities) tryWatchWorkflow(ctx context.Context, req *watchWorkflowReq
 			return &watchWorkflowResponse{Failed: false, WorkflowError: err}, nil
 		}
 	}
-	a.logger.Error("unexpected error from WorkflowRun.Get", tag.Error(err))
+	a.Logger.Error("unexpected error from WorkflowRun.Get", tag.Error(err))
 	return nil, err
 }
 
@@ -146,7 +139,7 @@ func (a *activities) WatchWorkflow(ctx context.Context, req *watchWorkflowReques
 
 func (a *activities) CancelWorkflow(ctx context.Context, req *cancelWorkflowRequest) error {
 	// TODO: does ctx get set up with the correct deadline? (from StartToCloseTimeout in my activity options?)
-	err := a.sdkClient.CancelWorkflow(ctx, req.WorkflowID, "")
+	err := a.SdkClient.CancelWorkflow(ctx, req.WorkflowID, "")
 	// Differentiate between error types
 	switch err := err.(type) {
 	case nil:
