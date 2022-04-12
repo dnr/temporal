@@ -73,8 +73,12 @@ type (
 )
 
 func (a *activities) StartWorkflow(ctx context.Context, req *startWorkflowRequest) *startWorkflowResponse {
-	// send req directly to frontend, or to history?
-	return &startWorkflowResponse{} //FIXME
+	// send req directly to frontend, or to history? FIXME
+
+	return &startWorkflowResponse{
+		Response: nil, //res,
+		RealTime: time.Now(),
+	}
 }
 
 func (a *activities) tryWatchWorkflow(ctx context.Context, req *watchWorkflowRequest) (*watchWorkflowResponse, error) {
@@ -88,7 +92,7 @@ func (a *activities) tryWatchWorkflow(ctx context.Context, req *watchWorkflowReq
 	}
 	switch err := err.(type) {
 	case nil:
-		return &watchWorkflowResponse{Failed: false}, nil
+		return &watchWorkflowResponse{Failed: false, WorkflowError: nil}, nil
 	// FIXME: what does a "not found" error come out as here?
 	case *temporal.WorkflowExecutionError:
 		switch err := err.Unwrap().(type) {
@@ -115,7 +119,6 @@ func (a *activities) WatchWorkflow(ctx context.Context, req *watchWorkflowReques
 		}
 		return res, err
 	}
-
 }
 
 func (a *activities) CancelWorkflow(ctx context.Context, req *cancelWorkflowRequest) error {

@@ -31,6 +31,8 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/google/uuid"
+
 	commonpb "go.temporal.io/api/common/v1"
 	enumspb "go.temporal.io/api/enums/v1"
 	schedpb "go.temporal.io/api/schedule/v1"
@@ -39,6 +41,8 @@ import (
 	"go.temporal.io/sdk/temporal"
 	"go.temporal.io/sdk/workflow"
 
+	"go.temporal.io/server/common"
+	"go.temporal.io/server/common/payload"
 	"go.temporal.io/server/common/primitives/timestamp"
 )
 
@@ -55,6 +59,8 @@ const (
 
 	defaultCatchupWindow = 60 * time.Second
 	minCatchupWindow     = 10 * time.Second
+
+	searchAttrStartTimeKey = "TemporalScheduledStartTime"
 )
 
 type (
@@ -603,43 +609,58 @@ func (s *scheduler) recordAction(result *schedpb.ScheduleActionResult) {
 
 func (s *scheduler) startWorkflowWithAllowAll(
 	start *bufferedStart,
-	req *workflowservice.StartWorkflowExecutionRequest,
+	origStartReq *workflowservice.StartWorkflowExecutionRequest,
 ) (*schedpb.ScheduleActionResult, error) {
-	// We append the nominal time to the workflow id
-	timeStr := start.Nominal.UTC().Format(time.RFC3339)
-	_ = timeStr
+	sreq := *origStartReq
+	sreq.WorkflowId = sreq.WorkflowId + "-" + start.Nominal.UTC().Format(time.RFC3339)
+	sreq.Identity = s.identity()
+	sreq.RequestId = uuid.NewString()
+	sreq.SearchAttributes = s.addSearchAttr(sreq.SearchAttributes, start.Nominal.UTC())
+
+	ctx := workflow.WithActivityOptions(s.ctx, workflow.ActivityOptions{RetryPolicy: defaultActivityRetryPolicy})
+	req := &startWorkflowRequest{Request: &sreq}
+	var res startWorkflowResponse
+	err := workflow.ExecuteActivity(ctx, s.a.StartWorkflow, req).Get(s.ctx, &res)
+	if err != nil {
+		return nil, err
+	}
 
 	// No watcher needed
-	return nil, nil // FIXME
+	return &schedpb.ScheduleActionResult{
+		ScheduleTime: timestamp.TimePtr(start.Actual),
+		ActualTime:   timestamp.TimePtr(res.RealTime),
+		StartWorkflowResult: &commonpb.WorkflowExecution{
+			WorkflowId: sreq.WorkflowId,
+			RunId:      res.Response.RunId,
+		},
+	}, nil
 }
 
 func (s *scheduler) startWorkflow(
 	start *bufferedStart,
-	req *workflowservice.StartWorkflowExecutionRequest,
+	origStartReq *workflowservice.StartWorkflowExecutionRequest,
 ) (*schedpb.ScheduleActionResult, error) {
 	// Watcher should not be running now
 	if s.Internal.WatcherReq != nil || s.watcherFuture != nil {
 		return nil, errInternal
 	}
 
-	// Validation
-	// namespace: already validated at creation time
-	// identity: set by SDK? FIXME
-	// request_id: FIXME
-	// workflow_id_reuse_policy: FIXME must be omitted or set to WORKFLOW_ID_REUSE_POLICY_ALLOW_DUPLICATE.
-	// cron_schedule: FIXME
+	sreq := *origStartReq
+	sreq.Identity = s.identity()
+	sreq.RequestId = uuid.NewString()
+	sreq.SearchAttributes = s.addSearchAttr(sreq.SearchAttributes, start.Nominal.UTC())
 
 	ctx := workflow.WithActivityOptions(s.ctx, workflow.ActivityOptions{RetryPolicy: defaultActivityRetryPolicy})
+	req := &startWorkflowRequest{Request: &sreq}
 	var res startWorkflowResponse
 	err := workflow.ExecuteActivity(ctx, s.a.StartWorkflow, req).Get(s.ctx, &res)
 	if err != nil {
-		// FIXME
 		return nil, err
 	}
 
 	// Start background activity to watch the workflow
 	s.Internal.WatcherReq = &watchWorkflowRequest{
-		WorkflowID: req.WorkflowId,
+		WorkflowID: sreq.WorkflowId,
 		RunID:      res.Response.RunId,
 	}
 	s.startWatcher()
@@ -648,17 +669,35 @@ func (s *scheduler) startWorkflow(
 		ScheduleTime: timestamp.TimePtr(start.Actual),
 		ActualTime:   timestamp.TimePtr(res.RealTime),
 		StartWorkflowResult: &commonpb.WorkflowExecution{
-			WorkflowId: req.WorkflowId,
+			WorkflowId: sreq.WorkflowId,
 			RunId:      res.Response.RunId,
 		},
 	}, nil
+}
+
+func (s *scheduler) identity() string {
+	return fmt.Sprintf("temporal-scheduler-%s", s.Internal.ID)
+}
+
+func (s *scheduler) addSearchAttr(
+	attrs *commonpb.SearchAttributes,
+	nominal time.Time,
+) *commonpb.SearchAttributes {
+	out := common.CopyMap(attrs.GetIndexedFields())
+	if p, err := payload.Encode(nominal); err == nil {
+		out[searchAttrStartTimeKey] = p
+	}
+	return &commonpb.SearchAttributes{
+		IndexedFields: out,
+	}
 }
 
 func (s *scheduler) startWatcher() {
 	ctx := workflow.WithActivityOptions(s.ctx, workflow.ActivityOptions{
 		StartToCloseTimeout: 365 * 24 * time.Hour,
 		RetryPolicy:         defaultActivityRetryPolicy,
-		HeartbeatTimeout:    65 * time.Second,
+		// see activities.tryWatchWorkflow for this timeout
+		HeartbeatTimeout: 65 * time.Second,
 	})
 	s.watcherFuture = workflow.ExecuteActivity(ctx, s.a.WatchWorkflow, s.Internal.WatcherReq)
 }
