@@ -42,6 +42,7 @@ import (
 	"go.temporal.io/sdk/workflow"
 
 	"go.temporal.io/server/common"
+	"go.temporal.io/server/common/namespace"
 	"go.temporal.io/server/common/payload"
 	"go.temporal.io/server/common/primitives/timestamp"
 )
@@ -74,6 +75,8 @@ type (
 	}
 
 	internalState struct {
+		Namespace         namespace.Name
+		NamespaceID       namespace.ID
 		ID                string
 		LastProcessedTime time.Time
 		BufferedStarts    []*bufferedStart
@@ -618,7 +621,11 @@ func (s *scheduler) startWorkflowWithAllowAll(
 	sreq.SearchAttributes = s.addSearchAttr(sreq.SearchAttributes, start.Nominal.UTC())
 
 	ctx := workflow.WithActivityOptions(s.ctx, workflow.ActivityOptions{RetryPolicy: defaultActivityRetryPolicy})
-	req := &startWorkflowRequest{Request: &sreq}
+	req := &startWorkflowRequest{
+		NamespaceID:     s.Internal.NamespaceID,
+		Request:         &sreq,
+		ActualStartTime: start.Actual, // used to set expiration time
+	}
 	var res startWorkflowResponse
 	err := workflow.ExecuteActivity(ctx, s.a.StartWorkflow, req).Get(s.ctx, &res)
 	if err != nil {
@@ -631,7 +638,7 @@ func (s *scheduler) startWorkflowWithAllowAll(
 		ActualTime:   timestamp.TimePtr(res.RealTime),
 		StartWorkflowResult: &commonpb.WorkflowExecution{
 			WorkflowId: sreq.WorkflowId,
-			RunId:      res.Response.RunId,
+			RunId:      res.RunID,
 		},
 	}, nil
 }
@@ -649,9 +656,15 @@ func (s *scheduler) startWorkflow(
 	sreq.Identity = s.identity()
 	sreq.RequestId = uuid.NewString()
 	sreq.SearchAttributes = s.addSearchAttr(sreq.SearchAttributes, start.Nominal.UTC())
+	// FIXME: last completion result
+	// FIXME: last failure
 
 	ctx := workflow.WithActivityOptions(s.ctx, workflow.ActivityOptions{RetryPolicy: defaultActivityRetryPolicy})
-	req := &startWorkflowRequest{Request: &sreq}
+	req := &startWorkflowRequest{
+		NamespaceID:     s.Internal.NamespaceID,
+		Request:         &sreq,
+		ActualStartTime: start.Actual, // used to set expiration time
+	}
 	var res startWorkflowResponse
 	err := workflow.ExecuteActivity(ctx, s.a.StartWorkflow, req).Get(s.ctx, &res)
 	if err != nil {
@@ -661,7 +674,7 @@ func (s *scheduler) startWorkflow(
 	// Start background activity to watch the workflow
 	s.Internal.WatcherReq = &watchWorkflowRequest{
 		WorkflowID: sreq.WorkflowId,
-		RunID:      res.Response.RunId,
+		RunID:      res.RunID,
 	}
 	s.startWatcher()
 
@@ -670,7 +683,7 @@ func (s *scheduler) startWorkflow(
 		ActualTime:   timestamp.TimePtr(res.RealTime),
 		StartWorkflowResult: &commonpb.WorkflowExecution{
 			WorkflowId: sreq.WorkflowId,
-			RunId:      res.Response.RunId,
+			RunId:      res.RunID,
 		},
 	}, nil
 }

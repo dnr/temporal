@@ -30,6 +30,7 @@ import (
 	sdkclient "go.temporal.io/sdk/client"
 	sdkworker "go.temporal.io/sdk/worker"
 	"go.temporal.io/sdk/workflow"
+	"go.temporal.io/server/api/historyservice/v1"
 	"go.temporal.io/server/common/log"
 	"go.temporal.io/server/common/metrics"
 	workercommon "go.temporal.io/server/service/worker/common"
@@ -45,6 +46,7 @@ type (
 		MetricsClient metrics.Client
 		Logger        log.Logger
 		SdkClient     sdkclient.Client
+		HistoryClient historyservice.HistoryServiceClient
 	}
 
 	fxResult struct {
@@ -81,5 +83,6 @@ func (s *schedulerWorker) activities() *activities {
 		metricsClient: s.MetricsClient,
 		logger:        s.Logger,
 		sdkClient:     s.SdkClient,
+		historyClient: s.HistoryClient,
 	}
 }

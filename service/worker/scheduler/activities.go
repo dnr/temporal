@@ -34,9 +34,12 @@ import (
 	"go.temporal.io/sdk/activity"
 	sdkclient "go.temporal.io/sdk/client"
 	"go.temporal.io/sdk/temporal"
+	"go.temporal.io/server/api/historyservice/v1"
+	"go.temporal.io/server/common"
 	"go.temporal.io/server/common/log"
 	"go.temporal.io/server/common/log/tag"
 	"go.temporal.io/server/common/metrics"
+	"go.temporal.io/server/common/namespace"
 )
 
 type (
@@ -44,6 +47,7 @@ type (
 		metricsClient metrics.Client
 		logger        log.Logger
 		sdkClient     sdkclient.Client
+		historyClient historyservice.HistoryServiceClient
 	}
 
 	watchWorkflowRequest struct {
@@ -59,11 +63,13 @@ type (
 	}
 
 	startWorkflowRequest struct {
-		Request *workflowservice.StartWorkflowExecutionRequest
+		NamespaceID     namespace.ID
+		Request         *workflowservice.StartWorkflowExecutionRequest
+		ActualStartTime time.Time
 	}
 
 	startWorkflowResponse struct {
-		Response *workflowservice.StartWorkflowExecutionResponse
+		RunID    string
 		RealTime time.Time
 	}
 
@@ -72,13 +78,30 @@ type (
 	}
 )
 
-func (a *activities) StartWorkflow(ctx context.Context, req *startWorkflowRequest) *startWorkflowResponse {
-	// send req directly to frontend, or to history? FIXME
+func (a *activities) StartWorkflow(ctx context.Context, req *startWorkflowRequest) (*startWorkflowResponse, error) {
+	request := common.CreateHistoryStartWorkflowRequest(
+		string(req.NamespaceID),
+		req.Request,
+		nil,
+		req.ActualStartTime,
+	)
+
+	// TODO: ideally, get the time of the workflow execution started event
+	// instead of this one, which will be close but not the same
+	now := time.Now()
+
+	res, err := a.historyClient.StartWorkflowExecution(ctx, request)
+	if err != nil {
+		if common.IsPersistenceTransientError(err) {
+			return nil, temporal.NewApplicationError(err.Error(), reflect.TypeOf(err).Name())
+		}
+		return nil, temporal.NewNonRetryableApplicationError(err.Error(), reflect.TypeOf(err).Name(), nil)
+	}
 
 	return &startWorkflowResponse{
-		Response: nil, //res,
-		RealTime: time.Now(),
-	}
+		RunID:    res.RunId,
+		RealTime: now,
+	}, nil
 }
 
 func (a *activities) tryWatchWorkflow(ctx context.Context, req *watchWorkflowRequest) (*watchWorkflowResponse, error) {
@@ -136,5 +159,4 @@ func (a *activities) CancelWorkflow(ctx context.Context, req *cancelWorkflowRequ
 	default:
 		return temporal.NewNonRetryableApplicationError(err.Error(), reflect.TypeOf(err).Name(), nil)
 	}
-
 }
