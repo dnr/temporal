@@ -75,6 +75,7 @@ func (s *schedulerWorker) Register(worker sdkworker.Worker) {
 
 func (s *schedulerWorker) DedicatedWorkerOptions() *workercommon.DedicatedWorkerOptions {
 	// use default worker
+	// FIXME: ensure worker is set up with no dataconverters at all
 	return nil
 }
 

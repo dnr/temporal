@@ -35,6 +35,7 @@ import (
 
 	commonpb "go.temporal.io/api/common/v1"
 	enumspb "go.temporal.io/api/enums/v1"
+	failurepb "go.temporal.io/api/failure/v1"
 	schedpb "go.temporal.io/api/schedule/v1"
 	"go.temporal.io/api/workflowservice/v1"
 	sdklog "go.temporal.io/sdk/log"
@@ -65,6 +66,8 @@ const (
 )
 
 type (
+	// FIXME: convert these all to protos
+
 	bufferedStart struct {
 		// Nominal (pre-jitter) and Actual (post-jitter) time of action
 		Nominal, Actual time.Time
@@ -80,9 +83,15 @@ type (
 		ID                string
 		LastProcessedTime time.Time
 		BufferedStarts    []*bufferedStart
+
+		// last completion/failure
+		LastCompletionResult *commonpb.Payloads
+		ContinuedFailure     *failurepb.Failure
+
 		// conflict token is implemented as simple sequence number
 		SequenceNumber uint64
 		ConflictToken  []byte
+
 		// WatcherReq != nil iff watcher activity is running
 		WatcherReq *watchWorkflowRequest
 	}
@@ -375,6 +384,15 @@ func (s *scheduler) wfWatcherReturned(f workflow.Future) {
 		s.incSeqNo()
 	}
 
+	// handle last completion/failure
+	if res.CompletionResult != nil {
+		s.Internal.LastCompletionResult = res.CompletionResult
+		s.Internal.Failure = nil
+	} else if res.Failure != nil {
+		// leave LastCompletionResult from previous run
+		s.Internal.Failure = res.Failure
+	}
+
 	s.logger.Info("started workflow finished",
 		"failed", res.Failed, "error", res.WorkflowError, "pause-after-failure", pauseAfterFailure)
 }
@@ -656,14 +674,14 @@ func (s *scheduler) startWorkflow(
 	sreq.Identity = s.identity()
 	sreq.RequestId = uuid.NewString()
 	sreq.SearchAttributes = s.addSearchAttr(sreq.SearchAttributes, start.Nominal.UTC())
-	// FIXME: last completion result
-	// FIXME: last failure
 
 	ctx := workflow.WithActivityOptions(s.ctx, workflow.ActivityOptions{RetryPolicy: defaultActivityRetryPolicy})
 	req := &startWorkflowRequest{
-		NamespaceID:     s.Internal.NamespaceID,
-		Request:         &sreq,
-		ActualStartTime: start.Actual, // used to set expiration time
+		NamespaceID:          s.Internal.NamespaceID,
+		Request:              &sreq,
+		ActualStartTime:      start.Actual, // used to set expiration time
+		LastCompletionResult: s.Internal.LastCompletionResult,
+		ContinuedFailure:     s.Internal.ContinuedFailure,
 	}
 	var res startWorkflowResponse
 	err := workflow.ExecuteActivity(ctx, s.a.StartWorkflow, req).Get(s.ctx, &res)

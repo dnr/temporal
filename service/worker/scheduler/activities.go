@@ -29,9 +29,12 @@ import (
 	"reflect"
 	"time"
 
+	commonpb "go.temporal.io/api/common/v1"
+	failurepb "go.temporal.io/api/failure/v1"
 	"go.temporal.io/api/serviceerror"
 	"go.temporal.io/api/workflowservice/v1"
 	"go.temporal.io/sdk/activity"
+	"go.temporal.io/sdk/internalbindings"
 	"go.temporal.io/sdk/temporal"
 	"go.temporal.io/server/common"
 	"go.temporal.io/server/common/log/tag"
@@ -43,6 +46,8 @@ type (
 		activityDeps
 	}
 
+	// FIXME: convert these all to protos
+
 	watchWorkflowRequest struct {
 		WorkflowID string
 		RunID      string // FIXME: do we need or want this?
@@ -53,12 +58,17 @@ type (
 		Failed bool
 		// WorkflowError has error details if any
 		WorkflowError error
+		// completion result/failure payload
+		CompletionResult *commonpb.Payloads
+		Failure          *failurepb.Failure
 	}
 
 	startWorkflowRequest struct {
-		NamespaceID     namespace.ID
-		Request         *workflowservice.StartWorkflowExecutionRequest
-		ActualStartTime time.Time
+		NamespaceID          namespace.ID
+		Request              *workflowservice.StartWorkflowExecutionRequest
+		ActualStartTime      time.Time
+		LastCompletionResult *commonpb.Payloads
+		ContinuedFailure     *failurepb.Failure
 	}
 
 	startWorkflowResponse struct {
@@ -78,6 +88,8 @@ func (a *activities) StartWorkflow(ctx context.Context, req *startWorkflowReques
 		nil,
 		req.ActualStartTime,
 	)
+	request.LastCompletionResult = req.LastCompletionResult
+	request.ContinuedFailure = req.ContinuedFailure
 
 	// TODO: ideally, get the time of the workflow execution started event
 	// instead of this one, which will be close but not the same
@@ -102,24 +114,26 @@ func (a *activities) tryWatchWorkflow(ctx context.Context, req *watchWorkflowReq
 	// calls and heartbeat in between, so we should set a slightly smaller timeout.
 	ctx2, cancel := context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()
-	err := a.SdkClient.GetWorkflow(ctx2, req.WorkflowID, req.RunID).Get(ctx2, nil)
+	var result *commonpb.Payloads // FIXME: does this work?
+	err := a.SdkClient.GetWorkflow(ctx2, req.WorkflowID, req.RunID).Get(ctx2, &result)
 	if ctx2.Err() != nil { // FIXME: is that the best way to tell if the call timed out? what will Get actually return?
 		return nil, ctx2.Err()
 	}
 	switch err := err.(type) {
 	case nil:
-		return &watchWorkflowResponse{Failed: false, WorkflowError: nil}, nil
+		return &watchWorkflowResponse{Failed: false, WorkflowError: nil, CompletionResult: result}, nil
 	// FIXME: what does a "not found" error come out as here?
 	case *temporal.WorkflowExecutionError:
+		failure := internalbindings.ConvertErrorToFailure(err, nil)
 		switch err := err.Unwrap().(type) {
 		case *temporal.ApplicationError:
-			return &watchWorkflowResponse{Failed: true, WorkflowError: err}, nil
+			return &watchWorkflowResponse{Failed: true, WorkflowError: err, Failure: failure}, nil
 		case *temporal.TimeoutError:
-			return &watchWorkflowResponse{Failed: true, WorkflowError: err}, nil
+			return &watchWorkflowResponse{Failed: true, WorkflowError: err, Failure: failure}, nil
 		case *temporal.CanceledError:
-			return &watchWorkflowResponse{Failed: false, WorkflowError: err}, nil
+			return &watchWorkflowResponse{Failed: false, WorkflowError: err, Failure: failure}, nil
 		case *temporal.TerminatedError:
-			return &watchWorkflowResponse{Failed: false, WorkflowError: err}, nil
+			return &watchWorkflowResponse{Failed: false, WorkflowError: err, Failure: failure}, nil
 		}
 	}
 	a.Logger.Error("unexpected error from WorkflowRun.Get", tag.Error(err))
