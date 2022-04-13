@@ -537,7 +537,7 @@ func (s *scheduler) processBuffer() bool {
 			continue
 		}
 
-		result, err := s.startWorkflowWithAllowAll(start, req)
+		result, err := s.startWorkflow(start, req)
 		if err != nil {
 			s.logger.Error("Failed to start workflow", "error", err)
 			// The "start workflow" activity has an unlimited retry policy, so if we get an
@@ -608,7 +608,7 @@ func (s *scheduler) processBuffer() bool {
 		return true
 	}
 
-	result, err := s.startWorkflow(pendingStart, req)
+	result, err := s.startWorkflowAndWatch(pendingStart, req)
 	if err != nil {
 		s.logger.Error("Failed to start workflow", "error", err)
 		// The "start workflow" activity has an unlimited retry policy, so if we get an
@@ -628,7 +628,7 @@ func (s *scheduler) recordAction(result *schedpb.ScheduleActionResult) {
 	}
 }
 
-func (s *scheduler) startWorkflowWithAllowAll(
+func (s *scheduler) startWorkflow(
 	start *bufferedStart,
 	origStartReq *workflowservice.StartWorkflowExecutionRequest,
 ) (*schedpb.ScheduleActionResult, error) {
@@ -661,7 +661,7 @@ func (s *scheduler) startWorkflowWithAllowAll(
 	}, nil
 }
 
-func (s *scheduler) startWorkflow(
+func (s *scheduler) startWorkflowAndWatch(
 	start *bufferedStart,
 	origStartReq *workflowservice.StartWorkflowExecutionRequest,
 ) (*schedpb.ScheduleActionResult, error) {
@@ -670,21 +670,7 @@ func (s *scheduler) startWorkflow(
 		return nil, errInternal
 	}
 
-	sreq := *origStartReq
-	sreq.Identity = s.identity()
-	sreq.RequestId = uuid.NewString()
-	sreq.SearchAttributes = s.addSearchAttr(sreq.SearchAttributes, start.Nominal.UTC())
-
-	ctx := workflow.WithActivityOptions(s.ctx, workflow.ActivityOptions{RetryPolicy: defaultActivityRetryPolicy})
-	req := &startWorkflowRequest{
-		NamespaceID:          s.Internal.NamespaceID,
-		Request:              &sreq,
-		ActualStartTime:      start.Actual, // used to set expiration time
-		LastCompletionResult: s.Internal.LastCompletionResult,
-		ContinuedFailure:     s.Internal.ContinuedFailure,
-	}
-	var res startWorkflowResponse
-	err := workflow.ExecuteActivity(ctx, s.a.StartWorkflow, req).Get(s.ctx, &res)
+	result, err := s.startWorkflow(start, origStartReq)
 	if err != nil {
 		return nil, err
 	}
@@ -696,14 +682,7 @@ func (s *scheduler) startWorkflow(
 	}
 	s.startWatcher()
 
-	return &schedpb.ScheduleActionResult{
-		ScheduleTime: timestamp.TimePtr(start.Actual),
-		ActualTime:   timestamp.TimePtr(res.RealTime),
-		StartWorkflowResult: &commonpb.WorkflowExecution{
-			WorkflowId: sreq.WorkflowId,
-			RunId:      res.RunID,
-		},
-	}, nil
+	return result, nil
 }
 
 func (s *scheduler) identity() string {
