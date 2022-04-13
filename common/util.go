@@ -681,11 +681,3 @@ func OverrideWorkflowTaskTimeout(
 
 	return timestamp.MinDuration(taskStartToCloseTimeout, workflowRunTimeout)
 }
-
-func CopyMap[T1 comparable, T2 any](in map[T1]T2) map[T1]T2 {
-	out := make(map[T1]T2, len(in))
-	for k, v:= range in {
-		out[k]=v
-	}
-	return out
-}

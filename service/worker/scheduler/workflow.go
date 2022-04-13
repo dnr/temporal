@@ -32,6 +32,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"golang.org/x/exp/maps"
 
 	commonpb "go.temporal.io/api/common/v1"
 	enumspb "go.temporal.io/api/enums/v1"
@@ -42,7 +43,6 @@ import (
 	"go.temporal.io/sdk/temporal"
 	"go.temporal.io/sdk/workflow"
 
-	"go.temporal.io/server/common"
 	"go.temporal.io/server/common/namespace"
 	"go.temporal.io/server/common/payload"
 	"go.temporal.io/server/common/primitives/timestamp"
@@ -66,7 +66,7 @@ const (
 )
 
 type (
-	// FIXME: convert these all to protos
+	// FIXME: convert these all to protos?
 
 	bufferedStart struct {
 		// Nominal (pre-jitter) and Actual (post-jitter) time of action
@@ -387,10 +387,10 @@ func (s *scheduler) wfWatcherReturned(f workflow.Future) {
 	// handle last completion/failure
 	if res.CompletionResult != nil {
 		s.Internal.LastCompletionResult = res.CompletionResult
-		s.Internal.Failure = nil
+		s.Internal.ContinuedFailure = nil
 	} else if res.Failure != nil {
 		// leave LastCompletionResult from previous run
-		s.Internal.Failure = res.Failure
+		s.Internal.ContinuedFailure = res.Failure
 	}
 
 	s.logger.Info("started workflow finished",
@@ -714,7 +714,7 @@ func (s *scheduler) addSearchAttr(
 	attrs *commonpb.SearchAttributes,
 	nominal time.Time,
 ) *commonpb.SearchAttributes {
-	out := common.CopyMap(attrs.GetIndexedFields())
+	out := maps.Clone(attrs.GetIndexedFields())
 	if p, err := payload.Encode(nominal); err == nil {
 		out[searchAttrStartTimeKey] = p
 	}

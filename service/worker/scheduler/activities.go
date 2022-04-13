@@ -46,7 +46,7 @@ type (
 		activityDeps
 	}
 
-	// FIXME: convert these all to protos
+	// FIXME: convert these all to protos?
 
 	watchWorkflowRequest struct {
 		WorkflowID string
