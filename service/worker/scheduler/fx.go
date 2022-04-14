@@ -27,7 +27,7 @@ package scheduler
 import (
 	"go.uber.org/fx"
 
-	sdkclient "go.temporal.io/sdk/client"
+	"go.temporal.io/api/workflowservice/v1"
 	sdkworker "go.temporal.io/sdk/worker"
 	"go.temporal.io/sdk/workflow"
 	"go.temporal.io/server/api/historyservice/v1"
@@ -43,10 +43,10 @@ type (
 
 	activityDeps struct {
 		fx.In
-		MetricsClient metrics.Client
-		Logger        log.Logger
-		SdkClient     sdkclient.Client
-		HistoryClient historyservice.HistoryServiceClient
+		MetricsClient  metrics.Client
+		Logger         log.Logger
+		HistoryClient  historyservice.HistoryServiceClient
+		FrontendClient workflowservice.WorkflowServiceClient
 	}
 
 	fxResult struct {

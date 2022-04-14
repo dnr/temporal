@@ -382,25 +382,30 @@ func (s *scheduler) wfWatcherReturned(f workflow.Future) {
 	}
 
 	// handle pause-on-failure
-	pauseAfterFailure := s.Schedule.Policies.PauseAfterFailure && res.Failed && !s.Schedule.State.Paused
+	failedStatus := res.Status == enumspb.WORKFLOW_EXECUTION_STATUS_FAILED || res.Status == enumspb.WORKFLOW_EXECUTION_STATUS_TIMED_OUT
+	pauseAfterFailure := s.Schedule.Policies.PauseAfterFailure && failedStatus && !s.Schedule.State.Paused
 	if pauseAfterFailure {
 		s.Schedule.State.Paused = true
-		s.Schedule.State.Notes = fmt.Sprintf("paused due to failure (%s)", res.WorkflowError)
-		s.logger.Info("paused due to failure", "error", res.WorkflowError)
+		if res.Status == enumspb.WORKFLOW_EXECUTION_STATUS_FAILED {
+			s.Schedule.State.Notes = fmt.Sprintf("paused due to workflow failure (%s)", res.Failure.GetMessage())
+			s.logger.Info("paused due to workflow failure", "message", res.Failure.GetMessage())
+		} else if res.Status == enumspb.WORKFLOW_EXECUTION_STATUS_TIMED_OUT {
+			s.Schedule.State.Notes = fmt.Sprintf("paused due to workflow timeout")
+			s.logger.Info("paused due to workflow timeout")
+		}
 		s.incSeqNo()
 	}
 
 	// handle last completion/failure
-	if res.CompletionResult != nil {
-		s.Internal.LastCompletionResult = res.CompletionResult
+	if res.Result != nil {
+		s.Internal.LastCompletionResult = res.Result
 		s.Internal.ContinuedFailure = nil
 	} else if res.Failure != nil {
 		// leave LastCompletionResult from previous run
 		s.Internal.ContinuedFailure = res.Failure
 	}
 
-	s.logger.Info("started workflow finished",
-		"failed", res.Failed, "error", res.WorkflowError, "pause-after-failure", pauseAfterFailure)
+	s.logger.Info("started workflow finished", "status", res.Status, "pause-after-failure", pauseAfterFailure)
 }
 
 func (s *scheduler) update(ch workflow.ReceiveChannel, _ bool) {
@@ -611,9 +616,9 @@ func (s *scheduler) processBuffer() bool {
 	s.Internal.BufferedStarts = nextBufferedStarts
 
 	if needTerminate {
-		s.terminateWorkflow(s.Internal.WatcherReq.WorkflowID)
+		s.terminateWorkflow(s.Internal.WatcherReq.Execution)
 	} else if needCancel {
-		s.cancelWorkflow(s.Internal.WatcherReq.WorkflowID)
+		s.cancelWorkflow(s.Internal.WatcherReq.Execution)
 	}
 
 	if pendingStart == nil {
@@ -693,8 +698,7 @@ func (s *scheduler) startWorkflowAndWatch(
 
 	// Start background activity to watch the workflow
 	s.Internal.WatcherReq = &watchWorkflowRequest{
-		WorkflowID: result.StartWorkflowResult.WorkflowId,
-		RunID:      result.StartWorkflowResult.RunId,
+		Execution: result.StartWorkflowResult,
 	}
 	s.startWatcher()
 
@@ -728,7 +732,7 @@ func (s *scheduler) startWatcher() {
 	s.watcherFuture = workflow.ExecuteActivity(ctx, s.a.WatchWorkflow, s.Internal.WatcherReq)
 }
 
-func (s *scheduler) cancelWorkflow(id string) {
+func (s *scheduler) cancelWorkflow(execution *commonpb.WorkflowExecution) {
 	ctx := workflow.WithActivityOptions(s.ctx, workflow.ActivityOptions{
 		StartToCloseTimeout: 1 * time.Minute,
 		RetryPolicy:         defaultActivityRetryPolicy,
@@ -738,13 +742,13 @@ func (s *scheduler) cancelWorkflow(id string) {
 		Namespace:   s.Internal.Namespace,
 		RequestID:   uuid.NewString(),
 		Identity:    s.identity(),
-		WorkflowID:  id,
+		Execution:   execution,
 	}
 	workflow.ExecuteActivity(ctx, s.a.CancelWorkflow, areq)
 	// do not wait for cancel to complete
 }
 
-func (s *scheduler) terminateWorkflow(id string) {
+func (s *scheduler) terminateWorkflow(execution *commonpb.WorkflowExecution) {
 	ctx := workflow.WithActivityOptions(s.ctx, workflow.ActivityOptions{
 		StartToCloseTimeout: 1 * time.Minute,
 		RetryPolicy:         defaultActivityRetryPolicy,
@@ -753,7 +757,7 @@ func (s *scheduler) terminateWorkflow(id string) {
 		NamespaceID: s.Internal.NamespaceID,
 		Namespace:   s.Internal.Namespace,
 		Identity:    s.identity(),
-		WorkflowID:  id,
+		Execution:   execution,
 		Reason:      "terminated by schedule overlap policy",
 	}
 	workflow.ExecuteActivity(ctx, s.a.TerminateWorkflow, areq)
