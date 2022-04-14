@@ -310,12 +310,16 @@ func (s *scheduler) processTimeRange(
 			s.Info.MissedCatchupWindow++
 			continue
 		}
-		s.addStart(nominalTime, nextTime, overlapPolicy, manual)
+		// Peek at paused/remaining actions state and don't even bother adding
+		// to buffer if we're not going to take an action now.
+		if s.canTakeScheduledAction(manual, false) {
+			s.addStart(nominalTime, nextTime, overlapPolicy, manual)
+		}
 	}
 	return 0, false
 }
 
-func (s *scheduler) canTakeScheduledAction(manual bool) bool {
+func (s *scheduler) canTakeScheduledAction(manual, decrement bool) bool {
 	// If manual (trigger immediately or backfill), always allow
 	if manual {
 		return true
@@ -330,8 +334,10 @@ func (s *scheduler) canTakeScheduledAction(manual bool) bool {
 	}
 	// Otherwise check and decrement limit
 	if s.Schedule.State.RemainingActions > 0 {
-		s.Schedule.State.RemainingActions--
-		s.incSeqNo()
+		if decrement {
+			s.Schedule.State.RemainingActions--
+			s.incSeqNo()
+		}
 		return true
 	}
 	// No actions left
@@ -536,12 +542,15 @@ func (s *scheduler) processBuffer() bool {
 	// Recreate the rest of the buffer in here as we're processing
 	var nextBufferedStarts []*bufferedStart
 
+	needTerminate := false
+	needCancel := false
+
 	for _, start := range s.Internal.BufferedStarts {
 		overlapPolicy := s.resolveOverlapPolicy(start.Overlap)
 
 		// For ALLOW_ALL, just start it, ignoring running/pending starts
 		if overlapPolicy == enumspb.SCHEDULE_OVERLAP_POLICY_ALLOW_ALL {
-			if s.canTakeScheduledAction(start.Manual) {
+			if s.canTakeScheduledAction(start.Manual, true) {
 				result, err := s.startWorkflow(start, req)
 				if err != nil {
 					s.logger.Error("Failed to start workflow", "error", err)
@@ -580,7 +589,7 @@ func (s *scheduler) processBuffer() bool {
 		case enumspb.SCHEDULE_OVERLAP_POLICY_CANCEL_OTHER:
 			if isRunning {
 				// an actual workflow is running, cancel it (asynchronously)
-				s.cancelWorkflow(s.Internal.WatcherReq.WorkflowID)
+				needCancel = true
 				// keep in buffer so it will get started once cancel completes
 				nextBufferedStarts = append(nextBufferedStarts, start)
 			} else {
@@ -590,7 +599,7 @@ func (s *scheduler) processBuffer() bool {
 		case enumspb.SCHEDULE_OVERLAP_POLICY_TERMINATE_OTHER:
 			if isRunning {
 				// an actual workflow is running, terminate it (asynchronously)
-				s.terminateWorkflow(s.Internal.WatcherReq.WorkflowID)
+				needTerminate = true
 				// keep in buffer so it will get started once cancel completes
 				nextBufferedStarts = append(nextBufferedStarts, start)
 			} else {
@@ -601,12 +610,18 @@ func (s *scheduler) processBuffer() bool {
 	}
 	s.Internal.BufferedStarts = nextBufferedStarts
 
+	if needTerminate {
+		s.terminateWorkflow(s.Internal.WatcherReq.WorkflowID)
+	} else if needCancel {
+		s.cancelWorkflow(s.Internal.WatcherReq.WorkflowID)
+	}
+
 	if pendingStart == nil {
 		return false
 	}
 
-	// FIXME: if we don't take the action, we shouldn't cancel/terminate previous!
-	if !s.canTakeScheduledAction(pendingStart.Manual) {
+	// Check paused/remaining actions again, and decrement this time.
+	if !s.canTakeScheduledAction(pendingStart.Manual, true) {
 		return true
 	}
 
