@@ -537,7 +537,7 @@ func (s *scheduler) processBuffer() bool {
 	var nextBufferedStarts []*bufferedStart
 
 	for _, start := range s.Internal.BufferedStarts {
-		overlapPolicy = s.resolveOverlapPolicy(start.Overlap)
+		overlapPolicy := s.resolveOverlapPolicy(start.Overlap)
 
 		// For ALLOW_ALL, just start it, ignoring running/pending starts
 		if overlapPolicy == enumspb.SCHEDULE_OVERLAP_POLICY_ALLOW_ALL {
@@ -652,7 +652,6 @@ func (s *scheduler) startWorkflow(
 		return nil, err
 	}
 
-	// No watcher needed
 	return &schedpb.ScheduleActionResult{
 		ScheduleTime: timestamp.TimePtr(start.Actual),
 		ActualTime:   timestamp.TimePtr(res.RealTime),
@@ -679,8 +678,8 @@ func (s *scheduler) startWorkflowAndWatch(
 
 	// Start background activity to watch the workflow
 	s.Internal.WatcherReq = &watchWorkflowRequest{
-		WorkflowID: sreq.WorkflowId,
-		RunID:      res.RunID,
+		WorkflowID: result.StartWorkflowResult.WorkflowId,
+		RunID:      result.StartWorkflowResult.RunId,
 	}
 	s.startWatcher()
 
@@ -695,12 +694,12 @@ func (s *scheduler) addSearchAttr(
 	attrs *commonpb.SearchAttributes,
 	nominal time.Time,
 ) *commonpb.SearchAttributes {
-	out := maps.Clone(attrs.GetIndexedFields())
+	fields := maps.Clone(attrs.GetIndexedFields())
 	if p, err := payload.Encode(nominal); err == nil {
-		out[searchAttrStartTimeKey] = p
+		fields[searchAttrStartTimeKey] = p
 	}
 	return &commonpb.SearchAttributes{
-		IndexedFields: out,
+		IndexedFields: fields,
 	}
 }
 
