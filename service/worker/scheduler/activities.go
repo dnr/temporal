@@ -36,6 +36,7 @@ import (
 	"go.temporal.io/sdk/activity"
 	"go.temporal.io/sdk/internalbindings"
 	"go.temporal.io/sdk/temporal"
+	"go.temporal.io/server/api/historyservice/v1"
 	"go.temporal.io/server/common"
 	"go.temporal.io/server/common/log/tag"
 	"go.temporal.io/server/common/namespace"
@@ -77,12 +78,19 @@ type (
 	}
 
 	cancelWorkflowRequest struct {
-		WorkflowID string
+		Namespace   namespace.Name
+		NamespaceID namespace.ID
+		RequestID   string
+		Identity    string
+		WorkflowID  string
 	}
 
 	terminateWorkflowRequest struct {
-		WorkflowID string
-		Reason     string
+		Namespace   namespace.Name
+		NamespaceID namespace.ID
+		Identity    string
+		WorkflowID  string
+		Reason      string
 	}
 )
 
@@ -157,9 +165,21 @@ func (a *activities) WatchWorkflow(ctx context.Context, req *watchWorkflowReques
 }
 
 func (a *activities) CancelWorkflow(ctx context.Context, req *cancelWorkflowRequest) error {
+	rreq := &historyservice.RequestCancelWorkflowExecutionRequest{
+		NamespaceId: req.NamespaceID.String(),
+		CancelRequest: &workflowservice.RequestCancelWorkflowExecutionRequest{
+			Namespace: req.Namespace.String(),
+			WorkflowExecution: &commonpb.WorkflowExecution{
+				WorkflowId: req.WorkflowID,
+			},
+			Identity:  req.Identity,
+			RequestId: req.RequestID,
+		},
+	}
 	// TODO: does ctx get set up with the correct deadline? (from StartToCloseTimeout in my activity options?)
-	err := a.SdkClient.CancelWorkflow(ctx, req.WorkflowID, "")
-	// Differentiate between error types
+	_, err := a.HistoryClient.RequestCancelWorkflowExecution(ctx, rreq)
+
+	// FIXME: check this error handling
 	switch err := err.(type) {
 	case nil:
 		return nil
@@ -174,9 +194,20 @@ func (a *activities) CancelWorkflow(ctx context.Context, req *cancelWorkflowRequ
 }
 
 func (a *activities) TerminateWorkflow(ctx context.Context, req *terminateWorkflowRequest) error {
-	// TODO: does ctx get set up with the correct deadline? (from StartToCloseTimeout in my activity options?)
-	err := a.SdkClient.TerminateWorkflow(ctx, req.WorkflowID, "", req.Reason)
-	// Differentiate between error types
+	rreq := &historyservice.TerminateWorkflowExecutionRequest{
+		NamespaceId: req.NamespaceID.String(),
+		TerminateRequest: &workflowservice.TerminateWorkflowExecutionRequest{
+			Namespace: req.Namespace.String(),
+			WorkflowExecution: &commonpb.WorkflowExecution{
+				WorkflowId: req.WorkflowID,
+			},
+			Reason:   req.Reason,
+			Identity: req.Identity,
+		},
+	}
+	_, err := a.HistoryClient.TerminateWorkflowExecution(ctx, rreq)
+
+	// FIXME: check this error handling
 	switch err := err.(type) {
 	case nil:
 		return nil

@@ -734,7 +734,11 @@ func (s *scheduler) cancelWorkflow(id string) {
 		RetryPolicy:         defaultActivityRetryPolicy,
 	})
 	areq := &cancelWorkflowRequest{
-		WorkflowID: id,
+		NamespaceID: s.Internal.NamespaceID,
+		Namespace:   s.Internal.Namespace,
+		RequestID:   uuid.NewString(),
+		Identity:    s.identity(),
+		WorkflowID:  id,
 	}
 	workflow.ExecuteActivity(ctx, s.a.CancelWorkflow, areq)
 	// do not wait for cancel to complete
@@ -746,8 +750,11 @@ func (s *scheduler) terminateWorkflow(id string) {
 		RetryPolicy:         defaultActivityRetryPolicy,
 	})
 	areq := &terminateWorkflowRequest{
-		WorkflowID: id,
-		Reason:     "terminated by schedule overlap policy",
+		NamespaceID: s.Internal.NamespaceID,
+		Namespace:   s.Internal.Namespace,
+		Identity:    s.identity(),
+		WorkflowID:  id,
+		Reason:      "terminated by schedule overlap policy",
 	}
 	workflow.ExecuteActivity(ctx, s.a.TerminateWorkflow, areq)
 	// do not wait for terminate to complete
