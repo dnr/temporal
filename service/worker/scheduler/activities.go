@@ -79,6 +79,11 @@ type (
 	cancelWorkflowRequest struct {
 		WorkflowID string
 	}
+
+	terminateWorkflowRequest struct {
+		WorkflowID string
+		Reason     string
+	}
 )
 
 func (a *activities) StartWorkflow(ctx context.Context, req *startWorkflowRequest) (*startWorkflowResponse, error) {
@@ -154,6 +159,23 @@ func (a *activities) WatchWorkflow(ctx context.Context, req *watchWorkflowReques
 func (a *activities) CancelWorkflow(ctx context.Context, req *cancelWorkflowRequest) error {
 	// TODO: does ctx get set up with the correct deadline? (from StartToCloseTimeout in my activity options?)
 	err := a.SdkClient.CancelWorkflow(ctx, req.WorkflowID, "")
+	// Differentiate between error types
+	switch err := err.(type) {
+	case nil:
+		return nil
+	case *serviceerror.Unavailable:
+		return temporal.NewApplicationError(err.Error(), reflect.TypeOf(err).Name())
+	case *serviceerror.Internal:
+		// TODO: should we retry these?
+		return temporal.NewApplicationError(err.Error(), reflect.TypeOf(err).Name())
+	default:
+		return temporal.NewNonRetryableApplicationError(err.Error(), reflect.TypeOf(err).Name(), nil)
+	}
+}
+
+func (a *activities) TerminateWorkflow(ctx context.Context, req *terminateWorkflowRequest) error {
+	// TODO: does ctx get set up with the correct deadline? (from StartToCloseTimeout in my activity options?)
+	err := a.SdkClient.TerminateWorkflow(ctx, req.WorkflowID, "", req.Reason)
 	// Differentiate between error types
 	switch err := err.(type) {
 	case nil:
