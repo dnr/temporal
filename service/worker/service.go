@@ -92,7 +92,8 @@ type (
 		esClient         esclient.Client
 		config           *Config
 
-		manager *workerManager
+		workerManager             *workerManager
+		perNamespaceWorkerManager *perNamespaceWorkerManager
 	}
 
 	// Config contains all the service config for worker
@@ -130,7 +131,8 @@ func NewService(
 	metadataManager persistence.MetadataManager,
 	taskManager persistence.TaskManager,
 	historyClient historyservice.HistoryServiceClient,
-	manager *workerManager,
+	workerManager *workerManager,
+	perNamespaceWorkerManager *perNamespaceWorkerManager,
 ) (*Service, error) {
 	workerServiceResolver, err := membershipMonitor.GetResolver(common.WorkerServiceName)
 	if err != nil {
@@ -162,7 +164,8 @@ func NewService(
 		taskManager:               taskManager,
 		historyClient:             historyClient,
 
-		manager: manager,
+		workerManager:             workerManager,
+		perNamespaceWorkerManager: perNamespaceWorkerManager,
 	}, nil
 }
 
@@ -351,7 +354,8 @@ func (s *Service) Start() {
 		s.startParentClosePolicyProcessor()
 	}
 
-	s.manager.Start()
+	s.workerManager.Start()
+	s.perNamespaceWorkerManager.Start()
 
 	s.logger.Info(
 		"worker service started",
@@ -373,7 +377,8 @@ func (s *Service) Stop() {
 
 	close(s.stopC)
 
-	s.manager.Stop()
+	s.perNamespaceWorkerManager.Stop()
+	s.workerManager.Stop()
 	s.namespaceRegistry.Stop()
 	s.membershipMonitor.Stop()
 	s.clusterMetadata.Stop()

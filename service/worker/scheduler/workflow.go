@@ -49,8 +49,6 @@ import (
 )
 
 const (
-	WorkflowName = "temporal-sys-scheduler-workflow"
-
 	// The number of future action times to include in Describe.
 	futureActionCount = 10
 	// The number of recent actual action results to include in Describe.

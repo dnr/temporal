@@ -36,8 +36,13 @@ import (
 	workercommon "go.temporal.io/server/service/worker/common"
 )
 
+const (
+	WorkflowName  = "temporal-sys-scheduler-workflow"
+	TaskQueueName = "temporal-sys-scheduler-tq"
+)
+
 type (
-	schedulerWorker struct {
+	workerComponent struct {
 		activityDeps
 	}
 
@@ -51,7 +56,7 @@ type (
 
 	fxResult struct {
 		fx.Out
-		Component workercommon.WorkerComponent `group:"workerComponent"`
+		Component workercommon.PerNamespaceWorkerComponent `group:"perNamespaceWorkerComponent"`
 	}
 )
 
@@ -60,25 +65,24 @@ var Module = fx.Options(
 )
 
 func NewResult(params activityDeps) fxResult {
-	component := &schedulerWorker{
-		activityDeps: params,
-	}
 	return fxResult{
-		Component: component,
+		Component: &workerComponent{
+			activityDeps: params,
+		},
 	}
 }
 
-func (s *schedulerWorker) Register(worker sdkworker.Worker) {
+func (s *workerComponent) DedicatedWorkerOptions() *workercommon.DedicatedWorkerOptions {
+	return &workercommon.DedicatedWorkerOptions{
+		TaskQueue: TaskQueueName,
+	}
+}
+
+func (s *workerComponent) Register(worker sdkworker.Worker) {
 	worker.RegisterWorkflowWithOptions(SchedulerWorkflow, workflow.RegisterOptions{Name: WorkflowName})
 	worker.RegisterActivity(s.activities())
 }
 
-func (s *schedulerWorker) DedicatedWorkerOptions() *workercommon.DedicatedWorkerOptions {
-	// use default worker
-	// FIXME: ensure worker is set up with no dataconverters at all
-	return nil
-}
-
-func (s *schedulerWorker) activities() *activities {
+func (s *workerComponent) activities() *activities {
 	return &activities{activityDeps: s.activityDeps}
 }
