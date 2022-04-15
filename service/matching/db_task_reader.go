@@ -25,9 +25,11 @@
 package matching
 
 import (
+	"context"
 	"sort"
 	"sync"
 
+	persistencespb "go.temporal.io/server/api/persistence/v1"
 	"go.temporal.io/server/common/collection"
 	"go.temporal.io/server/common/log"
 	"go.temporal.io/server/common/persistence"
@@ -37,11 +39,12 @@ const (
 	dbTaskReaderPageSize = 100
 )
 
-//go:generate mockgen -copyright_file ../../LICENSE -package $GOPACKAGE -source $GOFILE -destination db_task_reader_mock.go
+// temporarily disable mock gen until mock gen support go generics
+// //go:generate mockgen -copyright_file ../../LICENSE -package $GOPACKAGE -source $GOFILE -destination db_task_reader_mock.go
 
 type (
 	dbTaskReader interface {
-		taskIterator(maxTaskID int64) collection.Iterator
+		taskIterator(ctx context.Context, maxTaskID int64) collection.Iterator[*persistencespb.AllocatedTaskInfo]
 		ackTask(taskID int64)
 		moveAckedTaskID() int64
 	}
@@ -76,9 +79,12 @@ func newDBTaskReader(
 }
 
 func (t *dbTaskReaderImpl) taskIterator(
+	ctx context.Context,
 	maxTaskID int64,
-) collection.Iterator {
-	return collection.NewPagingIterator(t.getPaginationFn(maxTaskID))
+) collection.Iterator[*persistencespb.AllocatedTaskInfo] {
+	return collection.NewPagingIterator[*persistencespb.AllocatedTaskInfo](
+		t.getPaginationFn(ctx, maxTaskID),
+	)
 }
 
 func (t *dbTaskReaderImpl) ackTask(taskID int64) {
@@ -120,31 +126,28 @@ func (t *dbTaskReaderImpl) moveAckedTaskID() int64 {
 }
 
 func (t *dbTaskReaderImpl) getPaginationFn(
+	ctx context.Context,
 	maxTaskID int64,
-) collection.PaginationFn {
+) collection.PaginationFn[*persistencespb.AllocatedTaskInfo] {
 	t.Lock()
 	defer t.Unlock()
 	minTaskID := t.loadedTaskID
 
-	return func(paginationToken []byte) ([]interface{}, []byte, error) {
-		response, err := t.store.GetTasks(&persistence.GetTasksRequest{
+	return func(paginationToken []byte) ([]*persistencespb.AllocatedTaskInfo, []byte, error) {
+		response, err := t.store.GetTasks(ctx, &persistence.GetTasksRequest{
 			NamespaceID:        t.taskQueueKey.NamespaceID,
 			TaskQueue:          t.taskQueueKey.TaskQueueName,
 			TaskType:           t.taskQueueKey.TaskQueueType,
-			MinTaskIDExclusive: minTaskID, // exclusive
-			MaxTaskIDInclusive: maxTaskID, // inclusive
+			InclusiveMinTaskID: minTaskID + 1,
+			ExclusiveMaxTaskID: maxTaskID + 1,
 			PageSize:           dbTaskReaderPageSize,
 			NextPageToken:      paginationToken,
 		})
 		if err != nil {
 			return nil, nil, err
 		}
-
-		paginateItems := make([]interface{}, len(response.Tasks))
+		paginateItems := response.Tasks
 		token := response.NextPageToken
-		for index, task := range response.Tasks {
-			paginateItems[index] = task
-		}
 
 		t.Lock()
 		defer t.Unlock()

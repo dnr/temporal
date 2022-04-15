@@ -25,6 +25,7 @@
 package persistence
 
 import (
+	"context"
 	"errors"
 
 	enumspb "go.temporal.io/api/enums/v1"
@@ -81,11 +82,17 @@ func (m *clusterMetadataManagerImpl) Close() {
 	m.persistence.Close()
 }
 
-func (m *clusterMetadataManagerImpl) GetClusterMembers(request *GetClusterMembersRequest) (*GetClusterMembersResponse, error) {
-	return m.persistence.GetClusterMembers(request)
+func (m *clusterMetadataManagerImpl) GetClusterMembers(
+	ctx context.Context,
+	request *GetClusterMembersRequest,
+) (*GetClusterMembersResponse, error) {
+	return m.persistence.GetClusterMembers(ctx, request)
 }
 
-func (m *clusterMetadataManagerImpl) UpsertClusterMembership(request *UpsertClusterMembershipRequest) error {
+func (m *clusterMetadataManagerImpl) UpsertClusterMembership(
+	ctx context.Context,
+	request *UpsertClusterMembershipRequest,
+) error {
 	if request.RecordExpiry.Seconds() < 1 {
 		return ErrInvalidMembershipExpiry
 	}
@@ -102,15 +109,21 @@ func (m *clusterMetadataManagerImpl) UpsertClusterMembership(request *UpsertClus
 		return ErrIncompleteMembershipUpsert
 	}
 
-	return m.persistence.UpsertClusterMembership(request)
+	return m.persistence.UpsertClusterMembership(ctx, request)
 }
 
-func (m *clusterMetadataManagerImpl) PruneClusterMembership(request *PruneClusterMembershipRequest) error {
-	return m.persistence.PruneClusterMembership(request)
+func (m *clusterMetadataManagerImpl) PruneClusterMembership(
+	ctx context.Context,
+	request *PruneClusterMembershipRequest,
+) error {
+	return m.persistence.PruneClusterMembership(ctx, request)
 }
 
-func (m *clusterMetadataManagerImpl) ListClusterMetadata(request *ListClusterMetadataRequest) (*ListClusterMetadataResponse, error) {
-	resp, err := m.persistence.ListClusterMetadata(&InternalListClusterMetadataRequest{
+func (m *clusterMetadataManagerImpl) ListClusterMetadata(
+	ctx context.Context,
+	request *ListClusterMetadataRequest,
+) (*ListClusterMetadataResponse, error) {
+	resp, err := m.persistence.ListClusterMetadata(ctx, &InternalListClusterMetadataRequest{
 		PageSize:      request.PageSize,
 		NextPageToken: request.NextPageToken,
 	})
@@ -129,8 +142,10 @@ func (m *clusterMetadataManagerImpl) ListClusterMetadata(request *ListClusterMet
 	return &ListClusterMetadataResponse{ClusterMetadata: clusterMetadata, NextPageToken: resp.NextPageToken}, nil
 }
 
-func (m *clusterMetadataManagerImpl) GetCurrentClusterMetadata() (*GetClusterMetadataResponse, error) {
-	resp, err := m.persistence.GetClusterMetadata(&InternalGetClusterMetadataRequest{ClusterName: m.currentClusterName})
+func (m *clusterMetadataManagerImpl) GetCurrentClusterMetadata(
+	ctx context.Context,
+) (*GetClusterMetadataResponse, error) {
+	resp, err := m.persistence.GetClusterMetadata(ctx, &InternalGetClusterMetadataRequest{ClusterName: m.currentClusterName})
 	if err != nil {
 		return nil, err
 	}
@@ -142,8 +157,11 @@ func (m *clusterMetadataManagerImpl) GetCurrentClusterMetadata() (*GetClusterMet
 	return &GetClusterMetadataResponse{ClusterMetadata: *mcm, Version: resp.Version}, nil
 }
 
-func (m *clusterMetadataManagerImpl) GetClusterMetadata(request *GetClusterMetadataRequest) (*GetClusterMetadataResponse, error) {
-	resp, err := m.persistence.GetClusterMetadata(&InternalGetClusterMetadataRequest{ClusterName: request.ClusterName})
+func (m *clusterMetadataManagerImpl) GetClusterMetadata(
+	ctx context.Context,
+	request *GetClusterMetadataRequest,
+) (*GetClusterMetadataResponse, error) {
+	resp, err := m.persistence.GetClusterMetadata(ctx, &InternalGetClusterMetadataRequest{ClusterName: request.ClusterName})
 	if err != nil {
 		return nil, err
 	}
@@ -155,15 +173,18 @@ func (m *clusterMetadataManagerImpl) GetClusterMetadata(request *GetClusterMetad
 	return &GetClusterMetadataResponse{ClusterMetadata: *mcm, Version: resp.Version}, nil
 }
 
-func (m *clusterMetadataManagerImpl) SaveClusterMetadata(request *SaveClusterMetadataRequest) (bool, error) {
+func (m *clusterMetadataManagerImpl) SaveClusterMetadata(
+	ctx context.Context,
+	request *SaveClusterMetadataRequest,
+) (bool, error) {
 	mcm, err := m.serializer.SerializeClusterMetadata(&request.ClusterMetadata, clusterMetadataEncoding)
 	if err != nil {
 		return false, err
 	}
 
-	oldClusterMetadata, err := m.GetClusterMetadata(&GetClusterMetadataRequest{ClusterName: request.GetClusterName()})
+	oldClusterMetadata, err := m.GetClusterMetadata(ctx, &GetClusterMetadataRequest{ClusterName: request.GetClusterName()})
 	if _, notFound := err.(*serviceerror.NotFound); notFound {
-		return m.persistence.SaveClusterMetadata(&InternalSaveClusterMetadataRequest{
+		return m.persistence.SaveClusterMetadata(ctx, &InternalSaveClusterMetadataRequest{
 			ClusterName:     request.ClusterName,
 			ClusterMetadata: mcm,
 			Version:         request.Version,
@@ -176,19 +197,22 @@ func (m *clusterMetadataManagerImpl) SaveClusterMetadata(request *SaveClusterMet
 		return false, nil
 	}
 
-	return m.persistence.SaveClusterMetadata(&InternalSaveClusterMetadataRequest{
+	return m.persistence.SaveClusterMetadata(ctx, &InternalSaveClusterMetadataRequest{
 		ClusterName:     request.ClusterName,
 		ClusterMetadata: mcm,
 		Version:         request.Version,
 	})
 }
 
-func (m *clusterMetadataManagerImpl) DeleteClusterMetadata(request *DeleteClusterMetadataRequest) error {
+func (m *clusterMetadataManagerImpl) DeleteClusterMetadata(
+	ctx context.Context,
+	request *DeleteClusterMetadataRequest,
+) error {
 	if request.ClusterName == m.currentClusterName {
 		return serviceerror.NewInvalidArgument("Cannot delete current cluster metadata")
 	}
 
-	return m.persistence.DeleteClusterMetadata(&InternalDeleteClusterMetadataRequest{ClusterName: request.ClusterName})
+	return m.persistence.DeleteClusterMetadata(ctx, &InternalDeleteClusterMetadataRequest{ClusterName: request.ClusterName})
 }
 
 func (m *clusterMetadataManagerImpl) convertInternalGetClusterMetadataResponse(

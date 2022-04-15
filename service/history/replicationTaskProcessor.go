@@ -117,6 +117,7 @@ func NewReplicationTaskProcessor(
 	metricsClient metrics.Client,
 	replicationTaskFetcher ReplicationTaskFetcher,
 	replicationTaskExecutor replicationTaskExecutor,
+	eventSerializer serialization.Serializer,
 ) *ReplicationTaskProcessorImpl {
 	shardID := shard.GetShardID()
 	taskRetryPolicy := backoff.NewExponentialRetryPolicy(config.ReplicationTaskProcessorErrorRetryWait(shardID))
@@ -137,7 +138,7 @@ func NewReplicationTaskProcessor(
 		status:                  common.DaemonStatusInitialized,
 		shard:                   shard,
 		historyEngine:           historyEngine,
-		historySerializer:       serialization.NewSerializer(),
+		historySerializer:       eventSerializer,
 		config:                  config,
 		metricsClient:           metricsClient,
 		logger:                  shard.GetLogger(),
@@ -365,7 +366,7 @@ func (p *ReplicationTaskProcessorImpl) handleReplicationDLQTask(
 	)
 	// The following is guaranteed to success or retry forever until processor is shutdown.
 	return backoff.Retry(func() error {
-		err := p.shard.GetExecutionManager().PutReplicationTaskToDLQ(request)
+		err := p.shard.GetExecutionManager().PutReplicationTaskToDLQ(context.TODO(), request)
 		if err != nil {
 			p.logger.Error("failed to enqueue replication task to DLQ", tag.Error(err))
 			p.metricsClient.IncCounter(metrics.ReplicationTaskFetcherScope, metrics.ReplicationDLQFailed)
@@ -503,6 +504,7 @@ func (p *ReplicationTaskProcessorImpl) cleanupReplicationTasks() error {
 		int(p.shard.GetQueueMaxReadLevel(tasks.CategoryReplication, currentCluster).TaskID-*minAckedTaskID),
 	)
 	err := p.shard.GetExecutionManager().RangeCompleteHistoryTasks(
+		context.TODO(),
 		&persistence.RangeCompleteHistoryTasksRequest{
 			ShardID:      p.shard.GetShardID(),
 			TaskCategory: tasks.CategoryReplication,

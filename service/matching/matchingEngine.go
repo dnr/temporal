@@ -413,9 +413,21 @@ pollLoop:
 		resp, err := e.recordWorkflowTaskStarted(hCtx.Context, request, task)
 		if err != nil {
 			switch err.(type) {
-			case *serviceerror.NotFound, *serviceerrors.TaskAlreadyStarted:
-				e.logger.Debug(fmt.Sprintf("Duplicated workflow task taskQueue=%v, taskID=%v",
-					taskQueueName, task.event.GetTaskId()))
+			case *serviceerror.NotFound: // mutable state not found, workflow not running or workflow task not found
+				e.logger.Info("Workflow task not found",
+					tag.WorkflowTaskQueueName(taskQueueName),
+					tag.WorkflowNamespaceID(task.event.Data.GetNamespaceId()),
+					tag.WorkflowID(task.event.Data.GetWorkflowId()),
+					tag.WorkflowRunID(task.event.Data.GetRunId()),
+					tag.WorkflowTaskQueueName(taskQueueName),
+					tag.TaskID(task.event.GetTaskId()),
+					tag.TaskVisibilityTimestamp(timestamp.TimeValue(task.event.Data.GetCreateTime())),
+					tag.WorkflowEventID(task.event.Data.GetScheduleId()),
+					tag.Error(err),
+				)
+				task.finish(nil)
+			case *serviceerrors.TaskAlreadyStarted:
+				e.logger.Debug("Duplicated workflow task", tag.WorkflowTaskQueueName(taskQueueName), tag.TaskID(task.event.GetTaskId()))
 				task.finish(nil)
 			default:
 				task.finish(err)
@@ -480,8 +492,20 @@ pollLoop:
 		resp, err := e.recordActivityTaskStarted(hCtx.Context, request, task)
 		if err != nil {
 			switch err.(type) {
-			case *serviceerror.NotFound, *serviceerrors.TaskAlreadyStarted:
-				e.logger.Debug("Duplicated activity task", tag.Name(taskQueueName), tag.TaskID(task.event.GetTaskId()))
+			case *serviceerror.NotFound: // mutable state not found, workflow not running or activity info not found
+				e.logger.Info("Activity task not found",
+					tag.WorkflowNamespaceID(task.event.Data.GetNamespaceId()),
+					tag.WorkflowID(task.event.Data.GetWorkflowId()),
+					tag.WorkflowRunID(task.event.Data.GetRunId()),
+					tag.WorkflowTaskQueueName(taskQueueName),
+					tag.TaskID(task.event.GetTaskId()),
+					tag.TaskVisibilityTimestamp(timestamp.TimeValue(task.event.Data.GetCreateTime())),
+					tag.WorkflowEventID(task.event.Data.GetScheduleId()),
+					tag.Error(err),
+				)
+				task.finish(nil)
+			case *serviceerrors.TaskAlreadyStarted:
+				e.logger.Debug("Duplicated activity task", tag.WorkflowTaskQueueName(taskQueueName), tag.TaskID(task.event.GetTaskId()))
 				task.finish(nil)
 			default:
 				task.finish(err)
@@ -819,18 +843,6 @@ func (e *matchingEngineImpl) createPollActivityTaskQueueResponse(
 
 	serializedToken, _ := e.tokenSerializer.Serialize(taskToken)
 
-	// REMOVE THE CODE BELOW HERE after 1.10
-
-	// TODO ScheduleToCloseTimeout can be 0, meaning no timeout
-	//  however, SDK cannot handle ScheduleToCloseTimeout being 0
-	//  so need to override
-	scheduleToCloseTimeout := timestamp.DurationValue(attributes.ScheduleToCloseTimeout)
-	if scheduleToCloseTimeout == 0 {
-		scheduleToCloseTimeout = historyResponse.StartedTime.Add(
-			timestamp.DurationValue(attributes.StartToCloseTimeout),
-		).Sub(timestamp.TimeValue(scheduledEvent.EventTime))
-	}
-
 	return &matchingservice.PollActivityTaskQueueResponse{
 		ActivityId:                  attributes.ActivityId,
 		ActivityType:                attributes.ActivityType,
@@ -839,7 +851,7 @@ func (e *matchingEngineImpl) createPollActivityTaskQueueResponse(
 		WorkflowExecution:           task.workflowExecution(),
 		CurrentAttemptScheduledTime: historyResponse.CurrentAttemptScheduledTime,
 		ScheduledTime:               scheduledEvent.EventTime,
-		ScheduleToCloseTimeout:      timestamp.DurationPtr(scheduleToCloseTimeout),
+		ScheduleToCloseTimeout:      attributes.ScheduleToCloseTimeout,
 		StartedTime:                 historyResponse.StartedTime,
 		StartToCloseTimeout:         attributes.StartToCloseTimeout,
 		HeartbeatTimeout:            attributes.HeartbeatTimeout,
@@ -849,30 +861,6 @@ func (e *matchingEngineImpl) createPollActivityTaskQueueResponse(
 		WorkflowType:                historyResponse.WorkflowType,
 		WorkflowNamespace:           historyResponse.WorkflowNamespace,
 	}
-
-	// REMOVE THE CODE ABOVE HERE after 1.10
-	// UNCOMMENT THE CODE BELOW after 1.10 for original behavior
-
-	//return &matchingservice.PollActivityTaskQueueResponse{
-	//	ActivityId:                  attributes.ActivityId,
-	//	ActivityType:                attributes.ActivityType,
-	//	Header:                      attributes.Header,
-	//	Input:                       attributes.Input,
-	//	WorkflowExecution:           task.workflowExecution(),
-	//	CurrentAttemptScheduledTime: historyResponse.CurrentAttemptScheduledTime,
-	//	ScheduledTime:               scheduledEvent.EventTime,
-	//	ScheduleToCloseTimeout:      attributes.ScheduleToCloseTimeout,
-	//	StartedTime:                 historyResponse.StartedTime,
-	//	StartToCloseTimeout:         attributes.StartToCloseTimeout,
-	//	HeartbeatTimeout:            attributes.HeartbeatTimeout,
-	//	TaskToken:                   serializedToken,
-	//	Attempt:                     taskToken.ScheduleAttempt,
-	//	HeartbeatDetails:            historyResponse.HeartbeatDetails,
-	//	WorkflowType:                historyResponse.WorkflowType,
-	//	WorkflowNamespace:           historyResponse.WorkflowNamespace,
-	//}
-
-	// UNCOMMENT THE CODE ABOVE after 1.10 for original behavior
 }
 
 func (e *matchingEngineImpl) recordWorkflowTaskStarted(

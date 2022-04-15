@@ -69,11 +69,10 @@ type (
 
 	CacheImpl struct {
 		cache.Cache
-		shard            shard.Context
-		executionManager persistence.ExecutionManager
-		logger           log.Logger
-		metricsClient    metrics.Client
-		config           *configs.Config
+		shard         shard.Context
+		logger        log.Logger
+		metricsClient metrics.Client
+		config        *configs.Config
 	}
 
 	NewCacheFn func(shard shard.Context) Cache
@@ -94,12 +93,11 @@ func NewCache(shard shard.Context) Cache {
 	opts.Pin = true
 
 	return &CacheImpl{
-		Cache:            cache.New(config.HistoryCacheMaxSize(), opts),
-		shard:            shard,
-		executionManager: shard.GetExecutionManager(),
-		logger:           log.With(shard.GetLogger(), tag.ComponentHistoryCache),
-		metricsClient:    shard.GetMetricsClient(),
-		config:           config,
+		Cache:         cache.New(config.HistoryCacheMaxSize(), opts),
+		shard:         shard,
+		logger:        log.With(shard.GetLogger(), tag.ComponentHistoryCache),
+		metricsClient: shard.GetMetricsClient(),
+		config:        config,
 	}
 }
 
@@ -138,7 +136,7 @@ func (c *CacheImpl) GetOrCreateWorkflowExecution(
 	caller CallerType,
 ) (Context, ReleaseCacheFunc, error) {
 
-	if err := c.validateWorkflowExecutionInfo(namespaceID, &execution); err != nil {
+	if err := c.validateWorkflowExecutionInfo(ctx, namespaceID, &execution); err != nil {
 		return nil, nil, err
 	}
 
@@ -227,6 +225,7 @@ func (c *CacheImpl) makeReleaseFunc(
 }
 
 func (c *CacheImpl) validateWorkflowExecutionInfo(
+	ctx context.Context,
 	namespaceID namespace.ID,
 	execution *commonpb.WorkflowExecution,
 ) error {
@@ -242,7 +241,7 @@ func (c *CacheImpl) validateWorkflowExecutionInfo(
 
 	// RunID is not provided, lets try to retrieve the RunID for current active execution
 	if execution.GetRunId() == "" {
-		response, err := c.getCurrentExecutionWithRetry(&persistence.GetCurrentExecutionRequest{
+		response, err := c.getCurrentExecutionWithRetry(ctx, &persistence.GetCurrentExecutionRequest{
 			ShardID:     c.shard.GetShardID(),
 			NamespaceID: namespaceID.String(),
 			WorkflowID:  execution.GetWorkflowId(),
@@ -260,13 +259,14 @@ func (c *CacheImpl) validateWorkflowExecutionInfo(
 }
 
 func (c *CacheImpl) getCurrentExecutionWithRetry(
+	ctx context.Context,
 	request *persistence.GetCurrentExecutionRequest,
 ) (*persistence.GetCurrentExecutionResponse, error) {
 
 	var response *persistence.GetCurrentExecutionResponse
 	op := func() error {
 		var err error
-		response, err = c.executionManager.GetCurrentExecution(request)
+		response, err = c.shard.GetCurrentExecution(ctx, request)
 
 		return err
 	}

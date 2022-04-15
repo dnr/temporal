@@ -48,7 +48,6 @@ import (
 	"go.temporal.io/server/common/membership"
 	"go.temporal.io/server/common/metrics"
 	"go.temporal.io/server/common/persistence"
-	"go.temporal.io/server/common/resource"
 	serviceerrors "go.temporal.io/server/common/serviceerror"
 )
 
@@ -84,7 +83,7 @@ type (
 		saMapper                    searchattribute.Mapper
 		clusterMetadata             cluster.Metadata
 		archivalMetadata            archiver.ArchivalMetadata
-		hostInfoProvider            resource.HostInfoProvider
+		hostInfoProvider            membership.HostInfoProvider
 	}
 )
 
@@ -159,7 +158,7 @@ func (c *ControllerImpl) GetEngineForShard(ctx context.Context, shardID int32) (
 	if err != nil {
 		return nil, err
 	}
-	return shard.getOrCreateEngine(ctx)
+	return shard.GetEngineWithContext(ctx)
 }
 
 func (c *ControllerImpl) CloseShardByID(shardID int32) {

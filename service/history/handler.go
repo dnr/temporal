@@ -55,7 +55,6 @@ import (
 	"go.temporal.io/server/common/persistence"
 	"go.temporal.io/server/common/persistence/serialization"
 	"go.temporal.io/server/common/primitives/timestamp"
-	"go.temporal.io/server/common/resource"
 	"go.temporal.io/server/common/searchattribute"
 	serviceerrors "go.temporal.io/server/common/serviceerror"
 	"go.temporal.io/server/service/history/configs"
@@ -89,7 +88,7 @@ type (
 		saMapper                    searchattribute.Mapper
 		clusterMetadata             cluster.Metadata
 		archivalMetadata            archiver.ArchivalMetadata
-		hostInfoProvider            resource.HostInfoProvider
+		hostInfoProvider            membership.HostInfoProvider
 		controller                  *shard.ControllerImpl
 	}
 
@@ -108,7 +107,7 @@ type (
 		SaMapper                    searchattribute.Mapper
 		ClusterMetadata             cluster.Metadata
 		ArchivalMetadata            archiver.ArchivalMetadata
-		HostInfoProvider            resource.HostInfoProvider
+		HostInfoProvider            membership.HostInfoProvider
 		ShardController             *shard.ControllerImpl
 		EventNotifier               events.Notifier
 		ReplicationTaskFetchers     ReplicationTaskFetchers
@@ -563,7 +562,7 @@ func (h *Handler) DescribeHistoryHost(_ context.Context, _ *historyservice.Descr
 }
 
 // RemoveTask returns information about the internal states of a history host
-func (h *Handler) RemoveTask(_ context.Context, request *historyservice.RemoveTaskRequest) (_ *historyservice.RemoveTaskResponse, retError error) {
+func (h *Handler) RemoveTask(ctx context.Context, request *historyservice.RemoveTaskRequest) (_ *historyservice.RemoveTaskResponse, retError error) {
 	var err error
 	var category tasks.Category
 	switch categoryID := request.GetCategory(); categoryID {
@@ -583,7 +582,7 @@ func (h *Handler) RemoveTask(_ context.Context, request *historyservice.RemoveTa
 		}
 	}
 
-	err = h.persistenceExecutionManager.CompleteHistoryTask(&persistence.CompleteHistoryTaskRequest{
+	err = h.persistenceExecutionManager.CompleteHistoryTask(ctx, &persistence.CompleteHistoryTaskRequest{
 		ShardID:      request.GetShardId(),
 		TaskCategory: category,
 		TaskKey: tasks.Key{
@@ -603,9 +602,9 @@ func (h *Handler) CloseShard(_ context.Context, request *historyservice.CloseSha
 }
 
 // GetShard gets a shard hosted by this instance
-func (h *Handler) GetShard(_ context.Context, request *historyservice.GetShardRequest) (_ *historyservice.GetShardResponse, retError error) {
+func (h *Handler) GetShard(ctx context.Context, request *historyservice.GetShardRequest) (_ *historyservice.GetShardResponse, retError error) {
 	defer log.CapturePanic(h.logger, &retError)
-	resp, err := h.persistenceShardManager.GetOrCreateShard(&persistence.GetOrCreateShardRequest{
+	resp, err := h.persistenceShardManager.GetOrCreateShard(ctx, &persistence.GetOrCreateShardRequest{
 		ShardID: request.ShardId,
 	})
 	if err != nil {

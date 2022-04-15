@@ -25,6 +25,7 @@
 package workflow
 
 import (
+	"context"
 	"fmt"
 	"math/rand"
 	"time"
@@ -267,6 +268,7 @@ func NewMutableState(
 }
 
 func newMutableStateBuilderFromDB(
+	ctx context.Context,
 	shard shard.Context,
 	eventsCache events.Cache,
 	logger log.Logger,
@@ -317,7 +319,7 @@ func newMutableStateBuilderFromDB(
 	// Workflows created before 1.11 doesn't have ExecutionTime and it must be computed for backwards compatibility.
 	// Remove this "if" block when it is ok to rely on executionInfo.ExecutionTime only (added 6/9/21).
 	if mutableState.executionInfo.ExecutionTime == nil {
-		startEvent, err := mutableState.GetStartEvent()
+		startEvent, err := mutableState.GetStartEvent(ctx)
 		if err != nil {
 			return nil, err
 		}
@@ -582,6 +584,7 @@ func (e *MutableStateImpl) GetQueryRegistry() QueryRegistry {
 }
 
 func (e *MutableStateImpl) GetActivityScheduledEvent(
+	ctx context.Context,
 	scheduleEventID int64,
 ) (*historypb.HistoryEvent, error) {
 
@@ -595,6 +598,7 @@ func (e *MutableStateImpl) GetActivityScheduledEvent(
 		return nil, err
 	}
 	event, err := e.eventsCache.GetEvent(
+		ctx,
 		events.EventKey{
 			NamespaceID: namespace.ID(e.executionInfo.NamespaceId),
 			WorkflowID:  e.executionInfo.WorkflowId,
@@ -657,6 +661,7 @@ func (e *MutableStateImpl) GetChildExecutionInfo(
 // GetChildExecutionInitiatedEvent reads out the ChildExecutionInitiatedEvent from mutable state for in-progress child
 // executions
 func (e *MutableStateImpl) GetChildExecutionInitiatedEvent(
+	ctx context.Context,
 	initiatedEventID int64,
 ) (*historypb.HistoryEvent, error) {
 
@@ -670,6 +675,7 @@ func (e *MutableStateImpl) GetChildExecutionInitiatedEvent(
 		return nil, err
 	}
 	event, err := e.eventsCache.GetEvent(
+		ctx,
 		events.EventKey{
 			NamespaceID: namespace.ID(e.executionInfo.NamespaceId),
 			WorkflowID:  e.executionInfo.WorkflowId,
@@ -696,6 +702,40 @@ func (e *MutableStateImpl) GetRequestCancelInfo(
 
 	ri, ok := e.pendingRequestCancelInfoIDs[initiatedEventID]
 	return ri, ok
+}
+
+func (e *MutableStateImpl) GetRequesteCancelExternalInitiatedEvent(
+	ctx context.Context,
+	initiatedEventID int64,
+) (*historypb.HistoryEvent, error) {
+	ri, ok := e.pendingRequestCancelInfoIDs[initiatedEventID]
+	if !ok {
+		return nil, ErrMissingRequestCancelInfo
+	}
+
+	currentBranchToken, version, err := e.getCurrentBranchTokenAndEventVersion(ri.InitiatedId)
+	if err != nil {
+		return nil, err
+	}
+	event, err := e.eventsCache.GetEvent(
+		ctx,
+		events.EventKey{
+			NamespaceID: namespace.ID(e.executionInfo.NamespaceId),
+			WorkflowID:  e.executionInfo.WorkflowId,
+			RunID:       e.executionState.RunId,
+			EventID:     ri.InitiatedId,
+			Version:     version,
+		},
+		ri.InitiatedEventBatchId,
+		currentBranchToken,
+	)
+	if err != nil {
+		// do not return the original error
+		// since original error can be of type entity not exists
+		// which can cause task processing side to fail silently
+		return nil, ErrMissingRequestCancelInfo
+	}
+	return event, nil
 }
 
 func (e *MutableStateImpl) GetRetryBackoffDuration(
@@ -739,6 +779,7 @@ func (e *MutableStateImpl) GetSignalInfo(
 
 // GetSignalExternalInitiatedEvent get the details about signal external workflow
 func (e *MutableStateImpl) GetSignalExternalInitiatedEvent(
+	ctx context.Context,
 	initiatedEventID int64,
 ) (*historypb.HistoryEvent, error) {
 	si, ok := e.pendingSignalInfoIDs[initiatedEventID]
@@ -751,6 +792,7 @@ func (e *MutableStateImpl) GetSignalExternalInitiatedEvent(
 		return nil, err
 	}
 	event, err := e.eventsCache.GetEvent(
+		ctx,
 		events.EventKey{
 			NamespaceID: namespace.ID(e.executionInfo.NamespaceId),
 			WorkflowID:  e.executionInfo.WorkflowId,
@@ -771,7 +813,9 @@ func (e *MutableStateImpl) GetSignalExternalInitiatedEvent(
 }
 
 // GetCompletionEvent retrieves the workflow completion event from mutable state
-func (e *MutableStateImpl) GetCompletionEvent() (*historypb.HistoryEvent, error) {
+func (e *MutableStateImpl) GetCompletionEvent(
+	ctx context.Context,
+) (*historypb.HistoryEvent, error) {
 	if e.executionState.State != enumsspb.WORKFLOW_EXECUTION_STATE_COMPLETED {
 		return nil, ErrMissingWorkflowCompletionEvent
 	}
@@ -786,6 +830,7 @@ func (e *MutableStateImpl) GetCompletionEvent() (*historypb.HistoryEvent, error)
 	}
 
 	event, err := e.eventsCache.GetEvent(
+		ctx,
 		events.EventKey{
 			NamespaceID: namespace.ID(e.executionInfo.NamespaceId),
 			WorkflowID:  e.executionInfo.WorkflowId,
@@ -806,7 +851,9 @@ func (e *MutableStateImpl) GetCompletionEvent() (*historypb.HistoryEvent, error)
 }
 
 // GetStartEvent retrieves the workflow start event from mutable state
-func (e *MutableStateImpl) GetStartEvent() (*historypb.HistoryEvent, error) {
+func (e *MutableStateImpl) GetStartEvent(
+	ctx context.Context,
+) (*historypb.HistoryEvent, error) {
 
 	currentBranchToken, err := e.GetCurrentBranchToken()
 	if err != nil {
@@ -818,6 +865,7 @@ func (e *MutableStateImpl) GetStartEvent() (*historypb.HistoryEvent, error) {
 	}
 
 	event, err := e.eventsCache.GetEvent(
+		ctx,
 		events.EventKey{
 			NamespaceID: namespace.ID(e.executionInfo.NamespaceId),
 			WorkflowID:  e.executionInfo.WorkflowId,
@@ -845,7 +893,7 @@ func (e *MutableStateImpl) GetFirstRunID() (string, error) {
 	if len(firstRunID) != 0 {
 		return firstRunID, nil
 	}
-	currentStartEvent, err := e.GetStartEvent()
+	currentStartEvent, err := e.GetStartEvent(context.TODO())
 	if err != nil {
 		return "", err
 	}
@@ -1802,6 +1850,7 @@ func (e *MutableStateImpl) ReplicateWorkflowTaskFailedEvent() error {
 func (e *MutableStateImpl) AddActivityTaskScheduledEvent(
 	workflowTaskCompletedEventID int64,
 	command *commandpb.ScheduleActivityTaskCommandAttributes,
+	bypassTaskGeneration bool,
 ) (*historypb.HistoryEvent, *persistencespb.ActivityInfo, error) {
 
 	opTag := tag.WorkflowActionActivityTaskScheduled
@@ -1820,12 +1869,15 @@ func (e *MutableStateImpl) AddActivityTaskScheduledEvent(
 	event := e.hBuilder.AddActivityTaskScheduledEvent(workflowTaskCompletedEventID, command)
 	ai, err := e.ReplicateActivityTaskScheduledEvent(workflowTaskCompletedEventID, event)
 	// TODO merge active & passive task generation
-	if err := e.taskGenerator.GenerateActivityTasks(
-		timestamp.TimeValue(event.GetEventTime()),
-		event,
-	); err != nil {
-		return nil, nil, err
+	if !bypassTaskGeneration {
+		if err := e.taskGenerator.GenerateActivityTasks(
+			timestamp.TimeValue(event.GetEventTime()),
+			event,
+		); err != nil {
+			return nil, nil, err
+		}
 	}
+
 	return event, ai, err
 }
 
@@ -2513,6 +2565,7 @@ func (e *MutableStateImpl) ReplicateRequestCancelExternalWorkflowExecutionInitia
 	e.pendingRequestCancelInfoIDs[rci.InitiatedId] = rci
 	e.updateRequestCancelInfos[rci.InitiatedId] = rci
 
+	e.writeEventToCache(event)
 	return rci, nil
 }
 
@@ -4145,8 +4198,8 @@ func (e *MutableStateImpl) startTransactionHandleNamespaceMigration(
 		return nil, err
 	}
 
-	// local namespace -> global namespace && with buffered events
-	if lastWriteVersion == common.EmptyVersion && namespaceEntry.FailoverVersion() > common.EmptyVersion && e.HasBufferedEvents() {
+	// local namespace -> global namespace && with inflight workflow task
+	if lastWriteVersion == common.EmptyVersion && namespaceEntry.FailoverVersion() > common.EmptyVersion && e.HasInFlightWorkflowTask() {
 		localNamespaceMutation := namespace.NewPretendAsLocalNamespace(
 			e.clusterMetadata.GetCurrentClusterName(),
 		)

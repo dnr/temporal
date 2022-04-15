@@ -40,6 +40,7 @@ import (
 	enumspb "go.temporal.io/api/enums/v1"
 	"go.temporal.io/api/serviceerror"
 
+	"go.temporal.io/server/common"
 	"go.temporal.io/server/common/dynamicconfig"
 	"go.temporal.io/server/common/metrics"
 	"go.temporal.io/server/common/namespace"
@@ -119,10 +120,6 @@ func NewVisibilityStore(
 	}
 }
 
-func newReadContext() (context.Context, context.CancelFunc) {
-	return context.WithTimeout(context.Background(), readTimeout)
-}
-
 func (s *visibilityStore) Close() {
 	// TODO (alex): visibilityStore shouldn't Stop processor. Processor should be stopped where it is created.
 	if s.processor != nil {
@@ -134,17 +131,23 @@ func (s *visibilityStore) GetName() string {
 	return persistenceName
 }
 
-func (s *visibilityStore) RecordWorkflowExecutionStarted(request *store.InternalRecordWorkflowExecutionStartedRequest) error {
+func (s *visibilityStore) RecordWorkflowExecutionStarted(
+	ctx context.Context,
+	request *store.InternalRecordWorkflowExecutionStartedRequest,
+) error {
 	visibilityTaskKey := getVisibilityTaskKey(request.ShardID, request.TaskID)
 	doc, err := s.generateESDoc(request.InternalVisibilityRequestBase, visibilityTaskKey)
 	if err != nil {
 		return err
 	}
 
-	return s.addBulkIndexRequestAndWait(request.InternalVisibilityRequestBase, doc, visibilityTaskKey)
+	return s.addBulkIndexRequestAndWait(ctx, request.InternalVisibilityRequestBase, doc, visibilityTaskKey)
 }
 
-func (s *visibilityStore) RecordWorkflowExecutionClosed(request *store.InternalRecordWorkflowExecutionClosedRequest) error {
+func (s *visibilityStore) RecordWorkflowExecutionClosed(
+	ctx context.Context,
+	request *store.InternalRecordWorkflowExecutionClosedRequest,
+) error {
 	visibilityTaskKey := getVisibilityTaskKey(request.ShardID, request.TaskID)
 	doc, err := s.generateESDoc(request.InternalVisibilityRequestBase, visibilityTaskKey)
 	if err != nil {
@@ -156,20 +159,26 @@ func (s *visibilityStore) RecordWorkflowExecutionClosed(request *store.InternalR
 	doc[searchattribute.HistoryLength] = request.HistoryLength
 	doc[searchattribute.StateTransitionCount] = request.StateTransitionCount
 
-	return s.addBulkIndexRequestAndWait(request.InternalVisibilityRequestBase, doc, visibilityTaskKey)
+	return s.addBulkIndexRequestAndWait(ctx, request.InternalVisibilityRequestBase, doc, visibilityTaskKey)
 }
 
-func (s *visibilityStore) UpsertWorkflowExecution(request *store.InternalUpsertWorkflowExecutionRequest) error {
+func (s *visibilityStore) UpsertWorkflowExecution(
+	ctx context.Context,
+	request *store.InternalUpsertWorkflowExecutionRequest,
+) error {
 	visibilityTaskKey := getVisibilityTaskKey(request.ShardID, request.TaskID)
 	doc, err := s.generateESDoc(request.InternalVisibilityRequestBase, visibilityTaskKey)
 	if err != nil {
 		return err
 	}
 
-	return s.addBulkIndexRequestAndWait(request.InternalVisibilityRequestBase, doc, visibilityTaskKey)
+	return s.addBulkIndexRequestAndWait(ctx, request.InternalVisibilityRequestBase, doc, visibilityTaskKey)
 }
 
-func (s *visibilityStore) DeleteWorkflowExecution(request *manager.VisibilityDeleteWorkflowExecutionRequest) error {
+func (s *visibilityStore) DeleteWorkflowExecution(
+	ctx context.Context,
+	request *manager.VisibilityDeleteWorkflowExecutionRequest,
+) error {
 	docID := getDocID(request.WorkflowID, request.RunID)
 
 	bulkDeleteRequest := &client.BulkableRequest{
@@ -179,7 +188,7 @@ func (s *visibilityStore) DeleteWorkflowExecution(request *manager.VisibilityDel
 		RequestType: client.BulkableRequestTypeDelete,
 	}
 
-	return s.addBulkRequestAndWait(bulkDeleteRequest, docID)
+	return s.addBulkRequestAndWait(ctx, bulkDeleteRequest, docID)
 }
 
 func getDocID(workflowID string, runID string) string {
@@ -205,6 +214,7 @@ func getVisibilityTaskKey(shardID int32, taskID int64) string {
 }
 
 func (s *visibilityStore) addBulkIndexRequestAndWait(
+	ctx context.Context,
 	request *store.InternalVisibilityRequestBase,
 	esDoc map[string]interface{},
 	visibilityTaskKey string,
@@ -217,16 +227,27 @@ func (s *visibilityStore) addBulkIndexRequestAndWait(
 		Doc:         esDoc,
 	}
 
-	return s.addBulkRequestAndWait(bulkIndexRequest, visibilityTaskKey)
+	return s.addBulkRequestAndWait(ctx, bulkIndexRequest, visibilityTaskKey)
 }
 
-func (s *visibilityStore) addBulkRequestAndWait(bulkRequest *client.BulkableRequest, visibilityTaskKey string) error {
+func (s *visibilityStore) addBulkRequestAndWait(
+	ctx context.Context,
+	bulkRequest *client.BulkableRequest,
+	visibilityTaskKey string,
+) error {
 	s.checkProcessor()
 
 	// Add method is blocking. If bulk processor is busy flushing previous bulk, request will wait here.
 	// Therefore, ackTimeoutTimer in fact wait for request to be committed after it was added to bulk processor.
+	// TODO: this also means ctx is not respected if bulk processor is busy. Shall we make Add non-blocking or
+	// respecting the context?
 	ackCh := s.processor.Add(bulkRequest, visibilityTaskKey)
-	ackTimeoutTimer := time.NewTimer(s.processorAckTimeout())
+
+	ackTimeout := s.processorAckTimeout()
+	if deadline, ok := ctx.Deadline(); ok {
+		ackTimeout = common.MinDuration(ackTimeout, time.Until(deadline))
+	}
+	ackTimeoutTimer := time.NewTimer(ackTimeout)
 	defer ackTimeoutTimer.Stop()
 
 	select {
@@ -253,7 +274,10 @@ func (s *visibilityStore) checkProcessor() {
 	}
 }
 
-func (s *visibilityStore) ListOpenWorkflowExecutions(request *manager.ListWorkflowExecutionsRequest) (*store.InternalListWorkflowExecutionsResponse, error) {
+func (s *visibilityStore) ListOpenWorkflowExecutions(
+	ctx context.Context,
+	request *manager.ListWorkflowExecutionsRequest,
+) (*store.InternalListWorkflowExecutionsResponse, error) {
 
 	boolQuery := elastic.NewBoolQuery().
 		Filter(elastic.NewTermQuery(searchattribute.ExecutionStatus, enumspb.WORKFLOW_EXECUTION_STATUS_RUNNING.String()))
@@ -263,8 +287,6 @@ func (s *visibilityStore) ListOpenWorkflowExecutions(request *manager.ListWorkfl
 		return nil, err
 	}
 
-	ctx, cancel := newReadContext()
-	defer cancel()
 	searchResult, err := s.esClient.Search(ctx, p)
 	if err != nil {
 		return nil, convertElasticsearchClientError("ListOpenWorkflowExecutions failed", err)
@@ -277,7 +299,10 @@ func (s *visibilityStore) ListOpenWorkflowExecutions(request *manager.ListWorkfl
 	return s.getListWorkflowExecutionsResponse(searchResult, request.Namespace, request.PageSize, isRecordValid)
 }
 
-func (s *visibilityStore) ListClosedWorkflowExecutions(request *manager.ListWorkflowExecutionsRequest) (*store.InternalListWorkflowExecutionsResponse, error) {
+func (s *visibilityStore) ListClosedWorkflowExecutions(
+	ctx context.Context,
+	request *manager.ListWorkflowExecutionsRequest,
+) (*store.InternalListWorkflowExecutionsResponse, error) {
 
 	boolQuery := elastic.NewBoolQuery().
 		MustNot(elastic.NewTermQuery(searchattribute.ExecutionStatus, enumspb.WORKFLOW_EXECUTION_STATUS_RUNNING.String()))
@@ -287,8 +312,6 @@ func (s *visibilityStore) ListClosedWorkflowExecutions(request *manager.ListWork
 		return nil, err
 	}
 
-	ctx, cancel := newReadContext()
-	defer cancel()
 	searchResult, err := s.esClient.Search(ctx, p)
 	if err != nil {
 		return nil, convertElasticsearchClientError("ListClosedWorkflowExecutions failed", err)
@@ -301,7 +324,10 @@ func (s *visibilityStore) ListClosedWorkflowExecutions(request *manager.ListWork
 	return s.getListWorkflowExecutionsResponse(searchResult, request.Namespace, request.PageSize, isRecordValid)
 }
 
-func (s *visibilityStore) ListOpenWorkflowExecutionsByType(request *manager.ListWorkflowExecutionsByTypeRequest) (*store.InternalListWorkflowExecutionsResponse, error) {
+func (s *visibilityStore) ListOpenWorkflowExecutionsByType(
+	ctx context.Context,
+	request *manager.ListWorkflowExecutionsByTypeRequest,
+) (*store.InternalListWorkflowExecutionsResponse, error) {
 
 	boolQuery := elastic.NewBoolQuery().
 		Filter(
@@ -313,8 +339,6 @@ func (s *visibilityStore) ListOpenWorkflowExecutionsByType(request *manager.List
 		return nil, err
 	}
 
-	ctx, cancel := newReadContext()
-	defer cancel()
 	searchResult, err := s.esClient.Search(ctx, p)
 	if err != nil {
 		return nil, convertElasticsearchClientError("ListOpenWorkflowExecutionsByType failed", err)
@@ -327,7 +351,10 @@ func (s *visibilityStore) ListOpenWorkflowExecutionsByType(request *manager.List
 	return s.getListWorkflowExecutionsResponse(searchResult, request.Namespace, request.PageSize, isRecordValid)
 }
 
-func (s *visibilityStore) ListClosedWorkflowExecutionsByType(request *manager.ListWorkflowExecutionsByTypeRequest) (*store.InternalListWorkflowExecutionsResponse, error) {
+func (s *visibilityStore) ListClosedWorkflowExecutionsByType(
+	ctx context.Context,
+	request *manager.ListWorkflowExecutionsByTypeRequest,
+) (*store.InternalListWorkflowExecutionsResponse, error) {
 
 	boolQuery := elastic.NewBoolQuery().
 		Filter(elastic.NewTermQuery(searchattribute.WorkflowType, request.WorkflowTypeName)).
@@ -338,8 +365,6 @@ func (s *visibilityStore) ListClosedWorkflowExecutionsByType(request *manager.Li
 		return nil, err
 	}
 
-	ctx, cancel := newReadContext()
-	defer cancel()
 	searchResult, err := s.esClient.Search(ctx, p)
 	if err != nil {
 		return nil, convertElasticsearchClientError("ListClosedWorkflowExecutionsByType failed", err)
@@ -352,7 +377,10 @@ func (s *visibilityStore) ListClosedWorkflowExecutionsByType(request *manager.Li
 	return s.getListWorkflowExecutionsResponse(searchResult, request.Namespace, request.PageSize, isRecordValid)
 }
 
-func (s *visibilityStore) ListOpenWorkflowExecutionsByWorkflowID(request *manager.ListWorkflowExecutionsByWorkflowIDRequest) (*store.InternalListWorkflowExecutionsResponse, error) {
+func (s *visibilityStore) ListOpenWorkflowExecutionsByWorkflowID(
+	ctx context.Context,
+	request *manager.ListWorkflowExecutionsByWorkflowIDRequest,
+) (*store.InternalListWorkflowExecutionsResponse, error) {
 
 	boolQuery := elastic.NewBoolQuery().
 		Filter(
@@ -364,8 +392,6 @@ func (s *visibilityStore) ListOpenWorkflowExecutionsByWorkflowID(request *manage
 		return nil, err
 	}
 
-	ctx, cancel := newReadContext()
-	defer cancel()
 	searchResult, err := s.esClient.Search(ctx, p)
 	if err != nil {
 		return nil, convertElasticsearchClientError("ListOpenWorkflowExecutionsByWorkflowID failed", err)
@@ -378,7 +404,10 @@ func (s *visibilityStore) ListOpenWorkflowExecutionsByWorkflowID(request *manage
 	return s.getListWorkflowExecutionsResponse(searchResult, request.Namespace, request.PageSize, isRecordValid)
 }
 
-func (s *visibilityStore) ListClosedWorkflowExecutionsByWorkflowID(request *manager.ListWorkflowExecutionsByWorkflowIDRequest) (*store.InternalListWorkflowExecutionsResponse, error) {
+func (s *visibilityStore) ListClosedWorkflowExecutionsByWorkflowID(
+	ctx context.Context,
+	request *manager.ListWorkflowExecutionsByWorkflowIDRequest,
+) (*store.InternalListWorkflowExecutionsResponse, error) {
 
 	boolQuery := elastic.NewBoolQuery().
 		Filter(elastic.NewTermQuery(searchattribute.WorkflowID, request.WorkflowID)).
@@ -389,8 +418,6 @@ func (s *visibilityStore) ListClosedWorkflowExecutionsByWorkflowID(request *mana
 		return nil, err
 	}
 
-	ctx, cancel := newReadContext()
-	defer cancel()
 	searchResult, err := s.esClient.Search(ctx, p)
 	if err != nil {
 		return nil, convertElasticsearchClientError("ListClosedWorkflowExecutionsByWorkflowID failed", err)
@@ -403,7 +430,10 @@ func (s *visibilityStore) ListClosedWorkflowExecutionsByWorkflowID(request *mana
 	return s.getListWorkflowExecutionsResponse(searchResult, request.Namespace, request.PageSize, isRecordValid)
 }
 
-func (s *visibilityStore) ListClosedWorkflowExecutionsByStatus(request *manager.ListClosedWorkflowExecutionsByStatusRequest) (*store.InternalListWorkflowExecutionsResponse, error) {
+func (s *visibilityStore) ListClosedWorkflowExecutionsByStatus(
+	ctx context.Context,
+	request *manager.ListClosedWorkflowExecutionsByStatusRequest,
+) (*store.InternalListWorkflowExecutionsResponse, error) {
 
 	boolQuery := elastic.NewBoolQuery().
 		Filter(elastic.NewTermQuery(searchattribute.ExecutionStatus, request.Status.String()))
@@ -413,8 +443,6 @@ func (s *visibilityStore) ListClosedWorkflowExecutionsByStatus(request *manager.
 		return nil, err
 	}
 
-	ctx, cancel := newReadContext()
-	defer cancel()
 	searchResult, err := s.esClient.Search(ctx, p)
 	if err != nil {
 		return nil, convertElasticsearchClientError("ListClosedWorkflowExecutionsByStatus failed", err)
@@ -427,7 +455,10 @@ func (s *visibilityStore) ListClosedWorkflowExecutionsByStatus(request *manager.
 	return s.getListWorkflowExecutionsResponse(searchResult, request.Namespace, request.PageSize, isRecordValid)
 }
 
-func (s *visibilityStore) ListWorkflowExecutions(request *manager.ListWorkflowExecutionsRequestV2) (*store.InternalListWorkflowExecutionsResponse, error) {
+func (s *visibilityStore) ListWorkflowExecutions(
+	ctx context.Context,
+	request *manager.ListWorkflowExecutionsRequestV2,
+) (*store.InternalListWorkflowExecutionsResponse, error) {
 	p, err := s.buildSearchParametersV2(request)
 	if err != nil {
 		return nil, err
@@ -442,8 +473,6 @@ func (s *visibilityStore) ListWorkflowExecutions(request *manager.ListWorkflowEx
 		p.SearchAfter = token.SearchAfter
 	}
 
-	ctx, cancel := newReadContext()
-	defer cancel()
 	searchResult, err := s.esClient.Search(ctx, p)
 	if err != nil {
 		return nil, convertElasticsearchClientError("ListWorkflowExecutions failed", err)
@@ -452,10 +481,10 @@ func (s *visibilityStore) ListWorkflowExecutions(request *manager.ListWorkflowEx
 	return s.getListWorkflowExecutionsResponse(searchResult, request.Namespace, request.PageSize, nil)
 }
 
-func (s *visibilityStore) ScanWorkflowExecutions(request *manager.ListWorkflowExecutionsRequestV2) (*store.InternalListWorkflowExecutionsResponse, error) {
-	ctx, cancel := newReadContext()
-	defer cancel()
-
+func (s *visibilityStore) ScanWorkflowExecutions(
+	ctx context.Context,
+	request *manager.ListWorkflowExecutionsRequestV2,
+) (*store.InternalListWorkflowExecutionsResponse, error) {
 	if esClientV7, isV7 := s.esClient.(client.ClientV7); isV7 {
 		// Elasticsearch 7.10+ can use "point in time" (PIT) instead of scroll to scan over all workflows without skipping or duplicating them.
 		// https://www.elastic.co/guide/en/elasticsearch/reference/7.10/point-in-time-api.html
@@ -549,14 +578,15 @@ func (s *visibilityStore) scanWorkflowExecutionsWithScroll(ctx context.Context, 
 	return s.getListWorkflowExecutionsResponse(searchResult, request.Namespace, request.PageSize, nil)
 }
 
-func (s *visibilityStore) CountWorkflowExecutions(request *manager.CountWorkflowExecutionsRequest) (*manager.CountWorkflowExecutionsResponse, error) {
+func (s *visibilityStore) CountWorkflowExecutions(
+	ctx context.Context,
+	request *manager.CountWorkflowExecutionsRequest,
+) (*manager.CountWorkflowExecutionsResponse, error) {
 	boolQuery, _, err := s.convertQuery(request.Namespace, request.NamespaceID, request.Query)
 	if err != nil {
 		return nil, err
 	}
 
-	ctx, cancel := newReadContext()
-	defer cancel()
 	count, err := s.esClient.Count(ctx, s.index, boolQuery)
 	if err != nil {
 		return nil, convertElasticsearchClientError("CountWorkflowExecutions failed", err)

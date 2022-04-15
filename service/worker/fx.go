@@ -30,11 +30,20 @@ import (
 	"go.uber.org/fx"
 
 	"go.temporal.io/server/common"
+	"go.temporal.io/server/common/config"
 	"go.temporal.io/server/common/dynamicconfig"
+	"go.temporal.io/server/common/log"
+	"go.temporal.io/server/common/metrics"
 	persistenceClient "go.temporal.io/server/common/persistence/client"
+	"go.temporal.io/server/common/persistence/visibility"
+	"go.temporal.io/server/common/persistence/visibility/manager"
+	esclient "go.temporal.io/server/common/persistence/visibility/store/elasticsearch/client"
+	"go.temporal.io/server/common/resolver"
 	"go.temporal.io/server/common/resource"
+	"go.temporal.io/server/common/searchattribute"
 	"go.temporal.io/server/service"
 	"go.temporal.io/server/service/worker/addsearchattributes"
+	"go.temporal.io/server/service/worker/deletenamespace"
 	"go.temporal.io/server/service/worker/migration"
 )
 
@@ -42,20 +51,17 @@ var Module = fx.Options(
 	migration.Module,
 	addsearchattributes.Module,
 	resource.Module,
-	fx.Provide(ParamsExpandProvider),
+	deletenamespace.Module,
+	fx.Provide(VisibilityManagerProvider),
 	fx.Provide(dynamicconfig.NewCollection),
 	fx.Provide(ThrottledLoggerRpsFnProvider),
-	fx.Provide(NewConfig),
+	fx.Provide(ConfigProvider),
 	fx.Provide(PersistenceMaxQpsProvider),
 	fx.Provide(NewService),
 	fx.Provide(NewWorkerManager),
 	fx.Provide(NewPerNamespaceWorkerManager),
 	fx.Invoke(ServiceLifetimeHooks),
 )
-
-func ParamsExpandProvider(params *resource.BootstrapParams) common.RPCFactory {
-	return params.RPCFactory
-}
 
 func ThrottledLoggerRpsFnProvider(serviceConfig *Config) resource.ThrottledLoggerRpsFn {
 	return func() float64 { return float64(serviceConfig.ThrottledLogRPS()) }
@@ -65,6 +71,50 @@ func PersistenceMaxQpsProvider(
 	serviceConfig *Config,
 ) persistenceClient.PersistenceMaxQps {
 	return service.PersistenceMaxQpsFn(serviceConfig.PersistenceMaxQPS, serviceConfig.PersistenceGlobalMaxQPS)
+}
+
+func ConfigProvider(
+	dc *dynamicconfig.Collection,
+	persistenceConfig *config.Persistence,
+) *Config {
+	return NewConfig(
+		dc,
+		persistenceConfig,
+		persistenceConfig.AdvancedVisibilityConfigExist(),
+	)
+}
+
+func VisibilityManagerProvider(
+	logger log.Logger,
+	metricsClient metrics.Client,
+	persistenceConfig *config.Persistence,
+	serviceConfig *Config,
+	esConfig *esclient.Config,
+	esClient esclient.Client,
+	persistenceServiceResolver resolver.ServiceResolver,
+	searchAttributesMapper searchattribute.Mapper,
+	saProvider searchattribute.Provider,
+) (manager.VisibilityManager, error) {
+	return visibility.NewManager(
+		*persistenceConfig,
+		persistenceServiceResolver,
+		esConfig.GetVisibilityIndex(),
+		esConfig.GetSecondaryVisibilityIndex(),
+		esClient,
+		nil, // worker visibility never write
+		saProvider,
+		searchAttributesMapper,
+		serviceConfig.StandardVisibilityPersistenceMaxReadQPS,
+		serviceConfig.StandardVisibilityPersistenceMaxWriteQPS,
+		serviceConfig.AdvancedVisibilityPersistenceMaxReadQPS,
+		serviceConfig.AdvancedVisibilityPersistenceMaxWriteQPS,
+		serviceConfig.EnableReadVisibilityFromES,
+		dynamicconfig.GetStringPropertyFn(visibility.AdvancedVisibilityWritingModeOff), // worker visibility never write
+		serviceConfig.EnableReadFromSecondaryAdvancedVisibility,
+		dynamicconfig.GetBoolPropertyFn(false), // worker visibility never write
+		metricsClient,
+		logger,
+	)
 }
 
 func ServiceLifetimeHooks(

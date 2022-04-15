@@ -99,7 +99,7 @@ var (
 // AddSearchAttributesWorkflow is the workflow that adds search attributes to the cluster for specific index.
 func AddSearchAttributesWorkflow(ctx workflow.Context, params WorkflowParams) error {
 	logger := workflow.GetLogger(ctx)
-	logger.Info("Workflow started.", "wf-type", WorkflowName)
+	logger.Info("Workflow started.", tag.WorkflowType(WorkflowName))
 
 	var a *activities
 	var err error
@@ -124,7 +124,7 @@ func AddSearchAttributesWorkflow(ctx workflow.Context, params WorkflowParams) er
 		return fmt.Errorf("%w: UpdateClusterMetadataActivity: %v", ErrUnableToExecuteActivity, err)
 	}
 
-	logger.Info("Workflow finished successfully.", "wf-type", WorkflowName)
+	logger.Info("Workflow finished successfully.", tag.WorkflowType(WorkflowName))
 	return nil
 }
 
@@ -166,7 +166,7 @@ func (a *activities) WaitForYellowStatusActivity(ctx context.Context, indexName 
 	return nil
 }
 
-func (a *activities) UpdateClusterMetadataActivity(_ context.Context, params WorkflowParams) error {
+func (a *activities) UpdateClusterMetadataActivity(ctx context.Context, params WorkflowParams) error {
 	oldSearchAttributes, err := a.saManager.GetSearchAttributes(params.IndexName, true)
 	if err != nil {
 		return fmt.Errorf("%w: %v", ErrUnableToGetSearchAttributes, err)
@@ -179,7 +179,7 @@ func (a *activities) UpdateClusterMetadataActivity(_ context.Context, params Wor
 	for saName, saType := range params.CustomAttributesToAdd {
 		newCustomSearchAttributes[saName] = saType
 	}
-	err = a.saManager.SaveSearchAttributes(params.IndexName, newCustomSearchAttributes)
+	err = a.saManager.SaveSearchAttributes(ctx, params.IndexName, newCustomSearchAttributes)
 	if err != nil {
 		a.logger.Info("Unable to save search attributes to cluster metadata.", tag.ESIndex(params.IndexName), tag.Error(err))
 		a.metricsClient.IncCounter(metrics.AddSearchAttributesWorkflowScope, metrics.AddSearchAttributesFailuresCount)

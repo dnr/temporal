@@ -47,6 +47,7 @@ import (
 	"go.temporal.io/server/common/persistence"
 	"go.temporal.io/server/service/history/shard"
 	"go.temporal.io/server/service/history/tasks"
+	"go.temporal.io/server/service/history/workflow"
 )
 
 var (
@@ -64,6 +65,7 @@ type (
 			pageToken []byte,
 		) ([]*replicationspb.ReplicationTask, []byte, error)
 		purgeMessages(
+			ctx context.Context,
 			sourceCluster string,
 			lastMessageID int64,
 		) error
@@ -80,16 +82,29 @@ type (
 		taskExecutorsLock sync.Mutex
 		taskExecutors     map[string]replicationTaskExecutor
 		shard             shard.Context
+		deleteManager     workflow.DeleteManager
+		workflowCache     workflow.Cache
 		logger            log.Logger
 	}
 )
 
-func newLazyReplicationDLQHandler(shard shard.Context) replicationDLQHandler {
-	return newReplicationDLQHandler(shard, make(map[string]replicationTaskExecutor))
+func newLazyReplicationDLQHandler(
+	shard shard.Context,
+	deleteManager workflow.DeleteManager,
+	workflowCache workflow.Cache,
+) replicationDLQHandler {
+	return newReplicationDLQHandler(
+		shard,
+		deleteManager,
+		workflowCache,
+		make(map[string]replicationTaskExecutor),
+	)
 }
 
 func newReplicationDLQHandler(
 	shard shard.Context,
+	deleteManager workflow.DeleteManager,
+	workflowCache workflow.Cache,
 	taskExecutors map[string]replicationTaskExecutor,
 ) replicationDLQHandler {
 
@@ -98,6 +113,8 @@ func newReplicationDLQHandler(
 	}
 	return &replicationDLQHandlerImpl{
 		shard:         shard,
+		deleteManager: deleteManager,
+		workflowCache: workflowCache,
 		taskExecutors: taskExecutors,
 		logger:        shard.GetLogger(),
 	}
@@ -130,7 +147,7 @@ func (r *replicationDLQHandlerImpl) readMessagesWithAckLevel(
 ) ([]*replicationspb.ReplicationTask, int64, []byte, error) {
 
 	ackLevel := r.shard.GetReplicatorDLQAckLevel(sourceCluster)
-	resp, err := r.shard.GetExecutionManager().GetReplicationTasksFromDLQ(&persistence.GetReplicationTasksFromDLQRequest{
+	resp, err := r.shard.GetExecutionManager().GetReplicationTasksFromDLQ(ctx, &persistence.GetReplicationTasksFromDLQRequest{
 		GetHistoryTasksRequest: persistence.GetHistoryTasksRequest{
 			ShardID:             r.shard.GetShardID(),
 			TaskCategory:        tasks.CategoryReplication,
@@ -197,12 +214,14 @@ func (r *replicationDLQHandlerImpl) readMessagesWithAckLevel(
 }
 
 func (r *replicationDLQHandlerImpl) purgeMessages(
+	ctx context.Context,
 	sourceCluster string,
 	lastMessageID int64,
 ) error {
 
 	ackLevel := r.shard.GetReplicatorDLQAckLevel(sourceCluster)
 	err := r.shard.GetExecutionManager().RangeDeleteReplicationTaskFromDLQ(
+		ctx,
 		&persistence.RangeDeleteReplicationTaskFromDLQRequest{
 			RangeCompleteHistoryTasksRequest: persistence.RangeCompleteHistoryTasksRequest{
 				ShardID:             r.shard.GetShardID(),
@@ -258,6 +277,7 @@ func (r *replicationDLQHandlerImpl) mergeMessages(
 	}
 
 	err = r.shard.GetExecutionManager().RangeDeleteReplicationTaskFromDLQ(
+		ctx,
 		&persistence.RangeDeleteReplicationTaskFromDLQRequest{
 			RangeCompleteHistoryTasksRequest: persistence.RangeCompleteHistoryTasksRequest{
 				ShardID:             r.shard.GetShardID(),
@@ -320,6 +340,8 @@ func (r *replicationDLQHandlerImpl) getOrCreateTaskExecutor(clusterName string) 
 		r.shard.GetNamespaceRegistry(),
 		resender,
 		engine,
+		r.deleteManager,
+		r.workflowCache,
 		r.shard.GetMetricsClient(),
 		r.shard.GetLogger(),
 	)

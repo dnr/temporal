@@ -29,11 +29,11 @@
 package matching
 
 import (
+	context "context"
 	reflect "reflect"
 
 	gomock "github.com/golang/mock/gomock"
 	persistence "go.temporal.io/server/api/persistence/v1"
-	future "go.temporal.io/server/common/future"
 )
 
 // MockdbTaskWriter is a mock of dbTaskWriter interface.
@@ -60,10 +60,10 @@ func (m *MockdbTaskWriter) EXPECT() *MockdbTaskWriterMockRecorder {
 }
 
 // appendTask mocks base method.
-func (m *MockdbTaskWriter) appendTask(task *persistence.TaskInfo) future.Future {
+func (m *MockdbTaskWriter) appendTask(task *persistence.TaskInfo) dbTaskWriterFuture {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "appendTask", task)
-	ret0, _ := ret[0].(future.Future)
+	ret0, _ := ret[0].(dbTaskWriterFuture)
 	return ret0
 }
 
@@ -74,15 +74,15 @@ func (mr *MockdbTaskWriterMockRecorder) appendTask(task interface{}) *gomock.Cal
 }
 
 // flushTasks mocks base method.
-func (m *MockdbTaskWriter) flushTasks() {
+func (m *MockdbTaskWriter) flushTasks(ctx context.Context) {
 	m.ctrl.T.Helper()
-	m.ctrl.Call(m, "flushTasks")
+	m.ctrl.Call(m, "flushTasks", ctx)
 }
 
 // flushTasks indicates an expected call of flushTasks.
-func (mr *MockdbTaskWriterMockRecorder) flushTasks() *gomock.Call {
+func (mr *MockdbTaskWriterMockRecorder) flushTasks(ctx interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "flushTasks", reflect.TypeOf((*MockdbTaskWriter)(nil).flushTasks))
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "flushTasks", reflect.TypeOf((*MockdbTaskWriter)(nil).flushTasks), ctx)
 }
 
 // notifyFlushChan mocks base method.

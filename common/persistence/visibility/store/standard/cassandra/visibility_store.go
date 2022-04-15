@@ -25,6 +25,7 @@
 package cassandra
 
 import (
+	"context"
 	"time"
 
 	enumspb "go.temporal.io/api/enums/v1"
@@ -156,7 +157,9 @@ func (v *visibilityStore) Close() {
 }
 
 func (v *visibilityStore) RecordWorkflowExecutionStarted(
-	request *store.InternalRecordWorkflowExecutionStartedRequest) error {
+	ctx context.Context,
+	request *store.InternalRecordWorkflowExecutionStartedRequest,
+) error {
 
 	query := v.session.Query(templateCreateWorkflowExecutionStarted,
 		request.NamespaceID,
@@ -169,7 +172,7 @@ func (v *visibilityStore) RecordWorkflowExecutionStarted(
 		request.Memo.Data,
 		request.Memo.EncodingType.String(),
 		request.TaskQueue,
-	)
+	).WithContext(ctx)
 	// It is important to specify timestamp for all `open_executions` queries because
 	// we are using milliseconds instead of default microseconds. If custom timestamp collides with
 	// default timestamp, default one will always win because they are 1000 times bigger.
@@ -178,8 +181,11 @@ func (v *visibilityStore) RecordWorkflowExecutionStarted(
 	return gocql.ConvertError("RecordWorkflowExecutionStarted", err)
 }
 
-func (v *visibilityStore) RecordWorkflowExecutionClosed(request *store.InternalRecordWorkflowExecutionClosedRequest) error {
-	batch := v.session.NewBatch(gocql.LoggedBatch)
+func (v *visibilityStore) RecordWorkflowExecutionClosed(
+	ctx context.Context,
+	request *store.InternalRecordWorkflowExecutionClosedRequest,
+) error {
+	batch := v.session.NewBatch(gocql.LoggedBatch).WithContext(ctx)
 
 	// First, remove execution from the open table
 	batch.Query(templateDeleteWorkflowExecutionStarted,
@@ -225,21 +231,25 @@ func (v *visibilityStore) RecordWorkflowExecutionClosed(request *store.InternalR
 	return gocql.ConvertError("RecordWorkflowExecutionClosed", err)
 }
 
-func (v *visibilityStore) UpsertWorkflowExecution(_ *store.InternalUpsertWorkflowExecutionRequest) error {
+func (v *visibilityStore) UpsertWorkflowExecution(
+	_ context.Context,
+	_ *store.InternalUpsertWorkflowExecutionRequest,
+) error {
 	// Not OperationNotSupportedErr!
 	return nil
 }
 
 func (v *visibilityStore) ListOpenWorkflowExecutions(
+	ctx context.Context,
 	request *manager.ListWorkflowExecutionsRequest,
 ) (*store.InternalListWorkflowExecutionsResponse, error) {
-	query := v.session.
-		Query(templateGetOpenWorkflowExecutions,
-			request.NamespaceID.String(),
-			namespacePartition,
-			persistence.UnixMilliseconds(request.EarliestStartTime),
-			persistence.UnixMilliseconds(request.LatestStartTime)).
-		Consistency(v.lowConslevel)
+	query := v.session.Query(
+		templateGetOpenWorkflowExecutions,
+		request.NamespaceID.String(),
+		namespacePartition,
+		persistence.UnixMilliseconds(request.EarliestStartTime),
+		persistence.UnixMilliseconds(request.LatestStartTime),
+	).Consistency(v.lowConslevel).WithContext(ctx)
 	iter := query.PageSize(request.PageSize).PageState(request.NextPageToken).Iter()
 
 	response := &store.InternalListWorkflowExecutionsResponse{}
@@ -260,15 +270,17 @@ func (v *visibilityStore) ListOpenWorkflowExecutions(
 }
 
 func (v *visibilityStore) ListOpenWorkflowExecutionsByType(
-	request *manager.ListWorkflowExecutionsByTypeRequest) (*store.InternalListWorkflowExecutionsResponse, error) {
-	query := v.session.
-		Query(templateGetOpenWorkflowExecutionsByType,
-			request.NamespaceID.String(),
-			namespacePartition,
-			persistence.UnixMilliseconds(request.EarliestStartTime),
-			persistence.UnixMilliseconds(request.LatestStartTime),
-			request.WorkflowTypeName).
-		Consistency(v.lowConslevel)
+	ctx context.Context,
+	request *manager.ListWorkflowExecutionsByTypeRequest,
+) (*store.InternalListWorkflowExecutionsResponse, error) {
+	query := v.session.Query(
+		templateGetOpenWorkflowExecutionsByType,
+		request.NamespaceID.String(),
+		namespacePartition,
+		persistence.UnixMilliseconds(request.EarliestStartTime),
+		persistence.UnixMilliseconds(request.LatestStartTime),
+		request.WorkflowTypeName,
+	).Consistency(v.lowConslevel).WithContext(ctx)
 	iter := query.PageSize(request.PageSize).PageState(request.NextPageToken).Iter()
 
 	response := &store.InternalListWorkflowExecutionsResponse{}
@@ -289,15 +301,17 @@ func (v *visibilityStore) ListOpenWorkflowExecutionsByType(
 }
 
 func (v *visibilityStore) ListOpenWorkflowExecutionsByWorkflowID(
-	request *manager.ListWorkflowExecutionsByWorkflowIDRequest) (*store.InternalListWorkflowExecutionsResponse, error) {
-	query := v.session.
-		Query(templateGetOpenWorkflowExecutionsByID,
-			request.NamespaceID.String(),
-			namespacePartition,
-			persistence.UnixMilliseconds(request.EarliestStartTime),
-			persistence.UnixMilliseconds(request.LatestStartTime),
-			request.WorkflowID).
-		Consistency(v.lowConslevel)
+	ctx context.Context,
+	request *manager.ListWorkflowExecutionsByWorkflowIDRequest,
+) (*store.InternalListWorkflowExecutionsResponse, error) {
+	query := v.session.Query(
+		templateGetOpenWorkflowExecutionsByID,
+		request.NamespaceID.String(),
+		namespacePartition,
+		persistence.UnixMilliseconds(request.EarliestStartTime),
+		persistence.UnixMilliseconds(request.LatestStartTime),
+		request.WorkflowID,
+	).Consistency(v.lowConslevel).WithContext(ctx)
 	iter := query.PageSize(request.PageSize).PageState(request.NextPageToken).Iter()
 
 	response := &store.InternalListWorkflowExecutionsResponse{}
@@ -318,14 +332,15 @@ func (v *visibilityStore) ListOpenWorkflowExecutionsByWorkflowID(
 }
 
 func (v *visibilityStore) ListClosedWorkflowExecutions(
-	request *manager.ListWorkflowExecutionsRequest) (*store.InternalListWorkflowExecutionsResponse, error) {
-	query := v.session.
-		Query(templateGetClosedWorkflowExecutions,
-			request.NamespaceID.String(),
-			namespacePartition,
-			persistence.UnixMilliseconds(request.EarliestStartTime),
-			persistence.UnixMilliseconds(request.LatestStartTime)).
-		Consistency(v.lowConslevel)
+	ctx context.Context,
+	request *manager.ListWorkflowExecutionsRequest,
+) (*store.InternalListWorkflowExecutionsResponse, error) {
+	query := v.session.Query(templateGetClosedWorkflowExecutions,
+		request.NamespaceID.String(),
+		namespacePartition,
+		persistence.UnixMilliseconds(request.EarliestStartTime),
+		persistence.UnixMilliseconds(request.LatestStartTime),
+	).Consistency(v.lowConslevel).WithContext(ctx)
 	iter := query.PageSize(request.PageSize).PageState(request.NextPageToken).Iter()
 
 	response := &store.InternalListWorkflowExecutionsResponse{}
@@ -346,15 +361,17 @@ func (v *visibilityStore) ListClosedWorkflowExecutions(
 }
 
 func (v *visibilityStore) ListClosedWorkflowExecutionsByType(
-	request *manager.ListWorkflowExecutionsByTypeRequest) (*store.InternalListWorkflowExecutionsResponse, error) {
-	query := v.session.
-		Query(templateGetClosedWorkflowExecutionsByType,
-			request.NamespaceID.String(),
-			namespacePartition,
-			persistence.UnixMilliseconds(request.EarliestStartTime),
-			persistence.UnixMilliseconds(request.LatestStartTime),
-			request.WorkflowTypeName).
-		Consistency(v.lowConslevel)
+	ctx context.Context,
+	request *manager.ListWorkflowExecutionsByTypeRequest,
+) (*store.InternalListWorkflowExecutionsResponse, error) {
+	query := v.session.Query(
+		templateGetClosedWorkflowExecutionsByType,
+		request.NamespaceID.String(),
+		namespacePartition,
+		persistence.UnixMilliseconds(request.EarliestStartTime),
+		persistence.UnixMilliseconds(request.LatestStartTime),
+		request.WorkflowTypeName,
+	).Consistency(v.lowConslevel).WithContext(ctx)
 	iter := query.PageSize(request.PageSize).PageState(request.NextPageToken).Iter()
 
 	response := &store.InternalListWorkflowExecutionsResponse{}
@@ -375,15 +392,16 @@ func (v *visibilityStore) ListClosedWorkflowExecutionsByType(
 }
 
 func (v *visibilityStore) ListClosedWorkflowExecutionsByWorkflowID(
-	request *manager.ListWorkflowExecutionsByWorkflowIDRequest) (*store.InternalListWorkflowExecutionsResponse, error) {
-	query := v.session.
-		Query(templateGetClosedWorkflowExecutionsByID,
-			request.NamespaceID.String(),
-			namespacePartition,
-			persistence.UnixMilliseconds(request.EarliestStartTime),
-			persistence.UnixMilliseconds(request.LatestStartTime),
-			request.WorkflowID).
-		Consistency(v.lowConslevel)
+	ctx context.Context,
+	request *manager.ListWorkflowExecutionsByWorkflowIDRequest,
+) (*store.InternalListWorkflowExecutionsResponse, error) {
+	query := v.session.Query(templateGetClosedWorkflowExecutionsByID,
+		request.NamespaceID.String(),
+		namespacePartition,
+		persistence.UnixMilliseconds(request.EarliestStartTime),
+		persistence.UnixMilliseconds(request.LatestStartTime),
+		request.WorkflowID,
+	).Consistency(v.lowConslevel).WithContext(ctx)
 	iter := query.PageSize(request.PageSize).PageState(request.NextPageToken).Iter()
 
 	response := &store.InternalListWorkflowExecutionsResponse{}
@@ -404,15 +422,16 @@ func (v *visibilityStore) ListClosedWorkflowExecutionsByWorkflowID(
 }
 
 func (v *visibilityStore) ListClosedWorkflowExecutionsByStatus(
-	request *manager.ListClosedWorkflowExecutionsByStatusRequest) (*store.InternalListWorkflowExecutionsResponse, error) {
-	query := v.session.
-		Query(templateGetClosedWorkflowExecutionsByStatus,
-			request.NamespaceID.String(),
-			namespacePartition,
-			persistence.UnixMilliseconds(request.EarliestStartTime),
-			persistence.UnixMilliseconds(request.LatestStartTime),
-			request.Status).
-		Consistency(v.lowConslevel)
+	ctx context.Context,
+	request *manager.ListClosedWorkflowExecutionsByStatusRequest,
+) (*store.InternalListWorkflowExecutionsResponse, error) {
+	query := v.session.Query(templateGetClosedWorkflowExecutionsByStatus,
+		request.NamespaceID.String(),
+		namespacePartition,
+		persistence.UnixMilliseconds(request.EarliestStartTime),
+		persistence.UnixMilliseconds(request.LatestStartTime),
+		request.Status,
+	).Consistency(v.lowConslevel).WithContext(ctx)
 	iter := query.PageSize(request.PageSize).PageState(request.NextPageToken).Iter()
 
 	response := &store.InternalListWorkflowExecutionsResponse{}
@@ -432,28 +451,53 @@ func (v *visibilityStore) ListClosedWorkflowExecutionsByStatus(
 	return response, nil
 }
 
-func (v *visibilityStore) DeleteWorkflowExecution(request *manager.VisibilityDeleteWorkflowExecutionRequest) error {
-	query := v.session.Query(templateDeleteWorkflowExecutionClosed,
-		request.NamespaceID.String(),
-		namespacePartition,
-		persistence.UnixMilliseconds(request.CloseTime),
-		request.RunID).
-		Consistency(v.lowConslevel)
-	if err := query.Exec(); err != nil {
+func (v *visibilityStore) DeleteWorkflowExecution(
+	ctx context.Context,
+	request *manager.VisibilityDeleteWorkflowExecutionRequest,
+) error {
+	var query gocql.Query
+	if request.StartTime != nil {
+		query = v.session.Query(templateDeleteWorkflowExecutionStarted,
+			request.NamespaceID.String(),
+			namespacePartition,
+			persistence.UnixMilliseconds(*request.StartTime),
+			request.RunID,
+		).WithContext(ctx)
+	} else if request.CloseTime != nil {
+		query = v.session.Query(templateDeleteWorkflowExecutionClosed,
+			request.NamespaceID.String(),
+			namespacePartition,
+			persistence.UnixMilliseconds(*request.CloseTime),
+			request.RunID,
+		).WithContext(ctx)
+	} else {
+		panic("both StartTime and CloseTime are nil")
+	}
+
+	if err := query.Consistency(v.lowConslevel).Exec(); err != nil {
 		return gocql.ConvertError("DeleteWorkflowExecution", err)
 	}
 	return nil
 }
 
-func (v *visibilityStore) ListWorkflowExecutions(_ *manager.ListWorkflowExecutionsRequestV2) (*store.InternalListWorkflowExecutionsResponse, error) {
+func (v *visibilityStore) ListWorkflowExecutions(
+	_ context.Context,
+	_ *manager.ListWorkflowExecutionsRequestV2,
+) (*store.InternalListWorkflowExecutionsResponse, error) {
 	return nil, store.OperationNotSupportedErr
 }
 
-func (v *visibilityStore) ScanWorkflowExecutions(_ *manager.ListWorkflowExecutionsRequestV2) (*store.InternalListWorkflowExecutionsResponse, error) {
+func (v *visibilityStore) ScanWorkflowExecutions(
+	_ context.Context,
+	_ *manager.ListWorkflowExecutionsRequestV2,
+) (*store.InternalListWorkflowExecutionsResponse, error) {
 	return nil, store.OperationNotSupportedErr
 }
 
-func (v *visibilityStore) CountWorkflowExecutions(_ *manager.CountWorkflowExecutionsRequest) (*manager.CountWorkflowExecutionsResponse, error) {
+func (v *visibilityStore) CountWorkflowExecutions(
+	_ context.Context,
+	_ *manager.CountWorkflowExecutionsRequest,
+) (*manager.CountWorkflowExecutionsResponse, error) {
 	return nil, store.OperationNotSupportedErr
 }
 

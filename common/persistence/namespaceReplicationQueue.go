@@ -27,6 +27,7 @@
 package persistence
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"sync/atomic"
@@ -68,7 +69,7 @@ func NewNamespaceReplicationQueue(
 	if err != nil {
 		return nil, err
 	}
-	err = queue.Init(blob)
+	err = queue.Init(context.TODO(), blob)
 	if err != nil {
 		return nil, err
 	}
@@ -101,18 +102,18 @@ type (
 	// NamespaceReplicationQueue is used to publish and list namespace replication tasks
 	NamespaceReplicationQueue interface {
 		common.Daemon
-		Publish(message interface{}) error
-		GetReplicationMessages(lastMessageID int64, maxCount int) ([]*replicationspb.ReplicationTask, int64, error)
-		UpdateAckLevel(lastProcessedMessageID int64, clusterName string) error
-		GetAckLevels() (map[string]int64, error)
+		Publish(ctx context.Context, message interface{}) error
+		GetReplicationMessages(ctx context.Context, lastMessageID int64, maxCount int) ([]*replicationspb.ReplicationTask, int64, error)
+		UpdateAckLevel(ctx context.Context, lastProcessedMessageID int64, clusterName string) error
+		GetAckLevels(ctx context.Context) (map[string]int64, error)
 
-		PublishToDLQ(message interface{}) error
-		GetMessagesFromDLQ(firstMessageID int64, lastMessageID int64, pageSize int, pageToken []byte) ([]*replicationspb.ReplicationTask, []byte, error)
-		UpdateDLQAckLevel(lastProcessedMessageID int64) error
-		GetDLQAckLevel() (int64, error)
+		PublishToDLQ(ctx context.Context, message interface{}) error
+		GetMessagesFromDLQ(ctx context.Context, firstMessageID int64, lastMessageID int64, pageSize int, pageToken []byte) ([]*replicationspb.ReplicationTask, []byte, error)
+		UpdateDLQAckLevel(ctx context.Context, lastProcessedMessageID int64) error
+		GetDLQAckLevel(ctx context.Context) (int64, error)
 
-		RangeDeleteMessagesFromDLQ(firstMessageID int64, lastMessageID int64) error
-		DeleteMessageFromDLQ(messageID int64) error
+		RangeDeleteMessagesFromDLQ(ctx context.Context, firstMessageID int64, lastMessageID int64) error
+		DeleteMessageFromDLQ(ctx context.Context, messageID int64) error
 	}
 )
 
@@ -120,7 +121,7 @@ func (q *namespaceReplicationQueueImpl) Start() {
 	if !atomic.CompareAndSwapInt32(&q.status, common.DaemonStatusInitialized, common.DaemonStatusStarted) {
 		return
 	}
-	go q.purgeProcessor()
+	go q.purgeProcessor(context.TODO())
 }
 
 func (q *namespaceReplicationQueueImpl) Stop() {
@@ -130,7 +131,10 @@ func (q *namespaceReplicationQueueImpl) Stop() {
 	close(q.done)
 }
 
-func (q *namespaceReplicationQueueImpl) Publish(message interface{}) error {
+func (q *namespaceReplicationQueueImpl) Publish(
+	ctx context.Context,
+	message interface{},
+) error {
 	task, ok := message.(*replicationspb.ReplicationTask)
 	if !ok {
 		return errors.New("wrong message type")
@@ -140,10 +144,13 @@ func (q *namespaceReplicationQueueImpl) Publish(message interface{}) error {
 	if err != nil {
 		return fmt.Errorf("failed to encode message: %v", err)
 	}
-	return q.queue.EnqueueMessage(*blob)
+	return q.queue.EnqueueMessage(ctx, *blob)
 }
 
-func (q *namespaceReplicationQueueImpl) PublishToDLQ(message interface{}) error {
+func (q *namespaceReplicationQueueImpl) PublishToDLQ(
+	ctx context.Context,
+	message interface{},
+) error {
 	task, ok := message.(*replicationspb.ReplicationTask)
 	if !ok {
 		return errors.New("wrong message type")
@@ -153,7 +160,7 @@ func (q *namespaceReplicationQueueImpl) PublishToDLQ(message interface{}) error 
 	if err != nil {
 		return fmt.Errorf("failed to encode message: %v", err)
 	}
-	messageID, err := q.queue.EnqueueMessageToDLQ(*blob)
+	messageID, err := q.queue.EnqueueMessageToDLQ(ctx, *blob)
 	if err != nil {
 		return err
 	}
@@ -168,11 +175,12 @@ func (q *namespaceReplicationQueueImpl) PublishToDLQ(message interface{}) error 
 }
 
 func (q *namespaceReplicationQueueImpl) GetReplicationMessages(
+	ctx context.Context,
 	lastMessageID int64,
 	pageSize int,
 ) ([]*replicationspb.ReplicationTask, int64, error) {
 
-	messages, err := q.queue.ReadMessages(lastMessageID, pageSize)
+	messages, err := q.queue.ReadMessages(ctx, lastMessageID, pageSize)
 	if err != nil {
 		return nil, lastMessageID, err
 	}
@@ -192,20 +200,22 @@ func (q *namespaceReplicationQueueImpl) GetReplicationMessages(
 }
 
 func (q *namespaceReplicationQueueImpl) UpdateAckLevel(
+	ctx context.Context,
 	lastProcessedMessageID int64,
 	clusterName string,
 ) error {
-	return q.updateAckLevelWithRetry(lastProcessedMessageID, clusterName, false)
+	return q.updateAckLevelWithRetry(ctx, lastProcessedMessageID, clusterName, false)
 }
 
 func (q *namespaceReplicationQueueImpl) updateAckLevelWithRetry(
+	ctx context.Context,
 	lastProcessedMessageID int64,
 	clusterName string,
 	isDLQ bool,
 ) error {
 conditionFailedRetry:
 	for {
-		err := q.updateAckLevel(lastProcessedMessageID, clusterName, isDLQ)
+		err := q.updateAckLevel(ctx, lastProcessedMessageID, clusterName, isDLQ)
 		switch err.(type) {
 		case *ConditionFailedError:
 			continue conditionFailedRetry
@@ -216,6 +226,7 @@ conditionFailedRetry:
 }
 
 func (q *namespaceReplicationQueueImpl) updateAckLevel(
+	ctx context.Context,
 	lastProcessedMessageID int64,
 	clusterName string,
 	isDLQ bool,
@@ -223,9 +234,9 @@ func (q *namespaceReplicationQueueImpl) updateAckLevel(
 	var err error
 	var internalMetadata *InternalQueueMetadata
 	if isDLQ {
-		internalMetadata, err = q.queue.GetDLQAckLevels()
+		internalMetadata, err = q.queue.GetDLQAckLevels(ctx)
 	} else {
-		internalMetadata, err = q.queue.GetAckLevels()
+		internalMetadata, err = q.queue.GetAckLevels(ctx)
 	}
 
 	if err != nil {
@@ -254,9 +265,9 @@ func (q *namespaceReplicationQueueImpl) updateAckLevel(
 
 	internalMetadata.Blob = blob
 	if isDLQ {
-		err = q.queue.UpdateDLQAckLevel(internalMetadata)
+		err = q.queue.UpdateDLQAckLevel(ctx, internalMetadata)
 	} else {
-		err = q.queue.UpdateAckLevel(internalMetadata)
+		err = q.queue.UpdateAckLevel(ctx, internalMetadata)
 	}
 	if err != nil {
 		return fmt.Errorf("failed to update ack level: %v", err)
@@ -270,8 +281,10 @@ func (q *namespaceReplicationQueueImpl) updateAckLevel(
 	return nil
 }
 
-func (q *namespaceReplicationQueueImpl) GetAckLevels() (map[string]int64, error) {
-	metadata, err := q.queue.GetAckLevels()
+func (q *namespaceReplicationQueueImpl) GetAckLevels(
+	ctx context.Context,
+) (map[string]int64, error) {
+	metadata, err := q.queue.GetAckLevels(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -295,13 +308,14 @@ func (q *namespaceReplicationQueueImpl) ackLevelsFromBlob(blob *commonpb.DataBlo
 }
 
 func (q *namespaceReplicationQueueImpl) GetMessagesFromDLQ(
+	ctx context.Context,
 	firstMessageID int64,
 	lastMessageID int64,
 	pageSize int,
 	pageToken []byte,
 ) ([]*replicationspb.ReplicationTask, []byte, error) {
 
-	messages, token, err := q.queue.ReadMessagesFromDLQ(firstMessageID, lastMessageID, pageSize, pageToken)
+	messages, token, err := q.queue.ReadMessagesFromDLQ(ctx, firstMessageID, lastMessageID, pageSize, pageToken)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -322,13 +336,16 @@ func (q *namespaceReplicationQueueImpl) GetMessagesFromDLQ(
 }
 
 func (q *namespaceReplicationQueueImpl) UpdateDLQAckLevel(
+	ctx context.Context,
 	lastProcessedMessageID int64,
 ) error {
-	return q.updateAckLevelWithRetry(lastProcessedMessageID, localNamespaceReplicationCluster, true)
+	return q.updateAckLevelWithRetry(ctx, lastProcessedMessageID, localNamespaceReplicationCluster, true)
 }
 
-func (q *namespaceReplicationQueueImpl) GetDLQAckLevel() (int64, error) {
-	metadata, err := q.queue.GetDLQAckLevels()
+func (q *namespaceReplicationQueueImpl) GetDLQAckLevel(
+	ctx context.Context,
+) (int64, error) {
+	metadata, err := q.queue.GetDLQAckLevels(ctx)
 	if err != nil {
 		return EmptyQueueMessageID, err
 	}
@@ -345,11 +362,13 @@ func (q *namespaceReplicationQueueImpl) GetDLQAckLevel() (int64, error) {
 }
 
 func (q *namespaceReplicationQueueImpl) RangeDeleteMessagesFromDLQ(
+	ctx context.Context,
 	firstMessageID int64,
 	lastMessageID int64,
 ) error {
 
 	if err := q.queue.RangeDeleteMessagesFromDLQ(
+		ctx,
 		firstMessageID,
 		lastMessageID,
 	); err != nil {
@@ -360,14 +379,17 @@ func (q *namespaceReplicationQueueImpl) RangeDeleteMessagesFromDLQ(
 }
 
 func (q *namespaceReplicationQueueImpl) DeleteMessageFromDLQ(
+	ctx context.Context,
 	messageID int64,
 ) error {
 
-	return q.queue.DeleteMessageFromDLQ(messageID)
+	return q.queue.DeleteMessageFromDLQ(ctx, messageID)
 }
 
-func (q *namespaceReplicationQueueImpl) purgeAckedMessages() error {
-	ackLevelByCluster, err := q.GetAckLevels()
+func (q *namespaceReplicationQueueImpl) purgeAckedMessages(
+	ctx context.Context,
+) error {
+	ackLevelByCluster, err := q.GetAckLevels(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to purge messages: %v", err)
 	}
@@ -386,7 +408,7 @@ func (q *namespaceReplicationQueueImpl) purgeAckedMessages() error {
 		return nil
 	}
 
-	err = q.queue.DeleteMessagesBefore(*minAckLevel)
+	err = q.queue.DeleteMessagesBefore(ctx, *minAckLevel)
 	if err != nil {
 		return fmt.Errorf("failed to purge messages: %v", err)
 	}
@@ -396,7 +418,9 @@ func (q *namespaceReplicationQueueImpl) purgeAckedMessages() error {
 	return nil
 }
 
-func (q *namespaceReplicationQueueImpl) purgeProcessor() {
+func (q *namespaceReplicationQueueImpl) purgeProcessor(
+	ctx context.Context,
+) {
 	ticker := time.NewTicker(purgeInterval)
 	defer ticker.Stop()
 
@@ -406,7 +430,7 @@ func (q *namespaceReplicationQueueImpl) purgeProcessor() {
 			return
 		case <-ticker.C:
 			if q.ackLevelUpdated {
-				err := q.purgeAckedMessages()
+				err := q.purgeAckedMessages(ctx)
 				if err != nil {
 					q.logger.Warn("Failed to purge acked namespace replication messages.", tag.Error(err))
 				} else {

@@ -25,6 +25,7 @@
 package matching
 
 import (
+	"context"
 	"math/rand"
 	"testing"
 	"time"
@@ -102,17 +103,17 @@ func (s *dbTaskReaderSuite) TearDownTest() {
 }
 
 func (s *dbTaskReaderSuite) TestIteration_Error() {
-	s.taskStore.EXPECT().GetTasks(&persistence.GetTasksRequest{
+	s.taskStore.EXPECT().GetTasks(gomock.Any(), &persistence.GetTasksRequest{
 		NamespaceID:        s.namespaceID,
 		TaskQueue:          s.taskQueueName,
 		TaskType:           s.taskQueueType,
 		PageSize:           dbTaskReaderPageSize,
-		MinTaskIDExclusive: s.ackedTaskID,
-		MaxTaskIDInclusive: s.maxTaskID,
+		InclusiveMinTaskID: s.ackedTaskID + 1,
+		ExclusiveMaxTaskID: s.maxTaskID + 1,
 		NextPageToken:      nil,
 	}).Return(nil, serviceerror.NewInternal("random error"))
 
-	iter := s.taskTracker.taskIterator(s.maxTaskID)
+	iter := s.taskTracker.taskIterator(context.Background(), s.maxTaskID)
 	for iter.HasNext() {
 		_, err := iter.Next()
 		s.Error(err)
@@ -134,34 +135,34 @@ func (s *dbTaskReaderSuite) TestIteration_ErrorRetry() {
 		{TaskId: taskID2},
 	}
 	gomock.InOrder(
-		s.taskStore.EXPECT().GetTasks(&persistence.GetTasksRequest{
+		s.taskStore.EXPECT().GetTasks(gomock.Any(), &persistence.GetTasksRequest{
 			NamespaceID:        s.namespaceID,
 			TaskQueue:          s.taskQueueName,
 			TaskType:           s.taskQueueType,
 			PageSize:           dbTaskReaderPageSize,
-			MinTaskIDExclusive: s.ackedTaskID,
-			MaxTaskIDInclusive: s.maxTaskID,
+			InclusiveMinTaskID: s.ackedTaskID + 1,
+			ExclusiveMaxTaskID: s.maxTaskID + 1,
 			NextPageToken:      nil,
 		}).Return(&persistence.GetTasksResponse{
 			Tasks:         tasks1,
 			NextPageToken: token,
 		}, nil),
-		s.taskStore.EXPECT().GetTasks(&persistence.GetTasksRequest{
+		s.taskStore.EXPECT().GetTasks(gomock.Any(), &persistence.GetTasksRequest{
 			NamespaceID:        s.namespaceID,
 			TaskQueue:          s.taskQueueName,
 			TaskType:           s.taskQueueType,
 			PageSize:           dbTaskReaderPageSize,
-			MinTaskIDExclusive: s.ackedTaskID,
-			MaxTaskIDInclusive: s.maxTaskID,
+			InclusiveMinTaskID: s.ackedTaskID + 1,
+			ExclusiveMaxTaskID: s.maxTaskID + 1,
 			NextPageToken:      token,
 		}).Return(nil, serviceerror.NewInternal("some random error")),
-		s.taskStore.EXPECT().GetTasks(&persistence.GetTasksRequest{
+		s.taskStore.EXPECT().GetTasks(gomock.Any(), &persistence.GetTasksRequest{
 			NamespaceID:        s.namespaceID,
 			TaskQueue:          s.taskQueueName,
 			TaskType:           s.taskQueueType,
 			PageSize:           dbTaskReaderPageSize,
-			MinTaskIDExclusive: taskID1,
-			MaxTaskIDInclusive: s.maxTaskID,
+			InclusiveMinTaskID: taskID1 + 1,
+			ExclusiveMaxTaskID: s.maxTaskID + 1,
 			NextPageToken:      nil,
 		}).Return(&persistence.GetTasksResponse{
 			Tasks:         tasks2,
@@ -169,14 +170,14 @@ func (s *dbTaskReaderSuite) TestIteration_ErrorRetry() {
 		}, nil),
 	)
 
-	iter := s.taskTracker.taskIterator(s.maxTaskID)
+	iter := s.taskTracker.taskIterator(context.Background(), s.maxTaskID)
 	var actualTasks []*persistencespb.AllocatedTaskInfo
 	for iter.HasNext() {
 		item, err := iter.Next()
 		if err != nil {
 			break
 		}
-		actualTasks = append(actualTasks, item.(*persistencespb.AllocatedTaskInfo))
+		actualTasks = append(actualTasks, item)
 	}
 	s.Equal(tasks1, actualTasks)
 	s.Equal(s.ackedTaskID, s.taskTracker.ackedTaskID)
@@ -185,12 +186,12 @@ func (s *dbTaskReaderSuite) TestIteration_ErrorRetry() {
 		taskID1: false,
 	}, s.taskTracker.tasks)
 
-	iter = s.taskTracker.taskIterator(s.maxTaskID)
+	iter = s.taskTracker.taskIterator(context.Background(), s.maxTaskID)
 	actualTasks = nil
 	for iter.HasNext() {
 		item, err := iter.Next()
 		s.NoError(err)
-		actualTasks = append(actualTasks, item.(*persistencespb.AllocatedTaskInfo))
+		actualTasks = append(actualTasks, item)
 	}
 	s.Equal(tasks2, actualTasks)
 	s.Equal(s.ackedTaskID, s.taskTracker.ackedTaskID)
@@ -218,25 +219,25 @@ func (s *dbTaskReaderSuite) TestIteration_TwoIter() {
 	maxTaskID1 := taskID3 - 1
 	maxTaskID2 := s.maxTaskID
 
-	s.taskStore.EXPECT().GetTasks(&persistence.GetTasksRequest{
+	s.taskStore.EXPECT().GetTasks(gomock.Any(), &persistence.GetTasksRequest{
 		NamespaceID:        s.namespaceID,
 		TaskQueue:          s.taskQueueName,
 		TaskType:           s.taskQueueType,
 		PageSize:           dbTaskReaderPageSize,
-		MinTaskIDExclusive: s.ackedTaskID,
-		MaxTaskIDInclusive: maxTaskID1,
+		InclusiveMinTaskID: s.ackedTaskID + 1,
+		ExclusiveMaxTaskID: maxTaskID1 + 1,
 		NextPageToken:      nil,
 	}).Return(&persistence.GetTasksResponse{
 		Tasks:         tasks1,
 		NextPageToken: nil,
 	}, nil)
 
-	iter := s.taskTracker.taskIterator(maxTaskID1)
+	iter := s.taskTracker.taskIterator(context.Background(), maxTaskID1)
 	var actualTasks []*persistencespb.AllocatedTaskInfo
 	for iter.HasNext() {
 		item, err := iter.Next()
 		s.NoError(err)
-		actualTasks = append(actualTasks, item.(*persistencespb.AllocatedTaskInfo))
+		actualTasks = append(actualTasks, item)
 	}
 	s.Equal(tasks1, actualTasks)
 
@@ -248,25 +249,25 @@ func (s *dbTaskReaderSuite) TestIteration_TwoIter() {
 		maxTaskID1: true,
 	}, s.taskTracker.tasks)
 
-	s.taskStore.EXPECT().GetTasks(&persistence.GetTasksRequest{
+	s.taskStore.EXPECT().GetTasks(gomock.Any(), &persistence.GetTasksRequest{
 		NamespaceID:        s.namespaceID,
 		TaskQueue:          s.taskQueueName,
 		TaskType:           s.taskQueueType,
 		PageSize:           dbTaskReaderPageSize,
-		MinTaskIDExclusive: s.taskTracker.loadedTaskID,
-		MaxTaskIDInclusive: maxTaskID2,
+		InclusiveMinTaskID: s.taskTracker.loadedTaskID + 1,
+		ExclusiveMaxTaskID: maxTaskID2 + 1,
 		NextPageToken:      nil,
 	}).Return(&persistence.GetTasksResponse{
 		Tasks:         tasks2,
 		NextPageToken: nil,
 	}, nil)
 
-	iter = s.taskTracker.taskIterator(maxTaskID2)
+	iter = s.taskTracker.taskIterator(context.Background(), maxTaskID2)
 	actualTasks = nil
 	for iter.HasNext() {
 		item, err := iter.Next()
 		s.NoError(err)
-		actualTasks = append(actualTasks, item.(*persistencespb.AllocatedTaskInfo))
+		actualTasks = append(actualTasks, item)
 	}
 	s.Equal(tasks2, actualTasks)
 
@@ -298,25 +299,25 @@ func (s *dbTaskReaderSuite) TestIteration_Pagination() {
 	}
 
 	gomock.InOrder(
-		s.taskStore.EXPECT().GetTasks(&persistence.GetTasksRequest{
+		s.taskStore.EXPECT().GetTasks(gomock.Any(), &persistence.GetTasksRequest{
 			NamespaceID:        s.namespaceID,
 			TaskQueue:          s.taskQueueName,
 			TaskType:           s.taskQueueType,
 			PageSize:           dbTaskReaderPageSize,
-			MinTaskIDExclusive: s.ackedTaskID,
-			MaxTaskIDInclusive: s.maxTaskID,
+			InclusiveMinTaskID: s.ackedTaskID + 1,
+			ExclusiveMaxTaskID: s.maxTaskID + 1,
 			NextPageToken:      nil,
 		}).Return(&persistence.GetTasksResponse{
 			Tasks:         tasks1,
 			NextPageToken: token,
 		}, nil),
-		s.taskStore.EXPECT().GetTasks(&persistence.GetTasksRequest{
+		s.taskStore.EXPECT().GetTasks(gomock.Any(), &persistence.GetTasksRequest{
 			NamespaceID:        s.namespaceID,
 			TaskQueue:          s.taskQueueName,
 			TaskType:           s.taskQueueType,
 			PageSize:           dbTaskReaderPageSize,
-			MinTaskIDExclusive: s.ackedTaskID,
-			MaxTaskIDInclusive: s.maxTaskID,
+			InclusiveMinTaskID: s.ackedTaskID + 1,
+			ExclusiveMaxTaskID: s.maxTaskID + 1,
 			NextPageToken:      token,
 		}).Return(&persistence.GetTasksResponse{
 			Tasks:         tasks2,
@@ -324,12 +325,12 @@ func (s *dbTaskReaderSuite) TestIteration_Pagination() {
 		}, nil),
 	)
 
-	iter := s.taskTracker.taskIterator(s.maxTaskID)
+	iter := s.taskTracker.taskIterator(context.Background(), s.maxTaskID)
 	var actualTasks []*persistencespb.AllocatedTaskInfo
 	for iter.HasNext() {
 		item, err := iter.Next()
 		s.NoError(err)
-		actualTasks = append(actualTasks, item.(*persistencespb.AllocatedTaskInfo))
+		actualTasks = append(actualTasks, item)
 	}
 	s.Equal(append(tasks1, tasks2...), actualTasks)
 
@@ -354,25 +355,25 @@ func (s *dbTaskReaderSuite) TestIteration_MaxTaskID_Exists() {
 		{TaskId: taskID3},
 	}
 
-	s.taskStore.EXPECT().GetTasks(&persistence.GetTasksRequest{
+	s.taskStore.EXPECT().GetTasks(gomock.Any(), &persistence.GetTasksRequest{
 		NamespaceID:        s.namespaceID,
 		TaskQueue:          s.taskQueueName,
 		TaskType:           s.taskQueueType,
 		PageSize:           dbTaskReaderPageSize,
-		MinTaskIDExclusive: s.ackedTaskID,
-		MaxTaskIDInclusive: s.maxTaskID,
+		InclusiveMinTaskID: s.ackedTaskID + 1,
+		ExclusiveMaxTaskID: s.maxTaskID + 1,
 		NextPageToken:      nil,
 	}).Return(&persistence.GetTasksResponse{
 		Tasks:         tasks,
 		NextPageToken: nil,
 	}, nil)
 
-	iter := s.taskTracker.taskIterator(s.maxTaskID)
+	iter := s.taskTracker.taskIterator(context.Background(), s.maxTaskID)
 	var actualTasks []*persistencespb.AllocatedTaskInfo
 	for iter.HasNext() {
 		item, err := iter.Next()
 		s.NoError(err)
-		actualTasks = append(actualTasks, item.(*persistencespb.AllocatedTaskInfo))
+		actualTasks = append(actualTasks, item)
 	}
 	s.Equal(tasks, actualTasks)
 
@@ -393,25 +394,25 @@ func (s *dbTaskReaderSuite) TestIteration_MaxTaskID_Missing() {
 		{TaskId: taskID2},
 	}
 
-	s.taskStore.EXPECT().GetTasks(&persistence.GetTasksRequest{
+	s.taskStore.EXPECT().GetTasks(gomock.Any(), &persistence.GetTasksRequest{
 		NamespaceID:        s.namespaceID,
 		TaskQueue:          s.taskQueueName,
 		TaskType:           s.taskQueueType,
 		PageSize:           dbTaskReaderPageSize,
-		MinTaskIDExclusive: s.ackedTaskID,
-		MaxTaskIDInclusive: s.maxTaskID,
+		InclusiveMinTaskID: s.ackedTaskID + 1,
+		ExclusiveMaxTaskID: s.maxTaskID + 1,
 		NextPageToken:      nil,
 	}).Return(&persistence.GetTasksResponse{
 		Tasks:         tasks,
 		NextPageToken: nil,
 	}, nil)
 
-	iter := s.taskTracker.taskIterator(s.maxTaskID)
+	iter := s.taskTracker.taskIterator(context.Background(), s.maxTaskID)
 	var actualTasks []*persistencespb.AllocatedTaskInfo
 	for iter.HasNext() {
 		item, err := iter.Next()
 		s.NoError(err)
-		actualTasks = append(actualTasks, item.(*persistencespb.AllocatedTaskInfo))
+		actualTasks = append(actualTasks, item)
 	}
 	s.Equal(tasks, actualTasks)
 

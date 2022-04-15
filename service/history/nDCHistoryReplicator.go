@@ -127,6 +127,7 @@ func newNDCHistoryReplicator(
 	historyCache workflow.Cache,
 	eventsReapplier nDCEventsReapplier,
 	logger log.Logger,
+	eventSerializer serialization.Serializer,
 ) *nDCHistoryReplicatorImpl {
 
 	transactionMgr := newNDCTransactionMgr(shard, historyCache, eventsReapplier, logger)
@@ -134,7 +135,7 @@ func newNDCHistoryReplicator(
 		shard:             shard,
 		clusterMetadata:   shard.GetClusterMetadata(),
 		executionMgr:      shard.GetExecutionManager(),
-		historySerializer: serialization.NewSerializer(),
+		historySerializer: eventSerializer,
 		metricsClient:     shard.GetMetricsClient(),
 		namespaceRegistry: shard.GetNamespaceRegistry(),
 		historyCache:      historyCache,
@@ -247,7 +248,7 @@ func (r *nDCHistoryReplicatorImpl) applyEvents(
 	default:
 		// apply events, other than simple start workflow execution
 		// the continue as new + start workflow execution combination will also be processed here
-		mutableState, err := context.LoadWorkflowExecution()
+		mutableState, err := context.LoadWorkflowExecution(ctx)
 		switch err.(type) {
 		case nil:
 			// Sanity check to make only 3DC mutable state here

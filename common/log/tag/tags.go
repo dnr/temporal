@@ -50,7 +50,7 @@ const (
 	errorPrefix = "*"
 )
 
-///////////////////  Common tags defined here ///////////////////
+// ==========  Common tags defined here ==========
 
 // Operation returns tag for Operation
 func Operation(operation string) ZapTag {
@@ -87,7 +87,7 @@ func TimestampPtr(t *time.Time) ZapTag {
 	return NewTimeTag("timestamp", timestamp.TimeValue(t))
 }
 
-///////////////////  Workflow tags defined here: ( wf is short for workflow) ///////////////////
+// ==========  Workflow tags defined here: ( wf is short for workflow) ==========
 
 // WorkflowAction returns tag for WorkflowAction
 func workflowAction(action string) ZapTag {
@@ -326,7 +326,7 @@ func WorkflowEventCount(eventCount int) ZapTag {
 	return NewInt("wf-event-count", eventCount)
 }
 
-///////////////////  System tags defined here:  ///////////////////
+// ==========  System tags defined here:  ==========
 // Tags with pre-define values
 
 // Component returns tag for Component
@@ -560,6 +560,10 @@ func TaskVersion(taskVersion int64) ZapTag {
 	return NewInt64("queue-task-version", taskVersion)
 }
 
+func TaskType(taskType enumsspb.TaskType) ZapTag {
+	return NewStringTag("queue-task-type", taskType.String())
+}
+
 // TaskVisibilityTimestamp returns tag for task visibilityTimestamp
 func TaskVisibilityTimestamp(timestamp time.Time) ZapTag {
 	return NewTimeTag("queue-task-visibility-timestamp", timestamp)
@@ -672,7 +676,7 @@ func TokenLastEventID(id int64) ZapTag {
 	return NewInt64("token-last-event-id", id)
 }
 
-///////////////////  XDC tags defined here: xdc- ///////////////////
+// ==========  XDC tags defined here: xdc- ==========
 
 // SourceCluster returns tag for SourceCluster
 func SourceCluster(sourceCluster string) ZapTag {
@@ -719,7 +723,7 @@ func TokenLastEventVersion(version int64) ZapTag {
 	return NewInt64("xdc-token-last-event-version", version)
 }
 
-///////////////////  Archival tags defined here: archival- ///////////////////
+// ==========  Archival tags defined here: archival- ==========
 // archival request tags
 
 // ArchivalCallerServiceName returns tag for the service name calling archival client
@@ -883,4 +887,16 @@ func TLSCertFiles(filePaths []string) ZapTag {
 // Timeout returns tag for timeout
 func Timeout(timeoutValue string) ZapTag {
 	return NewStringTag("timeout", timeoutValue)
+}
+
+func DeletedExecutionsCount(count int) ZapTag {
+	return NewInt("deleted-executions-count", count)
+}
+
+func DeletedExecutionsErrorCount(count int) ZapTag {
+	return NewInt("delete-executions-error-count", count)
+}
+
+func Endpoint(endpoint string) ZapTag {
+	return NewStringTag("endpoint", endpoint)
 }

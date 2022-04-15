@@ -102,10 +102,10 @@ func (s *dbTaskWriterSuite) TestAppendFlushTask_Once_Success() {
 	ctx := context.Background()
 	task := s.randomTask()
 
-	s.taskOwnership.EXPECT().flushTasks(task).Return(nil)
+	s.taskOwnership.EXPECT().flushTasks(gomock.Any(), task).Return(nil)
 
 	fut := s.taskFlusher.appendTask(task)
-	s.taskFlusher.flushTasks()
+	s.taskFlusher.flushTasks(context.Background())
 
 	_, err := fut.Get(ctx)
 	s.NoError(err)
@@ -122,10 +122,10 @@ func (s *dbTaskWriterSuite) TestAppendFlushTask_Once_Failed() {
 	task := s.randomTask()
 	randomErr := serviceerror.NewUnavailable("random error")
 
-	s.taskOwnership.EXPECT().flushTasks(task).Return(randomErr)
+	s.taskOwnership.EXPECT().flushTasks(gomock.Any(), task).Return(randomErr)
 
 	fut := s.taskFlusher.appendTask(task)
-	s.taskFlusher.flushTasks()
+	s.taskFlusher.flushTasks(context.Background())
 
 	_, err := fut.Get(ctx)
 	s.Equal(randomErr, err)
@@ -141,7 +141,7 @@ func (s *dbTaskWriterSuite) TestAppendFlushTask_Multiple_OnePage_Success() {
 	numTasks := dbTaskFlusherBatchSize - 1
 	ctx := context.Background()
 
-	var futures []future.Future
+	var futures []future.Future[struct{}]
 	var tasks []interface{}
 	for i := 0; i < numTasks; i++ {
 		task := s.randomTask()
@@ -150,9 +150,9 @@ func (s *dbTaskWriterSuite) TestAppendFlushTask_Multiple_OnePage_Success() {
 		futures = append(futures, fut)
 	}
 
-	s.taskOwnership.EXPECT().flushTasks(tasks...).Return(nil)
+	s.taskOwnership.EXPECT().flushTasks(gomock.Any(), tasks...).Return(nil)
 
-	s.taskFlusher.flushTasks()
+	s.taskFlusher.flushTasks(context.Background())
 
 	for _, fut := range futures {
 		_, err := fut.Get(ctx)
@@ -171,7 +171,7 @@ func (s *dbTaskWriterSuite) TestAppendFlushTask_Multiple_OnePage_Failed() {
 	ctx := context.Background()
 	randomErr := serviceerror.NewUnavailable("random error")
 
-	var futures []future.Future
+	var futures []future.Future[struct{}]
 	var tasks []interface{}
 	for i := 0; i < numTasks; i++ {
 		task := s.randomTask()
@@ -180,9 +180,9 @@ func (s *dbTaskWriterSuite) TestAppendFlushTask_Multiple_OnePage_Failed() {
 		futures = append(futures, fut)
 	}
 
-	s.taskOwnership.EXPECT().flushTasks(tasks...).Return(randomErr)
+	s.taskOwnership.EXPECT().flushTasks(gomock.Any(), tasks...).Return(randomErr)
 
-	s.taskFlusher.flushTasks()
+	s.taskFlusher.flushTasks(context.Background())
 
 	for _, fut := range futures {
 		_, err := fut.Get(ctx)
@@ -200,7 +200,7 @@ func (s *dbTaskWriterSuite) TestAppendFlushTask_Multiple_MultiPage_Success() {
 	numTasks := 2*dbTaskFlusherBatchSize - 2
 	ctx := context.Background()
 
-	var futures []future.Future
+	var futures []future.Future[struct{}]
 	var taskBatch [][]interface{}
 	var tasks []interface{}
 	for i := 0; i < numTasks; i++ {
@@ -218,10 +218,10 @@ func (s *dbTaskWriterSuite) TestAppendFlushTask_Multiple_MultiPage_Success() {
 	}
 
 	for _, tasks := range taskBatch {
-		s.taskOwnership.EXPECT().flushTasks(tasks...).Return(nil)
+		s.taskOwnership.EXPECT().flushTasks(gomock.Any(), tasks...).Return(nil)
 	}
 
-	s.taskFlusher.flushTasks()
+	s.taskFlusher.flushTasks(context.Background())
 
 	for _, fut := range futures {
 		_, err := fut.Get(ctx)
@@ -235,7 +235,7 @@ func (s *dbTaskWriterSuite) TestAppendFlushTask_Multiple_MultiPage_Failed() {
 	ctx := context.Background()
 	randomErr := serviceerror.NewUnavailable("random error")
 
-	var futures []future.Future
+	var futures []future.Future[struct{}]
 	var taskBatch [][]interface{}
 	var tasks []interface{}
 	for i := 0; i < numTasks; i++ {
@@ -253,10 +253,10 @@ func (s *dbTaskWriterSuite) TestAppendFlushTask_Multiple_MultiPage_Failed() {
 	}
 
 	for _, tasks := range taskBatch {
-		s.taskOwnership.EXPECT().flushTasks(tasks...).Return(randomErr)
+		s.taskOwnership.EXPECT().flushTasks(gomock.Any(), tasks...).Return(randomErr)
 	}
 
-	s.taskFlusher.flushTasks()
+	s.taskFlusher.flushTasks(context.Background())
 
 	for _, fut := range futures {
 		_, err := fut.Get(ctx)

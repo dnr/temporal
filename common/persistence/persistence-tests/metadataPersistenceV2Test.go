@@ -25,6 +25,7 @@
 package persistencetests
 
 import (
+	"context"
 	"fmt"
 	"reflect"
 	"strconv"
@@ -52,6 +53,9 @@ type (
 		// override suite.Suite.Assertions with require.Assertions; this means that s.NotNil(nil) will stop the test,
 		// not merely log an error
 		*require.Assertions
+
+		ctx    context.Context
+		cancel context.CancelFunc
 	}
 )
 
@@ -63,6 +67,7 @@ func (m *MetadataPersistenceSuiteV2) SetupSuite() {
 func (m *MetadataPersistenceSuiteV2) SetupTest() {
 	// Have to define our overridden assertions in the test setup. If we did it earlier, s.T() will return nil
 	m.Assertions = require.New(m.T())
+	m.ctx, m.cancel = context.WithTimeout(context.Background(), time.Second*30)
 
 	// cleanup the namespace created
 	var token []byte
@@ -83,6 +88,7 @@ ListLoop:
 
 // TearDownTest implementation
 func (m *MetadataPersistenceSuiteV2) TearDownTest() {
+	m.cancel()
 }
 
 // TearDownSuite implementation
@@ -462,7 +468,7 @@ func (m *MetadataPersistenceSuiteV2) TestConcurrentUpdateNamespace() {
 	resp2, err2 := m.GetNamespace(id, "")
 	m.NoError(err2)
 	m.Equal(badBinaries, resp2.Namespace.Config.BadBinaries)
-	metadata, err := m.MetadataManager.GetMetadata()
+	metadata, err := m.MetadataManager.GetMetadata(m.ctx)
 	m.NoError(err)
 	notificationVersion := metadata.NotificationVersion
 
@@ -603,7 +609,7 @@ func (m *MetadataPersistenceSuiteV2) TestUpdateNamespace() {
 
 	resp2, err2 := m.GetNamespace(id, "")
 	m.NoError(err2)
-	metadata, err := m.MetadataManager.GetMetadata()
+	metadata, err := m.MetadataManager.GetMetadata(m.ctx)
 	m.NoError(err)
 	notificationVersion := metadata.NotificationVersion
 
@@ -829,7 +835,7 @@ func (m *MetadataPersistenceSuiteV2) TestRenameNamespace() {
 	_, err2 := m.GetNamespace(id, "")
 	m.NoError(err2)
 
-	err3 := m.MetadataManager.RenameNamespace(&p.RenameNamespaceRequest{
+	err3 := m.MetadataManager.RenameNamespace(m.ctx, &p.RenameNamespaceRequest{
 		PreviousName: name,
 		NewName:      newName,
 	})
@@ -849,7 +855,7 @@ func (m *MetadataPersistenceSuiteV2) TestRenameNamespace() {
 	m.Equal(newName, resp5.Namespace.Info.Name)
 	m.Equal(isGlobalNamespace, resp5.IsGlobalNamespace)
 
-	err6 := m.MetadataManager.RenameNamespace(&p.RenameNamespaceRequest{
+	err6 := m.MetadataManager.RenameNamespace(m.ctx, &p.RenameNamespaceRequest{
 		PreviousName: newName,
 		NewName:      newNewName,
 	})
@@ -1078,34 +1084,142 @@ func (m *MetadataPersistenceSuiteV2) TestListNamespaces() {
 	}
 
 	var token []byte
-	pageSize := 1
+	const pageSize = 1
+	pageCount := 0
 	outputNamespaces := make(map[string]*p.GetNamespaceResponse)
-ListLoop:
 	for {
 		resp, err := m.ListNamespaces(pageSize, token)
 		m.NoError(err)
 		token = resp.NextPageToken
 		for _, namespace := range resp.Namespaces {
-			outputNamespaces[string(namespace.Namespace.Info.Id)] = namespace
+			outputNamespaces[namespace.Namespace.Info.Id] = namespace
 			// global notification version is already tested, so here we make it 0
 			// so we can test == easily
 			namespace.NotificationVersion = 0
 		}
+		pageCount++
 		if len(token) == 0 {
-			break ListLoop
+			break
 		}
 	}
 
+	// 2 pages with data and 1 empty page which is unavoidable.
+	m.Equal(pageCount, 3)
 	m.Equal(len(inputNamespaces), len(outputNamespaces))
 	for _, namespace := range inputNamespaces {
-		m.Equal(namespace, outputNamespaces[string(namespace.Namespace.Info.Id)])
+		m.Equal(namespace, outputNamespaces[namespace.Namespace.Info.Id])
+	}
+}
+
+func (m *MetadataPersistenceSuiteV2) TestListNamespaces_DeletedNamespace() {
+	inputNamespaces := []*p.GetNamespaceResponse{
+		{
+			Namespace: &persistencespb.NamespaceDetail{
+				Info: &persistencespb.NamespaceInfo{
+					Id:    uuid.New(),
+					Name:  "list-namespace-test-name-1",
+					State: enumspb.NAMESPACE_STATE_REGISTERED,
+				},
+				Config:            &persistencespb.NamespaceConfig{},
+				ReplicationConfig: &persistencespb.NamespaceReplicationConfig{},
+			},
+		},
+		{
+			Namespace: &persistencespb.NamespaceDetail{
+				Info: &persistencespb.NamespaceInfo{
+					Id:    uuid.New(),
+					Name:  "list-namespace-test-name-2",
+					State: enumspb.NAMESPACE_STATE_DELETED,
+				},
+				Config:            &persistencespb.NamespaceConfig{},
+				ReplicationConfig: &persistencespb.NamespaceReplicationConfig{},
+			},
+		},
+		{
+			Namespace: &persistencespb.NamespaceDetail{
+				Info: &persistencespb.NamespaceInfo{
+					Id:    uuid.New(),
+					Name:  "list-namespace-test-name-3",
+					State: enumspb.NAMESPACE_STATE_REGISTERED,
+				},
+				Config:            &persistencespb.NamespaceConfig{},
+				ReplicationConfig: &persistencespb.NamespaceReplicationConfig{},
+			},
+		},
+		{
+			Namespace: &persistencespb.NamespaceDetail{
+				Info: &persistencespb.NamespaceInfo{
+					Id:    uuid.New(),
+					Name:  "list-namespace-test-name-4",
+					State: enumspb.NAMESPACE_STATE_DELETED,
+				},
+				Config:            &persistencespb.NamespaceConfig{},
+				ReplicationConfig: &persistencespb.NamespaceReplicationConfig{},
+			},
+		},
+	}
+	for _, namespace := range inputNamespaces {
+		_, err := m.CreateNamespace(
+			namespace.Namespace.Info,
+			namespace.Namespace.Config,
+			namespace.Namespace.ReplicationConfig,
+			namespace.IsGlobalNamespace,
+			namespace.Namespace.ConfigVersion,
+			namespace.Namespace.FailoverVersion,
+		)
+		m.NoError(err)
+	}
+
+	var token []byte
+	var listNamespacesPageSize2 []*p.GetNamespaceResponse
+	pageCount := 0
+	for {
+		resp, err := m.ListNamespaces(2, token)
+		m.NoError(err)
+		token = resp.NextPageToken
+		for _, namespace := range resp.Namespaces {
+			listNamespacesPageSize2 = append(listNamespacesPageSize2, namespace)
+		}
+		pageCount++
+		if len(token) == 0 {
+			break
+		}
+	}
+
+	// 1 page with data and 1 empty page which is unavoidable.
+	m.Equal(2, pageCount)
+	m.Len(listNamespacesPageSize2, 2)
+	for _, namespace := range listNamespacesPageSize2 {
+		m.NotEqual(namespace.Namespace.Info.State, enumspb.NAMESPACE_STATE_DELETED)
+	}
+
+	pageCount = 0
+	var listNamespacesPageSize1 []*p.GetNamespaceResponse
+	for {
+		resp, err := m.ListNamespaces(1, token)
+		m.NoError(err)
+		token = resp.NextPageToken
+		for _, namespace := range resp.Namespaces {
+			listNamespacesPageSize1 = append(listNamespacesPageSize1, namespace)
+		}
+		pageCount++
+		if len(token) == 0 {
+			break
+		}
+	}
+
+	// 2 pages with data and 1 empty page which is unavoidable.
+	m.Equal(3, pageCount)
+	m.Len(listNamespacesPageSize1, 2)
+	for _, namespace := range listNamespacesPageSize1 {
+		m.NotEqual(namespace.Namespace.Info.State, enumspb.NAMESPACE_STATE_DELETED)
 	}
 }
 
 // CreateNamespace helper method
 func (m *MetadataPersistenceSuiteV2) CreateNamespace(info *persistencespb.NamespaceInfo, config *persistencespb.NamespaceConfig,
 	replicationConfig *persistencespb.NamespaceReplicationConfig, isGlobalnamespace bool, configVersion int64, failoverVersion int64) (*p.CreateNamespaceResponse, error) {
-	return m.MetadataManager.CreateNamespace(&p.CreateNamespaceRequest{
+	return m.MetadataManager.CreateNamespace(m.ctx, &p.CreateNamespaceRequest{
 		Namespace: &persistencespb.NamespaceDetail{
 			Info:              info,
 			Config:            config,
@@ -1119,7 +1233,7 @@ func (m *MetadataPersistenceSuiteV2) CreateNamespace(info *persistencespb.Namesp
 
 // GetNamespace helper method
 func (m *MetadataPersistenceSuiteV2) GetNamespace(id string, name string) (*p.GetNamespaceResponse, error) {
-	return m.MetadataManager.GetNamespace(&p.GetNamespaceRequest{
+	return m.MetadataManager.GetNamespace(m.ctx, &p.GetNamespaceRequest{
 		ID:   id,
 		Name: name,
 	})
@@ -1137,7 +1251,7 @@ func (m *MetadataPersistenceSuiteV2) UpdateNamespace(
 	notificationVersion int64,
 	isGlobalNamespace bool,
 ) error {
-	return m.MetadataManager.UpdateNamespace(&p.UpdateNamespaceRequest{
+	return m.MetadataManager.UpdateNamespace(m.ctx, &p.UpdateNamespaceRequest{
 		Namespace: &persistencespb.NamespaceDetail{
 			Info:                        info,
 			Config:                      config,
@@ -1155,14 +1269,14 @@ func (m *MetadataPersistenceSuiteV2) UpdateNamespace(
 // DeleteNamespace helper method
 func (m *MetadataPersistenceSuiteV2) DeleteNamespace(id string, name string) error {
 	if len(id) > 0 {
-		return m.MetadataManager.DeleteNamespace(&p.DeleteNamespaceRequest{ID: id})
+		return m.MetadataManager.DeleteNamespace(m.ctx, &p.DeleteNamespaceRequest{ID: id})
 	}
-	return m.MetadataManager.DeleteNamespaceByName(&p.DeleteNamespaceByNameRequest{Name: name})
+	return m.MetadataManager.DeleteNamespaceByName(m.ctx, &p.DeleteNamespaceByNameRequest{Name: name})
 }
 
 // ListNamespaces helper method
 func (m *MetadataPersistenceSuiteV2) ListNamespaces(pageSize int, pageToken []byte) (*p.ListNamespacesResponse, error) {
-	return m.MetadataManager.ListNamespaces(&p.ListNamespacesRequest{
+	return m.MetadataManager.ListNamespaces(m.ctx, &p.ListNamespacesRequest{
 		PageSize:      pageSize,
 		NextPageToken: pageToken,
 	})

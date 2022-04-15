@@ -119,6 +119,7 @@ func (r *nDCStateRebuilderImpl) rebuild(
 	requestID string,
 ) (workflow.MutableState, int64, error) {
 	iter := collection.NewPagingIterator(r.getPaginationFn(
+		ctx,
 		common.FirstEventID,
 		baseLastEventID+1,
 		baseBranchToken,
@@ -136,7 +137,7 @@ func (r *nDCStateRebuilderImpl) rebuild(
 
 	var lastTxnId int64
 	for iter.HasNext() {
-		batch, err := iter.Next()
+		history, err := iter.Next()
 		switch err.(type) {
 		case nil:
 			// noop
@@ -147,7 +148,6 @@ func (r *nDCStateRebuilderImpl) rebuild(
 			return nil, 0, err
 		}
 
-		history := batch.(*HistoryBlobsPaginationItem)
 		if err := r.applyEvents(
 			targetWorkflowIdentifier,
 			stateBuilder,
@@ -194,7 +194,7 @@ func (r *nDCStateRebuilderImpl) rebuild(
 	rebuiltMutableState.GetExecutionInfo().LastFirstEventTxnId = lastTxnId
 
 	// refresh tasks to be generated
-	if err := r.taskRefresher.RefreshTasks(now, rebuiltMutableState); err != nil {
+	if err := r.taskRefresher.RefreshTasks(ctx, now, rebuiltMutableState); err != nil {
 		return nil, 0, err
 	}
 
@@ -245,12 +245,13 @@ func (r *nDCStateRebuilderImpl) applyEvents(
 }
 
 func (r *nDCStateRebuilderImpl) getPaginationFn(
+	ctx context.Context,
 	firstEventID int64,
 	nextEventID int64,
 	branchToken []byte,
-) collection.PaginationFn {
-	return func(paginationToken []byte) ([]interface{}, []byte, error) {
-		resp, err := r.executionMgr.ReadHistoryBranchByBatch(&persistence.ReadHistoryBranchRequest{
+) collection.PaginationFn[HistoryBlobsPaginationItem] {
+	return func(paginationToken []byte) ([]HistoryBlobsPaginationItem, []byte, error) {
+		resp, err := r.executionMgr.ReadHistoryBranchByBatch(ctx, &persistence.ReadHistoryBranchRequest{
 			BranchToken:   branchToken,
 			MinEventID:    firstEventID,
 			MaxEventID:    nextEventID,
@@ -263,9 +264,9 @@ func (r *nDCStateRebuilderImpl) getPaginationFn(
 		}
 
 		r.rebuiltHistorySize += int64(resp.Size)
-		var paginateItems []interface{}
+		paginateItems := make([]HistoryBlobsPaginationItem, 0, len(resp.History))
 		for i, history := range resp.History {
-			nextBatch := &HistoryBlobsPaginationItem{
+			nextBatch := HistoryBlobsPaginationItem{
 				History:       history,
 				TransactionID: resp.TransactionIDs[i],
 			}

@@ -29,9 +29,12 @@
 package matching
 
 import (
+	context "context"
 	reflect "reflect"
 
 	gomock "github.com/golang/mock/gomock"
+
+	persistencespb "go.temporal.io/server/api/persistence/v1"
 	collection "go.temporal.io/server/common/collection"
 )
 
@@ -85,15 +88,15 @@ func (mr *MockdbTaskReaderMockRecorder) moveAckedTaskID() *gomock.Call {
 }
 
 // taskIterator mocks base method.
-func (m *MockdbTaskReader) taskIterator(maxTaskID int64) collection.Iterator {
+func (m *MockdbTaskReader) taskIterator(ctx context.Context, maxTaskID int64) collection.Iterator[*persistencespb.AllocatedTaskInfo] {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "taskIterator", maxTaskID)
-	ret0, _ := ret[0].(collection.Iterator)
+	ret := m.ctrl.Call(m, "taskIterator", ctx, maxTaskID)
+	ret0, _ := ret[0].(collection.Iterator[*persistencespb.AllocatedTaskInfo])
 	return ret0
 }
 
 // taskIterator indicates an expected call of taskIterator.
-func (mr *MockdbTaskReaderMockRecorder) taskIterator(maxTaskID interface{}) *gomock.Call {
+func (mr *MockdbTaskReaderMockRecorder) taskIterator(ctx, maxTaskID interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "taskIterator", reflect.TypeOf((*MockdbTaskReader)(nil).taskIterator), maxTaskID)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "taskIterator", reflect.TypeOf((*MockdbTaskReader)(nil).taskIterator), ctx, maxTaskID)
 }

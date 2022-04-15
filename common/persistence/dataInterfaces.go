@@ -565,8 +565,8 @@ type (
 		NamespaceID        string
 		TaskQueue          string
 		TaskType           enumspb.TaskQueueType
-		MinTaskIDExclusive int64 // exclusive
-		MaxTaskIDInclusive int64 // inclusive
+		InclusiveMinTaskID int64
+		ExclusiveMaxTaskID int64
 		PageSize           int
 		NextPageToken      []byte
 	}
@@ -585,11 +585,11 @@ type (
 
 	// CompleteTasksLessThanRequest contains the request params needed to invoke CompleteTasksLessThan API
 	CompleteTasksLessThanRequest struct {
-		NamespaceID   string
-		TaskQueueName string
-		TaskType      enumspb.TaskQueueType
-		TaskID        int64 // Tasks less than or equal to this ID will be completed
-		Limit         int   // Limit on the max number of tasks that can be completed. Required param
+		NamespaceID        string
+		TaskQueueName      string
+		TaskType           enumspb.TaskQueueType
+		ExclusiveMaxTaskID int64 // Tasks less than this ID will be completed
+		Limit              int   // Limit on the max number of tasks that can be completed. Required param
 	}
 
 	// CreateNamespaceRequest is used to create the namespace
@@ -641,8 +641,9 @@ type (
 
 	// ListNamespacesRequest is used to list namespaces
 	ListNamespacesRequest struct {
-		PageSize      int
-		NextPageToken []byte
+		PageSize       int
+		NextPageToken  []byte
+		IncludeDeleted bool
 	}
 
 	// ListNamespacesResponse is the response for GetNamespace
@@ -976,8 +977,8 @@ type (
 	ShardManager interface {
 		Closeable
 		GetName() string
-		GetOrCreateShard(request *GetOrCreateShardRequest) (*GetOrCreateShardResponse, error)
-		UpdateShard(request *UpdateShardRequest) error
+		GetOrCreateShard(ctx context.Context, request *GetOrCreateShardRequest) (*GetOrCreateShardResponse, error)
+		UpdateShard(ctx context.Context, request *UpdateShardRequest) error
 	}
 
 	// ExecutionManager is used to manage workflow executions
@@ -985,73 +986,72 @@ type (
 		Closeable
 		GetName() string
 
-		CreateWorkflowExecution(request *CreateWorkflowExecutionRequest) (*CreateWorkflowExecutionResponse, error)
-		UpdateWorkflowExecution(request *UpdateWorkflowExecutionRequest) (*UpdateWorkflowExecutionResponse, error)
-		ConflictResolveWorkflowExecution(request *ConflictResolveWorkflowExecutionRequest) (*ConflictResolveWorkflowExecutionResponse, error)
-		DeleteWorkflowExecution(request *DeleteWorkflowExecutionRequest) error
-		DeleteCurrentWorkflowExecution(request *DeleteCurrentWorkflowExecutionRequest) error
-		GetCurrentExecution(request *GetCurrentExecutionRequest) (*GetCurrentExecutionResponse, error)
-		GetWorkflowExecution(request *GetWorkflowExecutionRequest) (*GetWorkflowExecutionResponse, error)
-		SetWorkflowExecution(request *SetWorkflowExecutionRequest) (*SetWorkflowExecutionResponse, error)
+		CreateWorkflowExecution(ctx context.Context, request *CreateWorkflowExecutionRequest) (*CreateWorkflowExecutionResponse, error)
+		UpdateWorkflowExecution(ctx context.Context, request *UpdateWorkflowExecutionRequest) (*UpdateWorkflowExecutionResponse, error)
+		ConflictResolveWorkflowExecution(ctx context.Context, request *ConflictResolveWorkflowExecutionRequest) (*ConflictResolveWorkflowExecutionResponse, error)
+		DeleteWorkflowExecution(ctx context.Context, request *DeleteWorkflowExecutionRequest) error
+		DeleteCurrentWorkflowExecution(ctx context.Context, request *DeleteCurrentWorkflowExecutionRequest) error
+		GetCurrentExecution(ctx context.Context, request *GetCurrentExecutionRequest) (*GetCurrentExecutionResponse, error)
+		GetWorkflowExecution(ctx context.Context, request *GetWorkflowExecutionRequest) (*GetWorkflowExecutionResponse, error)
+		SetWorkflowExecution(ctx context.Context, request *SetWorkflowExecutionRequest) (*SetWorkflowExecutionResponse, error)
 
 		// Scan operations
 
-		ListConcreteExecutions(request *ListConcreteExecutionsRequest) (*ListConcreteExecutionsResponse, error)
+		ListConcreteExecutions(ctx context.Context, request *ListConcreteExecutionsRequest) (*ListConcreteExecutionsResponse, error)
 
 		// Tasks related APIs
 
-		AddHistoryTasks(request *AddHistoryTasksRequest) error
-		GetHistoryTask(request *GetHistoryTaskRequest) (*GetHistoryTaskResponse, error)
-		GetHistoryTasks(request *GetHistoryTasksRequest) (*GetHistoryTasksResponse, error)
-		CompleteHistoryTask(request *CompleteHistoryTaskRequest) error
-		RangeCompleteHistoryTasks(request *RangeCompleteHistoryTasksRequest) error
+		AddHistoryTasks(ctx context.Context, request *AddHistoryTasksRequest) error
+		GetHistoryTask(ctx context.Context, request *GetHistoryTaskRequest) (*GetHistoryTaskResponse, error)
+		GetHistoryTasks(ctx context.Context, request *GetHistoryTasksRequest) (*GetHistoryTasksResponse, error)
+		CompleteHistoryTask(ctx context.Context, request *CompleteHistoryTaskRequest) error
+		RangeCompleteHistoryTasks(ctx context.Context, request *RangeCompleteHistoryTasksRequest) error
 
-		PutReplicationTaskToDLQ(request *PutReplicationTaskToDLQRequest) error
-		GetReplicationTasksFromDLQ(request *GetReplicationTasksFromDLQRequest) (*GetHistoryTasksResponse, error)
-		DeleteReplicationTaskFromDLQ(request *DeleteReplicationTaskFromDLQRequest) error
-		RangeDeleteReplicationTaskFromDLQ(request *RangeDeleteReplicationTaskFromDLQRequest) error
+		PutReplicationTaskToDLQ(ctx context.Context, request *PutReplicationTaskToDLQRequest) error
+		GetReplicationTasksFromDLQ(ctx context.Context, request *GetReplicationTasksFromDLQRequest) (*GetHistoryTasksResponse, error)
+		DeleteReplicationTaskFromDLQ(ctx context.Context, request *DeleteReplicationTaskFromDLQRequest) error
+		RangeDeleteReplicationTaskFromDLQ(ctx context.Context, request *RangeDeleteReplicationTaskFromDLQRequest) error
 
 		// The below are history V2 APIs
 		// V2 regards history events growing as a tree, decoupled from workflow concepts
 		// For Temporal, treeID is new runID, except for fork(reset), treeID will be the runID that it forks from.
 
 		// AppendHistoryNodes add a node to history node table
-		AppendHistoryNodes(request *AppendHistoryNodesRequest) (*AppendHistoryNodesResponse, error)
+		AppendHistoryNodes(ctx context.Context, request *AppendHistoryNodesRequest) (*AppendHistoryNodesResponse, error)
 		// ReadHistoryBranch returns history node data for a branch
-		ReadHistoryBranch(request *ReadHistoryBranchRequest) (*ReadHistoryBranchResponse, error)
+		ReadHistoryBranch(ctx context.Context, request *ReadHistoryBranchRequest) (*ReadHistoryBranchResponse, error)
 		// ReadHistoryBranchByBatch returns history node data for a branch ByBatch
-		ReadHistoryBranchByBatch(request *ReadHistoryBranchRequest) (*ReadHistoryBranchByBatchResponse, error)
+		ReadHistoryBranchByBatch(ctx context.Context, request *ReadHistoryBranchRequest) (*ReadHistoryBranchByBatchResponse, error)
 		// ReadHistoryBranch returns history node data for a branch
-		ReadHistoryBranchReverse(request *ReadHistoryBranchReverseRequest) (*ReadHistoryBranchReverseResponse, error)
+		ReadHistoryBranchReverse(ctx context.Context, request *ReadHistoryBranchReverseRequest) (*ReadHistoryBranchReverseResponse, error)
 		// ReadRawHistoryBranch returns history node raw data for a branch ByBatch
 		// NOTE: this API should only be used by 3+DC
-		ReadRawHistoryBranch(request *ReadHistoryBranchRequest) (*ReadRawHistoryBranchResponse, error)
+		ReadRawHistoryBranch(ctx context.Context, request *ReadHistoryBranchRequest) (*ReadRawHistoryBranchResponse, error)
 		// ForkHistoryBranch forks a new branch from a old branch
-		ForkHistoryBranch(request *ForkHistoryBranchRequest) (*ForkHistoryBranchResponse, error)
+		ForkHistoryBranch(ctx context.Context, request *ForkHistoryBranchRequest) (*ForkHistoryBranchResponse, error)
 		// DeleteHistoryBranch removes a branch
 		// If this is the last branch to delete, it will also remove the root node
-		DeleteHistoryBranch(request *DeleteHistoryBranchRequest) error
+		DeleteHistoryBranch(ctx context.Context, request *DeleteHistoryBranchRequest) error
 		// TrimHistoryBranch validate & trim a history branch
-		TrimHistoryBranch(request *TrimHistoryBranchRequest) (*TrimHistoryBranchResponse, error)
+		TrimHistoryBranch(ctx context.Context, request *TrimHistoryBranchRequest) (*TrimHistoryBranchResponse, error)
 		// GetHistoryTree returns all branch information of a tree
-		GetHistoryTree(request *GetHistoryTreeRequest) (*GetHistoryTreeResponse, error)
+		GetHistoryTree(ctx context.Context, request *GetHistoryTreeRequest) (*GetHistoryTreeResponse, error)
 		// GetAllHistoryTreeBranches returns all branches of all trees
-		GetAllHistoryTreeBranches(request *GetAllHistoryTreeBranchesRequest) (*GetAllHistoryTreeBranchesResponse, error)
+		GetAllHistoryTreeBranches(ctx context.Context, request *GetAllHistoryTreeBranchesRequest) (*GetAllHistoryTreeBranchesResponse, error)
 	}
 
 	// TaskManager is used to manage tasks
-	// TODO: consider change the range for GetTasks and CompleteTasks to be [inclusive, exclusive)
 	TaskManager interface {
 		Closeable
 		GetName() string
-		CreateTaskQueue(request *CreateTaskQueueRequest) (*CreateTaskQueueResponse, error)
-		UpdateTaskQueue(request *UpdateTaskQueueRequest) (*UpdateTaskQueueResponse, error)
-		GetTaskQueue(request *GetTaskQueueRequest) (*GetTaskQueueResponse, error)
-		ListTaskQueue(request *ListTaskQueueRequest) (*ListTaskQueueResponse, error)
-		DeleteTaskQueue(request *DeleteTaskQueueRequest) error
-		CreateTasks(request *CreateTasksRequest) (*CreateTasksResponse, error)
-		GetTasks(request *GetTasksRequest) (*GetTasksResponse, error)
-		CompleteTask(request *CompleteTaskRequest) error
+		CreateTaskQueue(ctx context.Context, request *CreateTaskQueueRequest) (*CreateTaskQueueResponse, error)
+		UpdateTaskQueue(ctx context.Context, request *UpdateTaskQueueRequest) (*UpdateTaskQueueResponse, error)
+		GetTaskQueue(ctx context.Context, request *GetTaskQueueRequest) (*GetTaskQueueResponse, error)
+		ListTaskQueue(ctx context.Context, request *ListTaskQueueRequest) (*ListTaskQueueResponse, error)
+		DeleteTaskQueue(ctx context.Context, request *DeleteTaskQueueRequest) error
+		CreateTasks(ctx context.Context, request *CreateTasksRequest) (*CreateTasksResponse, error)
+		GetTasks(ctx context.Context, request *GetTasksRequest) (*GetTasksResponse, error)
+		CompleteTask(ctx context.Context, request *CompleteTaskRequest) error
 		// CompleteTasksLessThan completes tasks less than or equal to the given task id
 		// This API takes a limit parameter which specifies the count of maxRows that
 		// can be deleted. This parameter may be ignored by the underlying storage, but
@@ -1061,36 +1061,36 @@ type (
 		// On success, this method returns:
 		//  - number of rows actually deleted, if limit is honored
 		//  - UnknownNumRowsDeleted, when all rows below value are deleted
-		CompleteTasksLessThan(request *CompleteTasksLessThanRequest) (int, error)
+		CompleteTasksLessThan(ctx context.Context, request *CompleteTasksLessThanRequest) (int, error)
 	}
 
 	// MetadataManager is used to manage metadata CRUD for namespace entities
 	MetadataManager interface {
 		Closeable
 		GetName() string
-		CreateNamespace(request *CreateNamespaceRequest) (*CreateNamespaceResponse, error)
-		GetNamespace(request *GetNamespaceRequest) (*GetNamespaceResponse, error)
-		UpdateNamespace(request *UpdateNamespaceRequest) error
-		RenameNamespace(request *RenameNamespaceRequest) error
-		DeleteNamespace(request *DeleteNamespaceRequest) error
-		DeleteNamespaceByName(request *DeleteNamespaceByNameRequest) error
-		ListNamespaces(request *ListNamespacesRequest) (*ListNamespacesResponse, error)
-		GetMetadata() (*GetMetadataResponse, error)
-		InitializeSystemNamespaces(currentClusterName string) error
+		CreateNamespace(ctx context.Context, request *CreateNamespaceRequest) (*CreateNamespaceResponse, error)
+		GetNamespace(ctx context.Context, request *GetNamespaceRequest) (*GetNamespaceResponse, error)
+		UpdateNamespace(ctx context.Context, request *UpdateNamespaceRequest) error
+		RenameNamespace(ctx context.Context, request *RenameNamespaceRequest) error
+		DeleteNamespace(ctx context.Context, request *DeleteNamespaceRequest) error
+		DeleteNamespaceByName(ctx context.Context, request *DeleteNamespaceByNameRequest) error
+		ListNamespaces(ctx context.Context, request *ListNamespacesRequest) (*ListNamespacesResponse, error)
+		GetMetadata(ctx context.Context) (*GetMetadataResponse, error)
+		InitializeSystemNamespaces(ctx context.Context, currentClusterName string) error
 	}
 
 	// ClusterMetadataManager is used to manage cluster-wide metadata and configuration
 	ClusterMetadataManager interface {
 		Closeable
 		GetName() string
-		GetClusterMembers(request *GetClusterMembersRequest) (*GetClusterMembersResponse, error)
-		UpsertClusterMembership(request *UpsertClusterMembershipRequest) error
-		PruneClusterMembership(request *PruneClusterMembershipRequest) error
-		ListClusterMetadata(request *ListClusterMetadataRequest) (*ListClusterMetadataResponse, error)
-		GetCurrentClusterMetadata() (*GetClusterMetadataResponse, error)
-		GetClusterMetadata(request *GetClusterMetadataRequest) (*GetClusterMetadataResponse, error)
-		SaveClusterMetadata(request *SaveClusterMetadataRequest) (bool, error)
-		DeleteClusterMetadata(request *DeleteClusterMetadataRequest) error
+		GetClusterMembers(ctx context.Context, request *GetClusterMembersRequest) (*GetClusterMembersResponse, error)
+		UpsertClusterMembership(ctx context.Context, request *UpsertClusterMembershipRequest) error
+		PruneClusterMembership(ctx context.Context, request *PruneClusterMembershipRequest) error
+		ListClusterMetadata(ctx context.Context, request *ListClusterMetadataRequest) (*ListClusterMetadataResponse, error)
+		GetCurrentClusterMetadata(ctx context.Context) (*GetClusterMetadataResponse, error)
+		GetClusterMetadata(ctx context.Context, request *GetClusterMetadataRequest) (*GetClusterMetadataResponse, error)
+		SaveClusterMetadata(ctx context.Context, request *SaveClusterMetadataRequest) (bool, error)
+		DeleteClusterMetadata(ctx context.Context, request *DeleteClusterMetadataRequest) error
 	}
 )
 

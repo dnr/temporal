@@ -56,6 +56,7 @@ import (
 	"go.temporal.io/server/common/archiver/provider"
 	"go.temporal.io/server/common/backoff"
 	"go.temporal.io/server/common/cluster"
+	"go.temporal.io/server/common/config"
 	"go.temporal.io/server/common/convert"
 	"go.temporal.io/server/common/headers"
 	"go.temporal.io/server/common/log"
@@ -69,8 +70,8 @@ import (
 	"go.temporal.io/server/common/persistence/visibility/manager"
 	esclient "go.temporal.io/server/common/persistence/visibility/store/elasticsearch/client"
 	"go.temporal.io/server/common/primitives/timestamp"
-	"go.temporal.io/server/common/resource"
 	"go.temporal.io/server/common/rpc/interceptor"
+	"go.temporal.io/server/common/sdk"
 	"go.temporal.io/server/common/searchattribute"
 	"go.temporal.io/server/common/xdc"
 	"go.temporal.io/server/service/history/tasks"
@@ -106,7 +107,7 @@ type (
 		clientFactory               serverClient.Factory
 		clientBean                  serverClient.Bean
 		historyClient               historyservice.HistoryServiceClient
-		sdkClient                   sdkclient.Client
+		sdkClientFactory            sdk.ClientFactory
 		membershipMonitor           membership.Monitor
 		metricsClient               metrics.Client
 		namespaceRegistry           namespace.Registry
@@ -117,7 +118,7 @@ type (
 	}
 
 	NewAdminHandlerArgs struct {
-		Params                              *resource.BootstrapParams
+		PersistenceConfig                   *config.Persistence
 		Config                              *Config
 		NamespaceReplicationQueue           persistence.NamespaceReplicationQueue
 		ReplicatorNamespaceReplicationQueue persistence.NamespaceReplicationQueue
@@ -132,7 +133,7 @@ type (
 		ClientFactory                       serverClient.Factory
 		ClientBean                          serverClient.Bean
 		HistoryClient                       historyservice.HistoryServiceClient
-		SdkSystemClient                     sdkclient.Client
+		sdkClientFactory                    sdk.ClientFactory
 		MembershipMonitor                   membership.Monitor
 		ArchiverProvider                    provider.ArchiverProvider
 		MetricsClient                       metrics.Client
@@ -142,6 +143,7 @@ type (
 		ClusterMetadata                     cluster.Metadata
 		ArchivalMetadata                    archiver.ArchivalMetadata
 		HealthServer                        *health.Server
+		EventSerializer                     serialization.Serializer
 	}
 )
 
@@ -165,7 +167,7 @@ func NewAdminHandler(
 	return &AdminHandler{
 		logger:                args.Logger,
 		status:                common.DaemonStatusInitialized,
-		numberOfHistoryShards: args.Params.PersistenceConfig.NumHistoryShards,
+		numberOfHistoryShards: args.PersistenceConfig.NumHistoryShards,
 		config:                args.Config,
 		namespaceHandler: namespace.NewHandler(
 			args.Config.MaxBadBinaries,
@@ -181,7 +183,7 @@ func NewAdminHandler(
 			args.NamespaceReplicationQueue,
 			args.Logger,
 		),
-		eventSerializer:             serialization.NewSerializer(),
+		eventSerializer:             args.EventSerializer,
 		visibilityMgr:               args.VisibilityMrg,
 		ESConfig:                    args.EsConfig,
 		ESClient:                    args.EsClient,
@@ -193,7 +195,7 @@ func NewAdminHandler(
 		clientFactory:               args.ClientFactory,
 		clientBean:                  args.ClientBean,
 		historyClient:               args.HistoryClient,
-		sdkClient:                   args.SdkSystemClient,
+		sdkClientFactory:            args.sdkClientFactory,
 		membershipMonitor:           args.MembershipMonitor,
 		metricsClient:               args.MetricsClient,
 		namespaceRegistry:           args.NamespaceRegistry,
@@ -278,7 +280,8 @@ func (adh *AdminHandler) AddSearchAttributes(ctx context.Context, request *admin
 		SkipSchemaUpdate:      request.GetSkipSchemaUpdate(),
 	}
 
-	run, err := adh.sdkClient.ExecuteWorkflow(
+	sdkClient := adh.sdkClientFactory.GetSystemClient(adh.logger)
+	run, err := sdkClient.ExecuteWorkflow(
 		ctx,
 		sdkclient.StartWorkflowOptions{
 			TaskQueue: worker.DefaultWorkerTaskQueue,
@@ -303,7 +306,7 @@ func (adh *AdminHandler) AddSearchAttributes(ctx context.Context, request *admin
 }
 
 // RemoveSearchAttributes remove search attribute from the cluster.
-func (adh *AdminHandler) RemoveSearchAttributes(_ context.Context, request *adminservice.RemoveSearchAttributesRequest) (_ *adminservice.RemoveSearchAttributesResponse, retError error) {
+func (adh *AdminHandler) RemoveSearchAttributes(ctx context.Context, request *adminservice.RemoveSearchAttributesRequest) (_ *adminservice.RemoveSearchAttributesResponse, retError error) {
 	defer log.CapturePanic(adh.logger, &retError)
 
 	scope, sw := adh.startRequestProfile(metrics.AdminRemoveSearchAttributesScope)
@@ -343,7 +346,7 @@ func (adh *AdminHandler) RemoveSearchAttributes(_ context.Context, request *admi
 		delete(newCustomSearchAttributes, saName)
 	}
 
-	err = adh.saManager.SaveSearchAttributes(indexName, newCustomSearchAttributes)
+	err = adh.saManager.SaveSearchAttributes(ctx, indexName, newCustomSearchAttributes)
 	if err != nil {
 		return nil, adh.error(serviceerror.NewUnavailable(fmt.Sprintf(errUnableToSaveSearchAttributesMessage, err)), scope)
 	}
@@ -376,7 +379,9 @@ func (adh *AdminHandler) GetSearchAttributes(ctx context.Context, request *admin
 
 func (adh *AdminHandler) getSearchAttributes(ctx context.Context, indexName string, runID string) (*adminservice.GetSearchAttributesResponse, error) {
 	var lastErr error
-	descResp, err := adh.sdkClient.DescribeWorkflowExecution(ctx, addsearchattributes.WorkflowName, runID)
+
+	sdkClient := adh.sdkClientFactory.GetSystemClient(adh.logger)
+	descResp, err := sdkClient.DescribeWorkflowExecution(ctx, addsearchattributes.WorkflowName, runID)
 	var wfInfo *workflowpb.WorkflowExecutionInfo
 	if err != nil {
 		// NotFound can happen when no search attributes were added and the workflow has never been executed.
@@ -567,7 +572,7 @@ func (adh *AdminHandler) ListHistoryTasks(
 		maxTaskKey.FireTime = timestamp.TimeValue(taskRange.ExclusiveMaxTaskKey.FireTime)
 		maxTaskKey.TaskID = taskRange.ExclusiveMaxTaskKey.TaskId
 	}
-	resp, err := adh.persistenceExecutionManager.GetHistoryTasks(&persistence.GetHistoryTasksRequest{
+	resp, err := adh.persistenceExecutionManager.GetHistoryTasks(ctx, &persistence.GetHistoryTasksRequest{
 		ShardID:             request.ShardId,
 		TaskCategory:        taskCategory,
 		InclusiveMinTaskKey: minTaskKey,
@@ -737,7 +742,7 @@ func (adh *AdminHandler) GetWorkflowExecutionRawHistoryV2(ctx context.Context, r
 		execution.GetWorkflowId(),
 		adh.numberOfHistoryShards,
 	)
-	rawHistoryResponse, err := adh.persistenceExecutionManager.ReadRawHistoryBranch(&persistence.ReadHistoryBranchRequest{
+	rawHistoryResponse, err := adh.persistenceExecutionManager.ReadRawHistoryBranch(ctx, &persistence.ReadHistoryBranchRequest{
 		BranchToken: targetVersionHistory.GetBranchToken(),
 		// GetWorkflowExecutionRawHistoryV2 is exclusive exclusive.
 		// ReadRawHistoryBranch is inclusive exclusive.
@@ -788,7 +793,7 @@ func (adh *AdminHandler) GetWorkflowExecutionRawHistoryV2(ctx context.Context, r
 
 // DescribeCluster return information about a temporal cluster
 func (adh *AdminHandler) DescribeCluster(
-	_ context.Context,
+	ctx context.Context,
 	request *adminservice.DescribeClusterRequest,
 ) (_ *adminservice.DescribeClusterResponse, retError error) {
 	defer log.CapturePanic(adh.logger, &retError)
@@ -841,6 +846,7 @@ func (adh *AdminHandler) DescribeCluster(
 		request.ClusterName = adh.clusterMetadata.GetCurrentClusterName()
 	}
 	metadata, err := adh.clusterMetadataManager.GetClusterMetadata(
+		ctx,
 		&persistence.GetClusterMetadataRequest{ClusterName: request.GetClusterName()},
 	)
 	if err != nil {
@@ -865,7 +871,7 @@ func (adh *AdminHandler) DescribeCluster(
 
 // ListClusters return information about temporal clusters
 func (adh *AdminHandler) ListClusters(
-	_ context.Context,
+	ctx context.Context,
 	request *adminservice.ListClustersRequest,
 ) (_ *adminservice.ListClustersResponse, retError error) {
 	defer log.CapturePanic(adh.logger, &retError)
@@ -880,7 +886,7 @@ func (adh *AdminHandler) ListClusters(
 		request.PageSize = listClustersPageSize
 	}
 
-	resp, err := adh.clusterMetadataManager.ListClusterMetadata(&persistence.ListClusterMetadataRequest{
+	resp, err := adh.clusterMetadataManager.ListClusterMetadata(ctx, &persistence.ListClusterMetadataRequest{
 		PageSize:      int(request.GetPageSize()),
 		NextPageToken: request.GetNextPageToken(),
 	})
@@ -899,7 +905,7 @@ func (adh *AdminHandler) ListClusters(
 }
 
 func (adh *AdminHandler) ListClusterMembers(
-	_ context.Context,
+	ctx context.Context,
 	request *adminservice.ListClusterMembersRequest,
 ) (_ *adminservice.ListClusterMembersResponse, retError error) {
 	defer log.CapturePanic(adh.logger, &retError)
@@ -924,7 +930,7 @@ func (adh *AdminHandler) ListClusterMembers(
 		startedTime = *startedTimeRef
 	}
 
-	resp, err := metadataMgr.GetClusterMembers(&persistence.GetClusterMembersRequest{
+	resp, err := metadataMgr.GetClusterMembers(ctx, &persistence.GetClusterMembersRequest{
 		LastHeartbeatWithin: heartbit,
 		RPCAddressEquals:    net.ParseIP(request.GetRpcAddress()),
 		HostIDEquals:        uuid.Parse(request.GetHostId()),
@@ -985,6 +991,7 @@ func (adh *AdminHandler) AddOrUpdateRemoteCluster(
 	var updateRequestVersion int64 = 0
 	clusterMetadataMrg := adh.clusterMetadataManager
 	clusterData, err := clusterMetadataMrg.GetClusterMetadata(
+		ctx,
 		&persistence.GetClusterMetadataRequest{ClusterName: resp.GetClusterName()},
 	)
 	switch err.(type) {
@@ -996,7 +1003,7 @@ func (adh *AdminHandler) AddOrUpdateRemoteCluster(
 		return nil, adh.error(err, scope)
 	}
 
-	applied, err := clusterMetadataMrg.SaveClusterMetadata(&persistence.SaveClusterMetadataRequest{
+	applied, err := clusterMetadataMrg.SaveClusterMetadata(ctx, &persistence.SaveClusterMetadataRequest{
 		ClusterMetadata: persistencespb.ClusterMetadata{
 			ClusterName:              resp.GetClusterName(),
 			HistoryShardCount:        resp.GetHistoryShardCount(),
@@ -1022,7 +1029,7 @@ func (adh *AdminHandler) AddOrUpdateRemoteCluster(
 }
 
 func (adh *AdminHandler) RemoveRemoteCluster(
-	_ context.Context,
+	ctx context.Context,
 	request *adminservice.RemoveRemoteClusterRequest,
 ) (_ *adminservice.RemoveRemoteClusterResponse, retError error) {
 	defer log.CapturePanic(adh.logger, &retError)
@@ -1031,6 +1038,7 @@ func (adh *AdminHandler) RemoveRemoteCluster(
 	defer sw.Stop()
 
 	if err := adh.clusterMetadataManager.DeleteClusterMetadata(
+		ctx,
 		&persistence.DeleteClusterMetadataRequest{ClusterName: request.GetClusterName()},
 	); err != nil {
 		return nil, adh.error(err, scope)
@@ -1063,7 +1071,7 @@ func (adh *AdminHandler) GetReplicationMessages(ctx context.Context, request *ad
 }
 
 // GetNamespaceReplicationMessages returns new namespace replication tasks since last retrieved task ID.
-func (adh *AdminHandler) GetNamespaceReplicationMessages(_ context.Context, request *adminservice.GetNamespaceReplicationMessagesRequest) (_ *adminservice.GetNamespaceReplicationMessagesResponse, retError error) {
+func (adh *AdminHandler) GetNamespaceReplicationMessages(ctx context.Context, request *adminservice.GetNamespaceReplicationMessagesRequest) (_ *adminservice.GetNamespaceReplicationMessagesResponse, retError error) {
 	defer log.CapturePanic(adh.logger, &retError)
 
 	scope, sw := adh.startRequestProfile(metrics.AdminGetNamespaceReplicationMessagesScope)
@@ -1079,7 +1087,7 @@ func (adh *AdminHandler) GetNamespaceReplicationMessages(_ context.Context, requ
 
 	lastMessageID := request.GetLastRetrievedMessageId()
 	if request.GetLastRetrievedMessageId() == defaultLastMessageID {
-		if clusterAckLevels, err := adh.namespaceReplicationQueue.GetAckLevels(); err == nil {
+		if clusterAckLevels, err := adh.namespaceReplicationQueue.GetAckLevels(ctx); err == nil {
 			if ackLevel, ok := clusterAckLevels[request.GetClusterName()]; ok {
 				lastMessageID = ackLevel
 			}
@@ -1087,6 +1095,7 @@ func (adh *AdminHandler) GetNamespaceReplicationMessages(_ context.Context, requ
 	}
 
 	replicationTasks, lastMessageID, err := adh.namespaceReplicationQueue.GetReplicationMessages(
+		ctx,
 		lastMessageID,
 		getNamespaceReplicationMessageBatchSize,
 	)
@@ -1096,6 +1105,7 @@ func (adh *AdminHandler) GetNamespaceReplicationMessages(_ context.Context, requ
 
 	if request.GetLastProcessedMessageId() != defaultLastMessageID {
 		if err := adh.namespaceReplicationQueue.UpdateAckLevel(
+			ctx,
 			request.GetLastProcessedMessageId(),
 			request.GetClusterName(),
 		); err != nil {
@@ -1223,6 +1233,7 @@ func (adh *AdminHandler) GetDLQMessages(
 			default:
 				var err error
 				tasks, token, err = adh.namespaceDLQHandler.Read(
+					ctx,
 					request.GetInclusiveEndMessageId(),
 					int(request.GetMaximumPageSize()),
 					request.GetNextPageToken())
@@ -1282,7 +1293,7 @@ func (adh *AdminHandler) PurgeDLQMessages(
 			case <-ctx.Done():
 				return ctx.Err()
 			default:
-				return adh.namespaceDLQHandler.Purge(request.GetInclusiveEndMessageId())
+				return adh.namespaceDLQHandler.Purge(ctx, request.GetInclusiveEndMessageId())
 			}
 		}
 	default:
@@ -1342,6 +1353,7 @@ func (adh *AdminHandler) MergeDLQMessages(
 			default:
 				var err error
 				token, err = adh.namespaceDLQHandler.Merge(
+					ctx,
 					request.GetInclusiveEndMessageId(),
 					int(request.GetMaximumPageSize()),
 					request.GetNextPageToken(),
@@ -1431,7 +1443,6 @@ func (adh *AdminHandler) ResendReplicationTasks(
 }
 
 // GetTaskQueueTasks returns tasks from task queue
-// TODO: support pagination
 func (adh *AdminHandler) GetTaskQueueTasks(
 	ctx context.Context,
 	request *adminservice.GetTaskQueueTasksRequest,
@@ -1449,12 +1460,12 @@ func (adh *AdminHandler) GetTaskQueueTasks(
 		return nil, adh.error(err, scope)
 	}
 
-	resp, err := adh.taskManager.GetTasks(&persistence.GetTasksRequest{
+	resp, err := adh.taskManager.GetTasks(ctx, &persistence.GetTasksRequest{
 		NamespaceID:        namespaceID.String(),
 		TaskQueue:          request.GetTaskQueue(),
 		TaskType:           request.GetTaskQueueType(),
-		MinTaskIDExclusive: request.GetMinTaskId(),
-		MaxTaskIDInclusive: request.GetMaxTaskId(),
+		InclusiveMinTaskID: request.GetMinTaskId(),
+		ExclusiveMaxTaskID: request.GetMaxTaskId(),
 		PageSize:           int(request.GetBatchSize()),
 		NextPageToken:      request.NextPageToken,
 	})
@@ -1493,11 +1504,6 @@ func (adh *AdminHandler) validateGetWorkflowExecutionRawHistoryV2Request(
 		request.GetEndEventId() == common.EmptyEventID &&
 		request.GetEndEventVersion() == common.EmptyVersion {
 		return errInvalidEventQueryRange
-	}
-
-	if (request.GetStartEventId() != common.EmptyEventID && request.GetStartEventVersion() == common.EmptyVersion) ||
-		(request.GetStartEventId() == common.EmptyEventID && request.GetStartEventVersion() != common.EmptyVersion) {
-		return errInvalidStartEventCombination
 	}
 
 	return nil

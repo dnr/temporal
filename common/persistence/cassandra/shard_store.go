@@ -25,6 +25,7 @@
 package cassandra
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
@@ -81,6 +82,7 @@ func NewShardStore(
 }
 
 func (d *ShardStore) GetOrCreateShard(
+	ctx context.Context,
 	request *p.InternalGetOrCreateShardRequest,
 ) (*p.InternalGetOrCreateShardResponse, error) {
 	query := d.Session.Query(templateGetShardQuery,
@@ -90,7 +92,8 @@ func (d *ShardStore) GetOrCreateShard(
 		rowTypeShardWorkflowID,
 		rowTypeShardRunID,
 		defaultVisibilityTimestamp,
-		rowTypeShardTaskID)
+		rowTypeShardTaskID,
+	).WithContext(ctx)
 
 	var data []byte
 	var encoding string
@@ -119,7 +122,8 @@ func (d *ShardStore) GetOrCreateShard(
 		rowTypeShardTaskID,
 		shardInfo.Data,
 		shardInfo.EncodingType.String(),
-		rangeID)
+		rangeID,
+	).WithContext(ctx)
 
 	previous := make(map[string]interface{})
 	applied, err := query.MapScanCAS(previous)
@@ -129,7 +133,7 @@ func (d *ShardStore) GetOrCreateShard(
 	if !applied {
 		// conflict, try again
 		request.CreateShardInfo = nil // prevent loop
-		return d.GetOrCreateShard(request)
+		return d.GetOrCreateShard(ctx, request)
 	}
 	return &p.InternalGetOrCreateShardResponse{
 		ShardInfo: shardInfo,
@@ -137,6 +141,7 @@ func (d *ShardStore) GetOrCreateShard(
 }
 
 func (d *ShardStore) UpdateShard(
+	ctx context.Context,
 	request *p.InternalUpdateShardRequest,
 ) error {
 	query := d.Session.Query(templateUpdateShardQuery,
@@ -150,7 +155,8 @@ func (d *ShardStore) UpdateShard(
 		rowTypeShardRunID,
 		defaultVisibilityTimestamp,
 		rowTypeShardTaskID,
-		request.PreviousRangeID) // If
+		request.PreviousRangeID,
+	).WithContext(ctx)
 
 	previous := make(map[string]interface{})
 	applied, err := query.MapScanCAS(previous)

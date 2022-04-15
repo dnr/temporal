@@ -25,6 +25,8 @@
 package persistence
 
 import (
+	"context"
+
 	commonpb "go.temporal.io/api/common/v1"
 	enumspb "go.temporal.io/api/enums/v1"
 	persistencespb "go.temporal.io/server/api/persistence/v1"
@@ -56,7 +58,10 @@ func (m *shardManagerImpl) GetName() string {
 	return m.shardStore.GetName()
 }
 
-func (m *shardManagerImpl) GetOrCreateShard(request *GetOrCreateShardRequest) (*GetOrCreateShardResponse, error) {
+func (m *shardManagerImpl) GetOrCreateShard(
+	ctx context.Context,
+	request *GetOrCreateShardRequest,
+) (*GetOrCreateShardResponse, error) {
 	var createShardInfo func() (int64, *commonpb.DataBlob, error)
 	createShardInfo = func() (int64, *commonpb.DataBlob, error) {
 		shardInfo := request.InitialShardInfo
@@ -71,7 +76,7 @@ func (m *shardManagerImpl) GetOrCreateShard(request *GetOrCreateShardRequest) (*
 		}
 		return shardInfo.GetRangeId(), data, nil
 	}
-	internalResp, err := m.shardStore.GetOrCreateShard(&InternalGetOrCreateShardRequest{
+	internalResp, err := m.shardStore.GetOrCreateShard(ctx, &InternalGetOrCreateShardRequest{
 		ShardID:          request.ShardID,
 		CreateShardInfo:  createShardInfo,
 		LifecycleContext: request.LifecycleContext,
@@ -88,7 +93,10 @@ func (m *shardManagerImpl) GetOrCreateShard(request *GetOrCreateShardRequest) (*
 	}, nil
 }
 
-func (m *shardManagerImpl) UpdateShard(request *UpdateShardRequest) error {
+func (m *shardManagerImpl) UpdateShard(
+	ctx context.Context,
+	request *UpdateShardRequest,
+) error {
 	shardInfo := request.ShardInfo
 	shardInfo.UpdateTime = timestamp.TimeNowPtrUtc()
 
@@ -102,5 +110,5 @@ func (m *shardManagerImpl) UpdateShard(request *UpdateShardRequest) error {
 		ShardInfo:       shardInfoBlob,
 		PreviousRangeID: request.PreviousRangeID,
 	}
-	return m.shardStore.UpdateShard(internalRequest)
+	return m.shardStore.UpdateShard(ctx, internalRequest)
 }

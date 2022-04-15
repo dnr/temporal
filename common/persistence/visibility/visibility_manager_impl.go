@@ -25,6 +25,7 @@
 package visibility
 
 import (
+	"context"
 	"fmt"
 	"time"
 
@@ -75,7 +76,10 @@ func (p *visibilityManagerImpl) GetName() string {
 	return p.store.GetName()
 }
 
-func (p *visibilityManagerImpl) RecordWorkflowExecutionStarted(request *manager.RecordWorkflowExecutionStartedRequest) error {
+func (p *visibilityManagerImpl) RecordWorkflowExecutionStarted(
+	ctx context.Context,
+	request *manager.RecordWorkflowExecutionStartedRequest,
+) error {
 	requestBase, err := p.newInternalVisibilityRequestBase(request.VisibilityRequestBase)
 	if err != nil {
 		return err
@@ -83,10 +87,13 @@ func (p *visibilityManagerImpl) RecordWorkflowExecutionStarted(request *manager.
 	req := &store.InternalRecordWorkflowExecutionStartedRequest{
 		InternalVisibilityRequestBase: requestBase,
 	}
-	return p.store.RecordWorkflowExecutionStarted(req)
+	return p.store.RecordWorkflowExecutionStarted(ctx, req)
 }
 
-func (p *visibilityManagerImpl) RecordWorkflowExecutionClosed(request *manager.RecordWorkflowExecutionClosedRequest) error {
+func (p *visibilityManagerImpl) RecordWorkflowExecutionClosed(
+	ctx context.Context,
+	request *manager.RecordWorkflowExecutionClosedRequest,
+) error {
 	requestBase, err := p.newInternalVisibilityRequestBase(request.VisibilityRequestBase)
 	if err != nil {
 		return err
@@ -96,10 +103,13 @@ func (p *visibilityManagerImpl) RecordWorkflowExecutionClosed(request *manager.R
 		CloseTime:                     request.CloseTime,
 		HistoryLength:                 request.HistoryLength,
 	}
-	return p.store.RecordWorkflowExecutionClosed(req)
+	return p.store.RecordWorkflowExecutionClosed(ctx, req)
 }
 
-func (p *visibilityManagerImpl) UpsertWorkflowExecution(request *manager.UpsertWorkflowExecutionRequest) error {
+func (p *visibilityManagerImpl) UpsertWorkflowExecution(
+	ctx context.Context,
+	request *manager.UpsertWorkflowExecutionRequest,
+) error {
 	requestBase, err := p.newInternalVisibilityRequestBase(request.VisibilityRequestBase)
 	if err != nil {
 		return err
@@ -107,41 +117,32 @@ func (p *visibilityManagerImpl) UpsertWorkflowExecution(request *manager.UpsertW
 	req := &store.InternalUpsertWorkflowExecutionRequest{
 		InternalVisibilityRequestBase: requestBase,
 	}
-	return p.store.UpsertWorkflowExecution(req)
+	return p.store.UpsertWorkflowExecution(ctx, req)
 }
 
-func (p *visibilityManagerImpl) DeleteWorkflowExecution(request *manager.VisibilityDeleteWorkflowExecutionRequest) error {
-	return p.store.DeleteWorkflowExecution(request)
+func (p *visibilityManagerImpl) DeleteWorkflowExecution(
+	ctx context.Context,
+	request *manager.VisibilityDeleteWorkflowExecutionRequest,
+) error {
+	return p.store.DeleteWorkflowExecution(ctx, request)
 }
 
-func (p *visibilityManagerImpl) ListOpenWorkflowExecutions(request *manager.ListWorkflowExecutionsRequest) (*manager.ListWorkflowExecutionsResponse, error) {
-	response, err := p.store.ListOpenWorkflowExecutions(request)
+func (p *visibilityManagerImpl) ListOpenWorkflowExecutions(
+	ctx context.Context,
+	request *manager.ListWorkflowExecutionsRequest,
+) (*manager.ListWorkflowExecutionsResponse, error) {
+	response, err := p.store.ListOpenWorkflowExecutions(ctx, request)
 	if err != nil {
 		return nil, err
 	}
 	return p.convertInternalListResponse(response)
 }
 
-func (p *visibilityManagerImpl) ListClosedWorkflowExecutions(request *manager.ListWorkflowExecutionsRequest) (*manager.ListWorkflowExecutionsResponse, error) {
-	response, err := p.store.ListClosedWorkflowExecutions(request)
-	if err != nil {
-		return nil, err
-	}
-
-	return p.convertInternalListResponse(response)
-}
-
-func (p *visibilityManagerImpl) ListOpenWorkflowExecutionsByType(request *manager.ListWorkflowExecutionsByTypeRequest) (*manager.ListWorkflowExecutionsResponse, error) {
-	response, err := p.store.ListOpenWorkflowExecutionsByType(request)
-	if err != nil {
-		return nil, err
-	}
-
-	return p.convertInternalListResponse(response)
-}
-
-func (p *visibilityManagerImpl) ListClosedWorkflowExecutionsByType(request *manager.ListWorkflowExecutionsByTypeRequest) (*manager.ListWorkflowExecutionsResponse, error) {
-	response, err := p.store.ListClosedWorkflowExecutionsByType(request)
+func (p *visibilityManagerImpl) ListClosedWorkflowExecutions(
+	ctx context.Context,
+	request *manager.ListWorkflowExecutionsRequest,
+) (*manager.ListWorkflowExecutionsResponse, error) {
+	response, err := p.store.ListClosedWorkflowExecutions(ctx, request)
 	if err != nil {
 		return nil, err
 	}
@@ -149,8 +150,11 @@ func (p *visibilityManagerImpl) ListClosedWorkflowExecutionsByType(request *mana
 	return p.convertInternalListResponse(response)
 }
 
-func (p *visibilityManagerImpl) ListOpenWorkflowExecutionsByWorkflowID(request *manager.ListWorkflowExecutionsByWorkflowIDRequest) (*manager.ListWorkflowExecutionsResponse, error) {
-	response, err := p.store.ListOpenWorkflowExecutionsByWorkflowID(request)
+func (p *visibilityManagerImpl) ListOpenWorkflowExecutionsByType(
+	ctx context.Context,
+	request *manager.ListWorkflowExecutionsByTypeRequest,
+) (*manager.ListWorkflowExecutionsResponse, error) {
+	response, err := p.store.ListOpenWorkflowExecutionsByType(ctx, request)
 	if err != nil {
 		return nil, err
 	}
@@ -158,8 +162,11 @@ func (p *visibilityManagerImpl) ListOpenWorkflowExecutionsByWorkflowID(request *
 	return p.convertInternalListResponse(response)
 }
 
-func (p *visibilityManagerImpl) ListClosedWorkflowExecutionsByWorkflowID(request *manager.ListWorkflowExecutionsByWorkflowIDRequest) (*manager.ListWorkflowExecutionsResponse, error) {
-	response, err := p.store.ListClosedWorkflowExecutionsByWorkflowID(request)
+func (p *visibilityManagerImpl) ListClosedWorkflowExecutionsByType(
+	ctx context.Context,
+	request *manager.ListWorkflowExecutionsByTypeRequest,
+) (*manager.ListWorkflowExecutionsResponse, error) {
+	response, err := p.store.ListClosedWorkflowExecutionsByType(ctx, request)
 	if err != nil {
 		return nil, err
 	}
@@ -167,8 +174,11 @@ func (p *visibilityManagerImpl) ListClosedWorkflowExecutionsByWorkflowID(request
 	return p.convertInternalListResponse(response)
 }
 
-func (p *visibilityManagerImpl) ListClosedWorkflowExecutionsByStatus(request *manager.ListClosedWorkflowExecutionsByStatusRequest) (*manager.ListWorkflowExecutionsResponse, error) {
-	response, err := p.store.ListClosedWorkflowExecutionsByStatus(request)
+func (p *visibilityManagerImpl) ListOpenWorkflowExecutionsByWorkflowID(
+	ctx context.Context,
+	request *manager.ListWorkflowExecutionsByWorkflowIDRequest,
+) (*manager.ListWorkflowExecutionsResponse, error) {
+	response, err := p.store.ListOpenWorkflowExecutionsByWorkflowID(ctx, request)
 	if err != nil {
 		return nil, err
 	}
@@ -176,8 +186,11 @@ func (p *visibilityManagerImpl) ListClosedWorkflowExecutionsByStatus(request *ma
 	return p.convertInternalListResponse(response)
 }
 
-func (p *visibilityManagerImpl) ListWorkflowExecutions(request *manager.ListWorkflowExecutionsRequestV2) (*manager.ListWorkflowExecutionsResponse, error) {
-	response, err := p.store.ListWorkflowExecutions(request)
+func (p *visibilityManagerImpl) ListClosedWorkflowExecutionsByWorkflowID(
+	ctx context.Context,
+	request *manager.ListWorkflowExecutionsByWorkflowIDRequest,
+) (*manager.ListWorkflowExecutionsResponse, error) {
+	response, err := p.store.ListClosedWorkflowExecutionsByWorkflowID(ctx, request)
 	if err != nil {
 		return nil, err
 	}
@@ -185,8 +198,11 @@ func (p *visibilityManagerImpl) ListWorkflowExecutions(request *manager.ListWork
 	return p.convertInternalListResponse(response)
 }
 
-func (p *visibilityManagerImpl) ScanWorkflowExecutions(request *manager.ListWorkflowExecutionsRequestV2) (*manager.ListWorkflowExecutionsResponse, error) {
-	response, err := p.store.ScanWorkflowExecutions(request)
+func (p *visibilityManagerImpl) ListClosedWorkflowExecutionsByStatus(
+	ctx context.Context,
+	request *manager.ListClosedWorkflowExecutionsByStatusRequest,
+) (*manager.ListWorkflowExecutionsResponse, error) {
+	response, err := p.store.ListClosedWorkflowExecutionsByStatus(ctx, request)
 	if err != nil {
 		return nil, err
 	}
@@ -194,8 +210,35 @@ func (p *visibilityManagerImpl) ScanWorkflowExecutions(request *manager.ListWork
 	return p.convertInternalListResponse(response)
 }
 
-func (p *visibilityManagerImpl) CountWorkflowExecutions(request *manager.CountWorkflowExecutionsRequest) (*manager.CountWorkflowExecutionsResponse, error) {
-	response, err := p.store.CountWorkflowExecutions(request)
+func (p *visibilityManagerImpl) ListWorkflowExecutions(
+	ctx context.Context,
+	request *manager.ListWorkflowExecutionsRequestV2,
+) (*manager.ListWorkflowExecutionsResponse, error) {
+	response, err := p.store.ListWorkflowExecutions(ctx, request)
+	if err != nil {
+		return nil, err
+	}
+
+	return p.convertInternalListResponse(response)
+}
+
+func (p *visibilityManagerImpl) ScanWorkflowExecutions(
+	ctx context.Context,
+	request *manager.ListWorkflowExecutionsRequestV2,
+) (*manager.ListWorkflowExecutionsResponse, error) {
+	response, err := p.store.ScanWorkflowExecutions(ctx, request)
+	if err != nil {
+		return nil, err
+	}
+
+	return p.convertInternalListResponse(response)
+}
+
+func (p *visibilityManagerImpl) CountWorkflowExecutions(
+	ctx context.Context,
+	request *manager.CountWorkflowExecutionsRequest,
+) (*manager.CountWorkflowExecutionsResponse, error) {
+	response, err := p.store.CountWorkflowExecutions(ctx, request)
 	if err != nil {
 		return nil, err
 	}

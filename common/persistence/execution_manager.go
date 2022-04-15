@@ -25,6 +25,7 @@
 package persistence
 
 import (
+	"context"
 	"fmt"
 
 	commonpb "go.temporal.io/api/common/v1"
@@ -81,6 +82,7 @@ func (m *executionManagerImpl) GetName() string {
 // The below three APIs are related to serialization/deserialization
 
 func (m *executionManagerImpl) CreateWorkflowExecution(
+	ctx context.Context,
 	request *CreateWorkflowExecutionRequest,
 ) (*CreateWorkflowExecutionResponse, error) {
 
@@ -119,7 +121,7 @@ func (m *executionManagerImpl) CreateWorkflowExecution(
 		NewWorkflowNewEvents:     newWorkflowNewEvents,
 	}
 
-	if _, err := m.persistence.CreateWorkflowExecution(newRequest); err != nil {
+	if _, err := m.persistence.CreateWorkflowExecution(ctx, newRequest); err != nil {
 		return nil, err
 	}
 	return &CreateWorkflowExecutionResponse{
@@ -131,6 +133,7 @@ func (m *executionManagerImpl) CreateWorkflowExecution(
 }
 
 func (m *executionManagerImpl) UpdateWorkflowExecution(
+	ctx context.Context,
 	request *UpdateWorkflowExecutionRequest,
 ) (*UpdateWorkflowExecutionResponse, error) {
 
@@ -189,7 +192,7 @@ func (m *executionManagerImpl) UpdateWorkflowExecution(
 		NewWorkflowNewEvents:    newWorkflowNewEvents,
 	}
 
-	err = m.persistence.UpdateWorkflowExecution(newRequest)
+	err = m.persistence.UpdateWorkflowExecution(ctx, newRequest)
 	switch err.(type) {
 	case nil:
 		return &UpdateWorkflowExecutionResponse{
@@ -206,6 +209,7 @@ func (m *executionManagerImpl) UpdateWorkflowExecution(
 		*WorkflowConditionFailedError,
 		*ConditionFailedError:
 		m.trimHistoryNode(
+			ctx,
 			request.ShardID,
 			updateMutation.ExecutionInfo.NamespaceId,
 			updateMutation.ExecutionInfo.WorkflowId,
@@ -218,6 +222,7 @@ func (m *executionManagerImpl) UpdateWorkflowExecution(
 }
 
 func (m *executionManagerImpl) ConflictResolveWorkflowExecution(
+	ctx context.Context,
 	request *ConflictResolveWorkflowExecutionRequest,
 ) (*ConflictResolveWorkflowExecutionResponse, error) {
 
@@ -291,7 +296,7 @@ func (m *executionManagerImpl) ConflictResolveWorkflowExecution(
 		CurrentWorkflowEventsNewEvents: currentWorkflowEventsNewEvents,
 	}
 
-	err = m.persistence.ConflictResolveWorkflowExecution(newRequest)
+	err = m.persistence.ConflictResolveWorkflowExecution(ctx, newRequest)
 	switch err.(type) {
 	case nil:
 		return &ConflictResolveWorkflowExecutionResponse{
@@ -312,6 +317,7 @@ func (m *executionManagerImpl) ConflictResolveWorkflowExecution(
 		*WorkflowConditionFailedError,
 		*ConditionFailedError:
 		m.trimHistoryNode(
+			ctx,
 			request.ShardID,
 			resetSnapshot.ExecutionInfo.NamespaceId,
 			resetSnapshot.ExecutionInfo.WorkflowId,
@@ -319,6 +325,7 @@ func (m *executionManagerImpl) ConflictResolveWorkflowExecution(
 		)
 		if currentMutation != nil {
 			m.trimHistoryNode(
+				ctx,
 				request.ShardID,
 				currentMutation.ExecutionInfo.NamespaceId,
 				currentMutation.ExecutionInfo.WorkflowId,
@@ -332,9 +339,10 @@ func (m *executionManagerImpl) ConflictResolveWorkflowExecution(
 }
 
 func (m *executionManagerImpl) GetWorkflowExecution(
+	ctx context.Context,
 	request *GetWorkflowExecutionRequest,
 ) (*GetWorkflowExecutionResponse, error) {
-	response, err := m.persistence.GetWorkflowExecution(request)
+	response, err := m.persistence.GetWorkflowExecution(ctx, request)
 	if err != nil {
 		return nil, err
 	}
@@ -357,6 +365,7 @@ func (m *executionManagerImpl) GetWorkflowExecution(
 }
 
 func (m *executionManagerImpl) SetWorkflowExecution(
+	ctx context.Context,
 	request *SetWorkflowExecutionRequest,
 ) (*SetWorkflowExecutionResponse, error) {
 	serializedWorkflowSnapshot, err := m.SerializeWorkflowSnapshot(&request.SetWorkflowSnapshot)
@@ -371,7 +380,7 @@ func (m *executionManagerImpl) SetWorkflowExecution(
 		SetWorkflowSnapshot: *serializedWorkflowSnapshot,
 	}
 
-	err = m.persistence.SetWorkflowExecution(newRequest)
+	err = m.persistence.SetWorkflowExecution(ctx, newRequest)
 	if err != nil {
 		return nil, err
 	}
@@ -401,7 +410,7 @@ func (m *executionManagerImpl) serializeWorkflowEventBatches(
 	return workflowNewEvents, &historyStatistics, nil
 }
 
-func (m *executionManagerImpl) DeserializeBufferedEvents(
+func (m *executionManagerImpl) DeserializeBufferedEvents( // unexport
 	blobs []*commonpb.DataBlob,
 ) ([]*historypb.HistoryEvent, error) {
 
@@ -446,7 +455,7 @@ func (m *executionManagerImpl) serializeWorkflowEvents(
 	return m.serializeAppendHistoryNodesRequest(request)
 }
 
-func (m *executionManagerImpl) SerializeWorkflowMutation(
+func (m *executionManagerImpl) SerializeWorkflowMutation( // unexport
 	input *WorkflowMutation,
 ) (*InternalWorkflowMutation, error) {
 
@@ -460,24 +469,29 @@ func (m *executionManagerImpl) SerializeWorkflowMutation(
 		WorkflowID:  input.ExecutionInfo.GetWorkflowId(),
 		RunID:       input.ExecutionState.GetRunId(),
 
-		UpsertActivityInfos:       make(map[int64]*commonpb.DataBlob),
-		UpsertTimerInfos:          make(map[string]*commonpb.DataBlob),
-		UpsertChildExecutionInfos: make(map[int64]*commonpb.DataBlob),
-		UpsertRequestCancelInfos:  make(map[int64]*commonpb.DataBlob),
-		UpsertSignalInfos:         make(map[int64]*commonpb.DataBlob),
+		UpsertActivityInfos: make(map[int64]*commonpb.DataBlob, len(input.UpsertActivityInfos)),
+		DeleteActivityInfos: input.DeleteActivityInfos,
+
+		UpsertTimerInfos: make(map[string]*commonpb.DataBlob, len(input.UpsertTimerInfos)),
+		DeleteTimerInfos: input.DeleteTimerInfos,
+
+		UpsertChildExecutionInfos: make(map[int64]*commonpb.DataBlob, len(input.UpsertChildExecutionInfos)),
+		DeleteChildExecutionInfos: input.DeleteChildExecutionInfos,
+
+		UpsertRequestCancelInfos: make(map[int64]*commonpb.DataBlob, len(input.UpsertRequestCancelInfos)),
+		DeleteRequestCancelInfos: input.DeleteRequestCancelInfos,
+
+		UpsertSignalInfos: make(map[int64]*commonpb.DataBlob, len(input.UpsertSignalInfos)),
+		DeleteSignalInfos: input.DeleteSignalInfos,
+
+		UpsertSignalRequestedIDs: input.UpsertSignalRequestedIDs,
+		DeleteSignalRequestedIDs: input.DeleteSignalRequestedIDs,
+
+		NewBufferedEvents:   nil,
+		ClearBufferedEvents: input.ClearBufferedEvents,
 
 		ExecutionInfo:  input.ExecutionInfo,
 		ExecutionState: input.ExecutionState,
-
-		DeleteActivityInfos:       input.DeleteActivityInfos,
-		DeleteTimerInfos:          input.DeleteTimerInfos,
-		DeleteChildExecutionInfos: input.DeleteChildExecutionInfos,
-		DeleteRequestCancelInfos:  input.DeleteRequestCancelInfos,
-		DeleteSignalInfos:         input.DeleteSignalInfos,
-		DeleteSignalRequestedIDs:  input.DeleteSignalRequestedIDs,
-
-		UpsertSignalRequestedIDs: input.UpsertSignalRequestedIDs,
-		ClearBufferedEvents:      input.ClearBufferedEvents,
 
 		Tasks: tasks,
 
@@ -502,6 +516,7 @@ func (m *executionManagerImpl) SerializeWorkflowMutation(
 		}
 		result.UpsertActivityInfos[key] = blob
 	}
+
 	for key, info := range input.UpsertTimerInfos {
 		blob, err := m.serializer.TimerInfoToBlob(info, enumspb.ENCODING_TYPE_PROTO3)
 		if err != nil {
@@ -509,6 +524,7 @@ func (m *executionManagerImpl) SerializeWorkflowMutation(
 		}
 		result.UpsertTimerInfos[key] = blob
 	}
+
 	for key, info := range input.UpsertChildExecutionInfos {
 		blob, err := m.serializer.ChildExecutionInfoToBlob(info, enumspb.ENCODING_TYPE_PROTO3)
 		if err != nil {
@@ -516,6 +532,7 @@ func (m *executionManagerImpl) SerializeWorkflowMutation(
 		}
 		result.UpsertChildExecutionInfos[key] = blob
 	}
+
 	for key, info := range input.UpsertRequestCancelInfos {
 		blob, err := m.serializer.RequestCancelInfoToBlob(info, enumspb.ENCODING_TYPE_PROTO3)
 		if err != nil {
@@ -523,6 +540,7 @@ func (m *executionManagerImpl) SerializeWorkflowMutation(
 		}
 		result.UpsertRequestCancelInfos[key] = blob
 	}
+
 	for key, info := range input.UpsertSignalInfos {
 		blob, err := m.serializer.SignalInfoToBlob(info, enumspb.ENCODING_TYPE_PROTO3)
 		if err != nil {
@@ -537,6 +555,7 @@ func (m *executionManagerImpl) SerializeWorkflowMutation(
 			return nil, err
 		}
 	}
+
 	result.LastWriteVersion, err = getCurrentBranchLastWriteVersion(input.ExecutionInfo.VersionHistories)
 	if err != nil {
 		return nil, err
@@ -549,7 +568,7 @@ func (m *executionManagerImpl) SerializeWorkflowMutation(
 	return result, nil
 }
 
-func (m *executionManagerImpl) SerializeWorkflowSnapshot(
+func (m *executionManagerImpl) SerializeWorkflowSnapshot( // unexport
 	input *WorkflowSnapshot,
 ) (*InternalWorkflowSnapshot, error) {
 
@@ -563,11 +582,11 @@ func (m *executionManagerImpl) SerializeWorkflowSnapshot(
 		WorkflowID:  input.ExecutionInfo.GetWorkflowId(),
 		RunID:       input.ExecutionState.GetRunId(),
 
-		ActivityInfos:       make(map[int64]*commonpb.DataBlob),
-		TimerInfos:          make(map[string]*commonpb.DataBlob),
-		ChildExecutionInfos: make(map[int64]*commonpb.DataBlob),
-		RequestCancelInfos:  make(map[int64]*commonpb.DataBlob),
-		SignalInfos:         make(map[int64]*commonpb.DataBlob),
+		ActivityInfos:       make(map[int64]*commonpb.DataBlob, len(input.ActivityInfos)),
+		TimerInfos:          make(map[string]*commonpb.DataBlob, len(input.TimerInfos)),
+		ChildExecutionInfos: make(map[int64]*commonpb.DataBlob, len(input.ChildExecutionInfos)),
+		RequestCancelInfos:  make(map[int64]*commonpb.DataBlob, len(input.RequestCancelInfos)),
+		SignalInfos:         make(map[int64]*commonpb.DataBlob, len(input.SignalInfos)),
 
 		ExecutionInfo:      input.ExecutionInfo,
 		ExecutionState:     input.ExecutionState,
@@ -641,21 +660,24 @@ func (m *executionManagerImpl) SerializeWorkflowSnapshot(
 }
 
 func (m *executionManagerImpl) DeleteWorkflowExecution(
+	ctx context.Context,
 	request *DeleteWorkflowExecutionRequest,
 ) error {
-	return m.persistence.DeleteWorkflowExecution(request)
+	return m.persistence.DeleteWorkflowExecution(ctx, request)
 }
 
 func (m *executionManagerImpl) DeleteCurrentWorkflowExecution(
+	ctx context.Context,
 	request *DeleteCurrentWorkflowExecutionRequest,
 ) error {
-	return m.persistence.DeleteCurrentWorkflowExecution(request)
+	return m.persistence.DeleteCurrentWorkflowExecution(ctx, request)
 }
 
 func (m *executionManagerImpl) GetCurrentExecution(
+	ctx context.Context,
 	request *GetCurrentExecutionRequest,
 ) (*GetCurrentExecutionResponse, error) {
-	internalResp, err := m.persistence.GetCurrentExecution(request)
+	internalResp, err := m.persistence.GetCurrentExecution(ctx, request)
 	if err != nil {
 		return nil, err
 	}
@@ -669,9 +691,10 @@ func (m *executionManagerImpl) GetCurrentExecution(
 }
 
 func (m *executionManagerImpl) ListConcreteExecutions(
+	ctx context.Context,
 	request *ListConcreteExecutionsRequest,
 ) (*ListConcreteExecutionsResponse, error) {
-	response, err := m.persistence.ListConcreteExecutions(request)
+	response, err := m.persistence.ListConcreteExecutions(ctx, request)
 	if err != nil {
 		return nil, err
 	}
@@ -690,6 +713,7 @@ func (m *executionManagerImpl) ListConcreteExecutions(
 }
 
 func (m *executionManagerImpl) AddHistoryTasks(
+	ctx context.Context,
 	input *AddHistoryTasksRequest,
 ) error {
 	tasks, err := serializeTasks(m.serializer, input.Tasks)
@@ -697,7 +721,7 @@ func (m *executionManagerImpl) AddHistoryTasks(
 		return err
 	}
 
-	return m.persistence.AddHistoryTasks(&InternalAddHistoryTasksRequest{
+	return m.persistence.AddHistoryTasks(ctx, &InternalAddHistoryTasksRequest{
 		ShardID: input.ShardID,
 		RangeID: input.RangeID,
 
@@ -710,9 +734,10 @@ func (m *executionManagerImpl) AddHistoryTasks(
 }
 
 func (m *executionManagerImpl) GetHistoryTask(
+	ctx context.Context,
 	request *GetHistoryTaskRequest,
 ) (*GetHistoryTaskResponse, error) {
-	resp, err := m.persistence.GetHistoryTask(request)
+	resp, err := m.persistence.GetHistoryTask(ctx, request)
 	if err != nil {
 		return nil, err
 	}
@@ -727,6 +752,7 @@ func (m *executionManagerImpl) GetHistoryTask(
 }
 
 func (m *executionManagerImpl) GetHistoryTasks(
+	ctx context.Context,
 	request *GetHistoryTasksRequest,
 ) (*GetHistoryTasksResponse, error) {
 	if err := validateTaskRange(
@@ -737,7 +763,7 @@ func (m *executionManagerImpl) GetHistoryTasks(
 		return nil, err
 	}
 
-	resp, err := m.persistence.GetHistoryTasks(request)
+	resp, err := m.persistence.GetHistoryTasks(ctx, request)
 	if err != nil {
 		return nil, err
 	}
@@ -758,12 +784,14 @@ func (m *executionManagerImpl) GetHistoryTasks(
 }
 
 func (m *executionManagerImpl) CompleteHistoryTask(
+	ctx context.Context,
 	request *CompleteHistoryTaskRequest,
 ) error {
-	return m.persistence.CompleteHistoryTask(request)
+	return m.persistence.CompleteHistoryTask(ctx, request)
 }
 
 func (m *executionManagerImpl) RangeCompleteHistoryTasks(
+	ctx context.Context,
 	request *RangeCompleteHistoryTasksRequest,
 ) error {
 	if err := validateTaskRange(
@@ -774,19 +802,21 @@ func (m *executionManagerImpl) RangeCompleteHistoryTasks(
 		return err
 	}
 
-	return m.persistence.RangeCompleteHistoryTasks(request)
+	return m.persistence.RangeCompleteHistoryTasks(ctx, request)
 }
 
 func (m *executionManagerImpl) PutReplicationTaskToDLQ(
+	ctx context.Context,
 	request *PutReplicationTaskToDLQRequest,
 ) error {
-	return m.persistence.PutReplicationTaskToDLQ(request)
+	return m.persistence.PutReplicationTaskToDLQ(ctx, request)
 }
 
 func (m *executionManagerImpl) GetReplicationTasksFromDLQ(
+	ctx context.Context,
 	request *GetReplicationTasksFromDLQRequest,
 ) (*GetHistoryTasksResponse, error) {
-	resp, err := m.persistence.GetReplicationTasksFromDLQ(request)
+	resp, err := m.persistence.GetReplicationTasksFromDLQ(ctx, request)
 	if err != nil {
 		return nil, err
 	}
@@ -808,15 +838,17 @@ func (m *executionManagerImpl) GetReplicationTasksFromDLQ(
 }
 
 func (m *executionManagerImpl) DeleteReplicationTaskFromDLQ(
+	ctx context.Context,
 	request *DeleteReplicationTaskFromDLQRequest,
 ) error {
-	return m.persistence.DeleteReplicationTaskFromDLQ(request)
+	return m.persistence.DeleteReplicationTaskFromDLQ(ctx, request)
 }
 
 func (m *executionManagerImpl) RangeDeleteReplicationTaskFromDLQ(
+	ctx context.Context,
 	request *RangeDeleteReplicationTaskFromDLQRequest,
 ) error {
-	return m.persistence.RangeDeleteReplicationTaskFromDLQ(request)
+	return m.persistence.RangeDeleteReplicationTaskFromDLQ(ctx, request)
 }
 
 func (m *executionManagerImpl) Close() {
@@ -824,12 +856,13 @@ func (m *executionManagerImpl) Close() {
 }
 
 func (m *executionManagerImpl) trimHistoryNode(
+	ctx context.Context,
 	shardID int32,
 	namespaceID string,
 	workflowID string,
 	runID string,
 ) {
-	response, err := m.GetWorkflowExecution(&GetWorkflowExecutionRequest{
+	response, err := m.GetWorkflowExecution(ctx, &GetWorkflowExecutionRequest{
 		ShardID:     shardID,
 		NamespaceID: namespaceID,
 		WorkflowID:  workflowID,
@@ -852,7 +885,7 @@ func (m *executionManagerImpl) trimHistoryNode(
 	}
 	mutableStateLastNodeID := executionInfo.LastFirstEventId
 	mutableStateLastNodeTransactionID := executionInfo.LastFirstEventTxnId
-	if _, err := m.TrimHistoryBranch(&TrimHistoryBranchRequest{
+	if _, err := m.TrimHistoryBranch(ctx, &TrimHistoryBranchRequest{
 		ShardID:       shardID,
 		BranchToken:   branchToken,
 		NodeID:        mutableStateLastNodeID,

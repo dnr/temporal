@@ -568,6 +568,7 @@ func (wh *WorkflowHandler) GetWorkflowExecutionHistory(ctx context.Context, requ
 		if !isWorkflowRunning {
 			if rawHistoryQueryEnabled {
 				historyBlob, _, err = wh.getRawHistory(
+					ctx,
 					wh.metricsScope(ctx),
 					namespaceID,
 					*execution,
@@ -586,6 +587,7 @@ func (wh *WorkflowHandler) GetWorkflowExecutionHistory(ctx context.Context, requ
 				historyBlob = historyBlob[len(historyBlob)-1:]
 			} else {
 				history, _, err = wh.getHistory(
+					ctx,
 					wh.metricsScope(ctx),
 					namespaceID,
 					namespace.Name(request.GetNamespace()),
@@ -621,6 +623,7 @@ func (wh *WorkflowHandler) GetWorkflowExecutionHistory(ctx context.Context, requ
 		} else {
 			if rawHistoryQueryEnabled {
 				historyBlob, continuationToken.PersistenceToken, err = wh.getRawHistory(
+					ctx,
 					wh.metricsScope(ctx),
 					namespaceID,
 					*execution,
@@ -633,6 +636,7 @@ func (wh *WorkflowHandler) GetWorkflowExecutionHistory(ctx context.Context, requ
 				)
 			} else {
 				history, continuationToken.PersistenceToken, err = wh.getHistory(
+					ctx,
 					wh.metricsScope(ctx),
 					namespaceID,
 					namespace.Name(request.GetNamespace()),
@@ -804,6 +808,7 @@ func (wh *WorkflowHandler) GetWorkflowExecutionHistoryReverse(ctx context.Contex
 	history.Events = []*historypb.HistoryEvent{}
 	// return all events
 	history, continuationToken.PersistenceToken, continuationToken.NextEventId, err = wh.getHistoryReverse(
+		ctx,
 		wh.metricsScope(ctx),
 		namespaceID,
 		namespace.Name(request.GetNamespace()),
@@ -977,7 +982,9 @@ func (wh *WorkflowHandler) RespondWorkflowTaskCompleted(
 		return nil, err
 	}
 
-	completedResp := &workflowservice.RespondWorkflowTaskCompletedResponse{}
+	completedResp := &workflowservice.RespondWorkflowTaskCompletedResponse{
+		ActivityTasks: histResp.ActivityTasks,
+	}
 	if request.GetReturnNewWorkflowTask() && histResp != nil && histResp.StartedResponse != nil {
 		taskToken := &tokenspb.Task{
 			NamespaceId:     taskToken.GetNamespaceId(),
@@ -986,7 +993,10 @@ func (wh *WorkflowHandler) RespondWorkflowTaskCompleted(
 			ScheduleId:      histResp.StartedResponse.GetScheduledEventId(),
 			ScheduleAttempt: histResp.StartedResponse.GetAttempt(),
 		}
-		token, _ := wh.tokenSerializer.Serialize(taskToken)
+		token, err := wh.tokenSerializer.Serialize(taskToken)
+		if err != nil {
+			return nil, err
+		}
 		workflowExecution := &commonpb.WorkflowExecution{
 			WorkflowId: taskToken.GetWorkflowId(),
 			RunId:      taskToken.GetRunId(),
@@ -2260,6 +2270,7 @@ func (wh *WorkflowHandler) ListOpenWorkflowExecutions(ctx context.Context, reque
 			err = errNoPermission
 		} else {
 			persistenceResp, err = wh.visibilityMrg.ListOpenWorkflowExecutionsByWorkflowID(
+				ctx,
 				&manager.ListWorkflowExecutionsByWorkflowIDRequest{
 					ListWorkflowExecutionsRequest: baseReq,
 					WorkflowID:                    request.GetExecutionFilter().GetWorkflowId(),
@@ -2271,7 +2282,7 @@ func (wh *WorkflowHandler) ListOpenWorkflowExecutions(ctx context.Context, reque
 		if wh.config.DisableListVisibilityByFilter(namespaceName.String()) {
 			err = errNoPermission
 		} else {
-			persistenceResp, err = wh.visibilityMrg.ListOpenWorkflowExecutionsByType(&manager.ListWorkflowExecutionsByTypeRequest{
+			persistenceResp, err = wh.visibilityMrg.ListOpenWorkflowExecutionsByType(ctx, &manager.ListWorkflowExecutionsByTypeRequest{
 				ListWorkflowExecutionsRequest: baseReq,
 				WorkflowTypeName:              request.GetTypeFilter().GetName(),
 			})
@@ -2279,7 +2290,7 @@ func (wh *WorkflowHandler) ListOpenWorkflowExecutions(ctx context.Context, reque
 		wh.logger.Debug("List open workflow with filter",
 			tag.WorkflowNamespace(request.GetNamespace()), tag.WorkflowListWorkflowFilterByType)
 	} else {
-		persistenceResp, err = wh.visibilityMrg.ListOpenWorkflowExecutions(baseReq)
+		persistenceResp, err = wh.visibilityMrg.ListOpenWorkflowExecutions(ctx, baseReq)
 	}
 
 	if err != nil {
@@ -2353,6 +2364,7 @@ func (wh *WorkflowHandler) ListClosedWorkflowExecutions(ctx context.Context, req
 			err = errNoPermission
 		} else {
 			persistenceResp, err = wh.visibilityMrg.ListClosedWorkflowExecutionsByWorkflowID(
+				ctx,
 				&manager.ListWorkflowExecutionsByWorkflowIDRequest{
 					ListWorkflowExecutionsRequest: baseReq,
 					WorkflowID:                    request.GetExecutionFilter().GetWorkflowId(),
@@ -2364,7 +2376,7 @@ func (wh *WorkflowHandler) ListClosedWorkflowExecutions(ctx context.Context, req
 		if wh.config.DisableListVisibilityByFilter(namespaceName.String()) {
 			err = errNoPermission
 		} else {
-			persistenceResp, err = wh.visibilityMrg.ListClosedWorkflowExecutionsByType(&manager.ListWorkflowExecutionsByTypeRequest{
+			persistenceResp, err = wh.visibilityMrg.ListClosedWorkflowExecutionsByType(ctx, &manager.ListWorkflowExecutionsByTypeRequest{
 				ListWorkflowExecutionsRequest: baseReq,
 				WorkflowTypeName:              request.GetTypeFilter().GetName(),
 			})
@@ -2378,7 +2390,7 @@ func (wh *WorkflowHandler) ListClosedWorkflowExecutions(ctx context.Context, req
 			if request.GetStatusFilter().GetStatus() == enumspb.WORKFLOW_EXECUTION_STATUS_UNSPECIFIED || request.GetStatusFilter().GetStatus() == enumspb.WORKFLOW_EXECUTION_STATUS_RUNNING {
 				err = errStatusFilterMustBeNotRunning
 			} else {
-				persistenceResp, err = wh.visibilityMrg.ListClosedWorkflowExecutionsByStatus(&manager.ListClosedWorkflowExecutionsByStatusRequest{
+				persistenceResp, err = wh.visibilityMrg.ListClosedWorkflowExecutionsByStatus(ctx, &manager.ListClosedWorkflowExecutionsByStatusRequest{
 					ListWorkflowExecutionsRequest: baseReq,
 					Status:                        request.GetStatusFilter().GetStatus(),
 				})
@@ -2387,7 +2399,7 @@ func (wh *WorkflowHandler) ListClosedWorkflowExecutions(ctx context.Context, req
 		wh.logger.Debug("List closed workflow with filter",
 			tag.WorkflowNamespace(request.GetNamespace()), tag.WorkflowListWorkflowFilterByStatus)
 	} else {
-		persistenceResp, err = wh.visibilityMrg.ListClosedWorkflowExecutions(baseReq)
+		persistenceResp, err = wh.visibilityMrg.ListClosedWorkflowExecutions(ctx, baseReq)
 	}
 
 	if err != nil {
@@ -2437,7 +2449,7 @@ func (wh *WorkflowHandler) ListWorkflowExecutions(ctx context.Context, request *
 		NextPageToken: request.NextPageToken,
 		Query:         request.GetQuery(),
 	}
-	persistenceResp, err := wh.visibilityMrg.ListWorkflowExecutions(req)
+	persistenceResp, err := wh.visibilityMrg.ListWorkflowExecutions(ctx, req)
 	if err != nil {
 		return nil, err
 	}
@@ -2571,7 +2583,7 @@ func (wh *WorkflowHandler) ScanWorkflowExecutions(ctx context.Context, request *
 		NextPageToken: request.NextPageToken,
 		Query:         request.GetQuery(),
 	}
-	persistenceResp, err := wh.visibilityMrg.ScanWorkflowExecutions(req)
+	persistenceResp, err := wh.visibilityMrg.ScanWorkflowExecutions(ctx, req)
 	if err != nil {
 		return nil, err
 	}
@@ -2610,7 +2622,7 @@ func (wh *WorkflowHandler) CountWorkflowExecutions(ctx context.Context, request 
 		Namespace:   namespaceName,
 		Query:       request.GetQuery(),
 	}
-	persistenceResp, err := wh.visibilityMrg.CountWorkflowExecutions(req)
+	persistenceResp, err := wh.visibilityMrg.CountWorkflowExecutions(ctx, req)
 	if err != nil {
 		return nil, err
 	}
@@ -2917,10 +2929,10 @@ func (wh *WorkflowHandler) DescribeTaskQueue(ctx context.Context, request *workf
 }
 
 // GetClusterInfo return information about Temporal deployment.
-func (wh *WorkflowHandler) GetClusterInfo(_ context.Context, _ *workflowservice.GetClusterInfoRequest) (_ *workflowservice.GetClusterInfoResponse, retError error) {
+func (wh *WorkflowHandler) GetClusterInfo(ctx context.Context, _ *workflowservice.GetClusterInfoRequest) (_ *workflowservice.GetClusterInfoResponse, retError error) {
 	defer log.CapturePanic(wh.logger, &retError)
 
-	metadata, err := wh.clusterMetadataManager.GetCurrentClusterMetadata()
+	metadata, err := wh.clusterMetadataManager.GetCurrentClusterMetadata(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -2959,8 +2971,9 @@ func (wh *WorkflowHandler) GetSystemInfo(ctx context.Context, request *workflows
 		// hardcoded boolean true values since older servers will respond with a
 		// form of this message without the field which is implied false.
 		Capabilities: &workflowservice.GetSystemInfoResponse_Capabilities{
-			SignalAndQueryHeader:         true,
-			InternalErrorDifferentiation: true,
+			SignalAndQueryHeader:            true,
+			InternalErrorDifferentiation:    true,
+			ActivityFailureIncludeHeartbeat: true,
 		},
 	}, nil
 }
@@ -2997,6 +3010,7 @@ func (wh *WorkflowHandler) ListTaskQueuePartitions(ctx context.Context, request 
 }
 
 func (wh *WorkflowHandler) getRawHistory(
+	ctx context.Context,
 	scope metrics.Scope,
 	namespaceID namespace.ID,
 	execution commonpb.WorkflowExecution,
@@ -3010,7 +3024,7 @@ func (wh *WorkflowHandler) getRawHistory(
 	var rawHistory []*commonpb.DataBlob
 	shardID := common.WorkflowIDToHistoryShard(namespaceID.String(), execution.GetWorkflowId(), wh.config.NumHistoryShards)
 
-	resp, err := wh.persistenceExecutionManager.ReadRawHistoryBranch(&persistence.ReadHistoryBranchRequest{
+	resp, err := wh.persistenceExecutionManager.ReadRawHistoryBranch(ctx, &persistence.ReadHistoryBranchRequest{
 		BranchToken:   branchToken,
 		MinEventID:    firstEventID,
 		MaxEventID:    nextEventID,
@@ -3062,6 +3076,7 @@ func (wh *WorkflowHandler) getRawHistory(
 }
 
 func (wh *WorkflowHandler) getHistory(
+	ctx context.Context,
 	scope metrics.Scope,
 	namespaceID namespace.ID,
 	namespace namespace.Name,
@@ -3079,7 +3094,7 @@ func (wh *WorkflowHandler) getHistory(
 	shardID := common.WorkflowIDToHistoryShard(namespaceID.String(), execution.GetWorkflowId(), wh.config.NumHistoryShards)
 	var err error
 	var historyEvents []*historypb.HistoryEvent
-	historyEvents, size, nextPageToken, err = persistence.ReadFullPageEvents(wh.persistenceExecutionManager, &persistence.ReadHistoryBranchRequest{
+	historyEvents, size, nextPageToken, err = persistence.ReadFullPageEvents(ctx, wh.persistenceExecutionManager, &persistence.ReadHistoryBranchRequest{
 		BranchToken:   branchToken,
 		MinEventID:    firstEventID,
 		MaxEventID:    nextEventID,
@@ -3141,6 +3156,7 @@ func (wh *WorkflowHandler) getHistory(
 }
 
 func (wh *WorkflowHandler) getHistoryReverse(
+	ctx context.Context,
 	scope metrics.Scope,
 	namespaceID namespace.ID,
 	namespace namespace.Name,
@@ -3156,7 +3172,7 @@ func (wh *WorkflowHandler) getHistoryReverse(
 	var err error
 	var historyEvents []*historypb.HistoryEvent
 
-	historyEvents, size, nextPageToken, err = persistence.ReadFullPageEventsReverse(wh.persistenceExecutionManager, &persistence.ReadHistoryBranchReverseRequest{
+	historyEvents, size, nextPageToken, err = persistence.ReadFullPageEventsReverse(ctx, wh.persistenceExecutionManager, &persistence.ReadHistoryBranchReverseRequest{
 		BranchToken:            branchToken,
 		MaxEventID:             nextEventID,
 		LastFirstTransactionID: lastFirstTxnID,
@@ -3319,6 +3335,7 @@ func (wh *WorkflowHandler) createPollWorkflowTaskQueueResponse(
 			}
 		}()
 		history, persistenceToken, err = wh.getHistory(
+			ctx,
 			wh.metricsScope(ctx),
 			namespaceID,
 			namespaceEntry.Name(),
@@ -3696,7 +3713,7 @@ func (wh *WorkflowHandler) trimHistoryNode(
 		return // abort
 	}
 
-	_, err = wh.persistenceExecutionManager.TrimHistoryBranch(&persistence.TrimHistoryBranchRequest{
+	_, err = wh.persistenceExecutionManager.TrimHistoryBranch(ctx, &persistence.TrimHistoryBranchRequest{
 		ShardID:       common.WorkflowIDToHistoryShard(namespaceID, workflowID, wh.config.NumHistoryShards),
 		BranchToken:   response.CurrentBranchToken,
 		NodeID:        response.GetLastFirstEventId(),

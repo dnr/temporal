@@ -25,6 +25,8 @@
 package matching
 
 import (
+	"context"
+
 	"go.temporal.io/api/serviceerror"
 
 	persistencespb "go.temporal.io/server/api/persistence/v1"
@@ -45,15 +47,16 @@ var (
 //go:generate mockgen -copyright_file ../../LICENSE -package $GOPACKAGE -source $GOFILE -destination db_task_writer_mock.go
 
 type (
-	dbTaskWriter interface {
-		appendTask(task *persistencespb.TaskInfo) future.Future
-		flushTasks()
+	dbTaskWriterFuture = future.Future[struct{}]
+	dbTaskWriter       interface {
+		appendTask(task *persistencespb.TaskInfo) dbTaskWriterFuture
+		flushTasks(ctx context.Context)
 		notifyFlushChan() <-chan struct{}
 	}
 
 	dbTaskInfo struct {
 		task   *persistencespb.TaskInfo
-		future *future.FutureImpl // nil, error
+		future *future.FutureImpl[struct{}] // nil, error
 	}
 
 	dbTaskWriterImpl struct {
@@ -83,12 +86,12 @@ func newDBTaskWriter(
 
 func (f *dbTaskWriterImpl) appendTask(
 	task *persistencespb.TaskInfo,
-) future.Future {
+) dbTaskWriterFuture {
 	if len(f.taskBuffer) >= dbTaskFlusherBatchSize {
 		f.notifyFlush()
 	}
 
-	fut := future.NewFuture()
+	fut := future.NewFuture[struct{}]()
 	select {
 	case f.taskBuffer <- dbTaskInfo{
 		task:   task,
@@ -97,20 +100,24 @@ func (f *dbTaskWriterImpl) appendTask(
 		// noop
 	default:
 		// busy
-		fut.Set(nil, errDBTaskWriterBufferFull)
+		fut.Set(struct{}{}, errDBTaskWriterBufferFull)
 	}
 	return fut
 }
 
-func (f *dbTaskWriterImpl) flushTasks() {
+func (f *dbTaskWriterImpl) flushTasks(
+	ctx context.Context,
+) {
 	for len(f.taskBuffer) > 0 {
-		f.flushTasksOnce()
+		f.flushTasksOnce(ctx)
 	}
 }
 
-func (f *dbTaskWriterImpl) flushTasksOnce() {
+func (f *dbTaskWriterImpl) flushTasksOnce(
+	ctx context.Context,
+) {
 	tasks := make([]*persistencespb.TaskInfo, 0, dbTaskFlusherBatchSize)
-	futures := make([]*future.FutureImpl, 0, len(tasks))
+	futures := make([]*future.FutureImpl[struct{}], 0, len(tasks))
 
 FlushLoop:
 	for i := 0; i < dbTaskFlusherBatchSize; i++ {
@@ -126,9 +133,9 @@ FlushLoop:
 	if len(tasks) == 0 {
 		return
 	}
-	err := f.ownership.flushTasks(tasks...)
+	err := f.ownership.flushTasks(ctx, tasks...)
 	for _, fut := range futures {
-		fut.Set(nil, err)
+		fut.Set(struct{}{}, err)
 	}
 }
 

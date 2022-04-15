@@ -30,12 +30,13 @@ import (
 
 	commonpb "go.temporal.io/api/common/v1"
 	enumspb "go.temporal.io/api/enums/v1"
+	"go.temporal.io/api/serviceerror"
 	taskqueuepb "go.temporal.io/api/taskqueue/v1"
 
 	"go.temporal.io/server/api/matchingservice/v1"
-	m "go.temporal.io/server/api/matchingservice/v1"
 	"go.temporal.io/server/common"
 	"go.temporal.io/server/common/log"
+	"go.temporal.io/server/common/log/tag"
 	"go.temporal.io/server/common/metrics"
 	"go.temporal.io/server/common/namespace"
 	"go.temporal.io/server/common/searchattribute"
@@ -108,7 +109,7 @@ func (t *transferQueueTaskExecutorBase) pushActivity(
 	ctx, cancel := context.WithTimeout(context.Background(), transferActiveTaskDefaultTimeout)
 	defer cancel()
 
-	_, err := t.matchingClient.AddActivityTask(ctx, &m.AddActivityTaskRequest{
+	_, err := t.matchingClient.AddActivityTask(ctx, &matchingservice.AddActivityTaskRequest{
 		NamespaceId:       task.TargetNamespaceID,
 		SourceNamespaceId: task.NamespaceID,
 		Execution: &commonpb.WorkflowExecution{
@@ -122,6 +123,11 @@ func (t *transferQueueTaskExecutorBase) pushActivity(
 		ScheduleId:             task.ScheduleID,
 		ScheduleToStartTimeout: activityScheduleToStartTimeout,
 	})
+	if _, ok := err.(*serviceerror.NotFound); ok {
+		// NotFound error is not expected for AddTasks calls
+		// but will be ignored by task error handling logic, so log it here
+		initializeLoggerForTask(task, t.logger).Error("Matching returned not found error for AddActivityTask", tag.Error(err))
+	}
 
 	return err
 }
@@ -135,7 +141,7 @@ func (t *transferQueueTaskExecutorBase) pushWorkflowTask(
 	ctx, cancel := context.WithTimeout(context.Background(), transferActiveTaskDefaultTimeout)
 	defer cancel()
 
-	_, err := t.matchingClient.AddWorkflowTask(ctx, &m.AddWorkflowTaskRequest{
+	_, err := t.matchingClient.AddWorkflowTask(ctx, &matchingservice.AddWorkflowTaskRequest{
 		NamespaceId: task.NamespaceID,
 		Execution: &commonpb.WorkflowExecution{
 			WorkflowId: task.WorkflowID,
@@ -145,6 +151,12 @@ func (t *transferQueueTaskExecutorBase) pushWorkflowTask(
 		ScheduleId:             task.ScheduleID,
 		ScheduleToStartTimeout: workflowTaskScheduleToStartTimeout,
 	})
+	if _, ok := err.(*serviceerror.NotFound); ok {
+		// NotFound error is not expected for AddTasks calls
+		// but will be ignored by task error handling logic, so log it here
+		initializeLoggerForTask(task, t.logger).Error("Matching returned not found error for AddWorkflowTask", tag.Error(err))
+	}
+
 	return err
 }
 
@@ -237,7 +249,7 @@ func (t *transferQueueTaskExecutorBase) processDeleteExecutionTask(
 	}
 	defer func() { release(retError) }()
 
-	mutableState, err := loadMutableStateForTransferTask(weCtx, task, t.metricsClient, t.logger)
+	mutableState, err := loadMutableStateForTransferTask(ctx, weCtx, task, t.metricsClient, t.logger)
 	if err != nil {
 		return err
 	}
@@ -252,6 +264,7 @@ func (t *transferQueueTaskExecutorBase) processDeleteExecutionTask(
 	}
 
 	return t.workflowDeleteManager.DeleteWorkflowExecution(
+		ctx,
 		namespace.ID(task.GetNamespaceID()),
 		workflowExecution,
 		weCtx,

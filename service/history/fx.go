@@ -28,7 +28,6 @@ import (
 	"context"
 	"net"
 
-	sdkclient "go.temporal.io/sdk/client"
 	"go.uber.org/fx"
 	"google.golang.org/grpc"
 
@@ -54,6 +53,7 @@ import (
 	"go.temporal.io/server/common/resolver"
 	"go.temporal.io/server/common/resource"
 	"go.temporal.io/server/common/rpc/interceptor"
+	"go.temporal.io/server/common/sdk"
 	"go.temporal.io/server/common/searchattribute"
 	"go.temporal.io/server/service"
 	"go.temporal.io/server/service/history/configs"
@@ -67,7 +67,6 @@ var Module = fx.Options(
 	resource.Module,
 	workflow.Module,
 	shard.Module,
-	fx.Provide(ParamsExpandProvider), // BootstrapParams should be deprecated
 	fx.Provide(dynamicconfig.NewCollection),
 	fx.Provide(ConfigProvider), // might be worth just using provider for configs.Config directly
 	fx.Provide(TelemetryInterceptorProvider),
@@ -130,7 +129,7 @@ func HandlerProvider(
 	saMapper searchattribute.Mapper,
 	clusterMetadata cluster.Metadata,
 	archivalMetadata archiver.ArchivalMetadata,
-	hostInfoProvider resource.HostInfoProvider,
+	hostInfoProvider membership.HostInfoProvider,
 	shardController *shard.ControllerImpl,
 	eventNotifier events.Notifier,
 	replicationTaskFetchers ReplicationTaskFetchers,
@@ -164,10 +163,6 @@ func HistoryEngineFactoryProvider(
 	return &historyEngineFactory{
 		HistoryEngineFactoryParams: params,
 	}
-}
-
-func ParamsExpandProvider(params *resource.BootstrapParams) common.RPCFactory {
-	return params.RPCFactory
 }
 
 func ConfigProvider(
@@ -228,7 +223,8 @@ func PersistenceMaxQpsProvider(
 
 func VisibilityManagerProvider(
 	logger log.Logger,
-	params *resource.BootstrapParams,
+	metricsClient metrics.Client,
+	persistenceConfig *config.Persistence,
 	esProcessorConfig *elasticsearch.ProcessorConfig,
 	serviceConfig *configs.Config,
 	esConfig *esclient.Config,
@@ -238,7 +234,7 @@ func VisibilityManagerProvider(
 	saProvider searchattribute.Provider,
 ) (manager.VisibilityManager, error) {
 	return visibility.NewManager(
-		params.PersistenceConfig,
+		*persistenceConfig,
 		persistenceServiceResolver,
 		esConfig.GetVisibilityIndex(),
 		esConfig.GetSecondaryVisibilityIndex(),
@@ -254,7 +250,7 @@ func VisibilityManagerProvider(
 		serviceConfig.AdvancedVisibilityWritingMode,
 		dynamicconfig.GetBoolPropertyFnFilteredByNamespace(false), // history visibility never read
 		serviceConfig.EnableWriteToSecondaryAdvancedVisibility,
-		params.MetricsClient,
+		metricsClient,
 		logger,
 	)
 }
@@ -287,7 +283,7 @@ func ReplicationTaskFetchersProvider(
 
 func ArchivalClientProvider(
 	archiverProvider provider.ArchiverProvider,
-	publicClient sdkclient.Client,
+	sdkClientFactory sdk.ClientFactory,
 	logger log.Logger,
 	metricsClient metrics.Client,
 	config *configs.Config,
@@ -295,7 +291,7 @@ func ArchivalClientProvider(
 	return warchiver.NewClient(
 		metricsClient,
 		logger,
-		publicClient,
+		sdkClientFactory,
 		config.NumArchiveSystemWorkflows,
 		config.ArchiveRequestRPS,
 		archiverProvider,

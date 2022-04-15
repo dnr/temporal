@@ -25,6 +25,7 @@
 package shard
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -103,7 +104,7 @@ func (s *contextSuite) SetupTest() {
 
 	s.mockExecutionManager = s.mockResource.ExecutionMgr
 	s.mockHistoryEngine = NewMockEngine(s.controller)
-	shardContext.engine = s.mockHistoryEngine
+	shardContext.engineFuture.Set(s.mockHistoryEngine, nil)
 }
 
 func (s *contextSuite) TearDownTest() {
@@ -141,10 +142,10 @@ func (s *contextSuite) TestAddTasks_Success() {
 
 	s.mockNamespaceCache.EXPECT().GetNamespaceByID(s.namespaceID).Return(s.namespaceEntry, nil)
 	s.mockClusterMetadata.EXPECT().GetCurrentClusterName().Return(cluster.TestCurrentClusterName)
-	s.mockExecutionManager.EXPECT().AddHistoryTasks(addTasksRequest).Return(nil)
+	s.mockExecutionManager.EXPECT().AddHistoryTasks(gomock.Any(), addTasksRequest).Return(nil)
 	s.mockHistoryEngine.EXPECT().NotifyNewTasks(gomock.Any(), tasks)
 
-	err := s.shardContext.AddTasks(addTasksRequest)
+	err := s.shardContext.AddTasks(context.Background(), addTasksRequest)
 	s.NoError(err)
 }
 
@@ -158,7 +159,7 @@ func (s *contextSuite) TestTimerMaxReadLevelInitialization() {
 			cluster.TestCurrentClusterName: timestamp.TimePtr(now),
 		},
 	}
-	s.mockResource.ShardMgr.EXPECT().GetOrCreateShard(gomock.Any()).Return(
+	s.mockResource.ShardMgr.EXPECT().GetOrCreateShard(gomock.Any(), gomock.Any()).Return(
 		&persistence.GetOrCreateShardResponse{
 			ShardInfo: persistenceShardInfo,
 		},

@@ -82,7 +82,7 @@ func newTask(
 		logger:    logger,
 		scavenger: scavenger,
 
-		ctx:         context.Background(),
+		ctx:         context.Background(), // TODO: use context from ExecutionsScavengerActivity
 		rateLimiter: rateLimiter,
 	}
 }
@@ -104,7 +104,7 @@ func (t *task) Run() executor.TaskStatus {
 			return executor.TaskStatusDefer
 		}
 
-		mutableState := &MutableState{WorkflowMutableState: record.(*persistencespb.WorkflowMutableState)}
+		mutableState := &MutableState{WorkflowMutableState: record}
 		printValidationResult(
 			mutableState,
 			t.validate(mutableState),
@@ -128,6 +128,7 @@ func (t *task) validate(
 	)
 
 	if validationResults, err := NewMutableStateIDValidator().Validate(
+		t.ctx,
 		mutableState,
 	); err != nil {
 		t.logger.Error("unable to validate mutable state ID",
@@ -144,7 +145,7 @@ func (t *task) validate(
 	if validationResults, err := NewHistoryEventIDValidator(
 		t.shardID,
 		t.executionManager,
-	).Validate(mutableState); err != nil {
+	).Validate(t.ctx, mutableState); err != nil {
 		t.logger.Error("unable to validate history event ID being contiguous",
 			tag.ShardID(t.shardID),
 			tag.WorkflowNamespaceID(mutableState.GetExecutionInfo().GetNamespaceId()),
@@ -159,22 +160,18 @@ func (t *task) validate(
 	return results
 }
 
-func (t *task) getPaginationFn() collection.PaginationFn {
-	return func(paginationToken []byte) ([]interface{}, []byte, error) {
+func (t *task) getPaginationFn() collection.PaginationFn[*persistencespb.WorkflowMutableState] {
+	return func(paginationToken []byte) ([]*persistencespb.WorkflowMutableState, []byte, error) {
 		req := &persistence.ListConcreteExecutionsRequest{
 			ShardID:   t.shardID,
 			PageSize:  executionsPageSize,
 			PageToken: paginationToken,
 		}
-		resp, err := t.executionManager.ListConcreteExecutions(req)
+		resp, err := t.executionManager.ListConcreteExecutions(t.ctx, req)
 		if err != nil {
 			return nil, nil, err
 		}
-		var paginateItems []interface{}
-		for _, state := range resp.States {
-			paginateItems = append(paginateItems, state)
-		}
-
+		paginateItems := resp.States
 		t.paginationToken = resp.PageToken
 		return paginateItems, resp.PageToken, nil
 	}

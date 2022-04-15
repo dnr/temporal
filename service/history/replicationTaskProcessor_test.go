@@ -41,6 +41,7 @@ import (
 	enumsspb "go.temporal.io/server/api/enums/v1"
 	historyspb "go.temporal.io/server/api/history/v1"
 	persistencespb "go.temporal.io/server/api/persistence/v1"
+	"go.temporal.io/server/common/persistence/serialization"
 	"go.temporal.io/server/common/primitives/timestamp"
 	"go.temporal.io/server/common/quotas"
 	"go.temporal.io/server/service/history/configs"
@@ -149,6 +150,7 @@ func (s *replicationTaskProcessorSuite) SetupTest() {
 		metricsClient,
 		s.mockReplicationTaskFetcher,
 		s.mockReplicationTaskExecutor,
+		serialization.NewSerializer(),
 	)
 }
 
@@ -257,7 +259,7 @@ func (s *replicationTaskProcessorSuite) TestHandleReplicationDLQTask_SyncActivit
 		},
 	}
 
-	s.mockExecutionManager.EXPECT().PutReplicationTaskToDLQ(request).Return(nil)
+	s.mockExecutionManager.EXPECT().PutReplicationTaskToDLQ(gomock.Any(), request).Return(nil)
 	err := s.replicationTaskProcessor.handleReplicationDLQTask(request)
 	s.NoError(err)
 }
@@ -281,7 +283,7 @@ func (s *replicationTaskProcessorSuite) TestHandleReplicationDLQTask_History() {
 		},
 	}
 
-	s.mockExecutionManager.EXPECT().PutReplicationTaskToDLQ(request).Return(nil)
+	s.mockExecutionManager.EXPECT().PutReplicationTaskToDLQ(gomock.Any(), request).Return(nil)
 	err := s.replicationTaskProcessor.handleReplicationDLQTask(request)
 	s.NoError(err)
 }
@@ -367,7 +369,7 @@ func (s *replicationTaskProcessorSuite) TestConvertTaskToDLQTask_History() {
 
 func (s *replicationTaskProcessorSuite) TestCleanupReplicationTask_Noop() {
 	ackedTaskID := int64(12345)
-	s.mockResource.ShardMgr.EXPECT().UpdateShard(gomock.Any()).Return(nil)
+	s.mockResource.ShardMgr.EXPECT().UpdateShard(gomock.Any(), gomock.Any()).Return(nil)
 	err := s.mockShard.UpdateQueueClusterAckLevel(tasks.CategoryReplication, cluster.TestAlternativeClusterName, tasks.Key{TaskID: ackedTaskID})
 	s.NoError(err)
 
@@ -378,12 +380,13 @@ func (s *replicationTaskProcessorSuite) TestCleanupReplicationTask_Noop() {
 
 func (s *replicationTaskProcessorSuite) TestCleanupReplicationTask_Cleanup() {
 	ackedTaskID := int64(12345)
-	s.mockResource.ShardMgr.EXPECT().UpdateShard(gomock.Any()).Return(nil)
+	s.mockResource.ShardMgr.EXPECT().UpdateShard(gomock.Any(), gomock.Any()).Return(nil)
 	err := s.mockShard.UpdateQueueClusterAckLevel(tasks.CategoryReplication, cluster.TestAlternativeClusterName, tasks.Key{TaskID: ackedTaskID})
 	s.NoError(err)
 
 	s.replicationTaskProcessor.minTxAckedTaskID = ackedTaskID - 1
 	s.mockExecutionManager.EXPECT().RangeCompleteHistoryTasks(
+		gomock.Any(),
 		&persistence.RangeCompleteHistoryTasksRequest{
 			ShardID:      s.shardID,
 			TaskCategory: tasks.CategoryReplication,

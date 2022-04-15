@@ -29,14 +29,13 @@ import (
 	stdlog "log"
 	"os"
 	"path"
-	"runtime"
 	"strings"
 	_ "time/tzdata" // embed tzdata as a fallback
 
 	"github.com/urfave/cli/v2"
 
-	"go.temporal.io/server/build"
 	"go.temporal.io/server/common/authorization"
+	"go.temporal.io/server/common/build"
 	"go.temporal.io/server/common/config"
 	"go.temporal.io/server/common/dynamicconfig"
 	"go.temporal.io/server/common/headers"
@@ -44,6 +43,7 @@ import (
 	"go.temporal.io/server/common/log/tag"
 	_ "go.temporal.io/server/common/persistence/sql/sqlplugin/mysql"      // needed to load mysql plugin
 	_ "go.temporal.io/server/common/persistence/sql/sqlplugin/postgresql" // needed to load postgresql plugin
+	_ "go.temporal.io/server/common/persistence/sql/sqlplugin/sqlite"     // needed to load sqlite plugin
 	"go.temporal.io/server/temporal"
 )
 
@@ -133,13 +133,15 @@ func buildCLI() *cli.App {
 				}
 
 				logger := log.NewZapLogger(log.BuildZapLogger(cfg.Log))
-				logger.Info("Build info",
-					tag.Timestamp(build.InfoData.BuildTime()),
+				logger.Info("Build info.",
+					tag.NewTimeTag("git-time", build.InfoData.GitTime),
 					tag.NewStringTag("git-revision", build.InfoData.GitRevision),
-					tag.NewStringTag("platform", runtime.GOARCH),
-					tag.NewStringTag("go-version", runtime.Version()),
-					tag.NewStringTag("server-version", headers.ServerVersion),
+					tag.NewBoolTag("git-modified", build.InfoData.GitModified),
+					tag.NewStringTag("go-arch", build.InfoData.GoArch),
+					tag.NewStringTag("go-os", build.InfoData.GoOs),
+					tag.NewStringTag("go-version", build.InfoData.GoVersion),
 					tag.NewBoolTag("cgo-enabled", build.InfoData.CgoEnabled),
+					tag.NewStringTag("server-version", headers.ServerVersion),
 				)
 
 				var dynamicConfigClient dynamicconfig.Client

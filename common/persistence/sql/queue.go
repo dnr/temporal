@@ -58,9 +58,10 @@ func newQueue(
 	return queue, nil
 }
 
-func (q *sqlQueue) Init(blob *commonpb.DataBlob) error {
-	ctx, cancel := newExecutionContext()
-	defer cancel()
+func (q *sqlQueue) Init(
+	ctx context.Context,
+	blob *commonpb.DataBlob,
+) error {
 	if err := q.initializeQueueMetadata(ctx, blob); err != nil {
 		return err
 	}
@@ -71,10 +72,9 @@ func (q *sqlQueue) Init(blob *commonpb.DataBlob) error {
 }
 
 func (q *sqlQueue) EnqueueMessage(
+	ctx context.Context,
 	blob commonpb.DataBlob,
 ) error {
-	ctx, cancel := newExecutionContext()
-	defer cancel()
 	err := q.txExecute(ctx, "EnqueueMessage", func(tx sqlplugin.Tx) error {
 		lastMessageID, err := tx.GetLastEnqueuedMessageIDForUpdate(ctx, q.queueType)
 		switch err {
@@ -99,11 +99,10 @@ func (q *sqlQueue) EnqueueMessage(
 }
 
 func (q *sqlQueue) ReadMessages(
+	ctx context.Context,
 	lastMessageID int64,
 	pageSize int,
 ) ([]*persistence.QueueMessage, error) {
-	ctx, cancel := newExecutionContext()
-	defer cancel()
 	rows, err := q.Db.RangeSelectFromMessages(ctx, sqlplugin.QueueMessagesRangeFilter{
 		QueueType:    q.queueType,
 		MinMessageID: lastMessageID,
@@ -127,10 +126,9 @@ func (q *sqlQueue) ReadMessages(
 }
 
 func (q *sqlQueue) DeleteMessagesBefore(
+	ctx context.Context,
 	messageID int64,
 ) error {
-	ctx, cancel := newExecutionContext()
-	defer cancel()
 	_, err := q.Db.RangeDeleteFromMessages(ctx, sqlplugin.QueueMessagesRangeFilter{
 		QueueType:    q.queueType,
 		MinMessageID: persistence.EmptyQueueMessageID,
@@ -142,9 +140,10 @@ func (q *sqlQueue) DeleteMessagesBefore(
 	return nil
 }
 
-func (q *sqlQueue) UpdateAckLevel(metadata *persistence.InternalQueueMetadata) error {
-	ctx, cancel := newExecutionContext()
-	defer cancel()
+func (q *sqlQueue) UpdateAckLevel(
+	ctx context.Context,
+	metadata *persistence.InternalQueueMetadata,
+) error {
 	err := q.txExecute(ctx, "UpdateAckLevel", func(tx sqlplugin.Tx) error {
 		result, err := tx.UpdateQueueMetadata(ctx, &sqlplugin.QueueMetadataRow{
 			QueueType:    q.queueType,
@@ -171,9 +170,9 @@ func (q *sqlQueue) UpdateAckLevel(metadata *persistence.InternalQueueMetadata) e
 	return nil
 }
 
-func (q *sqlQueue) GetAckLevels() (*persistence.InternalQueueMetadata, error) {
-	ctx, cancel := newExecutionContext()
-	defer cancel()
+func (q *sqlQueue) GetAckLevels(
+	ctx context.Context,
+) (*persistence.InternalQueueMetadata, error) {
 	row, err := q.Db.SelectFromQueueMetadata(ctx, sqlplugin.QueueMetadataFilter{
 		QueueType: q.queueType,
 	})
@@ -188,10 +187,9 @@ func (q *sqlQueue) GetAckLevels() (*persistence.InternalQueueMetadata, error) {
 }
 
 func (q *sqlQueue) EnqueueMessageToDLQ(
+	ctx context.Context,
 	blob commonpb.DataBlob,
 ) (int64, error) {
-	ctx, cancel := newExecutionContext()
-	defer cancel()
 	var lastMessageID int64
 	err := q.txExecute(ctx, "EnqueueMessageToDLQ", func(tx sqlplugin.Tx) error {
 		var err error
@@ -218,13 +216,12 @@ func (q *sqlQueue) EnqueueMessageToDLQ(
 }
 
 func (q *sqlQueue) ReadMessagesFromDLQ(
+	ctx context.Context,
 	firstMessageID int64,
 	lastMessageID int64,
 	pageSize int,
 	pageToken []byte,
 ) ([]*persistence.QueueMessage, []byte, error) {
-	ctx, cancel := newExecutionContext()
-	defer cancel()
 	if pageToken != nil && len(pageToken) != 0 {
 		lastReadMessageID, err := deserializePageToken(pageToken)
 		if err != nil {
@@ -262,10 +259,9 @@ func (q *sqlQueue) ReadMessagesFromDLQ(
 }
 
 func (q *sqlQueue) DeleteMessageFromDLQ(
+	ctx context.Context,
 	messageID int64,
 ) error {
-	ctx, cancel := newExecutionContext()
-	defer cancel()
 	_, err := q.Db.DeleteFromMessages(ctx, sqlplugin.QueueMessagesFilter{
 		QueueType: q.getDLQTypeFromQueueType(),
 		MessageID: messageID,
@@ -277,11 +273,10 @@ func (q *sqlQueue) DeleteMessageFromDLQ(
 }
 
 func (q *sqlQueue) RangeDeleteMessagesFromDLQ(
+	ctx context.Context,
 	firstMessageID int64,
 	lastMessageID int64,
 ) error {
-	ctx, cancel := newExecutionContext()
-	defer cancel()
 	_, err := q.Db.RangeDeleteFromMessages(ctx, sqlplugin.QueueMessagesRangeFilter{
 		QueueType:    q.getDLQTypeFromQueueType(),
 		MinMessageID: firstMessageID,
@@ -293,9 +288,10 @@ func (q *sqlQueue) RangeDeleteMessagesFromDLQ(
 	return nil
 }
 
-func (q *sqlQueue) UpdateDLQAckLevel(metadata *persistence.InternalQueueMetadata) error {
-	ctx, cancel := newExecutionContext()
-	defer cancel()
+func (q *sqlQueue) UpdateDLQAckLevel(
+	ctx context.Context,
+	metadata *persistence.InternalQueueMetadata,
+) error {
 	err := q.txExecute(ctx, "UpdateDLQAckLevel", func(tx sqlplugin.Tx) error {
 
 		result, err := tx.UpdateQueueMetadata(ctx, &sqlplugin.QueueMetadataRow{
@@ -322,9 +318,9 @@ func (q *sqlQueue) UpdateDLQAckLevel(metadata *persistence.InternalQueueMetadata
 	return nil
 }
 
-func (q *sqlQueue) GetDLQAckLevels() (*persistence.InternalQueueMetadata, error) {
-	ctx, cancel := newExecutionContext()
-	defer cancel()
+func (q *sqlQueue) GetDLQAckLevels(
+	ctx context.Context,
+) (*persistence.InternalQueueMetadata, error) {
 	row, err := q.Db.SelectFromQueueMetadata(ctx, sqlplugin.QueueMetadataFilter{
 		QueueType: q.getDLQTypeFromQueueType(),
 	})

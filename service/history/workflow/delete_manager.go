@@ -28,9 +28,12 @@ package workflow
 
 import (
 	"context"
+	"time"
 
 	commonpb "go.temporal.io/api/common/v1"
 	enumspb "go.temporal.io/api/enums/v1"
+	"go.temporal.io/api/serviceerror"
+	enumsspb "go.temporal.io/server/api/enums/v1"
 
 	"go.temporal.io/server/common"
 	"go.temporal.io/server/common/clock"
@@ -48,9 +51,10 @@ import (
 
 type (
 	DeleteManager interface {
-		AddDeleteWorkflowExecutionTask(nsID namespace.ID, we commonpb.WorkflowExecution, ms MutableState) error
-		DeleteWorkflowExecution(nsID namespace.ID, we commonpb.WorkflowExecution, weCtx Context, ms MutableState, sourceTaskVersion int64) error
-		DeleteWorkflowExecutionByRetention(nsID namespace.ID, we commonpb.WorkflowExecution, weCtx Context, ms MutableState, sourceTaskVersion int64) error
+		AddDeleteWorkflowExecutionTask(ctx context.Context, nsID namespace.ID, we commonpb.WorkflowExecution, ms MutableState) error
+		DeleteWorkflowExecution(ctx context.Context, nsID namespace.ID, we commonpb.WorkflowExecution, weCtx Context, ms MutableState, sourceTaskVersion int64) error
+		DeleteWorkflowExecutionByRetention(ctx context.Context, nsID namespace.ID, we commonpb.WorkflowExecution, weCtx Context, ms MutableState, sourceTaskVersion int64) error
+		DeleteWorkflowExecutionByReplication(ctx context.Context, nsID namespace.ID, we commonpb.WorkflowExecution, weCtx Context, ms MutableState, sourceTaskVersion int64) error
 	}
 
 	DeleteManagerImpl struct {
@@ -83,7 +87,9 @@ func NewDeleteManager(
 
 	return deleteManager
 }
+
 func (m *DeleteManagerImpl) AddDeleteWorkflowExecutionTask(
+	ctx context.Context,
 	nsID namespace.ID,
 	we commonpb.WorkflowExecution,
 	ms MutableState,
@@ -101,7 +107,7 @@ func (m *DeleteManagerImpl) AddDeleteWorkflowExecutionTask(
 		return err
 	}
 
-	err = m.shard.AddTasks(&persistence.AddHistoryTasksRequest{
+	err = m.shard.AddTasks(ctx, &persistence.AddHistoryTasksRequest{
 		ShardID: m.shard.GetShardID(),
 		// RangeID is set by shard
 		NamespaceID: nsID.String(),
@@ -119,6 +125,7 @@ func (m *DeleteManagerImpl) AddDeleteWorkflowExecutionTask(
 }
 
 func (m *DeleteManagerImpl) DeleteWorkflowExecution(
+	ctx context.Context,
 	nsID namespace.ID,
 	we commonpb.WorkflowExecution,
 	weCtx Context,
@@ -133,21 +140,27 @@ func (m *DeleteManagerImpl) DeleteWorkflowExecution(
 		// workflow should not be deleted. NotFound errors are ignored by task processor.
 		return consts.ErrWorkflowNotCompleted
 	}
+	completionEvent, err := ms.GetCompletionEvent(ctx)
+	if err != nil {
+		return err
+	}
 
-	err := m.deleteWorkflowExecutionInternal(
+	return m.deleteWorkflowExecutionInternal(
+		ctx,
 		nsID,
 		we,
 		weCtx,
 		ms,
 		sourceTaskVersion,
 		false,
+		nil,
+		completionEvent.GetEventTime(),
 		m.metricsClient.Scope(metrics.HistoryDeleteWorkflowExecutionScope),
 	)
-
-	return err
 }
 
 func (m *DeleteManagerImpl) DeleteWorkflowExecutionByRetention(
+	ctx context.Context,
 	nsID namespace.ID,
 	we commonpb.WorkflowExecution,
 	weCtx Context,
@@ -161,27 +174,74 @@ func (m *DeleteManagerImpl) DeleteWorkflowExecutionByRetention(
 		// But cross DC replication can resurrect workflow and therefore DeleteHistoryEventTask should be ignored.
 		return nil
 	}
+	completionEvent, err := ms.GetCompletionEvent(ctx)
+	if err != nil {
+		return err
+	}
 
-	err := m.deleteWorkflowExecutionInternal(
+	return m.deleteWorkflowExecutionInternal(
+		ctx,
 		nsID,
 		we,
 		weCtx,
 		ms,
 		sourceTaskVersion,
 		true,
+		nil,
+		completionEvent.GetEventTime(),
 		m.metricsClient.Scope(metrics.HistoryProcessDeleteHistoryEventScope),
 	)
+}
 
-	return err
+func (m *DeleteManagerImpl) DeleteWorkflowExecutionByReplication(
+	ctx context.Context,
+	nsID namespace.ID,
+	we commonpb.WorkflowExecution,
+	weCtx Context,
+	ms MutableState,
+	sourceTaskVersion int64,
+) error {
+
+	namespaceEntry := ms.GetNamespaceEntry()
+	if namespaceEntry.ActiveClusterName() == m.shard.GetClusterMetadata().GetCurrentClusterName() {
+		return serviceerror.NewInvalidArgument("Cannot cleanup workflows in active cluster by replication")
+	}
+
+	var startTime *time.Time
+	var closedTime *time.Time
+	if ms.GetExecutionState().State == enumsspb.WORKFLOW_EXECUTION_STATE_COMPLETED {
+		completionEvent, err := ms.GetCompletionEvent(ctx)
+		if err != nil {
+			return err
+		}
+		closedTime = completionEvent.GetEventTime()
+	} else {
+		startTime = ms.GetExecutionInfo().GetStartTime()
+	}
+	return m.deleteWorkflowExecutionInternal(
+		ctx,
+		nsID,
+		we,
+		weCtx,
+		ms,
+		sourceTaskVersion,
+		false,
+		startTime,
+		closedTime,
+		m.metricsClient.Scope(metrics.HistoryDeleteWorkflowExecutionScope),
+	)
 }
 
 func (m *DeleteManagerImpl) deleteWorkflowExecutionInternal(
+	ctx context.Context,
 	namespaceID namespace.ID,
 	we commonpb.WorkflowExecution,
 	weCtx Context,
 	ms MutableState,
 	newTaskVersion int64,
 	archiveIfEnabled bool,
+	startTime *time.Time,
+	closedTime *time.Time,
 	scope metrics.Scope,
 ) error {
 
@@ -192,7 +252,7 @@ func (m *DeleteManagerImpl) deleteWorkflowExecutionInternal(
 
 	shouldDeleteHistory := true
 	if archiveIfEnabled {
-		shouldDeleteHistory, err = m.archiveWorkflowIfEnabled(namespaceID, we, currentBranchToken, weCtx, ms, scope)
+		shouldDeleteHistory, err = m.archiveWorkflowIfEnabled(ctx, namespaceID, we, currentBranchToken, weCtx, ms, scope)
 		if err != nil {
 			return err
 		}
@@ -203,12 +263,8 @@ func (m *DeleteManagerImpl) deleteWorkflowExecutionInternal(
 		currentBranchToken = nil
 	}
 
-	completionEvent, err := ms.GetCompletionEvent()
-	if err != nil {
-		return err
-	}
-
 	if err := m.shard.DeleteWorkflowExecution(
+		ctx,
 		definition.WorkflowKey{
 			NamespaceID: namespaceID.String(),
 			WorkflowID:  we.GetWorkflowId(),
@@ -216,7 +272,8 @@ func (m *DeleteManagerImpl) deleteWorkflowExecutionInternal(
 		},
 		currentBranchToken,
 		newTaskVersion,
-		completionEvent.GetEventTime(),
+		startTime,
+		closedTime,
 	); err != nil {
 		return err
 	}
@@ -229,6 +286,7 @@ func (m *DeleteManagerImpl) deleteWorkflowExecutionInternal(
 }
 
 func (m *DeleteManagerImpl) archiveWorkflowIfEnabled(
+	ctx context.Context,
 	namespaceID namespace.ID,
 	workflowExecution commonpb.WorkflowExecution,
 	currentBranchToken []byte,
@@ -271,7 +329,7 @@ func (m *DeleteManagerImpl) archiveWorkflowIfEnabled(
 		CallerService:        common.HistoryServiceName,
 		AttemptArchiveInline: false, // archive in workflow by default
 	}
-	executionStats, err := weCtx.LoadExecutionStats()
+	executionStats, err := weCtx.LoadExecutionStats(ctx)
 	if err == nil && executionStats.HistorySize < int64(m.config.TimerProcessorHistoryArchivalSizeLimit()) {
 		req.AttemptArchiveInline = true
 	}

@@ -109,6 +109,8 @@ const (
 	EnableParentClosePolicyWorker = "system.enableParentClosePolicyWorker"
 	// EnableStickyQuery indicates if sticky query should be enabled per namespace
 	EnableStickyQuery = "system.enableStickyQuery"
+	// EnableActivityLocalDispatch indicates if acitivty local dispatch is enabled per namespace
+	EnableActivityLocalDispatch = "system.enableActivityLocalDispatch"
 
 	// key for size limit
 
@@ -214,6 +216,13 @@ const (
 	// KeepAliveTimeout After having pinged for keepalive check, the server waits for a duration
 	// of Timeout and if no activity is seen even after that the connection is closed.
 	KeepAliveTimeout = "frontend.keepAliveTimeout"
+
+	// DeleteNamespaceDeleteActivityRPS is RPS per every parallel delete executions activity.
+	// Total RPS is equal to DeleteNamespaceDeleteActivityRPS * DeleteNamespaceConcurrentDeleteExecutionsActivities.
+	DeleteNamespaceDeleteActivityRPS = "frontend.deleteNamespaceDeleteActivityRPS"
+	// DeleteNamespaceConcurrentDeleteExecutionsActivities is a number of concurrent delete executions activities.
+	// Must be not greater than 256 and number of worker cores in the cluster.
+	DeleteNamespaceConcurrentDeleteExecutionsActivities = "frontend.deleteNamespaceConcurrentDeleteExecutionsActivities"
 
 	// key for matching
 
