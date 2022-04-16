@@ -93,7 +93,7 @@ func (wm *perNamespaceWorkerManager) Start() {
 		return
 	}
 
-	wm.logger.Info("", tag.ComponentWorkerManager, tag.LifeCycleStarting)
+	wm.logger.Info("", tag.ComponentPerNSWorkerManager, tag.LifeCycleStarting)
 
 	// this will call namespaceCallback once synchronously with current namespaces
 	wm.namespaceRegistry.RegisterNamespaceChangeCallback(
@@ -103,7 +103,7 @@ func (wm *perNamespaceWorkerManager) Start() {
 		wm.namespaceCallback,
 	)
 
-	wm.logger.Info("", tag.ComponentWorkerManager, tag.LifeCycleStarted)
+	wm.logger.Info("", tag.ComponentPerNSWorkerManager, tag.LifeCycleStarted)
 }
 
 func (wm *perNamespaceWorkerManager) Stop() {
@@ -115,7 +115,7 @@ func (wm *perNamespaceWorkerManager) Stop() {
 		return
 	}
 
-	wm.logger.Info("", tag.ComponentWorkerManager, tag.LifeCycleStopping)
+	wm.logger.Info("", tag.ComponentPerNSWorkerManager, tag.LifeCycleStopping)
 
 	wm.namespaceRegistry.UnregisterNamespaceChangeCallback(namespaceCallbackKey)
 
@@ -131,7 +131,7 @@ func (wm *perNamespaceWorkerManager) Stop() {
 		}
 	}
 
-	wm.logger.Info("", tag.ComponentWorkerManager, tag.LifeCycleStopped)
+	wm.logger.Info("", tag.ComponentPerNSWorkerManager, tag.LifeCycleStopped)
 }
 
 func (wm *perNamespaceWorkerManager) Running() bool {
