@@ -129,8 +129,8 @@ type (
 	// Registry provides access to Namespace objects by name or by ID.
 	Registry interface {
 		common.Daemon
-		RegisterNamespaceChangeCallback(key any, initialNotificationVersion int64, prepareCallback PrepareCallbackFn, callback CallbackFn)
-		UnregisterNamespaceChangeCallback(key any)
+		RegisterNamespaceChangeCallback(shard int32, initialNotificationVersion int64, prepareCallback PrepareCallbackFn, callback CallbackFn)
+		UnregisterNamespaceChangeCallback(shard int32)
 		GetNamespace(name Name) (*Namespace, error)
 		GetNamespaceByID(id ID) (*Namespace, error)
 		GetNamespaceID(name Name) (ID, error)
@@ -162,8 +162,8 @@ type (
 		// cacheLock.Lock() (the other lock in this struct, above) while holding
 		// this lock or you risk a deadlock.
 		callbackLock     sync.Mutex
-		prepareCallbacks map[any]PrepareCallbackFn
-		callbacks        map[any]CallbackFn
+		prepareCallbacks map[int32]PrepareCallbackFn
+		callbacks        map[int32]CallbackFn
 	}
 )
 
@@ -184,8 +184,8 @@ func NewRegistry(
 		logger:                  logger,
 		cacheNameToID:           cache.New(cacheMaxSize, &cacheOpts),
 		cacheByID:               cache.New(cacheMaxSize, &cacheOpts),
-		prepareCallbacks:        make(map[any]PrepareCallbackFn),
-		callbacks:               make(map[any]CallbackFn),
+		prepareCallbacks:        make(map[int32]PrepareCallbackFn),
+		callbacks:               make(map[int32]CallbackFn),
 	}
 	reg.lastRefreshTime.Store(time.Time{})
 	return reg
@@ -244,15 +244,15 @@ func (r *registry) getAllNamespace() map[ID]*Namespace {
 // callback functions MUST NOT call back into this registry instance, either to
 // unregister themselves or to look up Namespaces.
 func (r *registry) RegisterNamespaceChangeCallback(
-	key any,
+	shard int32,
 	initialNotificationVersion int64,
 	prepareCallback PrepareCallbackFn,
 	callback CallbackFn,
 ) {
 
 	r.callbackLock.Lock()
-	r.prepareCallbacks[key] = prepareCallback
-	r.callbacks[key] = callback
+	r.prepareCallbacks[shard] = prepareCallback
+	r.callbacks[shard] = callback
 	r.callbackLock.Unlock()
 
 	// this section is trying to make the shard catch up with namespace changes
@@ -281,13 +281,13 @@ func (r *registry) RegisterNamespaceChangeCallback(
 
 // UnregisterNamespaceChangeCallback delete a namespace failover callback
 func (r *registry) UnregisterNamespaceChangeCallback(
-	key any,
+	shard int32,
 ) {
 	r.callbackLock.Lock()
 	defer r.callbackLock.Unlock()
 
-	delete(r.prepareCallbacks, key)
-	delete(r.callbacks, key)
+	delete(r.prepareCallbacks, shard)
+	delete(r.callbacks, shard)
 }
 
 // GetNamespace retrieves the information from the cache if it exists, otherwise retrieves the information from metadata

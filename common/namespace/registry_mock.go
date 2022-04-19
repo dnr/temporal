@@ -253,15 +253,15 @@ func (mr *MockRegistryMockRecorder) Refresh() *gomock.Call {
 }
 
 // RegisterNamespaceChangeCallback mocks base method.
-func (m *MockRegistry) RegisterNamespaceChangeCallback(key any, initialNotificationVersion int64, prepareCallback PrepareCallbackFn, callback CallbackFn) {
+func (m *MockRegistry) RegisterNamespaceChangeCallback(shard int32, initialNotificationVersion int64, prepareCallback PrepareCallbackFn, callback CallbackFn) {
 	m.ctrl.T.Helper()
-	m.ctrl.Call(m, "RegisterNamespaceChangeCallback", key, initialNotificationVersion, prepareCallback, callback)
+	m.ctrl.Call(m, "RegisterNamespaceChangeCallback", shard, initialNotificationVersion, prepareCallback, callback)
 }
 
 // RegisterNamespaceChangeCallback indicates an expected call of RegisterNamespaceChangeCallback.
-func (mr *MockRegistryMockRecorder) RegisterNamespaceChangeCallback(key, initialNotificationVersion, prepareCallback, callback interface{}) *gomock.Call {
+func (mr *MockRegistryMockRecorder) RegisterNamespaceChangeCallback(shard, initialNotificationVersion, prepareCallback, callback interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RegisterNamespaceChangeCallback", reflect.TypeOf((*MockRegistry)(nil).RegisterNamespaceChangeCallback), key, initialNotificationVersion, prepareCallback, callback)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RegisterNamespaceChangeCallback", reflect.TypeOf((*MockRegistry)(nil).RegisterNamespaceChangeCallback), shard, initialNotificationVersion, prepareCallback, callback)
 }
 
 // Start mocks base method.
@@ -289,13 +289,13 @@ func (mr *MockRegistryMockRecorder) Stop() *gomock.Call {
 }
 
 // UnregisterNamespaceChangeCallback mocks base method.
-func (m *MockRegistry) UnregisterNamespaceChangeCallback(key any) {
+func (m *MockRegistry) UnregisterNamespaceChangeCallback(shard int32) {
 	m.ctrl.T.Helper()
-	m.ctrl.Call(m, "UnregisterNamespaceChangeCallback", key)
+	m.ctrl.Call(m, "UnregisterNamespaceChangeCallback", shard)
 }
 
 // UnregisterNamespaceChangeCallback indicates an expected call of UnregisterNamespaceChangeCallback.
-func (mr *MockRegistryMockRecorder) UnregisterNamespaceChangeCallback(key interface{}) *gomock.Call {
+func (mr *MockRegistryMockRecorder) UnregisterNamespaceChangeCallback(shard interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UnregisterNamespaceChangeCallback", reflect.TypeOf((*MockRegistry)(nil).UnregisterNamespaceChangeCallback), key)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UnregisterNamespaceChangeCallback", reflect.TypeOf((*MockRegistry)(nil).UnregisterNamespaceChangeCallback), shard)
 }
