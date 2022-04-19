@@ -43,10 +43,6 @@ import (
 	workercommon "go.temporal.io/server/service/worker/common"
 )
 
-const (
-	namespaceCallbackKey = "service-worker-per-namespace-worker-manager"
-)
-
 type (
 	perNamespaceWorkers struct {
 		name    namespace.Name
@@ -95,13 +91,8 @@ func (wm *perNamespaceWorkerManager) Start() {
 
 	wm.logger.Info("", tag.ComponentPerNSWorkerManager, tag.LifeCycleStarting)
 
-	// this will call namespaceCallback once synchronously with current namespaces
-	wm.namespaceRegistry.RegisterNamespaceChangeCallback(
-		namespaceCallbackKey,
-		0,
-		func() {},
-		wm.namespaceCallback,
-	)
+	// this will call namespaceCallback with current namespaces
+	wm.namespaceRegistry.RegisterStateChangeCallback(wm, wm.namespaceCallback)
 
 	wm.logger.Info("", tag.ComponentPerNSWorkerManager, tag.LifeCycleStarted)
 }
@@ -117,7 +108,7 @@ func (wm *perNamespaceWorkerManager) Stop() {
 
 	wm.logger.Info("", tag.ComponentPerNSWorkerManager, tag.LifeCycleStopping)
 
-	wm.namespaceRegistry.UnregisterNamespaceChangeCallback(namespaceCallbackKey)
+	wm.namespaceRegistry.UnregisterStateChangeCallback(wm)
 
 	wm.lock.Lock()
 	defer wm.lock.Unlock()
@@ -138,16 +129,14 @@ func (wm *perNamespaceWorkerManager) Running() bool {
 	return atomic.LoadInt32(&wm.status) == common.DaemonStatusStarted
 }
 
-func (wm *perNamespaceWorkerManager) namespaceCallback(oldNs []*namespace.Namespace, newNs []*namespace.Namespace) {
-	for _, ns := range newNs {
-		switch ns.State() {
-		case enumspb.NAMESPACE_STATE_REGISTERED:
-			wm.setupNamespace(ns)
-		case enumspb.NAMESPACE_STATE_DEPRECATED:
-			// TODO: handle namespace deprecation/deletion
-		case enumspb.NAMESPACE_STATE_DELETED:
-			// TODO: handle namespace deprecation/deletion
-		}
+func (wm *perNamespaceWorkerManager) namespaceCallback(ns *namespace.Namespace) {
+	switch ns.State() {
+	case enumspb.NAMESPACE_STATE_REGISTERED:
+		wm.setupNamespace(ns)
+	case enumspb.NAMESPACE_STATE_DEPRECATED:
+		// TODO: handle namespace deprecation/deletion
+	case enumspb.NAMESPACE_STATE_DELETED:
+		// TODO: handle namespace deprecation/deletion
 	}
 }
 

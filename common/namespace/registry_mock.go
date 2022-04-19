@@ -264,6 +264,18 @@ func (mr *MockRegistryMockRecorder) RegisterNamespaceChangeCallback(shard, initi
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RegisterNamespaceChangeCallback", reflect.TypeOf((*MockRegistry)(nil).RegisterNamespaceChangeCallback), shard, initialNotificationVersion, prepareCallback, callback)
 }
 
+// RegisterStateChangeCallback mocks base method.
+func (m *MockRegistry) RegisterStateChangeCallback(key any, cb StateChangeCallbackFn) {
+	m.ctrl.T.Helper()
+	m.ctrl.Call(m, "RegisterStateChangeCallback", key, cb)
+}
+
+// RegisterStateChangeCallback indicates an expected call of RegisterStateChangeCallback.
+func (mr *MockRegistryMockRecorder) RegisterStateChangeCallback(key, cb interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RegisterStateChangeCallback", reflect.TypeOf((*MockRegistry)(nil).RegisterStateChangeCallback), key, cb)
+}
+
 // Start mocks base method.
 func (m *MockRegistry) Start() {
 	m.ctrl.T.Helper()
@@ -298,4 +310,16 @@ func (m *MockRegistry) UnregisterNamespaceChangeCallback(shard int32) {
 func (mr *MockRegistryMockRecorder) UnregisterNamespaceChangeCallback(shard interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UnregisterNamespaceChangeCallback", reflect.TypeOf((*MockRegistry)(nil).UnregisterNamespaceChangeCallback), shard)
+}
+
+// UnregisterStateChangeCallback mocks base method.
+func (m *MockRegistry) UnregisterStateChangeCallback(key any) {
+	m.ctrl.T.Helper()
+	m.ctrl.Call(m, "UnregisterStateChangeCallback", key)
+}
+
+// UnregisterStateChangeCallback indicates an expected call of UnregisterStateChangeCallback.
+func (mr *MockRegistryMockRecorder) UnregisterStateChangeCallback(key interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UnregisterStateChangeCallback", reflect.TypeOf((*MockRegistry)(nil).UnregisterStateChangeCallback), key)
 }
