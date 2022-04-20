@@ -371,7 +371,11 @@ func (s *Service) Start() {
 	}
 
 	s.workerManager.Start()
-	s.perNamespaceWorkerManager.Start()
+	s.perNamespaceWorkerManager.Start(
+		// TODO: get these from fx instead of passing through Start
+		s.hostInfo,
+		s.workerServiceResolver,
+	)
 
 	s.logger.Info(
 		"worker service started",
