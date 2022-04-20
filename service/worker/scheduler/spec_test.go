@@ -208,13 +208,13 @@ func (s *specSuite) TestSpecExclude() {
 	)
 }
 
-func (s *specSuite) TestSpecNotBefore() {
+func (s *specSuite) TestSpecStartTime() {
 	s.checkSequenceFull(
 		&schedpb.ScheduleSpec{
 			Interval: []*schedpb.IntervalSpec{
 				{Interval: timestamp.DurationPtr(90 * time.Minute)},
 			},
-			NotBefore: timestamp.TimePtr(time.Date(2022, 3, 23, 12, 0, 0, 0, time.UTC)),
+			StartTime: timestamp.TimePtr(time.Date(2022, 3, 23, 12, 0, 0, 0, time.UTC)),
 		},
 		&schedpb.ScheduleState{},
 		time.Date(2022, 3, 23, 8, 00, 0, 0, time.UTC),
@@ -224,13 +224,13 @@ func (s *specSuite) TestSpecNotBefore() {
 	)
 }
 
-func (s *specSuite) TestSpecNotAfter() {
+func (s *specSuite) TestSpecEndTime() {
 	s.checkSequenceFull(
 		&schedpb.ScheduleSpec{
 			Interval: []*schedpb.IntervalSpec{
 				{Interval: timestamp.DurationPtr(90 * time.Minute)},
 			},
-			NotAfter: timestamp.TimePtr(time.Date(2022, 3, 23, 14, 0, 0, 0, time.UTC)),
+			EndTime: timestamp.TimePtr(time.Date(2022, 3, 23, 14, 0, 0, 0, time.UTC)),
 		},
 		&schedpb.ScheduleState{},
 		time.Date(2022, 3, 23, 11, 00, 0, 0, time.UTC),

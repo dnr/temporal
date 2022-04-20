@@ -85,14 +85,14 @@ func (cs *compiledSpec) getNextTime(
 	state *schedpb.ScheduleState,
 	after time.Time,
 ) (nominal, next time.Time, has bool) {
-	if cs.spec.NotBefore != nil && after.Before(*cs.spec.NotBefore) {
-		after = cs.spec.NotBefore.Add(-time.Second)
+	if cs.spec.StartTime != nil && after.Before(*cs.spec.StartTime) {
+		after = cs.spec.StartTime.Add(-time.Second)
 	}
 
 	for {
 		nominal = cs.rawNextTime(after)
 
-		if nominal.IsZero() || (cs.spec.NotAfter != nil && nominal.After(*cs.spec.NotAfter)) {
+		if nominal.IsZero() || (cs.spec.EndTime != nil && nominal.After(*cs.spec.EndTime)) {
 			has = false
 			return
 		}

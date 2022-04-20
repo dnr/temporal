@@ -266,8 +266,8 @@ func (s *scheduler) processRequest(req *schedpb.ScheduleRequest) {
 
 	for _, bfr := range req.BackfillRequest {
 		s.processTimeRange(
-			timestamp.TimeValue(bfr.GetFromTime()),
-			timestamp.TimeValue(bfr.GetToTime()),
+			timestamp.TimeValue(bfr.GetStartTime()),
+			timestamp.TimeValue(bfr.GetEndTime()),
 			bfr.GetOverlapPolicy(),
 			true,
 		)
@@ -382,8 +382,8 @@ func (s *scheduler) wfWatcherReturned(f workflow.Future) {
 
 	// handle pause-on-failure
 	failedStatus := res.Status == enumspb.WORKFLOW_EXECUTION_STATUS_FAILED || res.Status == enumspb.WORKFLOW_EXECUTION_STATUS_TIMED_OUT
-	pauseAfterFailure := s.Schedule.Policies.PauseAfterFailure && failedStatus && !s.Schedule.State.Paused
-	if pauseAfterFailure {
+	pauseOnFailure := s.Schedule.Policies.PauseOnFailure && failedStatus && !s.Schedule.State.Paused
+	if pauseOnFailure {
 		s.Schedule.State.Paused = true
 		if res.Status == enumspb.WORKFLOW_EXECUTION_STATUS_FAILED {
 			s.Schedule.State.Notes = fmt.Sprintf("paused due to workflow failure (%s)", res.Failure.GetMessage())
@@ -404,7 +404,7 @@ func (s *scheduler) wfWatcherReturned(f workflow.Future) {
 		s.Internal.ContinuedFailure = res.Failure
 	}
 
-	s.logger.Info("started workflow finished", "status", res.Status, "pause-after-failure", pauseAfterFailure)
+	s.logger.Info("started workflow finished", "status", res.Status, "pause-after-failure", pauseOnFailure)
 }
 
 func (s *scheduler) update(ch workflow.ReceiveChannel, _ bool) {
@@ -440,17 +440,17 @@ func (s *scheduler) request(ch workflow.ReceiveChannel, _ bool) {
 func (s *scheduler) describe() (*DescribeResult, error) {
 	// update future actions
 	if s.cspec != nil {
-		s.Info.FutureActions = make([]*time.Time, 0, futureActionCount)
+		s.Info.FutureActionTimes = make([]*time.Time, 0, futureActionCount)
 		t1 := s.Internal.LastProcessedTime
-		for len(s.Info.FutureActions) < futureActionCount {
+		for len(s.Info.FutureActionTimes) < futureActionCount {
 			_, t1, has := s.cspec.getNextTime(s.Schedule.State, t1)
 			if !has {
 				break
 			}
-			s.Info.FutureActions = append(s.Info.FutureActions, timestamp.TimePtr(t1))
+			s.Info.FutureActionTimes = append(s.Info.FutureActionTimes, timestamp.TimePtr(t1))
 		}
 	} else {
-		s.Info.FutureActions = nil
+		s.Info.FutureActionTimes = nil
 	}
 
 	return &DescribeResult{
