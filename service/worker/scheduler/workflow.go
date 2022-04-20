@@ -659,6 +659,7 @@ func (s *scheduler) startWorkflow(
 	sreq.RequestId = uuid.NewString()
 	sreq.SearchAttributes = s.addSearchAttr(sreq.SearchAttributes, start.Nominal.UTC())
 
+		// FIXME: need to set NonRetryableErrorTypes
 	ctx := workflow.WithActivityOptions(s.ctx, workflow.ActivityOptions{RetryPolicy: defaultActivityRetryPolicy})
 	req := &startWorkflowRequest{
 		NamespaceID:     s.Internal.NamespaceID,
@@ -724,6 +725,7 @@ func (s *scheduler) addSearchAttr(
 func (s *scheduler) startWatcher() {
 	ctx := workflow.WithActivityOptions(s.ctx, workflow.ActivityOptions{
 		StartToCloseTimeout: 365 * 24 * time.Hour,
+		// FIXME: need to set NonRetryableErrorTypes
 		RetryPolicy:         defaultActivityRetryPolicy,
 		// see activities.tryWatchWorkflow for this timeout
 		HeartbeatTimeout: 65 * time.Second,
@@ -734,6 +736,7 @@ func (s *scheduler) startWatcher() {
 func (s *scheduler) cancelWorkflow(execution *commonpb.WorkflowExecution) {
 	ctx := workflow.WithActivityOptions(s.ctx, workflow.ActivityOptions{
 		StartToCloseTimeout: 1 * time.Minute,
+		// FIXME: need to set NonRetryableErrorTypes
 		RetryPolicy:         defaultActivityRetryPolicy,
 	})
 	areq := &cancelWorkflowRequest{
@@ -750,6 +753,7 @@ func (s *scheduler) cancelWorkflow(execution *commonpb.WorkflowExecution) {
 func (s *scheduler) terminateWorkflow(execution *commonpb.WorkflowExecution) {
 	ctx := workflow.WithActivityOptions(s.ctx, workflow.ActivityOptions{
 		StartToCloseTimeout: 1 * time.Minute,
+		// FIXME: need to set NonRetryableErrorTypes
 		RetryPolicy:         defaultActivityRetryPolicy,
 	})
 	areq := &terminateWorkflowRequest{

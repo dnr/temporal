@@ -101,7 +101,7 @@ func (e errFollow) Error() string { return string(e) }
 
 func (a *activities) StartWorkflow(ctx context.Context, req *startWorkflowRequest) (*startWorkflowResponse, error) {
 	request := common.CreateHistoryStartWorkflowRequest(
-		string(req.NamespaceID),
+		req.NamespaceID.String(),
 		req.Request,
 		nil,
 		req.ActualStartTime,
