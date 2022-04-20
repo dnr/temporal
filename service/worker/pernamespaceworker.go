@@ -153,13 +153,13 @@ func (wm *perNamespaceWorkerManager) Stop() {
 }
 
 func (wm *perNamespaceWorkerManager) namespaceCallback(ns *namespace.Namespace) {
-	wm.getWorkerSet(ns).refresh()
+	go wm.getWorkerSet(ns).refresh()
 }
 
 func (wm *perNamespaceWorkerManager) membershipChangedListener() {
 	for range wm.membershipChangedCh {
 		for _, ws := range wm.workerSets {
-			ws.refresh()
+			go ws.refresh()
 		}
 	}
 }
@@ -198,7 +198,7 @@ func (ws *workerSet) refresh() {
 	nsExists := ws.ns.State() != enumspb.NAMESPACE_STATE_DELETED
 
 	for _, wc := range ws.wm.components {
-		go ws.refreshComponent(wc, nsExists)
+		ws.refreshComponent(wc, nsExists)
 	}
 }
 
