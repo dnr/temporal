@@ -176,22 +176,26 @@ Outer:
 		// try to match year, month, etc. from outside in
 		if !cc.year(y) {
 			y, mo, d, h, m, s = y+1, time.January, 1, 0, 0, 0
+			dstoffset = 0
 			continue Outer
 		}
 		for !cc.month(int(mo)) {
 			mo, d, h, m, s = mo+1, 1, 0, 0, 0
+			dstoffset = 0
 			if mo > time.December {
 				continue Outer
 			}
 		}
 		for !cc.dayOfMonth(d) || !cc.dayOfWeek(int(time.Date(y, mo, d, h, m, s, 0, cc.tz).Weekday())) {
 			d, h, m, s = d+1, 0, 0, 0
+			dstoffset = 0
 			if d > daysInMonth(mo, y) {
 				continue Outer
 			}
 		}
 		for !cc.hour(h) {
 			h, m, s = h+1, 0, 0
+			dstoffset = 0
 			if h >= 24 {
 				continue Outer
 			}

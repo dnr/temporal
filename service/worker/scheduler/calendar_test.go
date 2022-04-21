@@ -25,6 +25,7 @@
 package scheduler
 
 import (
+	"math/rand"
 	"testing"
 	"time"
 
@@ -130,12 +131,6 @@ func (s *calendarSuite) TestGoDSTBehavior() {
 	t1 := time.Date(2022, time.March, 13, 1, 33, 33, 0, pacific)
 	t2 := time.Date(2022, time.March, 13, 2, 33, 33, 0, pacific)
 	s.Equal(t1, t2)
-	// When given a time that occurs twice like 2021-11-07T01:33, it returns the earlier one.
-	t4 := time.Date(2021, time.November, 7, 0, 33, 33, 0, pacific)
-	t5 := time.Date(2021, time.November, 7, 1, 33, 33, 0, pacific)
-	t6 := time.Date(2021, time.November, 7, 2, 33, 33, 0, pacific)
-	s.Equal(1*time.Hour, t5.Sub(t4))
-	s.Equal(2*time.Hour, t6.Sub(t5))
 }
 
 func (s *calendarSuite) checkSequence(spec *schedpb.CalendarSpec, tz *time.Location, start time.Time, seq ...time.Time) {
@@ -185,6 +180,24 @@ func (s *calendarSuite) TestCalendarNextDST() {
 		time.Date(2021, time.November, 7, 1, 44, 33, 0, pacific).Add(time.Hour),
 		time.Date(2021, time.November, 8, 1, 33, 33, 0, pacific),
 	)
+}
+
+func (s *calendarSuite) TestCalendarDSTStartInRepeatedHourButNotEnd() {
+	loc, err := time.LoadLocation("Europe/London")
+	s.NoError(err)
+	cc, err := newCompiledCalendar(&schedpb.CalendarSpec{
+		Second:     "0",
+		Minute:     "1",
+		Hour:       "0",
+		DayOfMonth: "2",
+		Month:      "Jan",
+		DayOfWeek:  "Sun",
+	}, loc)
+	s.NoError(err)
+	next := cc.next(time.Date(1970, time.January, 1, 0, 0, 5, 0, loc))
+	s.Equal(time.Date(1972, time.January, 2, 0, 1, 0, 0, loc), next)
+	next = cc.next(time.Date(1971, time.October, 31, 2, 7, 3, 0, loc))
+	s.Equal(time.Date(1972, time.January, 2, 0, 1, 0, 0, loc), next)
 }
 
 func (s *calendarSuite) TestMakeMatcher() {
@@ -295,10 +308,10 @@ func FuzzCalendar(f *testing.F) {
 		"US/Pacific",
 		"America/Montreal",
 		"Asia/Urumqi",
-		"Asia/Samarkand",
+		"Asia/Beirut",
 		"America/Indiana/Knox",
 		"Africa/Kinshasa",
-		"Etc/GMT-10",
+		"America/Asuncion",
 		"Europe/London",
 		"Asia/Vientiane",
 		"Cuba",
@@ -309,32 +322,35 @@ func FuzzCalendar(f *testing.F) {
 		if err != nil {
 			return
 		}
-		cc, err := newCompiledCalendar(&schedpb.CalendarSpec{
+		cal := &schedpb.CalendarSpec{
 			Second:     s,
 			Minute:     m,
 			Hour:       h,
 			DayOfMonth: dom,
-			Month:      m,
+			Month:      mo,
 			Year:       y,
 			DayOfWeek:  dow,
-		}, loc)
+		}
+		cc, err := newCompiledCalendar(cal, loc)
 		if err == nil {
-			now := time.Unix(now, 0)
+			now := time.Unix(now, 0).In(loc)
 			next := cc.next(now)
 			if next.IsZero() {
 				return
 			}
 			if next.Before(now) {
-				t.Errorf("next %v not before now %v", next, now)
+				t.Errorf("next %v not before now %v (for %+v)", next, now, cal)
 			}
-			for ts1 := now; ts1.Before(next); ts1 = ts1.Add(1234 * time.Second) {
+			gap := int(next.Sub(now) / time.Second)
+			for i := 0; i < 1000; i++ {
+				ts1 := now.Add(time.Duration(rand.Intn(gap)) * time.Second)
 				if !cc.next(ts1).Equal(next) {
-					t.Errorf("next(%v) = %v should equal next(%v) = %v", ts1, cc.next(ts1), now, next)
+					t.Errorf("next(%v) = %v should equal next(%v) = %v (for %+v)", ts1, cc.next(ts1), now, next, cal)
 				}
 			}
 			for ts1 := next; ts1.Sub(next) < 5*time.Hour; ts1 = ts1.Add(1234 * time.Second) {
 				if !cc.next(ts1).After(next) {
-					t.Errorf("next(%v) = %v should be after next(%v) = %v", ts1, cc.next(ts1), now, next)
+					t.Errorf("next(%v) = %v should be after next(%v) = %v (for %+v)", ts1, cc.next(ts1), now, next, cal)
 				}
 			}
 		}
