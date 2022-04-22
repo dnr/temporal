@@ -502,113 +502,47 @@ func (s *scheduler) processBuffer() bool {
 		return false
 	}
 
-	// Ignoring allow-all, we can start either zero or one workflows now.
-	// This is the one that we want to start, or nil.
-	var pendingStart *sschedpb.BufferedStart
-
 	// We might or might not have one running now. If the watcher activity is still running, we
 	// probably have one running. Even if the workflow has exited and our notification from the
 	// watcher activity is delayed, acting as if it's still running is correct, we'll just
 	// buffer the action and run it when we get the notification.
 	isRunning := s.watcherFuture != nil
 
-	// Recreate the rest of the buffer in here as we're processing
-	var nextBufferedStarts []*sschedpb.BufferedStart
+	action := processBuffer(s.State.BufferedStarts, isRunning, s.resolveOverlapPolicy)
 
-	needTerminate := false
-	needCancel := false
+	s.State.BufferedStarts = action.newBuffer
+	s.Info.OverlapSkipped += action.overlapSkipped
 
-	for _, start := range s.State.BufferedStarts {
-		overlapPolicy := s.resolveOverlapPolicy(start.OverlapPolicy)
-		s.logger.Debug("processBuffer: examining", "start", start, "overlap", overlapPolicy)
-
-		// For ALLOW_ALL, just start it, ignoring running/pending starts
-		if overlapPolicy == enumspb.SCHEDULE_OVERLAP_POLICY_ALLOW_ALL {
-			if s.canTakeScheduledAction(start.Manual, true) {
-				result, err := s.startWorkflow(start, req)
-				if err != nil {
-					s.logger.Error("Failed to start workflow", "error", err)
-					// The "start workflow" activity has an unlimited retry policy, so if we get an
-					// error here, it must be an unretryable one. Drop this from the buffer.
-				} else {
-					s.recordAction(result)
-				}
-			}
+	// Handle all ALLOW_ALL first
+	for _, start := range action.overlappingStarts {
+		if !s.canTakeScheduledAction(start.Manual, true) {
 			continue
 		}
-
-		// Now handle non-overlapping workflows
-
-		// If there's nothing running, we can start this one no matter what the policy is
-		if !isRunning && pendingStart == nil {
-			pendingStart = start
-			s.logger.Debug("processBuffer: now pending", "start", start)
+		result, err := s.startWorkflow(start, req)
+		if err != nil {
+			s.logger.Error("Failed to start workflow", "error", err)
+			// The "start workflow" activity has an unlimited retry policy, so if we get an
+			// error here, it must be an unretryable one. Drop this from the buffer.
 			continue
 		}
-
-		// Otherwise this one overlaps and we should apply the policy
-		switch overlapPolicy {
-		case enumspb.SCHEDULE_OVERLAP_POLICY_SKIP:
-			// just skip
-			s.Info.OverlapSkipped++
-			s.logger.Debug("processBuffer: skipped")
-		case enumspb.SCHEDULE_OVERLAP_POLICY_BUFFER_ONE:
-			// allow one (the first one) in the buffer
-			if len(nextBufferedStarts) == 0 {
-				nextBufferedStarts = append(nextBufferedStarts, start)
-				s.logger.Debug("processBuffer: now single buffered")
-			} else {
-				s.Info.OverlapSkipped++
-				s.logger.Debug("processBuffer: skipped")
-			}
-		case enumspb.SCHEDULE_OVERLAP_POLICY_BUFFER_ALL:
-			// always add to buffer
-			nextBufferedStarts = append(nextBufferedStarts, start)
-			s.logger.Debug("processBuffer: buffered")
-		case enumspb.SCHEDULE_OVERLAP_POLICY_CANCEL_OTHER:
-			if isRunning {
-				// an actual workflow is running, cancel it (asynchronously)
-				needCancel = true
-				// keep in buffer so it will get started once cancel completes
-				nextBufferedStarts = append(nextBufferedStarts, start)
-				s.logger.Debug("processBuffer: will cancel")
-			} else {
-				// it's not running yet, it's just the one we were going to start. replace it
-				pendingStart = start
-				s.logger.Debug("processBuffer: now pending")
-			}
-		case enumspb.SCHEDULE_OVERLAP_POLICY_TERMINATE_OTHER:
-			if isRunning {
-				// an actual workflow is running, terminate it (asynchronously)
-				needTerminate = true
-				// keep in buffer so it will get started once cancel completes
-				nextBufferedStarts = append(nextBufferedStarts, start)
-				s.logger.Debug("processBuffer: will terminate")
-			} else {
-				// it's not running yet, it's just the one we were going to start. replace it
-				pendingStart = start
-				s.logger.Debug("processBuffer: now pending")
-			}
-		}
+		s.recordAction(result)
 	}
-	s.State.BufferedStarts = nextBufferedStarts
 
-	if needTerminate {
+	if action.needTerminate {
 		s.terminateWorkflow(s.State.WatcherRequest.Execution)
-	} else if needCancel {
+	} else if action.needCancel {
 		s.cancelWorkflow(s.State.WatcherRequest.Execution)
 	}
 
-	if pendingStart == nil {
+	if action.nonOverlappingStart == nil {
 		return false
 	}
 
 	// Check paused/remaining actions again, and decrement this time.
-	if !s.canTakeScheduledAction(pendingStart.Manual, true) {
+	if !s.canTakeScheduledAction(action.nonOverlappingStart.Manual, true) {
 		return true
 	}
-
-	result, err := s.startWorkflowAndWatch(pendingStart, req)
+	result, err := s.startWorkflowAndWatch(action.nonOverlappingStart, req)
 	if err != nil {
 		s.logger.Error("Failed to start workflow", "error", err)
 		// The "start workflow" activity has an unlimited retry policy, so if we get an
