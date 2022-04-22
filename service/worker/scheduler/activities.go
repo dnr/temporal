@@ -37,57 +37,16 @@ import (
 	"go.temporal.io/api/workflowservice/v1"
 	"go.temporal.io/sdk/activity"
 	"go.temporal.io/sdk/temporal"
+
 	"go.temporal.io/server/api/historyservice/v1"
+	sschedpb "go.temporal.io/server/api/schedule/v1"
 	"go.temporal.io/server/common"
-	"go.temporal.io/server/common/namespace"
+	"go.temporal.io/server/common/primitives/timestamp"
 )
 
 type (
 	activities struct {
 		activityDeps
-	}
-
-	// FIXME: convert these all to protos?
-
-	watchWorkflowRequest struct {
-		Namespace   namespace.Name
-		NamespaceID namespace.ID
-		Execution   *commonpb.WorkflowExecution
-	}
-
-	watchWorkflowResponse struct {
-		Status  enumspb.WorkflowExecutionStatus
-		Result  *commonpb.Payloads
-		Failure *failurepb.Failure
-	}
-
-	startWorkflowRequest struct {
-		NamespaceID          namespace.ID
-		Request              *workflowservice.StartWorkflowExecutionRequest
-		ActualStartTime      time.Time
-		LastCompletionResult *commonpb.Payloads
-		ContinuedFailure     *failurepb.Failure
-	}
-
-	startWorkflowResponse struct {
-		RunID    string
-		RealTime time.Time
-	}
-
-	cancelWorkflowRequest struct {
-		Namespace   namespace.Name
-		NamespaceID namespace.ID
-		RequestID   string
-		Identity    string
-		Execution   *commonpb.WorkflowExecution
-	}
-
-	terminateWorkflowRequest struct {
-		Namespace   namespace.Name
-		NamespaceID namespace.ID
-		Identity    string
-		Execution   *commonpb.WorkflowExecution
-		Reason      string
 	}
 
 	errFollow string
@@ -99,12 +58,12 @@ var (
 
 func (e errFollow) Error() string { return string(e) }
 
-func (a *activities) StartWorkflow(ctx context.Context, req *startWorkflowRequest) (*startWorkflowResponse, error) {
+func (a *activities) StartWorkflow(ctx context.Context, req *sschedpb.StartWorkflowRequest) (*sschedpb.StartWorkflowResponse, error) {
 	request := common.CreateHistoryStartWorkflowRequest(
-		req.NamespaceID.String(),
+		req.NamespaceId,
 		req.Request,
 		nil,
-		req.ActualStartTime,
+		timestamp.TimeValue(req.StartTime),
 	)
 	request.LastCompletionResult = req.LastCompletionResult
 	request.ContinuedFailure = req.ContinuedFailure
@@ -121,13 +80,13 @@ func (a *activities) StartWorkflow(ctx context.Context, req *startWorkflowReques
 		return nil, temporal.NewNonRetryableApplicationError(err.Error(), reflect.TypeOf(err).Name(), nil)
 	}
 
-	return &startWorkflowResponse{
-		RunID:    res.RunId,
-		RealTime: now,
+	return &sschedpb.StartWorkflowResponse{
+		RunId:         res.RunId,
+		RealStartTime: timestamp.TimePtr(now),
 	}, nil
 }
 
-func (a *activities) tryWatchWorkflow(ctx context.Context, req *watchWorkflowRequest) (*watchWorkflowResponse, error) {
+func (a *activities) tryWatchWorkflow(ctx context.Context, req *sschedpb.WatchWorkflowRequest) (*sschedpb.WatchWorkflowResponse, error) {
 	// make sure we return and heartbeat 5s before the timeout
 	ctx2, cancel := context.WithTimeout(ctx, activity.GetInfo(ctx).HeartbeatTimeout-5*time.Second)
 	defer cancel()
@@ -135,7 +94,7 @@ func (a *activities) tryWatchWorkflow(ctx context.Context, req *watchWorkflowReq
 	// poll history service directly instead of just going to frontend to avoid
 	// using resources on frontend while waiting.
 	pollReq := &historyservice.PollMutableStateRequest{
-		NamespaceId:         req.NamespaceID.String(),
+		NamespaceId:         req.NamespaceId,
 		Execution:           req.Execution,
 		ExpectedNextEventId: common.EndEventID,
 	}
@@ -155,7 +114,7 @@ func (a *activities) tryWatchWorkflow(ctx context.Context, req *watchWorkflowReq
 	// get last event from history
 	// TODO: could we read from persistence directly or is that too crazy?
 	histReq := &workflowservice.GetWorkflowExecutionHistoryRequest{
-		Namespace:              req.Namespace.String(),
+		Namespace:              req.Namespace,
 		Execution:              req.Execution,
 		MaximumPageSize:        1,
 		HistoryEventFilterType: enumspb.HISTORY_EVENT_FILTER_TYPE_CLOSE_EVENT,
@@ -174,6 +133,16 @@ func (a *activities) tryWatchWorkflow(ctx context.Context, req *watchWorkflowReq
 	}
 	lastEvent := events[0]
 
+	makeResponse := func(result *commonpb.Payloads, failure *failurepb.Failure) *sschedpb.WatchWorkflowResponse {
+		resp := &sschedpb.WatchWorkflowResponse{Status: pollResp.WorkflowStatus}
+		if result != nil {
+			resp.ResultFailure = &sschedpb.WatchWorkflowResponse_Result{Result: result}
+		} else if failure != nil {
+			resp.ResultFailure = &sschedpb.WatchWorkflowResponse_Failure{Failure: failure}
+		}
+		return resp
+	}
+
 	switch pollResp.WorkflowStatus {
 	case enumspb.WORKFLOW_EXECUTION_STATUS_COMPLETED:
 		attrs := lastEvent.GetWorkflowExecutionCompletedEventAttributes()
@@ -183,7 +152,7 @@ func (a *activities) tryWatchWorkflow(ctx context.Context, req *watchWorkflowReq
 		if len(attrs.NewExecutionRunId) > 0 {
 			return nil, errFollow(attrs.NewExecutionRunId)
 		}
-		return &watchWorkflowResponse{Status: pollResp.WorkflowStatus, Result: attrs.Result}, nil
+		return makeResponse(attrs.Result, nil), nil
 	case enumspb.WORKFLOW_EXECUTION_STATUS_FAILED:
 		attrs := lastEvent.GetWorkflowExecutionFailedEventAttributes()
 		if attrs == nil {
@@ -192,19 +161,19 @@ func (a *activities) tryWatchWorkflow(ctx context.Context, req *watchWorkflowReq
 		if len(attrs.NewExecutionRunId) > 0 {
 			return nil, errFollow(attrs.NewExecutionRunId)
 		}
-		return &watchWorkflowResponse{Status: pollResp.WorkflowStatus, Failure: attrs.Failure}, nil
+		return makeResponse(nil, attrs.Failure), nil
 	case enumspb.WORKFLOW_EXECUTION_STATUS_CANCELED:
 		attrs := lastEvent.GetWorkflowExecutionCanceledEventAttributes()
 		if attrs == nil {
 			return nil, errInternal
 		}
-		return &watchWorkflowResponse{Status: pollResp.WorkflowStatus}, nil
+		return makeResponse(nil, nil), nil
 	case enumspb.WORKFLOW_EXECUTION_STATUS_TERMINATED:
 		attrs := lastEvent.GetWorkflowExecutionTerminatedEventAttributes()
 		if attrs == nil {
 			return nil, errInternal
 		}
-		return &watchWorkflowResponse{Status: pollResp.WorkflowStatus}, nil
+		return makeResponse(nil, nil), nil
 	case enumspb.WORKFLOW_EXECUTION_STATUS_CONTINUED_AS_NEW:
 		attrs := lastEvent.GetWorkflowExecutionContinuedAsNewEventAttributes()
 		if attrs == nil {
@@ -219,13 +188,13 @@ func (a *activities) tryWatchWorkflow(ctx context.Context, req *watchWorkflowReq
 		if len(attrs.NewExecutionRunId) > 0 {
 			return nil, errFollow(attrs.NewExecutionRunId)
 		}
-		return &watchWorkflowResponse{Status: pollResp.WorkflowStatus}, nil
+		return makeResponse(nil, nil), nil
 	}
 
 	return nil, errInternal
 }
 
-func (a *activities) WatchWorkflow(ctx context.Context, req *watchWorkflowRequest) (*watchWorkflowResponse, error) {
+func (a *activities) WatchWorkflow(ctx context.Context, req *sschedpb.WatchWorkflowRequest) (*sschedpb.WatchWorkflowResponse, error) {
 	for {
 		activity.RecordHeartbeat(ctx)
 		res, err := a.tryWatchWorkflow(ctx, req)
@@ -240,14 +209,14 @@ func (a *activities) WatchWorkflow(ctx context.Context, req *watchWorkflowReques
 	}
 }
 
-func (a *activities) CancelWorkflow(ctx context.Context, req *cancelWorkflowRequest) error {
+func (a *activities) CancelWorkflow(ctx context.Context, req *sschedpb.CancelWorkflowRequest) error {
 	rreq := &historyservice.RequestCancelWorkflowExecutionRequest{
-		NamespaceId: req.NamespaceID.String(),
+		NamespaceId: req.NamespaceId,
 		CancelRequest: &workflowservice.RequestCancelWorkflowExecutionRequest{
-			Namespace:         req.Namespace.String(),
+			Namespace:         req.Namespace,
 			WorkflowExecution: req.Execution,
 			Identity:          req.Identity,
-			RequestId:         req.RequestID,
+			RequestId:         req.RequestId,
 		},
 	}
 	_, err := a.HistoryClient.RequestCancelWorkflowExecution(ctx, rreq)
@@ -259,18 +228,17 @@ func (a *activities) CancelWorkflow(ctx context.Context, req *cancelWorkflowRequ
 	case *serviceerror.Unavailable:
 		return temporal.NewApplicationError(err.Error(), reflect.TypeOf(err).Name())
 	case *serviceerror.Internal:
-		// TODO: should we retry these?
 		return temporal.NewApplicationError(err.Error(), reflect.TypeOf(err).Name())
 	default:
 		return temporal.NewNonRetryableApplicationError(err.Error(), reflect.TypeOf(err).Name(), nil)
 	}
 }
 
-func (a *activities) TerminateWorkflow(ctx context.Context, req *terminateWorkflowRequest) error {
+func (a *activities) TerminateWorkflow(ctx context.Context, req *sschedpb.TerminateWorkflowRequest) error {
 	rreq := &historyservice.TerminateWorkflowExecutionRequest{
-		NamespaceId: req.NamespaceID.String(),
+		NamespaceId: req.NamespaceId,
 		TerminateRequest: &workflowservice.TerminateWorkflowExecutionRequest{
-			Namespace:         req.Namespace.String(),
+			Namespace:         req.Namespace,
 			WorkflowExecution: req.Execution,
 			Reason:            req.Reason,
 			Identity:          req.Identity,
@@ -285,7 +253,6 @@ func (a *activities) TerminateWorkflow(ctx context.Context, req *terminateWorkfl
 	case *serviceerror.Unavailable:
 		return temporal.NewApplicationError(err.Error(), reflect.TypeOf(err).Name())
 	case *serviceerror.Internal:
-		// TODO: should we retry these?
 		return temporal.NewApplicationError(err.Error(), reflect.TypeOf(err).Name())
 	default:
 		return temporal.NewNonRetryableApplicationError(err.Error(), reflect.TypeOf(err).Name(), nil)

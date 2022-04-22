@@ -36,14 +36,13 @@ import (
 
 	commonpb "go.temporal.io/api/common/v1"
 	enumspb "go.temporal.io/api/enums/v1"
-	failurepb "go.temporal.io/api/failure/v1"
 	schedpb "go.temporal.io/api/schedule/v1"
 	"go.temporal.io/api/workflowservice/v1"
 	sdklog "go.temporal.io/sdk/log"
 	"go.temporal.io/sdk/temporal"
 	"go.temporal.io/sdk/workflow"
 
-	"go.temporal.io/server/common/namespace"
+	sschedpb "go.temporal.io/server/api/schedule/v1"
 	"go.temporal.io/server/common/payload"
 	"go.temporal.io/server/common/primitives/timestamp"
 )
@@ -64,54 +63,8 @@ const (
 )
 
 type (
-	// FIXME: convert these all to protos?
-
-	bufferedStart struct {
-		// Nominal (pre-jitter) and Actual (post-jitter) time of action
-		Nominal, Actual time.Time
-		// Overridden overlap policy
-		Overlap enumspb.ScheduleOverlapPolicy
-		// Trigger-immediately or backfill
-		Manual bool
-	}
-
-	internalState struct {
-		Namespace         namespace.Name
-		NamespaceID       namespace.ID
-		LastProcessedTime time.Time
-		BufferedStarts    []*bufferedStart
-
-		// last completion/failure
-		LastCompletionResult *commonpb.Payloads
-		ContinuedFailure     *failurepb.Failure
-
-		// conflict token is implemented as simple sequence number
-		SequenceNumber uint64
-		ConflictToken  []byte
-
-		// WatcherReq != nil iff watcher activity is running
-		WatcherReq *watchWorkflowRequest
-	}
-
-	StartArgs struct {
-		Schedule       *schedpb.Schedule
-		Info           *schedpb.ScheduleInfo
-		InitialRequest *schedpb.ScheduleRequest
-		Internal       internalState
-	}
-
-	UpdateArgs struct {
-		Schedule      *schedpb.Schedule
-		ConflictToken []byte
-	}
-
-	DescribeResult struct {
-		Schedule *schedpb.Schedule
-		Info     *schedpb.ScheduleInfo
-	}
-
 	scheduler struct {
-		StartArgs
+		sschedpb.StartScheduleArgs
 
 		ctx    workflow.Context
 		a      *activities
@@ -134,13 +87,13 @@ var (
 	errInternal       = errors.New("Internal logic error")
 )
 
-func SchedulerWorkflow(ctx workflow.Context, args *StartArgs) error {
+func SchedulerWorkflow(ctx workflow.Context, args *sschedpb.StartScheduleArgs) error {
 	id := workflow.GetInfo(ctx).WorkflowExecution.ID
 	scheduler := &scheduler{
-		StartArgs: *args,
-		ctx:       ctx,
-		a:         nil,
-		logger:    sdklog.With(workflow.GetLogger(ctx), "schedule-id", id),
+		StartScheduleArgs: *args,
+		ctx:               ctx,
+		a:                 nil,
+		logger:            sdklog.With(workflow.GetLogger(ctx), "schedule-id", id),
 	}
 	return scheduler.run()
 }
@@ -155,17 +108,17 @@ func (s *scheduler) run() error {
 		return err
 	}
 
-	if s.Internal.LastProcessedTime.IsZero() {
+	if s.State.LastProcessedTime == nil {
 		s.logger.Debug("Initializing internal state")
-		s.Internal.LastProcessedTime = s.now()
+		s.State.LastProcessedTime = timestamp.TimePtr(s.now())
 		s.Info = &schedpb.ScheduleInfo{
-			CreateTime: timestamp.TimePtr(s.Internal.LastProcessedTime),
+			CreateTime: s.State.LastProcessedTime,
 		}
 		s.incSeqNo()
 	}
 
 	// Recreate watcher activity if needed
-	if s.Internal.WatcherReq != nil {
+	if s.State.WatcherRequest != nil {
 		s.startWatcher()
 	}
 
@@ -175,19 +128,20 @@ func (s *scheduler) run() error {
 	s.InitialRequest = nil
 
 	for iters := iterationsBeforeContinueAsNew; iters >= 0; iters-- {
+		t1 := timestamp.TimeValue(s.State.LastProcessedTime)
 		t2 := s.now()
-		if t2.Before(s.Internal.LastProcessedTime) {
+		if t2.Before(t1) {
 			// Time went backwards. Currently this can only happen across a continue-as-new boundary.
-			s.logger.Warn("Time went backwards", "from", s.Internal.LastProcessedTime, "to", t2)
-			t2 = s.Internal.LastProcessedTime
+			s.logger.Warn("Time went backwards", "from", t1, "to", t2)
+			t2 = t1
 		}
 		nextSleep, hasNext := s.processTimeRange(
-			s.Internal.LastProcessedTime, t2,
+			t1, t2,
 			// resolve this to the schedule's policy as late as possible
 			enumspb.SCHEDULE_OVERLAP_POLICY_UNSPECIFIED,
 			false,
 		)
-		s.Internal.LastProcessedTime = t2
+		s.State.LastProcessedTime = timestamp.TimePtr(t2)
 		for s.processBuffer() {
 		}
 		// sleep returns on any of:
@@ -200,10 +154,13 @@ func (s *scheduler) run() error {
 	// The watcher activity will get cancelled automatically if running.
 
 	s.logger.Info("Schedule doing continue-as-new")
-	return workflow.NewContinueAsNewError(s.ctx, WorkflowName, &s.StartArgs)
+	return workflow.NewContinueAsNewError(s.ctx, WorkflowName, &s.StartScheduleArgs)
 }
 
 func (s *scheduler) ensureFields() {
+	if s.Schedule == nil {
+		s.Schedule = &schedpb.Schedule{}
+	}
 	if s.Schedule.Spec == nil {
 		s.Schedule.Spec = &schedpb.ScheduleSpec{}
 	}
@@ -218,6 +175,9 @@ func (s *scheduler) ensureFields() {
 	}
 	if s.Info == nil {
 		s.Info = &schedpb.ScheduleInfo{}
+	}
+	if s.State == nil {
+		s.State = &sschedpb.InternalState{}
 	}
 }
 
@@ -375,9 +335,9 @@ func (s *scheduler) sleep(nextSleep time.Duration, hasNext bool) {
 func (s *scheduler) wfWatcherReturned(f workflow.Future) {
 	// workflow is not running anymore
 	s.watcherFuture = nil
-	s.Internal.WatcherReq = nil
+	s.State.WatcherRequest = nil
 
-	var res watchWorkflowResponse
+	var res sschedpb.WatchWorkflowResponse
 	err := f.Get(s.ctx, &res)
 	if err != nil {
 		// shouldn't happen since this is a select callback
@@ -391,8 +351,8 @@ func (s *scheduler) wfWatcherReturned(f workflow.Future) {
 	if pauseOnFailure {
 		s.Schedule.State.Paused = true
 		if res.Status == enumspb.WORKFLOW_EXECUTION_STATUS_FAILED {
-			s.Schedule.State.Notes = fmt.Sprintf("paused due to workflow failure (%s)", res.Failure.GetMessage())
-			s.logger.Info("paused due to workflow failure", "message", res.Failure.GetMessage())
+			s.Schedule.State.Notes = fmt.Sprintf("paused due to workflow failure (%s)", res.GetFailure().GetMessage())
+			s.logger.Info("paused due to workflow failure", "message", res.GetFailure().GetMessage())
 		} else if res.Status == enumspb.WORKFLOW_EXECUTION_STATUS_TIMED_OUT {
 			s.Schedule.State.Notes = fmt.Sprintf("paused due to workflow timeout")
 			s.logger.Info("paused due to workflow timeout")
@@ -401,19 +361,19 @@ func (s *scheduler) wfWatcherReturned(f workflow.Future) {
 	}
 
 	// handle last completion/failure
-	if res.Result != nil {
-		s.Internal.LastCompletionResult = res.Result
-		s.Internal.ContinuedFailure = nil
-	} else if res.Failure != nil {
+	if res.GetResult() != nil {
+		s.State.LastCompletionResult = res.GetResult()
+		s.State.ContinuedFailure = nil
+	} else if res.GetFailure() != nil {
 		// leave LastCompletionResult from previous run
-		s.Internal.ContinuedFailure = res.Failure
+		s.State.ContinuedFailure = res.GetFailure()
 	}
 
 	s.logger.Info("started workflow finished", "status", res.Status, "pause-after-failure", pauseOnFailure)
 }
 
 func (s *scheduler) update(ch workflow.ReceiveChannel, _ bool) {
-	var req UpdateArgs
+	var req sschedpb.FullUpdateRequest
 	ch.Receive(s.ctx, &req)
 	if err := s.checkConflict(req.ConflictToken); err != nil {
 		s.logger.Warn("Update conflicted with concurrent change")
@@ -442,11 +402,11 @@ func (s *scheduler) request(ch workflow.ReceiveChannel, _ bool) {
 	s.processRequest(&req)
 }
 
-func (s *scheduler) describe() (*DescribeResult, error) {
+func (s *scheduler) describe() (*sschedpb.DescribeResponse, error) {
 	// update future actions
 	if s.cspec != nil {
 		s.Info.FutureActionTimes = make([]*time.Time, 0, futureActionCount)
-		t1 := s.Internal.LastProcessedTime
+		t1 := timestamp.TimeValue(s.State.LastProcessedTime)
 		for len(s.Info.FutureActionTimes) < futureActionCount {
 			_, t1, has := s.cspec.getNextTime(s.Schedule.State, t1)
 			if !has {
@@ -458,21 +418,22 @@ func (s *scheduler) describe() (*DescribeResult, error) {
 		s.Info.FutureActionTimes = nil
 	}
 
-	return &DescribeResult{
+	return &sschedpb.DescribeResponse{
 		Schedule: s.Schedule,
 		Info:     s.Info,
 	}, nil
 }
 
 func (s *scheduler) incSeqNo() {
-	s.Internal.SequenceNumber++
-	buf := make([]byte, 8)
-	binary.BigEndian.PutUint64(buf, s.Internal.SequenceNumber)
-	s.Internal.ConflictToken = buf
+	if len(s.State.ConflictToken) != 8 {
+		s.State.ConflictToken = make([]byte, 8)
+	}
+	v := binary.BigEndian.Uint64(s.State.ConflictToken)
+	binary.BigEndian.PutUint64(s.State.ConflictToken, v+1)
 }
 
 func (s *scheduler) checkConflict(token []byte) error {
-	if token == nil || bytes.Equal(token, s.Internal.ConflictToken) {
+	if token == nil || bytes.Equal(token, s.State.ConflictToken) {
 		return nil
 	}
 	return errUpdateConflict
@@ -512,11 +473,11 @@ func (s *scheduler) resolveOverlapPolicy(overlapPolicy enumspb.ScheduleOverlapPo
 
 func (s *scheduler) addStart(nominalTime, actualTime time.Time, overlapPolicy enumspb.ScheduleOverlapPolicy, manual bool) {
 	s.logger.Debug("addStart", "nominal", nominalTime, "actual", actualTime, "overlapPolicy", overlapPolicy, "manual", manual)
-	s.Internal.BufferedStarts = append(s.Internal.BufferedStarts, &bufferedStart{
-		Nominal: nominalTime,
-		Actual:  actualTime,
-		Overlap: overlapPolicy,
-		Manual:  manual,
+	s.State.BufferedStarts = append(s.State.BufferedStarts, &sschedpb.BufferedStart{
+		NominalTime:   timestamp.TimePtr(nominalTime),
+		ActualTime:    timestamp.TimePtr(actualTime),
+		OverlapPolicy: overlapPolicy,
+		Manual:        manual,
 	})
 }
 
@@ -536,14 +497,14 @@ func (s *scheduler) processBuffer() bool {
 	// This part will have to change when we support more actions.
 	req := s.Schedule.Action.GetStartWorkflow()
 	if req == nil {
-		s.Internal.BufferedStarts = nil
+		s.State.BufferedStarts = nil
 		s.logger.Debug("processBuffer: no action")
 		return false
 	}
 
 	// Ignoring allow-all, we can start either zero or one workflows now.
 	// This is the one that we want to start, or nil.
-	var pendingStart *bufferedStart
+	var pendingStart *sschedpb.BufferedStart
 
 	// We might or might not have one running now. If the watcher activity is still running, we
 	// probably have one running. Even if the workflow has exited and our notification from the
@@ -552,13 +513,13 @@ func (s *scheduler) processBuffer() bool {
 	isRunning := s.watcherFuture != nil
 
 	// Recreate the rest of the buffer in here as we're processing
-	var nextBufferedStarts []*bufferedStart
+	var nextBufferedStarts []*sschedpb.BufferedStart
 
 	needTerminate := false
 	needCancel := false
 
-	for _, start := range s.Internal.BufferedStarts {
-		overlapPolicy := s.resolveOverlapPolicy(start.Overlap)
+	for _, start := range s.State.BufferedStarts {
+		overlapPolicy := s.resolveOverlapPolicy(start.OverlapPolicy)
 		s.logger.Debug("processBuffer: examining", "start", start, "overlap", overlapPolicy)
 
 		// For ALLOW_ALL, just start it, ignoring running/pending starts
@@ -630,12 +591,12 @@ func (s *scheduler) processBuffer() bool {
 			}
 		}
 	}
-	s.Internal.BufferedStarts = nextBufferedStarts
+	s.State.BufferedStarts = nextBufferedStarts
 
 	if needTerminate {
-		s.terminateWorkflow(s.Internal.WatcherReq.Execution)
+		s.terminateWorkflow(s.State.WatcherRequest.Execution)
 	} else if needCancel {
-		s.cancelWorkflow(s.Internal.WatcherReq.Execution)
+		s.cancelWorkflow(s.State.WatcherRequest.Execution)
 	}
 
 	if pendingStart == nil {
@@ -668,44 +629,44 @@ func (s *scheduler) recordAction(result *schedpb.ScheduleActionResult) {
 }
 
 func (s *scheduler) startWorkflow(
-	start *bufferedStart,
+	start *sschedpb.BufferedStart,
 	origStartReq *workflowservice.StartWorkflowExecutionRequest,
 ) (*schedpb.ScheduleActionResult, error) {
 	sreq := *origStartReq
-	sreq.WorkflowId = sreq.WorkflowId + "-" + start.Nominal.UTC().Format(time.RFC3339)
+	sreq.WorkflowId = sreq.WorkflowId + "-" + start.NominalTime.UTC().Format(time.RFC3339)
 	sreq.Identity = s.identity()
 	sreq.RequestId = uuid.NewString()
-	sreq.SearchAttributes = s.addSearchAttr(sreq.SearchAttributes, start.Nominal.UTC())
+	sreq.SearchAttributes = s.addSearchAttr(sreq.SearchAttributes, start.NominalTime.UTC())
 
 	// FIXME: need to set NonRetryableErrorTypes
 	ctx := workflow.WithActivityOptions(s.ctx, workflow.ActivityOptions{RetryPolicy: defaultActivityRetryPolicy})
-	req := &startWorkflowRequest{
-		NamespaceID:     s.Internal.NamespaceID,
-		Request:         &sreq,
-		ActualStartTime: start.Actual, // used to set expiration time
+	req := &sschedpb.StartWorkflowRequest{
+		NamespaceId: s.State.NamespaceId,
+		Request:     &sreq,
+		StartTime:   start.ActualTime, // used to set expiration time, so use actual instead of nominal
 	}
-	var res startWorkflowResponse
+	var res sschedpb.StartWorkflowResponse
 	err := workflow.ExecuteActivity(ctx, s.a.StartWorkflow, req).Get(s.ctx, &res)
 	if err != nil {
 		return nil, err
 	}
 
 	return &schedpb.ScheduleActionResult{
-		ScheduleTime: timestamp.TimePtr(start.Actual),
-		ActualTime:   timestamp.TimePtr(res.RealTime),
+		ScheduleTime: start.ActualTime,
+		ActualTime:   res.RealStartTime,
 		StartWorkflowResult: &commonpb.WorkflowExecution{
 			WorkflowId: sreq.WorkflowId,
-			RunId:      res.RunID,
+			RunId:      res.RunId,
 		},
 	}, nil
 }
 
 func (s *scheduler) startWorkflowAndWatch(
-	start *bufferedStart,
+	start *sschedpb.BufferedStart,
 	origStartReq *workflowservice.StartWorkflowExecutionRequest,
 ) (*schedpb.ScheduleActionResult, error) {
 	// Watcher should not be running now
-	if s.Internal.WatcherReq != nil || s.watcherFuture != nil {
+	if s.State.WatcherRequest != nil || s.watcherFuture != nil {
 		return nil, errInternal
 	}
 
@@ -715,7 +676,7 @@ func (s *scheduler) startWorkflowAndWatch(
 	}
 
 	// Start background activity to watch the workflow
-	s.Internal.WatcherReq = &watchWorkflowRequest{
+	s.State.WatcherRequest = &sschedpb.WatchWorkflowRequest{
 		Execution: result.StartWorkflowResult,
 	}
 	s.startWatcher()
@@ -725,7 +686,7 @@ func (s *scheduler) startWorkflowAndWatch(
 
 func (s *scheduler) identity() string {
 	info := workflow.GetInfo(s.ctx)
-	return fmt.Sprintf("temporal-scheduler-%s-%s", s.Internal.Namespace, info.WorkflowExecution.ID)
+	return fmt.Sprintf("temporal-scheduler-%s-%s", s.State.Namespace, info.WorkflowExecution.ID)
 }
 
 func (s *scheduler) addSearchAttr(
@@ -742,7 +703,7 @@ func (s *scheduler) addSearchAttr(
 }
 
 func (s *scheduler) startWatcher() {
-	s.logger.Debug("starting wf watcher", s.Internal.WatcherReq)
+	s.logger.Debug("starting wf watcher", s.State.WatcherRequest)
 	ctx := workflow.WithActivityOptions(s.ctx, workflow.ActivityOptions{
 		StartToCloseTimeout: 365 * 24 * time.Hour,
 		// FIXME: need to set NonRetryableErrorTypes
@@ -750,7 +711,7 @@ func (s *scheduler) startWatcher() {
 		// see activities.tryWatchWorkflow for this timeout
 		HeartbeatTimeout: 65 * time.Second,
 	})
-	s.watcherFuture = workflow.ExecuteActivity(ctx, s.a.WatchWorkflow, s.Internal.WatcherReq)
+	s.watcherFuture = workflow.ExecuteActivity(ctx, s.a.WatchWorkflow, s.State.WatcherRequest)
 }
 
 func (s *scheduler) cancelWorkflow(execution *commonpb.WorkflowExecution) {
@@ -759,10 +720,10 @@ func (s *scheduler) cancelWorkflow(execution *commonpb.WorkflowExecution) {
 		// FIXME: need to set NonRetryableErrorTypes
 		RetryPolicy: defaultActivityRetryPolicy,
 	})
-	areq := &cancelWorkflowRequest{
-		NamespaceID: s.Internal.NamespaceID,
-		Namespace:   s.Internal.Namespace,
-		RequestID:   uuid.NewString(),
+	areq := &sschedpb.CancelWorkflowRequest{
+		NamespaceId: s.State.NamespaceId,
+		Namespace:   s.State.Namespace,
+		RequestId:   uuid.NewString(),
 		Identity:    s.identity(),
 		Execution:   execution,
 	}
@@ -776,9 +737,9 @@ func (s *scheduler) terminateWorkflow(execution *commonpb.WorkflowExecution) {
 		// FIXME: need to set NonRetryableErrorTypes
 		RetryPolicy: defaultActivityRetryPolicy,
 	})
-	areq := &terminateWorkflowRequest{
-		NamespaceID: s.Internal.NamespaceID,
-		Namespace:   s.Internal.Namespace,
+	areq := &sschedpb.TerminateWorkflowRequest{
+		NamespaceId: s.State.NamespaceId,
+		Namespace:   s.State.Namespace,
 		Identity:    s.identity(),
 		Execution:   execution,
 		Reason:      "terminated by schedule overlap policy",
