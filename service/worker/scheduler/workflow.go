@@ -78,7 +78,6 @@ type (
 	internalState struct {
 		Namespace         namespace.Name
 		NamespaceID       namespace.ID
-		ID                string
 		LastProcessedTime time.Time
 		BufferedStarts    []*bufferedStart
 
@@ -132,21 +131,22 @@ var (
 	}
 
 	errUpdateConflict = errors.New("Conflicting concurrent update")
-	errInternal       = errors.New("internal logic error")
+	errInternal       = errors.New("Internal logic error")
 )
 
 func SchedulerWorkflow(ctx workflow.Context, args *StartArgs) error {
+	id := workflow.GetInfo(ctx).WorkflowExecution.ID
 	scheduler := &scheduler{
 		StartArgs: *args,
 		ctx:       ctx,
 		a:         nil,
-		logger:    sdklog.With(workflow.GetLogger(ctx), "schedule-id", args.Internal.ID),
+		logger:    sdklog.With(workflow.GetLogger(ctx), "schedule-id", id),
 	}
 	return scheduler.run()
 }
 
 func (s *scheduler) run() error {
-	s.logger.Info("Schedule started")
+	s.logger.Info("Schedule starting", "schedule", s.Schedule)
 
 	s.ensureFields()
 	s.compileSpec()
@@ -255,6 +255,8 @@ func (s *scheduler) now() time.Time {
 }
 
 func (s *scheduler) processRequest(req *schedpb.ScheduleRequest) {
+	s.logger.Debug("processRequest", "req", req)
+
 	if req == nil {
 		return
 	}
@@ -290,6 +292,8 @@ func (s *scheduler) processTimeRange(
 	overlapPolicy enumspb.ScheduleOverlapPolicy,
 	manual bool,
 ) (nextSleep time.Duration, hasNext bool) {
+	s.logger.Debug("processTimeRange", "t1", t1, "t2", t2, "overlapPolicy", overlapPolicy, "manual", manual)
+
 	if s.cspec == nil {
 		return 0, false
 	}
@@ -361,6 +365,7 @@ func (s *scheduler) sleep(nextSleep time.Duration, hasNext bool) {
 		sel.AddFuture(s.watcherFuture, s.wfWatcherReturned)
 	}
 
+	s.logger.Debug("sleeping", "hasNext", hasNext, "watcher", s.watcherFuture != nil)
 	sel.Select(s.ctx)
 	for sel.HasPending() {
 		sel.Select(s.ctx)
@@ -493,7 +498,6 @@ func (s *scheduler) getCatchupWindow() time.Duration {
 		return defaultCatchupWindow
 	}
 	return cw
-
 }
 
 func (s *scheduler) resolveOverlapPolicy(overlapPolicy enumspb.ScheduleOverlapPolicy) enumspb.ScheduleOverlapPolicy {
@@ -507,6 +511,7 @@ func (s *scheduler) resolveOverlapPolicy(overlapPolicy enumspb.ScheduleOverlapPo
 }
 
 func (s *scheduler) addStart(nominalTime, actualTime time.Time, overlapPolicy enumspb.ScheduleOverlapPolicy, manual bool) {
+	s.logger.Debug("addStart", "nominal", nominalTime, "actual", actualTime, "overlapPolicy", overlapPolicy, "manual", manual)
 	s.Internal.BufferedStarts = append(s.Internal.BufferedStarts, &bufferedStart{
 		Nominal: nominalTime,
 		Actual:  actualTime,
@@ -517,6 +522,8 @@ func (s *scheduler) addStart(nominalTime, actualTime time.Time, overlapPolicy en
 
 // processBuffer should return true if there might be more work to do right now.
 func (s *scheduler) processBuffer() bool {
+	s.logger.Debug("processBuffer")
+
 	// We should try to do something reasonable with any combination of overlap
 	// policies in the buffer, although some combinations don't make much sense
 	// and would require a convoluted series of calls to set up.
@@ -530,6 +537,7 @@ func (s *scheduler) processBuffer() bool {
 	req := s.Schedule.Action.GetStartWorkflow()
 	if req == nil {
 		s.Internal.BufferedStarts = nil
+		s.logger.Debug("processBuffer: no action")
 		return false
 	}
 
@@ -551,6 +559,7 @@ func (s *scheduler) processBuffer() bool {
 
 	for _, start := range s.Internal.BufferedStarts {
 		overlapPolicy := s.resolveOverlapPolicy(start.Overlap)
+		s.logger.Debug("processBuffer: examining", "start", start, "overlap", overlapPolicy)
 
 		// For ALLOW_ALL, just start it, ignoring running/pending starts
 		if overlapPolicy == enumspb.SCHEDULE_OVERLAP_POLICY_ALLOW_ALL {
@@ -572,6 +581,7 @@ func (s *scheduler) processBuffer() bool {
 		// If there's nothing running, we can start this one no matter what the policy is
 		if !isRunning && pendingStart == nil {
 			pendingStart = start
+			s.logger.Debug("processBuffer: now pending", "start", start)
 			continue
 		}
 
@@ -580,25 +590,31 @@ func (s *scheduler) processBuffer() bool {
 		case enumspb.SCHEDULE_OVERLAP_POLICY_SKIP:
 			// just skip
 			s.Info.OverlapSkipped++
+			s.logger.Debug("processBuffer: skipped")
 		case enumspb.SCHEDULE_OVERLAP_POLICY_BUFFER_ONE:
 			// allow one (the first one) in the buffer
 			if len(nextBufferedStarts) == 0 {
 				nextBufferedStarts = append(nextBufferedStarts, start)
+				s.logger.Debug("processBuffer: now single buffered")
 			} else {
 				s.Info.OverlapSkipped++
+				s.logger.Debug("processBuffer: skipped")
 			}
 		case enumspb.SCHEDULE_OVERLAP_POLICY_BUFFER_ALL:
 			// always add to buffer
 			nextBufferedStarts = append(nextBufferedStarts, start)
+			s.logger.Debug("processBuffer: buffered")
 		case enumspb.SCHEDULE_OVERLAP_POLICY_CANCEL_OTHER:
 			if isRunning {
 				// an actual workflow is running, cancel it (asynchronously)
 				needCancel = true
 				// keep in buffer so it will get started once cancel completes
 				nextBufferedStarts = append(nextBufferedStarts, start)
+				s.logger.Debug("processBuffer: will cancel")
 			} else {
 				// it's not running yet, it's just the one we were going to start. replace it
 				pendingStart = start
+				s.logger.Debug("processBuffer: now pending")
 			}
 		case enumspb.SCHEDULE_OVERLAP_POLICY_TERMINATE_OTHER:
 			if isRunning {
@@ -606,9 +622,11 @@ func (s *scheduler) processBuffer() bool {
 				needTerminate = true
 				// keep in buffer so it will get started once cancel completes
 				nextBufferedStarts = append(nextBufferedStarts, start)
+				s.logger.Debug("processBuffer: will terminate")
 			} else {
 				// it's not running yet, it's just the one we were going to start. replace it
 				pendingStart = start
+				s.logger.Debug("processBuffer: now pending")
 			}
 		}
 	}
@@ -659,7 +677,7 @@ func (s *scheduler) startWorkflow(
 	sreq.RequestId = uuid.NewString()
 	sreq.SearchAttributes = s.addSearchAttr(sreq.SearchAttributes, start.Nominal.UTC())
 
-		// FIXME: need to set NonRetryableErrorTypes
+	// FIXME: need to set NonRetryableErrorTypes
 	ctx := workflow.WithActivityOptions(s.ctx, workflow.ActivityOptions{RetryPolicy: defaultActivityRetryPolicy})
 	req := &startWorkflowRequest{
 		NamespaceID:     s.Internal.NamespaceID,
@@ -706,7 +724,8 @@ func (s *scheduler) startWorkflowAndWatch(
 }
 
 func (s *scheduler) identity() string {
-	return fmt.Sprintf("temporal-scheduler-%s", s.Internal.ID)
+	info := workflow.GetInfo(s.ctx)
+	return fmt.Sprintf("temporal-scheduler-%s-%s", s.Internal.Namespace, info.WorkflowExecution.ID)
 }
 
 func (s *scheduler) addSearchAttr(
@@ -723,10 +742,11 @@ func (s *scheduler) addSearchAttr(
 }
 
 func (s *scheduler) startWatcher() {
+	s.logger.Debug("starting wf watcher", s.Internal.WatcherReq)
 	ctx := workflow.WithActivityOptions(s.ctx, workflow.ActivityOptions{
 		StartToCloseTimeout: 365 * 24 * time.Hour,
 		// FIXME: need to set NonRetryableErrorTypes
-		RetryPolicy:         defaultActivityRetryPolicy,
+		RetryPolicy: defaultActivityRetryPolicy,
 		// see activities.tryWatchWorkflow for this timeout
 		HeartbeatTimeout: 65 * time.Second,
 	})
@@ -737,7 +757,7 @@ func (s *scheduler) cancelWorkflow(execution *commonpb.WorkflowExecution) {
 	ctx := workflow.WithActivityOptions(s.ctx, workflow.ActivityOptions{
 		StartToCloseTimeout: 1 * time.Minute,
 		// FIXME: need to set NonRetryableErrorTypes
-		RetryPolicy:         defaultActivityRetryPolicy,
+		RetryPolicy: defaultActivityRetryPolicy,
 	})
 	areq := &cancelWorkflowRequest{
 		NamespaceID: s.Internal.NamespaceID,
@@ -754,7 +774,7 @@ func (s *scheduler) terminateWorkflow(execution *commonpb.WorkflowExecution) {
 	ctx := workflow.WithActivityOptions(s.ctx, workflow.ActivityOptions{
 		StartToCloseTimeout: 1 * time.Minute,
 		// FIXME: need to set NonRetryableErrorTypes
-		RetryPolicy:         defaultActivityRetryPolicy,
+		RetryPolicy: defaultActivityRetryPolicy,
 	})
 	areq := &terminateWorkflowRequest{
 		NamespaceID: s.Internal.NamespaceID,
