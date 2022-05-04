@@ -59,7 +59,8 @@ const (
 	defaultCatchupWindow = 60 * time.Second
 	minCatchupWindow     = 10 * time.Second
 
-	searchAttrStartTimeKey = "TemporalScheduledStartTime"
+	searchAttrStartTime    = "TemporalScheduledStartTime"
+	searchAttrScheduleById = "TemporalScheduledById"
 )
 
 type (
@@ -629,7 +630,11 @@ func (s *scheduler) addSearchAttr(
 ) *commonpb.SearchAttributes {
 	fields := maps.Clone(attrs.GetIndexedFields())
 	if p, err := payload.Encode(nominal); err == nil {
-		fields[searchAttrStartTimeKey] = p
+		fields[searchAttrStartTime] = p
+	}
+	info := workflow.GetInfo(s.ctx)
+	if p, err := payload.Encode(info.WorkflowExecution.ID); err == nil {
+		fields[searchAttrScheduleById] = p
 	}
 	return &commonpb.SearchAttributes{
 		IndexedFields: fields,
