@@ -37,6 +37,7 @@ import (
 	commonpb "go.temporal.io/api/common/v1"
 	enumspb "go.temporal.io/api/enums/v1"
 	schedpb "go.temporal.io/api/schedule/v1"
+	workflowpb "go.temporal.io/api/workflow/v1"
 	"go.temporal.io/api/workflowservice/v1"
 	sdklog "go.temporal.io/sdk/log"
 	"go.temporal.io/sdk/temporal"
@@ -123,10 +124,9 @@ func (s *scheduler) run() error {
 		s.startWatcher()
 	}
 
-	// A schedule may be created with an initial Request, e.g. start one
-	// immediately. Handle that now.
-	s.processRequest(s.InitialRequest)
-	s.InitialRequest = nil
+	// A schedule may be created with an initial Patch, e.g. start one immediately. Handle that now.
+	s.processPatch(s.InitialPatch)
+	s.InitialPatch = nil
 
 	for iters := iterationsBeforeContinueAsNew; iters >= 0; iters-- {
 		t1 := timestamp.TimeValue(s.State.LastProcessedTime)
@@ -215,19 +215,19 @@ func (s *scheduler) now() time.Time {
 	return workflow.Now(s.ctx)
 }
 
-func (s *scheduler) processRequest(req *schedpb.ScheduleRequest) {
-	s.logger.Debug("processRequest", "req", req)
+func (s *scheduler) processPatch(patch *schedpb.SchedulePatch) {
+	s.logger.Debug("processPatch", "patch", patch)
 
-	if req == nil {
+	if patch == nil {
 		return
 	}
 
-	if trigger := req.TriggerImmediately; trigger != nil {
+	if trigger := patch.TriggerImmediately; trigger != nil {
 		now := s.now()
 		s.addStart(now, now, trigger.OverlapPolicy, true)
 	}
 
-	for _, bfr := range req.BackfillRequest {
+	for _, bfr := range patch.BackfillRequest {
 		s.processTimeRange(
 			timestamp.TimeValue(bfr.GetStartTime()),
 			timestamp.TimeValue(bfr.GetEndTime()),
@@ -236,14 +236,14 @@ func (s *scheduler) processRequest(req *schedpb.ScheduleRequest) {
 		)
 	}
 
-	if req.Pause != "" {
+	if patch.Pause != "" {
 		s.Schedule.State.Paused = true
-		s.Schedule.State.Notes = req.Pause
+		s.Schedule.State.Notes = patch.Pause
 		s.incSeqNo()
 	}
-	if req.Unpause != "" {
+	if patch.Unpause != "" {
 		s.Schedule.State.Paused = false
-		s.Schedule.State.Notes = req.Unpause
+		s.Schedule.State.Notes = patch.Unpause
 		s.incSeqNo()
 	}
 }
@@ -312,10 +312,10 @@ func (s *scheduler) sleep(nextSleep time.Duration, hasNext bool) {
 	sel := workflow.NewSelector(s.ctx)
 
 	upCh := workflow.GetSignalChannel(s.ctx, "update")
-	sel.AddReceive(upCh, s.update)
+	sel.AddReceive(upCh, s.handleUpdateSignal)
 
-	reqCh := workflow.GetSignalChannel(s.ctx, "request")
-	sel.AddReceive(reqCh, s.request)
+	reqCh := workflow.GetSignalChannel(s.ctx, "patch")
+	sel.AddReceive(reqCh, s.handlePatchSignal)
 
 	if hasNext {
 		tmr := workflow.NewTimer(s.ctx, nextSleep)
@@ -373,7 +373,7 @@ func (s *scheduler) wfWatcherReturned(f workflow.Future) {
 	s.logger.Info("started workflow finished", "status", res.Status, "pause-after-failure", pauseOnFailure)
 }
 
-func (s *scheduler) update(ch workflow.ReceiveChannel, _ bool) {
+func (s *scheduler) handleUpdateSignal(ch workflow.ReceiveChannel, _ bool) {
 	var req sschedpb.FullUpdateRequest
 	ch.Receive(s.ctx, &req)
 	if err := s.checkConflict(req.ConflictToken); err != nil {
@@ -396,11 +396,11 @@ func (s *scheduler) update(ch workflow.ReceiveChannel, _ bool) {
 	s.incSeqNo()
 }
 
-func (s *scheduler) request(ch workflow.ReceiveChannel, _ bool) {
-	var req schedpb.ScheduleRequest
-	ch.Receive(s.ctx, &req)
-	s.logger.Info("Schedule request", "request", req.String())
-	s.processRequest(&req)
+func (s *scheduler) handlePatchSignal(ch workflow.ReceiveChannel, _ bool) {
+	var patch schedpb.SchedulePatch
+	ch.Receive(s.ctx, &patch)
+	s.logger.Info("Schedule patch", "patch", patch.String())
+	s.processPatch(&patch)
 }
 
 func (s *scheduler) describe() (*sschedpb.DescribeResponse, error) {
@@ -565,13 +565,14 @@ func (s *scheduler) recordAction(result *schedpb.ScheduleActionResult) {
 
 func (s *scheduler) startWorkflow(
 	start *sschedpb.BufferedStart,
-	origStartReq *workflowservice.StartWorkflowExecutionRequest,
+	origStartReq *workflowpb.NewWorkflowExecutionInfo,
 ) (*schedpb.ScheduleActionResult, error) {
-	sreq := *origStartReq
-	sreq.WorkflowId = sreq.WorkflowId + "-" + start.NominalTime.UTC().Format(time.RFC3339)
-	sreq.Identity = s.identity()
-	sreq.RequestId = uuid.NewString()
-	sreq.SearchAttributes = s.addSearchAttr(sreq.SearchAttributes, start.NominalTime.UTC())
+	sreq := &workflowservice.StartWorkflowExecutionRequest{	Namespace:"asdf",
+	}
+	// sreq.WorkflowId = sreq.WorkflowId + "-" + start.NominalTime.UTC().Format(time.RFC3339)
+	// sreq.Identity = s.identity()
+	// sreq.RequestId = uuid.NewString()
+	// sreq.SearchAttributes = s.addSearchAttr(sreq.SearchAttributes, start.NominalTime.UTC())
 
 	// FIXME: need to set NonRetryableErrorTypes
 	ctx := workflow.WithActivityOptions(s.ctx, workflow.ActivityOptions{RetryPolicy: defaultActivityRetryPolicy})
@@ -598,7 +599,7 @@ func (s *scheduler) startWorkflow(
 
 func (s *scheduler) startWorkflowAndWatch(
 	start *sschedpb.BufferedStart,
-	origStartReq *workflowservice.StartWorkflowExecutionRequest,
+	origStartReq *workflowpb.NewWorkflowExecutionInfo,
 ) (*schedpb.ScheduleActionResult, error) {
 	// Watcher should not be running now
 	if s.State.WatcherRequest != nil || s.watcherFuture != nil {

@@ -38,7 +38,7 @@ require (
 	go.opentelemetry.io/otel/sdk v1.6.3
 	go.opentelemetry.io/otel/sdk/metric v0.29.0
 	go.temporal.io/api v1.7.1-0.20220429205751-8a73b1f896d0
-	go.temporal.io/sdk v1.14.1-0.20220429221638-3a2b86ebed54
+	go.temporal.io/sdk v1.14.1-0.20220503143303-7c3777acd583
 	go.temporal.io/version v0.3.0
 	go.uber.org/atomic v1.9.0
 	go.uber.org/fx v1.17.1
@@ -125,3 +125,5 @@ require (
 )
 
 replace go.temporal.io/api => /home/dnr/t/api-go
+
+replace go.temporal.io/sdk => /home/dnr/t/sdk-go
