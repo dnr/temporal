@@ -36,9 +36,9 @@ import (
 const IdentityHistoryService = "history-service"
 
 var (
-	// ErrTaskDiscarded is the error indicating that the timer / transfer task is pending for too long and discarded.
+	// ErrTaskDiscarded is the error indicating that the standby timer / transfer task is pending for too long and discarded.
 	ErrTaskDiscarded = errors.New("passive task pending for too long")
-	// ErrTaskRetry is the error indicating that the timer / transfer task should be retried.
+	// ErrTaskRetry is the error indicating that the standby timer / transfer task should be retried since condition in mutable state is not met.
 	ErrTaskRetry = errors.New("passive task should retry due to condition in mutable state is not met")
 	// ErrDuplicate is exported temporarily for integration test
 	ErrDuplicate = errors.New("duplicate task, completing it")
@@ -78,6 +78,8 @@ var (
 	ErrUnknownCluster = serviceerror.NewInvalidArgument("unknown cluster")
 	// ErrBufferedQueryCleared is error indicating mutable state is cleared while buffered query is pending
 	ErrBufferedQueryCleared = serviceerror.NewUnavailable("buffered query cleared, please retry")
+	// ErrWorkflowBusy is error indicating workflow is currently busy and workflow context can't be locked within specified timeout
+	ErrWorkflowBusy = serviceerror.NewUnavailable("timeout locking workflow execution")
 
 	// FailedWorkflowStatuses is a set of failed workflow close states, used for start workflow policy
 	// for start workflow execution API

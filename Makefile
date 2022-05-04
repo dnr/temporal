@@ -28,7 +28,8 @@ update-proto: clean-proto update-proto-submodule buf-lint api-linter protoc fix-
 GOOS        ?= $(shell go env GOOS)
 GOARCH      ?= $(shell go env GOARCH)
 GOPATH      ?= $(shell go env GOPATH)
-CGO_ENABLED ?= $(shell go env CGO_ENABLED)
+# Disable cgo by default.
+CGO_ENABLED ?= 0
 
 PERSISTENCE_TYPE ?= nosql
 PERSISTENCE_DRIVER ?= cassandra
@@ -77,8 +78,7 @@ ALL_SCRIPTS     := $(shell find . -name "*.sh")
 
 PINNED_DEPENDENCIES := \
 	github.com/apache/thrift@v0.0.0-20161221203622-b2a4d4ae21c7 \
-	github.com/go-sql-driver/mysql@v1.5.0 \
-	go.opentelemetry.io/otel/metric@v0.27.0 # There are breaking changes in v0.28.0
+	github.com/go-sql-driver/mysql@v1.5.0 
 
 # Code coverage output files.
 COVER_ROOT                 := ./.coverage
@@ -102,8 +102,8 @@ update-checkers:
 	@go install golang.org/x/tools/cmd/goimports@latest
 	@go install honnef.co/go/tools/cmd/staticcheck@master # TODO: Set concrete version above 0.2.2 here.
 	@go install github.com/kisielk/errcheck@v1.6.0
-	@go install github.com/googleapis/api-linter/cmd/api-linter@v1.29.4
-	@go install github.com/bufbuild/buf/cmd/buf@v0.56.0
+	@go install github.com/googleapis/api-linter/cmd/api-linter@v1.31.0
+	@go install github.com/bufbuild/buf/cmd/buf@v1.4.0
 
 update-mockgen:
 	@printf $(COLOR) "Install/update mockgen tool..."

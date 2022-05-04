@@ -22,75 +22,57 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-package collection
+package log
 
 import (
 	"sync"
+
+	"go.temporal.io/server/common/log/tag"
 )
+
+var _ Logger = (*lazyLogger)(nil)
 
 type (
-	concurrentQueueImpl struct {
-		sync.Mutex
-		items []interface{}
+	lazyLogger struct {
+		logger Logger
+		tagFn  func() []tag.Tag
+
+		once sync.Once
 	}
 )
 
-// NewConcurrentQueue creates a new concurrent queue
-func NewConcurrentQueue() Queue {
-	return &concurrentQueueImpl{
-		items: make([]interface{}, 0, 1000),
+func NewLazyLogger(logger Logger, tagFn func() []tag.Tag) *lazyLogger {
+	return &lazyLogger{
+		logger: logger,
+		tagFn:  tagFn,
 	}
 }
 
-func (q *concurrentQueueImpl) Peek() interface{} {
-	q.Lock()
-	defer q.Unlock()
-
-	if q.isEmptyLocked() {
-		return nil
-	}
-	return q.items[0]
+func (l *lazyLogger) Debug(msg string, tags ...tag.Tag) {
+	l.once.Do(l.tagLogger)
+	l.logger.Debug(msg, tags...)
 }
 
-func (q *concurrentQueueImpl) Add(item interface{}) {
-	if item == nil {
-		panic("cannot add nil item to queue")
-	}
-
-	q.Lock()
-	defer q.Unlock()
-
-	q.items = append(q.items, item)
+func (l *lazyLogger) Info(msg string, tags ...tag.Tag) {
+	l.once.Do(l.tagLogger)
+	l.logger.Info(msg, tags...)
 }
 
-func (q *concurrentQueueImpl) Remove() interface{} {
-	q.Lock()
-	defer q.Unlock()
-	if q.isEmptyLocked() {
-		return nil
-	}
-
-	item := q.items[0]
-	q.items[0] = nil
-	q.items = q.items[1:]
-
-	return item
+func (l *lazyLogger) Warn(msg string, tags ...tag.Tag) {
+	l.once.Do(l.tagLogger)
+	l.logger.Warn(msg, tags...)
 }
 
-func (q *concurrentQueueImpl) IsEmpty() bool {
-	q.Lock()
-	defer q.Unlock()
-
-	return q.isEmptyLocked()
+func (l *lazyLogger) Error(msg string, tags ...tag.Tag) {
+	l.once.Do(l.tagLogger)
+	l.logger.Error(msg, tags...)
 }
 
-func (q *concurrentQueueImpl) Len() int {
-	q.Lock()
-	defer q.Unlock()
-
-	return len(q.items)
+func (l *lazyLogger) Fatal(msg string, tags ...tag.Tag) {
+	l.once.Do(l.tagLogger)
+	l.logger.Fatal(msg, tags...)
 }
 
-func (q *concurrentQueueImpl) isEmptyLocked() bool {
-	return len(q.items) == 0
+func (l *lazyLogger) tagLogger() {
+	l.logger = With(l.logger, l.tagFn()...)
 }

@@ -80,6 +80,10 @@ const (
 	retryTaskProcessingMaxInterval     = 100 * time.Millisecond
 	retryTaskProcessingMaxAttempts     = 3
 
+	rescheduleTaskInitialInterval    = 3 * time.Second
+	rescheduleTaskBackoffCoefficient = 1.05
+	rescheduleTaskMaxInterval        = 3 * time.Minute
+
 	replicationServiceBusyInitialInterval    = 2 * time.Second
 	replicationServiceBusyMaxInterval        = 10 * time.Second
 	replicationServiceBusyExpirationInterval = 30 * time.Second
@@ -195,6 +199,16 @@ func CreateTaskProcessingRetryPolicy() backoff.RetryPolicy {
 	return policy
 }
 
+// CreateTaskReschedulePolicy creates a retry policy for task processing
+func CreateTaskReschedulePolicy() backoff.RetryPolicy {
+	policy := backoff.NewExponentialRetryPolicy(rescheduleTaskInitialInterval)
+	policy.SetBackoffCoefficient(rescheduleTaskBackoffCoefficient)
+	policy.SetMaximumInterval(rescheduleTaskMaxInterval)
+	policy.SetExpirationInterval(backoff.NoInterval)
+
+	return policy
+}
+
 // CreateReplicationServiceBusyRetryPolicy creates a retry policy to handle replication service busy
 func CreateReplicationServiceBusyRetryPolicy() backoff.RetryPolicy {
 	policy := backoff.NewExponentialRetryPolicy(replicationServiceBusyInitialInterval)
@@ -228,6 +242,7 @@ func IsPersistenceTransientError(err error) bool {
 func IsServiceTransientError(err error) bool {
 	switch err.(type) {
 	case *serviceerror.NotFound,
+		*serviceerror.NamespaceNotFound,
 		*serviceerror.InvalidArgument,
 		*serviceerror.NamespaceNotActive,
 		*serviceerror.WorkflowExecutionAlreadyStarted:
@@ -281,12 +296,7 @@ func IsResourceExhausted(err error) bool {
 	return false
 }
 
-func IsNotFoundError(err error) bool {
-	var notFoundError *serviceerror.NotFound
-	return errors.As(err, &notFoundError)
-}
-
-// WorkflowIDToHistoryShard is used to map namespaceID-workflowID pair to a shardID
+// WorkflowIDToHistoryShard is used to map namespaceID-workflowID pair to a shardID.
 func WorkflowIDToHistoryShard(
 	namespaceID string,
 	workflowID string,

@@ -111,6 +111,8 @@ const (
 	EnableStickyQuery = "system.enableStickyQuery"
 	// EnableActivityLocalDispatch indicates if acitivty local dispatch is enabled per namespace
 	EnableActivityLocalDispatch = "system.enableActivityLocalDispatch"
+	// NamespaceCacheRefreshInterval is the key for namespace cache refresh interval dynamic config
+	NamespaceCacheRefreshInterval = "system.namespaceCacheRefreshInterval"
 
 	// key for size limit
 
@@ -305,12 +307,22 @@ const (
 	// StandbyTaskMissingEventsDiscardDelay is the amount of time standby cluster's will wait (if events are missing)
 	// before discarding the task
 	StandbyTaskMissingEventsDiscardDelay = "history.standbyTaskMissingEventsDiscardDelay"
+	// TimerTaskHighPriorityRPS is the per namespace rps limit for processing timer tasks as high priority
+	TimerTaskHighPriorityRPS = "history.timerTaskHighPriorityRPS"
 	// TimerTaskBatchSize is batch size for timer processor to process tasks
 	TimerTaskBatchSize = "history.timerTaskBatchSize"
 	// TimerTaskWorkerCount is number of task workers for timer processor
 	TimerTaskWorkerCount = "history.timerTaskWorkerCount"
 	// TimerTaskMaxRetryCount is max retry count for timer processor
 	TimerTaskMaxRetryCount = "history.timerTaskMaxRetryCount"
+	// TimerProcessorEnablePriorityTaskScheduler indicates whether host level priority task scheduler should be used for timer processor
+	TimerProcessorEnablePriorityTaskScheduler = "history.timerProcessorEnablePriorityTaskScheduler"
+	// TimerProcessorSchedulerWorkerCount is the number of workers in the host level task scheduler for timer processor
+	TimerProcessorSchedulerWorkerCount = "history.timerProcessorSchedulerWorkerCount"
+	// TimerProcessorSchedulerQueueSize is the task channel size in the host level task scheduler for timer processor
+	TimerProcessorSchedulerQueueSize = "history.timerProcessorSchedulerQueueSize"
+	// TimerProcessorSchedulerRoundRobinWeights is the priority round robin weights for timer task scheduler
+	TimerProcessorSchedulerRoundRobinWeights = "history.timerProcessorSchedulerRoundRobinWeights"
 	// TimerProcessorCompleteTimerFailureRetryCount is retry count for timer processor complete timer operation
 	TimerProcessorCompleteTimerFailureRetryCount = "history.timerProcessorCompleteTimerFailureRetryCount"
 	// TimerProcessorUpdateAckInterval is update interval for timer processor
@@ -327,20 +339,22 @@ const (
 	TimerProcessorMaxPollInterval = "history.timerProcessorMaxPollInterval"
 	// TimerProcessorMaxPollIntervalJitterCoefficient is the max poll interval jitter coefficient
 	TimerProcessorMaxPollIntervalJitterCoefficient = "history.timerProcessorMaxPollIntervalJitterCoefficient"
-	// TimerProcessorRedispatchInterval is the redispatch interval for timer processor
-	TimerProcessorRedispatchInterval = "history.timerProcessorRedispatchInterval"
-	// TimerProcessorRedispatchIntervalJitterCoefficient is the redispatch interval jitter coefficient
-	TimerProcessorRedispatchIntervalJitterCoefficient = "history.timerProcessorRedispatchIntervalJitterCoefficient"
-	// TimerProcessorMaxRedispatchQueueSize is the threshold of the number of tasks in the redispatch queue for timer processor
-	TimerProcessorMaxRedispatchQueueSize = "history.timerProcessorMaxRedispatchQueueSize"
-	// TimerProcessorEnablePriorityTaskProcessor indicates whether priority task processor should be used for timer processor
-	TimerProcessorEnablePriorityTaskProcessor = "history.timerProcessorEnablePriorityTaskProcessor"
+	// TimerProcessorRescheduleInterval is the redispatch interval for timer processor
+	TimerProcessorRescheduleInterval = "history.timerProcessorRescheduleInterval"
+	// TimerProcessorRescheduleIntervalJitterCoefficient is the redispatch interval jitter coefficient
+	TimerProcessorRescheduleIntervalJitterCoefficient = "history.timerProcessorRescheduleIntervalJitterCoefficient"
+	// TimerProcessorMaxReschedulerSize is the threshold of the number of tasks in the redispatch queue for timer processor
+	TimerProcessorMaxReschedulerSize = "history.timerProcessorMaxReschedulerSize"
+	// TimerProcessorPollBackoffInterval is the poll backoff interval if task redispatcher's size exceeds limit for timer processor
+	TimerProcessorPollBackoffInterval = "history.timerProcessorPollBackoffInterval"
 	// TimerProcessorMaxTimeShift is the max shift timer processor can have
 	TimerProcessorMaxTimeShift = "history.timerProcessorMaxTimeShift"
 	// TimerProcessorHistoryArchivalSizeLimit is the max history size for inline archival
 	TimerProcessorHistoryArchivalSizeLimit = "history.timerProcessorHistoryArchivalSizeLimit"
 	// TimerProcessorArchivalTimeLimit is the upper time limit for inline history archival
 	TimerProcessorArchivalTimeLimit = "history.timerProcessorArchivalTimeLimit"
+	// TransferTaskHighPriorityRPS is the per namespace rps limit for processing timer tasks as high priority
+	TransferTaskHighPriorityRPS = "history.transferTaskHighPriorityRPS"
 	// TransferTaskBatchSize is batch size for transferQueueProcessor
 	TransferTaskBatchSize = "history.transferTaskBatchSize"
 	// TransferProcessorFailoverMaxPollRPS is max poll rate per second for transferQueueProcessor
@@ -351,6 +365,14 @@ const (
 	TransferTaskWorkerCount = "history.transferTaskWorkerCount"
 	// TransferTaskMaxRetryCount is max times of retry for transferQueueProcessor
 	TransferTaskMaxRetryCount = "history.transferTaskMaxRetryCount"
+	// TransferProcessorEnablePriorityTaskScheduler indicates whether host level priority task scheduler should be used for transferQueueProcessor
+	TransferProcessorEnablePriorityTaskScheduler = "history.transferProcessorEnablePriorityTaskScheduler"
+	// TransferProcessorSchedulerWorkerCount is the number of workers in the host level task scheduler for transferQueueProcessor
+	TransferProcessorSchedulerWorkerCount = "history.transferProcessorSchedulerWorkerCount"
+	// TransferProcessorSchedulerQueueSize is the task channel size in the host level task scheduler for transferQueueProcessor
+	TransferProcessorSchedulerQueueSize = "history.transferProcessorSchedulerQueueSize"
+	// TransferProcessorSchedulerRoundRobinWeights is the priority round robin weights for transfer task scheduler
+	TransferProcessorSchedulerRoundRobinWeights = "history.transferProcessorSchedulerRoundRobinWeights"
 	// TransferProcessorCompleteTransferFailureRetryCount is times of retry for failure
 	TransferProcessorCompleteTransferFailureRetryCount = "history.transferProcessorCompleteTransferFailureRetryCount"
 	// TransferProcessorUpdateShardTaskCount is update shard count for transferQueueProcessor
@@ -365,17 +387,19 @@ const (
 	TransferProcessorUpdateAckIntervalJitterCoefficient = "history.transferProcessorUpdateAckIntervalJitterCoefficient"
 	// TransferProcessorCompleteTransferInterval is complete timer interval for transferQueueProcessor
 	TransferProcessorCompleteTransferInterval = "history.transferProcessorCompleteTransferInterval"
-	// TransferProcessorRedispatchInterval is the redispatch interval for transferQueueProcessor
-	TransferProcessorRedispatchInterval = "history.transferProcessorRedispatchInterval"
-	// TransferProcessorRedispatchIntervalJitterCoefficient is the redispatch interval jitter coefficient
-	TransferProcessorRedispatchIntervalJitterCoefficient = "history.transferProcessorRedispatchIntervalJitterCoefficient"
-	// TransferProcessorMaxRedispatchQueueSize is the threshold of the number of tasks in the redispatch queue for transferQueueProcessor
-	TransferProcessorMaxRedispatchQueueSize = "history.transferProcessorMaxRedispatchQueueSize"
-	// TransferProcessorEnablePriorityTaskProcessor indicates whether priority task processor should be used for transferQueueProcessor
-	TransferProcessorEnablePriorityTaskProcessor = "history.transferProcessorEnablePriorityTaskProcessor"
+	// TransferProcessorRescheduleInterval is the redispatch interval for transferQueueProcessor
+	TransferProcessorRescheduleInterval = "history.transferProcessorRescheduleInterval"
+	// TransferProcessorRescheduleIntervalJitterCoefficient is the redispatch interval jitter coefficient
+	TransferProcessorRescheduleIntervalJitterCoefficient = "history.transferProcessorRescheduleIntervalJitterCoefficient"
+	// TransferProcessorMaxReschedulerSize is the threshold of the number of tasks in the redispatch queue for transferQueueProcessor
+	TransferProcessorMaxReschedulerSize = "history.transferProcessorMaxReschedulerSize"
+	// TransferProcessorPollBackoffInterval is the poll backoff interval if task redispatcher's size exceeds limit for transferQueueProcessor
+	TransferProcessorPollBackoffInterval = "history.transferProcessorPollBackoffInterval"
 	// TransferProcessorVisibilityArchivalTimeLimit is the upper time limit for archiving visibility records
 	TransferProcessorVisibilityArchivalTimeLimit = "history.transferProcessorVisibilityArchivalTimeLimit"
 
+	// VisibilityTaskHighPriorityRPS is the per namespace rps limit for processing timer tasks as high priority
+	VisibilityTaskHighPriorityRPS = "history.visibilityTaskHighPriorityRPS"
 	// VisibilityTaskBatchSize is batch size for visibilityQueueProcessor
 	VisibilityTaskBatchSize = "history.visibilityTaskBatchSize"
 	// VisibilityProcessorFailoverMaxPollRPS is max poll rate per second for visibilityQueueProcessor
@@ -386,6 +410,14 @@ const (
 	VisibilityTaskWorkerCount = "history.visibilityTaskWorkerCount"
 	// VisibilityTaskMaxRetryCount is max times of retry for visibilityQueueProcessor
 	VisibilityTaskMaxRetryCount = "history.visibilityTaskMaxRetryCount"
+	// VisibilityProcessorEnablePriorityTaskScheduler indicates whether host level priority task scheduler should be used for visibilityQueueProcessor
+	VisibilityProcessorEnablePriorityTaskScheduler = "history.visibilityProcessorEnablePriorityTaskScheduler"
+	// VisibilityProcessorSchedulerWorkerCount is the number of workers in the host level task scheduler for visibilityQueueProcessor
+	VisibilityProcessorSchedulerWorkerCount = "history.visibilityProcessorSchedulerWorkerCount"
+	// VisibilityProcessorSchedulerQueueSize is the task channel size in the host level task scheduler for visibilityQueueProcessor
+	VisibilityProcessorSchedulerQueueSize = "history.visibilityProcessorSchedulerQueueSize"
+	// VisibilityProcessorSchedulerRoundRobinWeights is the priority round robin weights for visibility task scheduler
+	VisibilityProcessorSchedulerRoundRobinWeights = "history.visibilityProcessorSchedulerRoundRobinWeights"
 	// VisibilityProcessorCompleteTaskFailureRetryCount is times of retry for failure
 	VisibilityProcessorCompleteTaskFailureRetryCount = "history.visibilityProcessorCompleteTaskFailureRetryCount"
 	// VisibilityProcessorMaxPollInterval max poll interval for visibilityQueueProcessor
@@ -398,14 +430,14 @@ const (
 	VisibilityProcessorUpdateAckIntervalJitterCoefficient = "history.visibilityProcessorUpdateAckIntervalJitterCoefficient"
 	// VisibilityProcessorCompleteTaskInterval is complete timer interval for visibilityQueueProcessor
 	VisibilityProcessorCompleteTaskInterval = "history.visibilityProcessorCompleteTaskInterval"
-	// VisibilityProcessorRedispatchInterval is the redispatch interval for visibilityQueueProcessor
-	VisibilityProcessorRedispatchInterval = "history.visibilityProcessorRedispatchInterval"
-	// VisibilityProcessorRedispatchIntervalJitterCoefficient is the redispatch interval jitter coefficient
-	VisibilityProcessorRedispatchIntervalJitterCoefficient = "history.visibilityProcessorRedispatchIntervalJitterCoefficient"
-	// VisibilityProcessorMaxRedispatchQueueSize is the threshold of the number of tasks in the redispatch queue for visibilityQueueProcessor
-	VisibilityProcessorMaxRedispatchQueueSize = "history.visibilityProcessorMaxRedispatchQueueSize"
-	// VisibilityProcessorEnablePriorityTaskProcessor indicates whether priority task processor should be used for visibilityQueueProcessor
-	VisibilityProcessorEnablePriorityTaskProcessor = "history.visibilityProcessorEnablePriorityTaskProcessor"
+	// VisibilityProcessorRescheduleInterval is the redispatch interval for visibilityQueueProcessor
+	VisibilityProcessorRescheduleInterval = "history.visibilityProcessorRescheduleInterval"
+	// VisibilityProcessorRescheduleIntervalJitterCoefficient is the redispatch interval jitter coefficient
+	VisibilityProcessorRescheduleIntervalJitterCoefficient = "history.visibilityProcessorRescheduleIntervalJitterCoefficient"
+	// VisibilityProcessorMaxReschedulerSize is the threshold of the number of tasks in the redispatch queue for visibilityQueueProcessor
+	VisibilityProcessorMaxReschedulerSize = "history.visibilityProcessorMaxReschedulerSize"
+	// VisibilityProcessorPollBackoffInterval is the poll backoff interval if task redispatcher's size exceeds limit for visibilityQueueProcessor
+	VisibilityProcessorPollBackoffInterval = "history.visibilityProcessorPollBackoffInterval"
 	// VisibilityProcessorVisibilityArchivalTimeLimit is the upper time limit for archiving visibility records
 	VisibilityProcessorVisibilityArchivalTimeLimit = "history.visibilityProcessorVisibilityArchivalTimeLimit"
 
@@ -425,12 +457,12 @@ const (
 	ReplicatorProcessorUpdateAckInterval = "history.replicatorProcessorUpdateAckInterval"
 	// ReplicatorProcessorUpdateAckIntervalJitterCoefficient is the update interval jitter coefficient
 	ReplicatorProcessorUpdateAckIntervalJitterCoefficient = "history.replicatorProcessorUpdateAckIntervalJitterCoefficient"
-	// ReplicatorProcessorRedispatchInterval is the redispatch interval for ReplicatorProcessor
-	ReplicatorProcessorRedispatchInterval = "history.replicatorProcessorRedispatchInterval"
-	// ReplicatorProcessorRedispatchIntervalJitterCoefficient is the redispatch interval jitter coefficient
-	ReplicatorProcessorRedispatchIntervalJitterCoefficient = "history.replicatorProcessorRedispatchIntervalJitterCoefficient"
-	// ReplicatorProcessorMaxRedispatchQueueSize is the threshold of the number of tasks in the redispatch queue for ReplicatorProcessor
-	ReplicatorProcessorMaxRedispatchQueueSize = "history.replicatorProcessorMaxRedispatchQueueSize"
+	// ReplicatorProcessorRescheduleInterval is the redispatch interval for ReplicatorProcessor
+	ReplicatorProcessorRescheduleInterval = "history.replicatorProcessorRescheduleInterval"
+	// ReplicatorProcessorRescheduleIntervalJitterCoefficient is the redispatch interval jitter coefficient
+	ReplicatorProcessorRescheduleIntervalJitterCoefficient = "history.replicatorProcessorRescheduleIntervalJitterCoefficient"
+	// ReplicatorProcessorMaxReschedulerSize is the threshold of the number of tasks in the redispatch queue for ReplicatorProcessor
+	ReplicatorProcessorMaxReschedulerSize = "history.replicatorProcessorMaxReschedulerSize"
 	// ReplicatorProcessorEnablePriorityTaskProcessor indicates whether priority task processor should be used for ReplicatorProcessor
 	ReplicatorProcessorEnablePriorityTaskProcessor = "history.replicatorProcessorEnablePriorityTaskProcessor"
 	// MaximumBufferedEventsBatch is max number of buffer event in mutable state
@@ -472,6 +504,8 @@ const (
 	WorkflowTaskHeartbeatTimeout = "history.workflowTaskHeartbeatTimeout"
 	// WorkflowTaskCriticalAttempts is the number of attempts for a workflow task that's regarded as critical
 	WorkflowTaskCriticalAttempts = "history.workflowTaskCriticalAttempt"
+	// WorkflowTaskRetryMaxInterval is the maximum interval added to a workflow task's startToClose timeout for slowing down retry
+	WorkflowTaskRetryMaxInterval = "history.workflowTaskRetryMaxInterval"
 	// DefaultWorkflowTaskTimeout for a workflow task
 	DefaultWorkflowTaskTimeout = "history.defaultWorkflowTaskTimeout"
 	// SkipReapplicationByNamespaceID is whether skipping a event re-application for a namespace

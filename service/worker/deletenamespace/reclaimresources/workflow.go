@@ -38,10 +38,13 @@ import (
 )
 
 const (
-	// WorkflowName is the workflow name.
 	WorkflowName = "temporal-sys-reclaim-namespace-resources-workflow"
 
 	namespaceCacheRefreshDelay = 11 * time.Second
+
+	// Workflow will try to delete workflow executions (call API and wait for all executions to get deleted) maxDeleteExecutionsAttempts number of times.
+	// If there are still some executions left, workflow fails, and needs to be restarted manually (this indicates some serious problems with transfer/visibility task processing).
+	maxDeleteExecutionsAttempts = 3
 )
 
 type (
@@ -70,6 +73,24 @@ var (
 	deleteExecutionsWorkflowOptions = workflow.ChildWorkflowOptions{
 		RetryPolicy:        retryPolicy,
 		WorkflowRunTimeout: 60 * time.Minute,
+	}
+
+	ensureNoExecutionsActivityRetryPolicy = &temporal.RetryPolicy{
+		InitialInterval:    1 * time.Second,
+		MaximumInterval:    2 * time.Minute,
+		BackoffCoefficient: 2,
+	}
+
+	ensureNoExecutionsStdVisibilityOptionsActivity = workflow.ActivityOptions{
+		RetryPolicy:            ensureNoExecutionsActivityRetryPolicy,
+		StartToCloseTimeout:    30 * time.Second,
+		ScheduleToCloseTimeout: 30 * time.Minute, // ~20 attempts
+	}
+
+	ensureNoExecutionsAdvVisibilityActivityOptions = workflow.ActivityOptions{
+		RetryPolicy:            ensureNoExecutionsActivityRetryPolicy,
+		StartToCloseTimeout:    30 * time.Second,
+		ScheduleToCloseTimeout: 10 * time.Hour, // Sanity check, advanced visibility can control the progress of activity.
 	}
 )
 
@@ -124,14 +145,20 @@ func ReclaimResourcesWorkflow(ctx workflow.Context, params ReclaimResourcesParam
 func deleteWorkflowExecutions(ctx workflow.Context, params ReclaimResourcesParams) (ReclaimResourcesResult, error) {
 	var a *Activities
 	logger := workflow.GetLogger(ctx)
-	deleteAttempt := int32(1)
 	var result ReclaimResourcesResult
 
-	for {
-		ctx1 := workflow.WithChildOptions(ctx, deleteExecutionsWorkflowOptions)
-		ctx1 = workflow.WithWorkflowID(ctx1, fmt.Sprintf("%s/%s", deleteexecutions.WorkflowName, params.Namespace))
+	ctx1 := workflow.WithLocalActivityOptions(ctx, localActivityOptions)
+	var isAdvancedVisibility bool
+	err := workflow.ExecuteLocalActivity(ctx1, a.IsAdvancedVisibilityActivity).Get(ctx, &isAdvancedVisibility)
+	if err != nil {
+		return result, fmt.Errorf("%w: IsAdvancedVisibilityActivity: %v", errors.ErrUnableToExecuteActivity, err)
+	}
+
+	for deleteAttempt := int32(1); deleteAttempt <= maxDeleteExecutionsAttempts; deleteAttempt++ {
+		ctx2 := workflow.WithChildOptions(ctx, deleteExecutionsWorkflowOptions)
+		ctx2 = workflow.WithWorkflowID(ctx2, fmt.Sprintf("%s/%s", deleteexecutions.WorkflowName, params.Namespace))
 		var der deleteexecutions.DeleteExecutionsResult
-		err := workflow.ExecuteChildWorkflow(ctx1, deleteexecutions.DeleteExecutionsWorkflow, params.DeleteExecutionsParams).Get(ctx, &der)
+		err := workflow.ExecuteChildWorkflow(ctx2, deleteexecutions.DeleteExecutionsWorkflow, params.DeleteExecutionsParams).Get(ctx, &der)
 		if err != nil {
 			logger.Error("Unable to execute child workflow.", tag.WorkflowType(deleteexecutions.WorkflowName), tag.Error(err))
 			return result, fmt.Errorf("%w: %s: %v", errors.ErrUnableToExecuteChildWorkflow, deleteexecutions.WorkflowName, err)
@@ -139,34 +166,29 @@ func deleteWorkflowExecutions(ctx workflow.Context, params ReclaimResourcesParam
 		result.SuccessCount += der.SuccessCount
 		result.ErrorCount += der.ErrorCount
 
-		ensureNoExecutionsActivityOptions := workflow.ActivityOptions{
-			// 445 seconds of total retry intervals.
-			RetryPolicy: &temporal.RetryPolicy{
-				InitialInterval:    1 * time.Second,
-				MaximumInterval:    200 * time.Second,
-				BackoffCoefficient: 1.8,
-				MaximumAttempts:    10,
-			},
-			StartToCloseTimeout:    30 * time.Second,
-			ScheduleToCloseTimeout: 600 * time.Second,
+		if isAdvancedVisibility {
+			ctx3 := workflow.WithActivityOptions(ctx, ensureNoExecutionsAdvVisibilityActivityOptions)
+			err = workflow.ExecuteActivity(ctx3, a.EnsureNoExecutionsAdvVisibilityActivity, params.NamespaceID, params.Namespace).Get(ctx, nil)
+		} else {
+			ctx3 := workflow.WithActivityOptions(ctx, ensureNoExecutionsStdVisibilityOptionsActivity)
+			err = workflow.ExecuteActivity(ctx3, a.EnsureNoExecutionsStdVisibilityActivity, params.NamespaceID, params.Namespace).Get(ctx, nil)
 		}
-		ctx2 := workflow.WithActivityOptions(ctx, ensureNoExecutionsActivityOptions)
-		err = workflow.ExecuteActivity(ctx2, a.EnsureNoExecutionsActivity, params.NamespaceID, params.Namespace).Get(ctx, nil)
 		if err == nil {
-			break
+			logger.Info("All workflow executions has been deleted successfully.", tag.WorkflowNamespace(params.Namespace.String()), tag.DeletedExecutionsCount(result.SuccessCount), tag.DeletedExecutionsErrorCount(result.ErrorCount))
+			return result, nil
 		}
+
 		var appErr *temporal.ApplicationError
 		if stderrors.As(err, &appErr) {
 			switch appErr.Type() {
-			case errors.ExecutionsStillExistErrType:
+			case errors.ExecutionsStillExistErrType, errors.NoProgressErrType:
 				logger.Info("Unable to delete workflow executions. Will try again.", tag.WorkflowNamespace(params.Namespace.String()), tag.Counter(der.ErrorCount), tag.Attempt(deleteAttempt))
-				deleteAttempt++
 				continue
 			}
 		}
 		return result, fmt.Errorf("%w: EnsureNoExecutionsActivity: %v", errors.ErrUnableToExecuteActivity, err)
 	}
 
-	logger.Info("All workflow executions has been deleted successfully.", tag.WorkflowNamespace(params.Namespace.String()), tag.DeletedExecutionsCount(result.SuccessCount), tag.DeletedExecutionsErrorCount(result.ErrorCount))
-	return result, nil
+	logger.Error("Unable to delete workflow executions after maximum attempts.", tag.WorkflowNamespace(params.Namespace.String()), tag.DeletedExecutionsCount(result.SuccessCount), tag.DeletedExecutionsErrorCount(result.ErrorCount), tag.Attempt(maxDeleteExecutionsAttempts))
+	return result, fmt.Errorf("unable to delete workflow executions after %d attempts", maxDeleteExecutionsAttempts)
 }

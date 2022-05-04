@@ -33,6 +33,7 @@ import "temporal/api/enums/v1/task_queue.proto";
 import "temporal/api/taskqueue/v1/message.proto";
 import "temporal/api/query/v1/message.proto";
 
+import "temporal/server/api/clock/v1/message.proto";
 import "temporal/server/api/enums/v1/task.proto";
 import "temporal/server/api/history/v1/message.proto";
 
@@ -106,6 +107,7 @@ message AddWorkflowTaskRequest {
     google.protobuf.Duration schedule_to_start_timeout = 5 [(gogoproto.stdduration) = true];
     string forwarded_source = 6;
     temporal.server.api.enums.v1.TaskSource source = 7;
+    temporal.server.api.clock.v1.ShardClock clock = 9;
 }
 
 message AddWorkflowTaskResponse {
@@ -114,6 +116,7 @@ message AddWorkflowTaskResponse {
 message AddActivityTaskRequest {
     string namespace_id = 1;
     temporal.api.common.v1.WorkflowExecution execution = 2;
+    // TODO: remove after 1.17 release.
     string source_namespace_id = 3;
     temporal.api.taskqueue.v1.TaskQueue task_queue = 4;
     int64 schedule_id = 5;
@@ -122,6 +125,7 @@ message AddActivityTaskRequest {
     google.protobuf.Duration schedule_to_start_timeout = 6 [(gogoproto.stdduration) = true];
     string forwarded_source = 7;
     temporal.server.api.enums.v1.TaskSource source = 8;
+    temporal.server.api.clock.v1.ShardClock clock = 9;
 }
 
 message AddActivityTaskResponse {

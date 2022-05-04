@@ -97,6 +97,7 @@ const (
 	StatsTypeTagName      = "stats_type"
 	CacheTypeTagName      = "cache_type"
 	FailureTagName        = "failure"
+	TaskCategoryTagName   = "task_category"
 	TaskTypeTagName       = "task_type"
 	QueueTypeTagName      = "queue_type"
 	visibilityTypeTagName = "visibility_type"
@@ -166,6 +167,8 @@ const (
 	PersistenceGetOrCreateShardScope
 	// PersistenceUpdateShardScope tracks UpdateShard calls made by service to persistence layer
 	PersistenceUpdateShardScope
+	// PersistenceAssertShardOwnershipScope tracks UpdateShard calls made by service to persistence layer
+	PersistenceAssertShardOwnershipScope
 	// PersistenceCreateWorkflowExecutionScope tracks CreateWorkflowExecution calls made by service to persistence layer
 	PersistenceCreateWorkflowExecutionScope
 	// PersistenceGetWorkflowExecutionScope tracks GetWorkflowExecution calls made by service to persistence layer
@@ -1220,6 +1223,7 @@ var ScopeDefs = map[ServiceIdx]map[int]scopeDefinition{
 		UnknownScope:                                      {operation: "Unknown"},
 		PersistenceGetOrCreateShardScope:                  {operation: "GetOrCreateShard"},
 		PersistenceUpdateShardScope:                       {operation: "UpdateShard"},
+		PersistenceAssertShardOwnershipScope:              {operation: "AssertShardOwnership"},
 		PersistenceCreateWorkflowExecutionScope:           {operation: "CreateWorkflowExecution"},
 		PersistenceGetWorkflowExecutionScope:              {operation: "GetWorkflowExecution"},
 		PersistenceSetWorkflowExecutionScope:              {operation: "SetWorkflowExecution"},
@@ -1754,6 +1758,7 @@ const (
 	ServiceRequests = iota
 	ServicePendingRequests
 	ServiceFailures
+	ServiceFailuresWithType
 	ServiceCriticalFailures
 	ServiceLatency
 	ServiceLatencyNoUserLatency
@@ -1922,6 +1927,7 @@ const (
 	TaskSkipped
 	TaskAttemptTimer
 	TaskStandbyRetryCounter
+	TaskWorkflowBusyCounter
 	TaskNotActiveCounter
 	TaskLimitExceededCounter
 	TaskBatchCompleteCounter
@@ -1931,13 +1937,10 @@ const (
 	TaskUserLatency
 	TaskNoUserLatency
 	TaskNoUserQueueLatency
-	TaskRedispatchQueuePendingTasksTimer
+	TaskReschedulerPendingTasks
 	TaskScheduleToStartLatency
-
+	TaskThrottledCounter
 	TransferTaskMissingEventCounter
-
-	TransferTaskThrottledCounter
-	TimerTaskThrottledCounter
 
 	ActivityE2ELatency
 	AckLevelUpdateCounter
@@ -2253,6 +2256,7 @@ var MetricDefs = map[ServiceIdx]map[int]metricDefinition{
 		ServiceRequests:                                     NewCounterDef("service_requests"),
 		ServicePendingRequests:                              NewGaugeDef("service_pending_requests"),
 		ServiceFailures:                                     NewCounterDef("service_errors"),
+		ServiceFailuresWithType:                             NewCounterDef("service_errors_with_type"),
 		ServiceCriticalFailures:                             NewCounterDef("service_errors_critical"),
 		ServiceLatency:                                      NewTimerDef("service_latency"),
 		ServiceLatencyNoUserLatency:                         NewTimerDef("service_latency_nouserlatency"),
@@ -2405,6 +2409,7 @@ var MetricDefs = map[ServiceIdx]map[int]metricDefinition{
 		TaskDiscarded:            NewCounterDef("task_errors_discarded"),
 		TaskSkipped:              NewCounterDef("task_skipped"),
 		TaskStandbyRetryCounter:  NewCounterDef("task_errors_standby_retry_counter"),
+		TaskWorkflowBusyCounter:  NewCounterDef("task_errors_workflow_busy"),
 		TaskNotActiveCounter:     NewCounterDef("task_errors_not_active_counter"),
 		TaskLimitExceededCounter: NewCounterDef("task_errors_limit_exceeded_counter"),
 
@@ -2418,9 +2423,8 @@ var MetricDefs = map[ServiceIdx]map[int]metricDefinition{
 
 		TransferTaskMissingEventCounter:                   NewCounterDef("transfer_task_missing_event_counter"),
 		TaskBatchCompleteCounter:                          NewCounterDef("task_batch_complete_counter"),
-		TaskRedispatchQueuePendingTasksTimer:              NewTimerDef("task_redispatch_queue_pending_tasks"),
-		TransferTaskThrottledCounter:                      NewCounterDef("transfer_task_throttled_counter"),
-		TimerTaskThrottledCounter:                         NewCounterDef("timer_task_throttled_counter"),
+		TaskReschedulerPendingTasks:                       NewDimensionlessHistogramDef("task_rescheduler_pending_tasks"),
+		TaskThrottledCounter:                              NewCounterDef("task_throttled_counter"),
 		ActivityE2ELatency:                                NewTimerDef("activity_end_to_end_latency"),
 		AckLevelUpdateCounter:                             NewCounterDef("ack_level_update"),
 		AckLevelUpdateFailedCounter:                       NewCounterDef("ack_level_update_failed"),
