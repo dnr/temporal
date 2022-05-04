@@ -565,20 +565,29 @@ func (s *scheduler) recordAction(result *schedpb.ScheduleActionResult) {
 
 func (s *scheduler) startWorkflow(
 	start *sschedpb.BufferedStart,
-	origStartReq *workflowpb.NewWorkflowExecutionInfo,
+	newWorkflow *workflowpb.NewWorkflowExecutionInfo,
 ) (*schedpb.ScheduleActionResult, error) {
-	sreq := &workflowservice.StartWorkflowExecutionRequest{	Namespace:"asdf",
-	}
-	// sreq.WorkflowId = sreq.WorkflowId + "-" + start.NominalTime.UTC().Format(time.RFC3339)
-	// sreq.Identity = s.identity()
-	// sreq.RequestId = uuid.NewString()
-	// sreq.SearchAttributes = s.addSearchAttr(sreq.SearchAttributes, start.NominalTime.UTC())
-
 	// FIXME: need to set NonRetryableErrorTypes
 	ctx := workflow.WithActivityOptions(s.ctx, workflow.ActivityOptions{RetryPolicy: defaultActivityRetryPolicy})
 	req := &sschedpb.StartWorkflowRequest{
 		NamespaceId: s.State.NamespaceId,
-		Request:     &sreq,
+		Request:     &workflowservice.StartWorkflowExecutionRequest{
+			Namespace:  s.State.Namespace,
+			WorkflowId:newWorkflow.WorkflowId + "-" + start.NominalTime.UTC().Format(time.RFC3339),
+			WorkflowType:newWorkflow.WorkflowType,
+			TaskQueue:newWorkflow.TaskQueue,
+			Input:newWorkflow.Input,
+			WorkflowExecutionTimeout:newWorkflow.WorkflowExecutionTimeout,
+			WorkflowRunTimeout:newWorkflow.WorkflowRunTimeout,
+			WorkflowTaskTimeout:newWorkflow.WorkflowTaskTimeout,
+			Identity:s.identity(),
+			RequestId:uuid.NewString(),
+			WorkflowIdReusePolicy:enumspb.WORKFLOW_ID_REUSE_POLICY_ALLOW_DUPLICATE,
+			RetryPolicy:newWorkflow.RetryPolicy,
+			Memo           :newWorkflow.Memo,
+			SearchAttributes:s.addSearchAttr(sreq.SearchAttributes, start.NominalTime.UTC()),
+			Header          :newWorkflow.Header,
+		},
 		StartTime:   start.ActualTime, // used to set expiration time, so use actual instead of nominal
 	}
 	var res sschedpb.StartWorkflowResponse
@@ -599,14 +608,14 @@ func (s *scheduler) startWorkflow(
 
 func (s *scheduler) startWorkflowAndWatch(
 	start *sschedpb.BufferedStart,
-	origStartReq *workflowpb.NewWorkflowExecutionInfo,
+	newWorkflow *workflowpb.NewWorkflowExecutionInfo,
 ) (*schedpb.ScheduleActionResult, error) {
 	// Watcher should not be running now
 	if s.State.WatcherRequest != nil || s.watcherFuture != nil {
 		return nil, errInternal
 	}
 
-	result, err := s.startWorkflow(start, origStartReq)
+	result, err := s.startWorkflow(start, newWorkflow)
 	if err != nil {
 		return nil, err
 	}
