@@ -567,13 +567,14 @@ func (s *scheduler) startWorkflow(
 	start *sschedpb.BufferedStart,
 	newWorkflow *workflowpb.NewWorkflowExecutionInfo,
 ) (*schedpb.ScheduleActionResult, error) {
+	workflowID:=newWorkflow.WorkflowId + "-" + start.NominalTime.UTC().Format(time.RFC3339)
 	// FIXME: need to set NonRetryableErrorTypes
 	ctx := workflow.WithActivityOptions(s.ctx, workflow.ActivityOptions{RetryPolicy: defaultActivityRetryPolicy})
 	req := &sschedpb.StartWorkflowRequest{
 		NamespaceId: s.State.NamespaceId,
 		Request:     &workflowservice.StartWorkflowExecutionRequest{
 			Namespace:  s.State.Namespace,
-			WorkflowId:newWorkflow.WorkflowId + "-" + start.NominalTime.UTC().Format(time.RFC3339),
+			WorkflowId:workflowID,
 			WorkflowType:newWorkflow.WorkflowType,
 			TaskQueue:newWorkflow.TaskQueue,
 			Input:newWorkflow.Input,
@@ -585,7 +586,7 @@ func (s *scheduler) startWorkflow(
 			WorkflowIdReusePolicy:enumspb.WORKFLOW_ID_REUSE_POLICY_ALLOW_DUPLICATE,
 			RetryPolicy:newWorkflow.RetryPolicy,
 			Memo           :newWorkflow.Memo,
-			SearchAttributes:s.addSearchAttr(sreq.SearchAttributes, start.NominalTime.UTC()),
+			SearchAttributes:s.addSearchAttr(newWorkflow.SearchAttributes, start.NominalTime.UTC()),
 			Header          :newWorkflow.Header,
 		},
 		StartTime:   start.ActualTime, // used to set expiration time, so use actual instead of nominal
@@ -600,7 +601,7 @@ func (s *scheduler) startWorkflow(
 		ScheduleTime: start.ActualTime,
 		ActualTime:   res.RealStartTime,
 		StartWorkflowResult: &commonpb.WorkflowExecution{
-			WorkflowId: sreq.WorkflowId,
+			WorkflowId: workflowID,
 			RunId:      res.RunId,
 		},
 	}, nil
