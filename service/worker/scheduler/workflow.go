@@ -567,29 +567,29 @@ func (s *scheduler) startWorkflow(
 	start *sschedpb.BufferedStart,
 	newWorkflow *workflowpb.NewWorkflowExecutionInfo,
 ) (*schedpb.ScheduleActionResult, error) {
-	workflowID:=newWorkflow.WorkflowId + "-" + start.NominalTime.UTC().Format(time.RFC3339)
+	workflowID := newWorkflow.WorkflowId + "-" + start.NominalTime.UTC().Format(time.RFC3339)
 	// FIXME: need to set NonRetryableErrorTypes
 	ctx := workflow.WithActivityOptions(s.ctx, workflow.ActivityOptions{RetryPolicy: defaultActivityRetryPolicy})
 	req := &sschedpb.StartWorkflowRequest{
 		NamespaceId: s.State.NamespaceId,
-		Request:     &workflowservice.StartWorkflowExecutionRequest{
-			Namespace:  s.State.Namespace,
-			WorkflowId:workflowID,
-			WorkflowType:newWorkflow.WorkflowType,
-			TaskQueue:newWorkflow.TaskQueue,
-			Input:newWorkflow.Input,
-			WorkflowExecutionTimeout:newWorkflow.WorkflowExecutionTimeout,
-			WorkflowRunTimeout:newWorkflow.WorkflowRunTimeout,
-			WorkflowTaskTimeout:newWorkflow.WorkflowTaskTimeout,
-			Identity:s.identity(),
-			RequestId:uuid.NewString(),
-			WorkflowIdReusePolicy:enumspb.WORKFLOW_ID_REUSE_POLICY_ALLOW_DUPLICATE,
-			RetryPolicy:newWorkflow.RetryPolicy,
-			Memo           :newWorkflow.Memo,
-			SearchAttributes:s.addSearchAttr(newWorkflow.SearchAttributes, start.NominalTime.UTC()),
-			Header          :newWorkflow.Header,
+		Request: &workflowservice.StartWorkflowExecutionRequest{
+			Namespace:                s.State.Namespace,
+			WorkflowId:               workflowID,
+			WorkflowType:             newWorkflow.WorkflowType,
+			TaskQueue:                newWorkflow.TaskQueue,
+			Input:                    newWorkflow.Input,
+			WorkflowExecutionTimeout: newWorkflow.WorkflowExecutionTimeout,
+			WorkflowRunTimeout:       newWorkflow.WorkflowRunTimeout,
+			WorkflowTaskTimeout:      newWorkflow.WorkflowTaskTimeout,
+			Identity:                 s.identity(),
+			RequestId:                uuid.NewString(),
+			WorkflowIdReusePolicy:    enumspb.WORKFLOW_ID_REUSE_POLICY_ALLOW_DUPLICATE,
+			RetryPolicy:              newWorkflow.RetryPolicy,
+			Memo:                     newWorkflow.Memo,
+			SearchAttributes:         s.addSearchAttr(newWorkflow.SearchAttributes, start.NominalTime.UTC()),
+			Header:                   newWorkflow.Header,
 		},
-		StartTime:   start.ActualTime, // used to set expiration time, so use actual instead of nominal
+		StartTime: start.ActualTime, // used to set expiration time, so use actual instead of nominal
 	}
 	var res sschedpb.StartWorkflowResponse
 	err := workflow.ExecuteActivity(ctx, s.a.StartWorkflow, req).Get(s.ctx, &res)
