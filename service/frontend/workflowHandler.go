@@ -3010,43 +3010,141 @@ func (wh *WorkflowHandler) ListTaskQueuePartitions(ctx context.Context, request 
 }
 
 // Creates a new schedule.
-func (wh *WorkflowHandler) CreateSchedule(context.Context, *workflowservice.CreateScheduleRequest) (*workflowservice.CreateScheduleResponse, error) {
+func (wh *WorkflowHandler) CreateSchedule(ctx context.Context, request *workflowservice.CreateScheduleRequest) (_ *workflowservice.CreateScheduleResponse, retError error) {
+	defer log.CapturePanic(wh.logger, &retError)
+
+	if wh.isStopped() {
+		return nil, errShuttingDown
+	}
+
+	if err := wh.versionChecker.ClientSupported(ctx, wh.config.EnableClientVersionCheck()); err != nil {
+		return nil, err
+	}
+
+	if request == nil {
+		return nil, errRequestNotSet
+	}
+
 	panic("FIXME")
 	return nil, nil
 }
 
 // Returns the schedule description and current state of an existing schedule.
-func (wh *WorkflowHandler) DescribeSchedule(context.Context, *workflowservice.DescribeScheduleRequest) (*workflowservice.DescribeScheduleResponse, error) {
+func (wh *WorkflowHandler) DescribeSchedule(ctx context.Context, request *workflowservice.DescribeScheduleRequest) (_ *workflowservice.DescribeScheduleResponse, retError error) {
+	defer log.CapturePanic(wh.logger, &retError)
+
+	if wh.isStopped() {
+		return nil, errShuttingDown
+	}
+
+	if err := wh.versionChecker.ClientSupported(ctx, wh.config.EnableClientVersionCheck()); err != nil {
+		return nil, err
+	}
+
+	if request == nil {
+		return nil, errRequestNotSet
+	}
+
 	panic("FIXME")
 	return nil, nil
 }
 
 // Changes the configuration or state of an existing schedule.
-func (wh *WorkflowHandler) UpdateSchedule(context.Context, *workflowservice.UpdateScheduleRequest) (*workflowservice.UpdateScheduleResponse, error) {
+func (wh *WorkflowHandler) UpdateSchedule(ctx context.Context, request *workflowservice.UpdateScheduleRequest) (_ *workflowservice.UpdateScheduleResponse, retError error) {
+	defer log.CapturePanic(wh.logger, &retError)
+
+	if wh.isStopped() {
+		return nil, errShuttingDown
+	}
+
+	if err := wh.versionChecker.ClientSupported(ctx, wh.config.EnableClientVersionCheck()); err != nil {
+		return nil, err
+	}
+
+	if request == nil {
+		return nil, errRequestNotSet
+	}
+
 	panic("FIXME")
 	return nil, nil
 }
 
 // Makes a specific change to a schedule or triggers an immediate action.
-func (wh *WorkflowHandler) PatchSchedule(context.Context, *workflowservice.PatchScheduleRequest) (*workflowservice.PatchScheduleResponse, error) {
+func (wh *WorkflowHandler) PatchSchedule(ctx context.Context, request *workflowservice.PatchScheduleRequest) (_ *workflowservice.PatchScheduleResponse, retError error) {
+	defer log.CapturePanic(wh.logger, &retError)
+
+	if wh.isStopped() {
+		return nil, errShuttingDown
+	}
+
+	if err := wh.versionChecker.ClientSupported(ctx, wh.config.EnableClientVersionCheck()); err != nil {
+		return nil, err
+	}
+
+	if request == nil {
+		return nil, errRequestNotSet
+	}
+
 	panic("FIXME")
 	return nil, nil
 }
 
 // Lists matching times within a range.
-func (wh *WorkflowHandler) ListScheduleMatchingTimes(context.Context, *workflowservice.ListScheduleMatchingTimesRequest) (*workflowservice.ListScheduleMatchingTimesResponse, error) {
+func (wh *WorkflowHandler) ListScheduleMatchingTimes(ctx context.Context, request *workflowservice.ListScheduleMatchingTimesRequest) (_ *workflowservice.ListScheduleMatchingTimesResponse, retError error) {
+	defer log.CapturePanic(wh.logger, &retError)
+
+	if wh.isStopped() {
+		return nil, errShuttingDown
+	}
+
+	if err := wh.versionChecker.ClientSupported(ctx, wh.config.EnableClientVersionCheck()); err != nil {
+		return nil, err
+	}
+
+	if request == nil {
+		return nil, errRequestNotSet
+	}
+
 	panic("FIXME")
 	return nil, nil
 }
 
 // Deletes a schedule, removing it from the system.
-func (wh *WorkflowHandler) DeleteSchedule(context.Context, *workflowservice.DeleteScheduleRequest) (*workflowservice.DeleteScheduleResponse, error) {
+func (wh *WorkflowHandler) DeleteSchedule(ctx context.Context, request *workflowservice.DeleteScheduleRequest) (_ *workflowservice.DeleteScheduleResponse, retError error) {
+	defer log.CapturePanic(wh.logger, &retError)
+
+	if wh.isStopped() {
+		return nil, errShuttingDown
+	}
+
+	if err := wh.versionChecker.ClientSupported(ctx, wh.config.EnableClientVersionCheck()); err != nil {
+		return nil, err
+	}
+
+	if request == nil {
+		return nil, errRequestNotSet
+	}
+
 	panic("FIXME")
 	return nil, nil
 }
 
 // List all schedules in a namespace.
-func (wh *WorkflowHandler) ListSchedules(context.Context, *workflowservice.ListSchedulesRequest) (*workflowservice.ListSchedulesResponse, error) {
+func (wh *WorkflowHandler) ListSchedules(ctx context.Context, request *workflowservice.ListSchedulesRequest) (_ *workflowservice.ListSchedulesResponse, retError error) {
+	defer log.CapturePanic(wh.logger, &retError)
+
+	if wh.isStopped() {
+		return nil, errShuttingDown
+	}
+
+	if err := wh.versionChecker.ClientSupported(ctx, wh.config.EnableClientVersionCheck()); err != nil {
+		return nil, err
+	}
+
+	if request == nil {
+		return nil, errRequestNotSet
+	}
+
 	panic("FIXME")
 	return nil, nil
 }
