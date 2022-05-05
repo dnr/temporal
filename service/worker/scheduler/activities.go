@@ -68,10 +68,6 @@ func (a *activities) StartWorkflow(ctx context.Context, req *sschedpb.StartWorkf
 	request.LastCompletionResult = req.LastCompletionResult
 	request.ContinuedFailure = req.ContinuedFailure
 
-	// TODO: ideally, get the time of the workflow execution started event
-	// instead of this one, which will be close but not the same
-	now := time.Now()
-
 	res, err := a.HistoryClient.StartWorkflowExecution(ctx, request)
 	if err != nil {
 		if common.IsServiceTransientError(err) {
@@ -79,6 +75,10 @@ func (a *activities) StartWorkflow(ctx context.Context, req *sschedpb.StartWorkf
 		}
 		return nil, temporal.NewNonRetryableApplicationError(err.Error(), reflect.TypeOf(err).Name(), nil)
 	}
+
+	// TODO: ideally, get the time of the workflow execution started event
+	// instead of this one, which will be close but not the same
+	now := time.Now()
 
 	return &sschedpb.StartWorkflowResponse{
 		RunId:         res.RunId,
@@ -94,21 +94,36 @@ func (a *activities) tryWatchWorkflow(ctx context.Context, req *sschedpb.WatchWo
 	// poll history service directly instead of just going to frontend to avoid
 	// using resources on frontend while waiting.
 	pollReq := &historyservice.PollMutableStateRequest{
-		NamespaceId:         req.NamespaceId,
-		Execution:           req.Execution,
-		ExpectedNextEventId: common.EndEventID,
+		NamespaceId: req.NamespaceId,
+		Execution:   req.Execution,
 	}
-	// this will block up for workflow completion to 20s (default) and return
+	if req.LongPoll {
+		pollReq.ExpectedNextEventId = common.EndEventID
+	}
+	// if long-polling, this will block up for workflow completion to 20s (default) and return
 	// the current mutable state at that point
-	pollResp, err := a.HistoryClient.PollMutableState(ctx, pollReq)
+	pollRes, err := a.HistoryClient.PollMutableState(ctx, pollReq)
 
 	// FIXME: separate out retriable vs unretriable errors
 	if err != nil {
 		return nil, err
 	}
 
-	if pollResp.WorkflowStatus == enumspb.WORKFLOW_EXECUTION_STATUS_RUNNING {
-		return nil, errTryAgain // not completed yet, just try again
+	makeResponse := func(result *commonpb.Payloads, failure *failurepb.Failure) *sschedpb.WatchWorkflowResponse {
+		res := &sschedpb.WatchWorkflowResponse{Status: pollRes.WorkflowStatus}
+		if result != nil {
+			res.ResultFailure = &sschedpb.WatchWorkflowResponse_Result{Result: result}
+		} else if failure != nil {
+			res.ResultFailure = &sschedpb.WatchWorkflowResponse_Failure{Failure: failure}
+		}
+		return res
+	}
+
+	if pollRes.WorkflowStatus == enumspb.WORKFLOW_EXECUTION_STATUS_RUNNING {
+		if req.LongPoll {
+			return nil, errTryAgain // not completed yet, just try again
+		}
+		return makeResponse(nil, nil), nil
 	}
 
 	// get last event from history
@@ -120,30 +135,20 @@ func (a *activities) tryWatchWorkflow(ctx context.Context, req *sschedpb.WatchWo
 		HistoryEventFilterType: enumspb.HISTORY_EVENT_FILTER_TYPE_CLOSE_EVENT,
 		SkipArchival:           true, // should be recently completed, no need for archival
 	}
-	histResp, err := a.FrontendClient.GetWorkflowExecutionHistory(ctx2, histReq)
+	histRes, err := a.FrontendClient.GetWorkflowExecutionHistory(ctx2, histReq)
 
 	// FIXME: separate out retriable vs unretriable errors
 	if err != nil {
 		return nil, err
 	}
 
-	events := histResp.GetHistory().GetEvents()
+	events := histRes.GetHistory().GetEvents()
 	if len(events) < 1 {
 		return nil, errInternal
 	}
 	lastEvent := events[0]
 
-	makeResponse := func(result *commonpb.Payloads, failure *failurepb.Failure) *sschedpb.WatchWorkflowResponse {
-		resp := &sschedpb.WatchWorkflowResponse{Status: pollResp.WorkflowStatus}
-		if result != nil {
-			resp.ResultFailure = &sschedpb.WatchWorkflowResponse_Result{Result: result}
-		} else if failure != nil {
-			resp.ResultFailure = &sschedpb.WatchWorkflowResponse_Failure{Failure: failure}
-		}
-		return resp
-	}
-
-	switch pollResp.WorkflowStatus {
+	switch pollRes.WorkflowStatus {
 	case enumspb.WORKFLOW_EXECUTION_STATUS_COMPLETED:
 		attrs := lastEvent.GetWorkflowExecutionCompletedEventAttributes()
 		if attrs == nil {

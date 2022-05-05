@@ -58,9 +58,6 @@ message InternalState {
 
     // conflict token is implemented as simple sequence number
     bytes conflict_token = 7;
-
-    // WatcherRequest != nil iff watcher activity is running
-    WatchWorkflowRequest watcher_request = 8;
 }
 
 message StartScheduleArgs {
@@ -75,16 +72,21 @@ message FullUpdateRequest {
     bytes conflict_token = 2;
 }
 
+message RefreshRequest {
+    // List of workflow ids that are completed now
+    repeated string workflow_id = 1;
+}
+
 message DescribeResponse {
     temporal.api.schedule.v1.Schedule schedule = 1;
     temporal.api.schedule.v1.ScheduleInfo info = 2;
 }
 
-
 message WatchWorkflowRequest {
     string namespace = 1;
     string namespace_id = 2;
     temporal.api.common.v1.WorkflowExecution execution = 3;
+    bool long_poll = 4;
 }
 
 message WatchWorkflowResponse {

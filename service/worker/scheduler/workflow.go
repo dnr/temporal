@@ -33,6 +33,7 @@ import (
 
 	"github.com/google/uuid"
 	"golang.org/x/exp/maps"
+	"golang.org/x/exp/slices"
 
 	commonpb "go.temporal.io/api/common/v1"
 	enumspb "go.temporal.io/api/enums/v1"
@@ -74,8 +75,8 @@ type (
 
 		cspec *compiledSpec
 
-		// watcherFuture != nil iff watcher activity is running
-		watcherFuture workflow.Future
+		// watchers for currently-running workflows
+		watchers map[string]workflow.Future
 	}
 )
 
@@ -96,6 +97,7 @@ func SchedulerWorkflow(ctx workflow.Context, args *sschedpb.StartScheduleArgs) e
 		ctx:               ctx,
 		a:                 nil,
 		logger:            sdklog.With(workflow.GetLogger(ctx), "schedule-id", id),
+		watchers:          make(map[string]workflow.Future),
 	}
 	return scheduler.run()
 }
@@ -117,11 +119,6 @@ func (s *scheduler) run() error {
 			CreateTime: s.State.LastProcessedTime,
 		}
 		s.incSeqNo()
-	}
-
-	// Recreate watcher activity if needed
-	if s.State.WatcherRequest != nil {
-		s.startWatcher()
 	}
 
 	// A schedule may be created with an initial Patch, e.g. start one immediately. Handle that now.
@@ -147,12 +144,12 @@ func (s *scheduler) run() error {
 		}
 		// sleep returns on any of:
 		// 1. requested time elapsed
-		// 2. we got a signal (an update or request)
-		// 3. a workflow that we created finished
+		// 2. we got a signal (update, request, refresh)
+		// 3. a workflow that we were watching finished
 		s.sleep(nextSleep, hasNext)
 	}
 
-	// The watcher activity will get cancelled automatically if running.
+	// Any watcher activities will get cancelled automatically if running.
 
 	s.logger.Info("Schedule doing continue-as-new")
 	return workflow.NewContinueAsNewError(s.ctx, WorkflowName, &s.StartScheduleArgs)
@@ -317,33 +314,48 @@ func (s *scheduler) sleep(nextSleep time.Duration, hasNext bool) {
 	reqCh := workflow.GetSignalChannel(s.ctx, "patch")
 	sel.AddReceive(reqCh, s.handlePatchSignal)
 
+	refreshCh := workflow.GetSignalChannel(s.ctx, "refresh")
+	sel.AddReceive(refreshCh, s.handleRefreshSignal)
+
 	if hasNext {
 		tmr := workflow.NewTimer(s.ctx, nextSleep)
 		sel.AddFuture(tmr, func(_ workflow.Future) {})
 	}
 
-	if s.watcherFuture != nil {
-		sel.AddFuture(s.watcherFuture, s.wfWatcherReturned)
+	for id, fut := range s.watchers {
+		sel.AddFuture(fut, func(f workflow.Future) { s.wfWatcherReturned(id, f) })
 	}
 
-	s.logger.Debug("sleeping", "hasNext", hasNext, "watcher", s.watcherFuture != nil)
+	s.logger.Debug("sleeping", "hasNext", hasNext, "watchers", len(s.watchers))
 	sel.Select(s.ctx)
 	for sel.HasPending() {
 		sel.Select(s.ctx)
 	}
 }
 
-func (s *scheduler) wfWatcherReturned(f workflow.Future) {
-	// workflow is not running anymore
-	s.watcherFuture = nil
-	s.State.WatcherRequest = nil
+func (s *scheduler) wfWatcherReturned(id string, f workflow.Future) {
+	delete(s.watchers, id)
 
 	var res sschedpb.WatchWorkflowResponse
 	err := f.Get(s.ctx, &res)
 	if err != nil {
 		// shouldn't happen since this is a select callback
-		s.logger.Error("Error from workflow watcher future", "error", err)
+		s.logger.Error("error from workflow watcher future", "error", err)
 		return
+	}
+
+	if res.Status == enumspb.WORKFLOW_EXECUTION_STATUS_RUNNING {
+		// This could happen if someone suggested we should check up on a workflow because it's
+		// not running, but we found it is actually running. Just ignore.
+		s.logger.Warn("watcher returned for running workflow")
+		return
+	}
+
+	// now we know it's not running, remove from running workflow list
+	if idx := slices.Index(s.Info.RunningWorkflowIds, id); idx >= 0 {
+		s.Info.RunningWorkflowIds = slices.Delete(s.Info.RunningWorkflowIds, idx, idx+1)
+	} else {
+		s.logger.Error("completed workflow not found in running list", "workflow", id)
 	}
 
 	// handle pause-on-failure
@@ -352,11 +364,11 @@ func (s *scheduler) wfWatcherReturned(f workflow.Future) {
 	if pauseOnFailure {
 		s.Schedule.State.Paused = true
 		if res.Status == enumspb.WORKFLOW_EXECUTION_STATUS_FAILED {
-			s.Schedule.State.Notes = fmt.Sprintf("paused due to workflow failure (%s)", res.GetFailure().GetMessage())
-			s.logger.Info("paused due to workflow failure", "message", res.GetFailure().GetMessage())
+			s.Schedule.State.Notes = fmt.Sprintf("paused due to workflow failure: %s: %s", id, res.GetFailure().GetMessage())
+			s.logger.Info("paused due to workflow failure", "workflow", id, "message", res.GetFailure().GetMessage())
 		} else if res.Status == enumspb.WORKFLOW_EXECUTION_STATUS_TIMED_OUT {
-			s.Schedule.State.Notes = fmt.Sprintf("paused due to workflow timeout")
-			s.logger.Info("paused due to workflow timeout")
+			s.Schedule.State.Notes = fmt.Sprintf("paused due to workflow timeout: %s", id)
+			s.logger.Info("paused due to workflow timeout", "workflow", id)
 		}
 		s.incSeqNo()
 	}
@@ -370,7 +382,7 @@ func (s *scheduler) wfWatcherReturned(f workflow.Future) {
 		s.State.ContinuedFailure = res.GetFailure()
 	}
 
-	s.logger.Info("started workflow finished", "status", res.Status, "pause-after-failure", pauseOnFailure)
+	s.logger.Info("started workflow finished", "workflow", id, "status", res.Status, "pause-after-failure", pauseOnFailure)
 }
 
 func (s *scheduler) handleUpdateSignal(ch workflow.ReceiveChannel, _ bool) {
@@ -401,6 +413,17 @@ func (s *scheduler) handlePatchSignal(ch workflow.ReceiveChannel, _ bool) {
 	ch.Receive(s.ctx, &patch)
 	s.logger.Info("Schedule patch", "patch", patch.String())
 	s.processPatch(&patch)
+}
+
+func (s *scheduler) handleRefreshSignal(ch workflow.ReceiveChannel, _ bool) {
+	var refresh sschedpb.RefreshRequest
+	ch.Receive(s.ctx, &refresh)
+	s.logger.Debug("Got refresh signal", "refresh", refresh.String())
+	for _, id := range refresh.WorkflowId {
+		if _, ok := s.watchers[id]; !ok {
+			s.startWatcher(id, false)
+		}
+	}
 }
 
 func (s *scheduler) describe() (*sschedpb.DescribeResponse, error) {
@@ -503,20 +526,23 @@ func (s *scheduler) processBuffer() bool {
 		return false
 	}
 
-	// We might or might not have one running now. If the watcher activity is still running, we
-	// probably have one running. Even if the workflow has exited and our notification from the
-	// watcher activity is delayed, acting as if it's still running is correct, we'll just
-	// buffer the action and run it when we get the notification.
-	isRunning := s.watcherFuture != nil
+	isRunning := len(s.Info.RunningWorkflowIds) > 0
+	tryAgain := false
 
 	action := processBuffer(s.State.BufferedStarts, isRunning, s.resolveOverlapPolicy)
 
 	s.State.BufferedStarts = action.newBuffer
 	s.Info.OverlapSkipped += action.overlapSkipped
 
-	// Handle all ALLOW_ALL first
-	for _, start := range action.overlappingStarts {
+	// Try starting whatever we're supposed to start now
+	allStarts := action.overlappingStarts
+	if action.nonOverlappingStart != nil {
+		allStarts = append(allStarts, action.nonOverlappingStart)
+	}
+	for _, start := range allStarts {
 		if !s.canTakeScheduledAction(start.Manual, true) {
+			// try again to drain the buffer if paused or out of actions
+			tryAgain = true
 			continue
 		}
 		result, err := s.startWorkflow(start, req)
@@ -524,34 +550,36 @@ func (s *scheduler) processBuffer() bool {
 			s.logger.Error("Failed to start workflow", "error", err)
 			// The "start workflow" activity has an unlimited retry policy, so if we get an
 			// error here, it must be an unretryable one. Drop this from the buffer.
+			tryAgain = true
 			continue
 		}
 		s.recordAction(result)
 	}
 
+	// Terminate or cancel if required (terminate overrides cancel if both are present)
 	if action.needTerminate {
-		s.terminateWorkflow(s.State.WatcherRequest.Execution)
+		for _, id := range s.Info.RunningWorkflowIds {
+			s.terminateWorkflow(id)
+		}
 	} else if action.needCancel {
-		s.cancelWorkflow(s.State.WatcherRequest.Execution)
+		for _, id := range s.Info.RunningWorkflowIds {
+			s.cancelWorkflow(id)
+		}
 	}
 
-	if action.nonOverlappingStart == nil {
-		return false
+	// If we still have a buffer here, then we're waiting for started workflow(s) to complete
+	// (maybe one we just started). In order to get woken up, we need to be watching at least
+	// one of them with an activity. We only need one watcher at a time, though: after that one
+	// returns, we'll end up back here and start the next one.
+	if len(s.State.BufferedStarts) > 0 && len(s.watchers) == 0 {
+		if len(s.Info.RunningWorkflowIds) > 0 {
+			s.startWatcher(s.Info.RunningWorkflowIds[0], true)
+		} else {
+			s.logger.Error("have buffered workflows but none running")
+		}
 	}
 
-	// Check paused/remaining actions again, and decrement this time.
-	if !s.canTakeScheduledAction(action.nonOverlappingStart.Manual, true) {
-		return true
-	}
-	result, err := s.startWorkflowAndWatch(action.nonOverlappingStart, req)
-	if err != nil {
-		s.logger.Error("Failed to start workflow", "error", err)
-		// The "start workflow" activity has an unlimited retry policy, so if we get an
-		// error here, it must be an unretryable one. Drop this from the buffer.
-		return true
-	}
-	s.recordAction(result)
-	return false
+	return tryAgain
 }
 
 func (s *scheduler) recordAction(result *schedpb.ScheduleActionResult) {
@@ -561,6 +589,9 @@ func (s *scheduler) recordAction(result *schedpb.ScheduleActionResult) {
 	if extra > 0 {
 		s.Info.RecentActions = s.Info.RecentActions[extra:]
 	}
+	if result.StartWorkflowResult != nil {
+		s.Info.RunningWorkflowIds = append(s.Info.RunningWorkflowIds, result.StartWorkflowResult.WorkflowId)
+	}
 }
 
 func (s *scheduler) startWorkflow(
@@ -568,7 +599,7 @@ func (s *scheduler) startWorkflow(
 	newWorkflow *workflowpb.NewWorkflowExecutionInfo,
 ) (*schedpb.ScheduleActionResult, error) {
 	workflowID := newWorkflow.WorkflowId + "-" + start.NominalTime.UTC().Format(time.RFC3339)
-	// FIXME: need to set NonRetryableErrorTypes
+	// FIXME: need to set NonRetryableErrorTypes?
 	ctx := workflow.WithActivityOptions(s.ctx, workflow.ActivityOptions{RetryPolicy: defaultActivityRetryPolicy})
 	req := &sschedpb.StartWorkflowRequest{
 		NamespaceId: s.State.NamespaceId,
@@ -589,7 +620,9 @@ func (s *scheduler) startWorkflow(
 			SearchAttributes:         s.addSearchAttr(newWorkflow.SearchAttributes, start.NominalTime.UTC()),
 			Header:                   newWorkflow.Header,
 		},
-		StartTime: start.ActualTime, // used to set expiration time, so use actual instead of nominal
+		StartTime:            start.ActualTime, // used to set expiration time, so use actual instead of nominal
+		LastCompletionResult: s.State.LastCompletionResult,
+		ContinuedFailure:     s.State.ContinuedFailure,
 	}
 	var res sschedpb.StartWorkflowResponse
 	err := workflow.ExecuteActivity(ctx, s.a.StartWorkflow, req).Get(s.ctx, &res)
@@ -605,29 +638,6 @@ func (s *scheduler) startWorkflow(
 			RunId:      res.RunId,
 		},
 	}, nil
-}
-
-func (s *scheduler) startWorkflowAndWatch(
-	start *sschedpb.BufferedStart,
-	newWorkflow *workflowpb.NewWorkflowExecutionInfo,
-) (*schedpb.ScheduleActionResult, error) {
-	// Watcher should not be running now
-	if s.State.WatcherRequest != nil || s.watcherFuture != nil {
-		return nil, errInternal
-	}
-
-	result, err := s.startWorkflow(start, newWorkflow)
-	if err != nil {
-		return nil, err
-	}
-
-	// Start background activity to watch the workflow
-	s.State.WatcherRequest = &sschedpb.WatchWorkflowRequest{
-		Execution: result.StartWorkflowResult,
-	}
-	s.startWatcher()
-
-	return result, nil
 }
 
 func (s *scheduler) identity() string {
@@ -652,22 +662,28 @@ func (s *scheduler) addSearchAttr(
 	}
 }
 
-func (s *scheduler) startWatcher() {
-	s.logger.Debug("starting wf watcher", s.State.WatcherRequest)
+func (s *scheduler) startWatcher(id string, longPoll bool) {
+	s.logger.Debug("starting watcher", "workflow", id)
+
 	ctx := workflow.WithActivityOptions(s.ctx, workflow.ActivityOptions{
 		StartToCloseTimeout: 365 * 24 * time.Hour,
-		// FIXME: need to set NonRetryableErrorTypes
-		RetryPolicy: defaultActivityRetryPolicy,
-		// see activities.tryWatchWorkflow for this timeout
+		// FIXME: need to set NonRetryableErrorTypes?
+		RetryPolicy:      defaultActivityRetryPolicy,
 		HeartbeatTimeout: 65 * time.Second,
 	})
-	s.watcherFuture = workflow.ExecuteActivity(ctx, s.a.WatchWorkflow, s.State.WatcherRequest)
+	req := &sschedpb.WatchWorkflowRequest{
+		Namespace:   s.State.Namespace,
+		NamespaceId: s.State.NamespaceId,
+		Execution:   &commonpb.WorkflowExecution{WorkflowId: id},
+		LongPoll:    longPoll,
+	}
+	s.watchers[id] = workflow.ExecuteActivity(ctx, s.a.WatchWorkflow, req)
 }
 
-func (s *scheduler) cancelWorkflow(execution *commonpb.WorkflowExecution) {
+func (s *scheduler) cancelWorkflow(id string) {
 	ctx := workflow.WithActivityOptions(s.ctx, workflow.ActivityOptions{
 		StartToCloseTimeout: 1 * time.Minute,
-		// FIXME: need to set NonRetryableErrorTypes
+		// FIXME: need to set NonRetryableErrorTypes?
 		RetryPolicy: defaultActivityRetryPolicy,
 	})
 	areq := &sschedpb.CancelWorkflowRequest{
@@ -675,23 +691,23 @@ func (s *scheduler) cancelWorkflow(execution *commonpb.WorkflowExecution) {
 		Namespace:   s.State.Namespace,
 		RequestId:   uuid.NewString(),
 		Identity:    s.identity(),
-		Execution:   execution,
+		Execution:   &commonpb.WorkflowExecution{WorkflowId: id},
 	}
 	workflow.ExecuteActivity(ctx, s.a.CancelWorkflow, areq)
 	// do not wait for cancel to complete
 }
 
-func (s *scheduler) terminateWorkflow(execution *commonpb.WorkflowExecution) {
+func (s *scheduler) terminateWorkflow(id string) {
 	ctx := workflow.WithActivityOptions(s.ctx, workflow.ActivityOptions{
 		StartToCloseTimeout: 1 * time.Minute,
-		// FIXME: need to set NonRetryableErrorTypes
+		// FIXME: need to set NonRetryableErrorTypes?
 		RetryPolicy: defaultActivityRetryPolicy,
 	})
 	areq := &sschedpb.TerminateWorkflowRequest{
 		NamespaceId: s.State.NamespaceId,
 		Namespace:   s.State.Namespace,
 		Identity:    s.identity(),
-		Execution:   execution,
+		Execution:   &commonpb.WorkflowExecution{WorkflowId: id},
 		Reason:      "terminated by schedule overlap policy",
 	}
 	workflow.ExecuteActivity(ctx, s.a.TerminateWorkflow, areq)
