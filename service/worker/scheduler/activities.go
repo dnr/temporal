@@ -39,7 +39,7 @@ import (
 	"go.temporal.io/sdk/temporal"
 
 	"go.temporal.io/server/api/historyservice/v1"
-	sschedpb "go.temporal.io/server/api/schedule/v1"
+	schedspb "go.temporal.io/server/api/schedule/v1"
 	"go.temporal.io/server/common"
 	"go.temporal.io/server/common/primitives/timestamp"
 )
@@ -58,7 +58,7 @@ var (
 
 func (e errFollow) Error() string { return string(e) }
 
-func (a *activities) StartWorkflow(ctx context.Context, req *sschedpb.StartWorkflowRequest) (*sschedpb.StartWorkflowResponse, error) {
+func (a *activities) StartWorkflow(ctx context.Context, req *schedspb.StartWorkflowRequest) (*schedspb.StartWorkflowResponse, error) {
 	request := common.CreateHistoryStartWorkflowRequest(
 		req.NamespaceId,
 		req.Request,
@@ -80,13 +80,13 @@ func (a *activities) StartWorkflow(ctx context.Context, req *sschedpb.StartWorkf
 	// instead of this one, which will be close but not the same
 	now := time.Now()
 
-	return &sschedpb.StartWorkflowResponse{
+	return &schedspb.StartWorkflowResponse{
 		RunId:         res.RunId,
 		RealStartTime: timestamp.TimePtr(now),
 	}, nil
 }
 
-func (a *activities) tryWatchWorkflow(ctx context.Context, req *sschedpb.WatchWorkflowRequest) (*sschedpb.WatchWorkflowResponse, error) {
+func (a *activities) tryWatchWorkflow(ctx context.Context, req *schedspb.WatchWorkflowRequest) (*schedspb.WatchWorkflowResponse, error) {
 	// make sure we return and heartbeat 5s before the timeout
 	ctx2, cancel := context.WithTimeout(ctx, activity.GetInfo(ctx).HeartbeatTimeout-5*time.Second)
 	defer cancel()
@@ -109,12 +109,12 @@ func (a *activities) tryWatchWorkflow(ctx context.Context, req *sschedpb.WatchWo
 		return nil, err
 	}
 
-	makeResponse := func(result *commonpb.Payloads, failure *failurepb.Failure) *sschedpb.WatchWorkflowResponse {
-		res := &sschedpb.WatchWorkflowResponse{Status: pollRes.WorkflowStatus}
+	makeResponse := func(result *commonpb.Payloads, failure *failurepb.Failure) *schedspb.WatchWorkflowResponse {
+		res := &schedspb.WatchWorkflowResponse{Status: pollRes.WorkflowStatus}
 		if result != nil {
-			res.ResultFailure = &sschedpb.WatchWorkflowResponse_Result{Result: result}
+			res.ResultFailure = &schedspb.WatchWorkflowResponse_Result{Result: result}
 		} else if failure != nil {
-			res.ResultFailure = &sschedpb.WatchWorkflowResponse_Failure{Failure: failure}
+			res.ResultFailure = &schedspb.WatchWorkflowResponse_Failure{Failure: failure}
 		}
 		return res
 	}
@@ -199,7 +199,7 @@ func (a *activities) tryWatchWorkflow(ctx context.Context, req *sschedpb.WatchWo
 	return nil, errInternal
 }
 
-func (a *activities) WatchWorkflow(ctx context.Context, req *sschedpb.WatchWorkflowRequest) (*sschedpb.WatchWorkflowResponse, error) {
+func (a *activities) WatchWorkflow(ctx context.Context, req *schedspb.WatchWorkflowRequest) (*schedspb.WatchWorkflowResponse, error) {
 	for {
 		activity.RecordHeartbeat(ctx)
 		res, err := a.tryWatchWorkflow(ctx, req)
@@ -214,7 +214,7 @@ func (a *activities) WatchWorkflow(ctx context.Context, req *sschedpb.WatchWorkf
 	}
 }
 
-func (a *activities) CancelWorkflow(ctx context.Context, req *sschedpb.CancelWorkflowRequest) error {
+func (a *activities) CancelWorkflow(ctx context.Context, req *schedspb.CancelWorkflowRequest) error {
 	rreq := &historyservice.RequestCancelWorkflowExecutionRequest{
 		NamespaceId: req.NamespaceId,
 		CancelRequest: &workflowservice.RequestCancelWorkflowExecutionRequest{
@@ -239,7 +239,7 @@ func (a *activities) CancelWorkflow(ctx context.Context, req *sschedpb.CancelWor
 	}
 }
 
-func (a *activities) TerminateWorkflow(ctx context.Context, req *sschedpb.TerminateWorkflowRequest) error {
+func (a *activities) TerminateWorkflow(ctx context.Context, req *schedspb.TerminateWorkflowRequest) error {
 	rreq := &historyservice.TerminateWorkflowExecutionRequest{
 		NamespaceId: req.NamespaceId,
 		TerminateRequest: &workflowservice.TerminateWorkflowExecutionRequest{
