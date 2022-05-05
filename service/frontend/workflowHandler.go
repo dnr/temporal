@@ -3009,6 +3009,48 @@ func (wh *WorkflowHandler) ListTaskQueuePartitions(ctx context.Context, request 
 	}, err
 }
 
+// Creates a new schedule.
+func (wh *WorkflowHandler) CreateSchedule(context.Context, *workflowservice.CreateScheduleRequest) (*workflowservice.CreateScheduleResponse, error) {
+	panic("FIXME")
+	return nil, nil
+}
+
+// Returns the schedule description and current state of an existing schedule.
+func (wh *WorkflowHandler) DescribeSchedule(context.Context, *workflowservice.DescribeScheduleRequest) (*workflowservice.DescribeScheduleResponse, error) {
+	panic("FIXME")
+	return nil, nil
+}
+
+// Changes the configuration or state of an existing schedule.
+func (wh *WorkflowHandler) UpdateSchedule(context.Context, *workflowservice.UpdateScheduleRequest) (*workflowservice.UpdateScheduleResponse, error) {
+	panic("FIXME")
+	return nil, nil
+}
+
+// Makes a specific change to a schedule or triggers an immediate action.
+func (wh *WorkflowHandler) PatchSchedule(context.Context, *workflowservice.PatchScheduleRequest) (*workflowservice.PatchScheduleResponse, error) {
+	panic("FIXME")
+	return nil, nil
+}
+
+// Lists matching times within a range.
+func (wh *WorkflowHandler) ListScheduleMatchingTimes(context.Context, *workflowservice.ListScheduleMatchingTimesRequest) (*workflowservice.ListScheduleMatchingTimesResponse, error) {
+	panic("FIXME")
+	return nil, nil
+}
+
+// Deletes a schedule, removing it from the system.
+func (wh *WorkflowHandler) DeleteSchedule(context.Context, *workflowservice.DeleteScheduleRequest) (*workflowservice.DeleteScheduleResponse, error) {
+	panic("FIXME")
+	return nil, nil
+}
+
+// List all schedules in a namespace.
+func (wh *WorkflowHandler) ListSchedules(context.Context, *workflowservice.ListSchedulesRequest) (*workflowservice.ListSchedulesResponse, error) {
+	panic("FIXME")
+	return nil, nil
+}
+
 func (wh *WorkflowHandler) getRawHistory(
 	ctx context.Context,
 	scope metrics.Scope,
