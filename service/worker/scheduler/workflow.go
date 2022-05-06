@@ -58,10 +58,16 @@ const (
 	SignalNamePatch   = "patch"
 	SignalNameRefresh = "refresh"
 
+	QueryNameDescribe          = "describe"
+	QueryNameListMatchingTimes = "listMatchingTimes"
+
 	// The number of future action times to include in Describe.
 	futureActionCount = 10
 	// The number of recent actual action results to include in Describe.
 	recentActionCount = 10
+
+	// Maximum number of times to list per ListMatchingTimes query.
+	maxListMatchingTimesCount = 1000
 
 	// TODO: replace with event count or hint from server
 	iterationsBeforeContinueAsNew = 500
@@ -118,7 +124,10 @@ func (s *scheduler) run() error {
 	s.ensureFields()
 	s.compileSpec()
 
-	if err := workflow.SetQueryHandler(s.ctx, "describe", s.describe); err != nil {
+	if err := workflow.SetQueryHandler(s.ctx, QueryNameDescribe, s.handleDescribeQuery); err != nil {
+		return err
+	}
+	if err := workflow.SetQueryHandler(s.ctx, QueryNameListMatchingTimes, s.handleListMatchingTimesQuery); err != nil {
 		return err
 	}
 
@@ -271,7 +280,7 @@ func (s *scheduler) processTimeRange(
 	catchupWindow := s.getCatchupWindow()
 
 	for {
-		nominalTime, nextTime, hasNext := s.cspec.getNextTime(s.Schedule.State, t1)
+		nominalTime, nextTime, hasNext := s.cspec.getNextTime(t1)
 		t1 = nextTime
 		if !hasNext {
 			return 0, false
@@ -438,13 +447,13 @@ func (s *scheduler) handleRefreshSignal(ch workflow.ReceiveChannel, _ bool) {
 	}
 }
 
-func (s *scheduler) describe() (*schedspb.DescribeResponse, error) {
+func (s *scheduler) handleDescribeQuery() (*schedspb.DescribeResponse, error) {
 	// update future actions
 	if s.cspec != nil {
 		s.Info.FutureActionTimes = make([]*time.Time, 0, futureActionCount)
 		t1 := timestamp.TimeValue(s.State.LastProcessedTime)
 		for len(s.Info.FutureActionTimes) < futureActionCount {
-			_, t1, has := s.cspec.getNextTime(s.Schedule.State, t1)
+			_, t1, has := s.cspec.getNextTime(t1)
 			if !has {
 				break
 			}
@@ -458,6 +467,26 @@ func (s *scheduler) describe() (*schedspb.DescribeResponse, error) {
 		Schedule: s.Schedule,
 		Info:     s.Info,
 	}, nil
+}
+
+func (s *scheduler) handleListMatchingTimesQuery(req *workflowservice.ListScheduleMatchingTimesRequest) (*workflowservice.ListScheduleMatchingTimesResponse, error) {
+	if req == nil || req.StartTime == nil || req.EndTime == nil {
+		return nil, errors.New("missing or invalid query")
+	}
+	if s.cspec == nil {
+		return nil, errors.New("invalid schedule: " + s.Info.InvalidScheduleError)
+	}
+
+	var out []*time.Time
+	t1 := timestamp.TimeValue(req.StartTime)
+	for i := 0; i < maxListMatchingTimesCount; i++ {
+		_, t1, has := s.cspec.getNextTime(t1)
+		if !has || t1.After(timestamp.TimeValue(req.EndTime)) {
+			break
+		}
+		out = append(out, timestamp.TimePtr(t1))
+	}
+	return &workflowservice.ListScheduleMatchingTimesResponse{StartTime: out}, nil
 }
 
 func (s *scheduler) incSeqNo() {

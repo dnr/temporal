@@ -81,10 +81,7 @@ func loadTimezone(spec *schedpb.ScheduleSpec) (*time.Location, error) {
 	return time.LoadLocation(spec.TimezoneName)
 }
 
-func (cs *compiledSpec) getNextTime(
-	state *schedpb.ScheduleState,
-	after time.Time,
-) (nominal, next time.Time, has bool) {
+func (cs *compiledSpec) getNextTime(after time.Time) (nominal, next time.Time, has bool) {
 	if cs.spec.StartTime != nil && after.Before(*cs.spec.StartTime) {
 		after = cs.spec.StartTime.Add(-time.Second)
 	}

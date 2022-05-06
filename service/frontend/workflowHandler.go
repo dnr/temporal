@@ -36,6 +36,7 @@ import (
 	enumspb "go.temporal.io/api/enums/v1"
 	filterpb "go.temporal.io/api/filter/v1"
 	historypb "go.temporal.io/api/history/v1"
+	querypb "go.temporal.io/api/query/v1"
 	"go.temporal.io/api/serviceerror"
 	taskqueuepb "go.temporal.io/api/taskqueue/v1"
 	"go.temporal.io/api/workflowservice/v1"
@@ -3299,9 +3300,51 @@ func (wh *WorkflowHandler) ListScheduleMatchingTimes(ctx context.Context, reques
 		return nil, errRequestNotSet
 	}
 
-	panic("FIXME")
-	// TODO: turn into query
-	return nil, nil
+	namespaceID, err := wh.namespaceRegistry.GetNamespaceID(namespace.Name(request.GetNamespace()))
+	if err != nil {
+		return nil, err
+	}
+
+	queryPayload, err := payloads.Encode(request)
+	if err != nil {
+		return nil, err
+	}
+
+	sizeLimitError := wh.config.BlobSizeLimitError(request.GetNamespace())
+	sizeLimitWarn := wh.config.BlobSizeLimitWarn(request.GetNamespace())
+	if err := common.CheckEventBlobSizeLimit(
+		queryPayload.Size(),
+		sizeLimitWarn,
+		sizeLimitError,
+		namespaceID.String(),
+		request.ScheduleId,
+		"",
+		wh.metricsScope(ctx).Tagged(metrics.CommandTypeTag(enumspb.COMMAND_TYPE_UNSPECIFIED.String())),
+		wh.throttledLogger,
+		tag.BlobSizeViolationOperation("ListScheduleMatchingTimes")); err != nil {
+		return nil, err
+	}
+
+	req := &historyservice.QueryWorkflowRequest{
+		NamespaceId: namespaceID.String(),
+		Request: &workflowservice.QueryWorkflowRequest{
+			Namespace: request.Namespace,
+			Execution: &commonpb.WorkflowExecution{WorkflowId: request.ScheduleId},
+			Query: &querypb.WorkflowQuery{
+				QueryType: scheduler.QueryNameListMatchingTimes,
+				QueryArgs: queryPayload,
+			},
+		},
+	}
+	res, err := wh.historyClient.QueryWorkflow(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+
+	var response workflowservice.ListScheduleMatchingTimesResponse
+	payloads.Decode(res.GetResponse().GetQueryResult(), &response)
+
+	return &response, nil
 }
 
 // Deletes a schedule, removing it from the system.
