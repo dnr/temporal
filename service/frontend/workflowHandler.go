@@ -37,6 +37,7 @@ import (
 	filterpb "go.temporal.io/api/filter/v1"
 	historypb "go.temporal.io/api/history/v1"
 	querypb "go.temporal.io/api/query/v1"
+	schedpb "go.temporal.io/api/schedule/v1"
 	"go.temporal.io/api/serviceerror"
 	taskqueuepb "go.temporal.io/api/taskqueue/v1"
 	"go.temporal.io/api/workflowservice/v1"
@@ -3500,9 +3501,52 @@ func (wh *WorkflowHandler) ListSchedules(ctx context.Context, request *workflows
 		return nil, errRequestNotSet
 	}
 
-	panic("FIXME")
-	// TODO: turn into visibility query
-	return nil, nil
+	if request.GetMaximumPageSize() <= 0 {
+		request.MaximumPageSize = int32(wh.config.VisibilityMaxPageSize(request.GetNamespace()))
+	}
+
+	if wh.isListRequestPageSizeTooLarge(request.GetMaximumPageSize(), request.GetNamespace()) {
+		return nil, serviceerror.NewInvalidArgument(fmt.Sprintf(errPageSizeTooBigMessage, wh.config.ESIndexMaxResultWindow()))
+	}
+
+	namespaceName := namespace.Name(request.GetNamespace())
+	namespaceID, err := wh.namespaceRegistry.GetNamespaceID(namespaceName)
+	if err != nil {
+		return nil, err
+	}
+
+	// FIXME: should we respect this here?
+	if wh.config.DisableListVisibilityByFilter(namespaceName.String()) {
+		return nil, errNoPermission
+	}
+
+	persistenceResp, err := wh.visibilityMrg.ListOpenWorkflowExecutionsByType(ctx, &manager.ListWorkflowExecutionsByTypeRequest{
+		ListWorkflowExecutionsRequest: &manager.ListWorkflowExecutionsRequest{
+			NamespaceID:   namespaceID,
+			Namespace:     namespaceName,
+			PageSize:      int(request.GetMaximumPageSize()),
+			NextPageToken: request.NextPageToken,
+		},
+		WorkflowTypeName: scheduler.WorkflowType,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	schedules := make([]*schedpb.ScheduleListEntry, len(persistenceResp.Executions))
+	for i, ex := range persistenceResp.Executions {
+		schedules[i] = &schedpb.ScheduleListEntry{
+			ScheduleId: ex.GetExecution().GetWorkflowId(),
+			Memo:       ex.GetMemo(),
+			// FIXME: where does search attribute mapping happen?
+			SearchAttributes: ex.GetSearchAttributes(),
+		}
+	}
+
+	return &workflowservice.ListSchedulesResponse{
+		Schedules:     schedules,
+		NextPageToken: persistenceResp.NextPageToken,
+	}, nil
 }
 
 func (wh *WorkflowHandler) getRawHistory(
