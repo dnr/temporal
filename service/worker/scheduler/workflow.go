@@ -173,7 +173,7 @@ func (s *scheduler) run() error {
 	// Any watcher activities will get cancelled automatically if running.
 
 	s.logger.Info("Schedule doing continue-as-new")
-	return workflow.NewContinueAsNewError(s.ctx, WorkflowName, &s.StartScheduleArgs)
+	return workflow.NewContinueAsNewError(s.ctx, WorkflowType, &s.StartScheduleArgs)
 }
 
 func (s *scheduler) ensureFields() {
@@ -464,8 +464,9 @@ func (s *scheduler) handleDescribeQuery() (*schedspb.DescribeResponse, error) {
 	}
 
 	return &schedspb.DescribeResponse{
-		Schedule: s.Schedule,
-		Info:     s.Info,
+		Schedule:      s.Schedule,
+		Info:          s.Info,
+		ConflictToken: s.State.ConflictToken,
 	}, nil
 }
 

@@ -37,7 +37,7 @@ import (
 )
 
 const (
-	WorkflowName  = "temporal-sys-scheduler-workflow"
+	WorkflowType  = "temporal-sys-scheduler-workflow"
 	TaskQueueName = "temporal-sys-scheduler-tq"
 )
 
@@ -81,7 +81,7 @@ func (s *workerComponent) DedicatedWorkerOptions() *workercommon.PerNamespaceDed
 }
 
 func (s *workerComponent) Register(worker sdkworker.Worker) {
-	worker.RegisterWorkflowWithOptions(SchedulerWorkflow, workflow.RegisterOptions{Name: WorkflowName})
+	worker.RegisterWorkflowWithOptions(SchedulerWorkflow, workflow.RegisterOptions{Name: WorkflowType})
 	worker.RegisterActivity(s.activities())
 }
 

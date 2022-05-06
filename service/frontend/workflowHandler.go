@@ -3119,7 +3119,7 @@ func (wh *WorkflowHandler) CreateSchedule(ctx context.Context, request *workflow
 	startReq := &workflowservice.StartWorkflowExecutionRequest{
 		Namespace:        request.Namespace,
 		WorkflowId:       request.ScheduleId,
-		WorkflowType:     &commonpb.WorkflowType{Name: scheduler.WorkflowName},
+		WorkflowType:     &commonpb.WorkflowType{Name: scheduler.WorkflowType},
 		TaskQueue:        &taskqueuepb.TaskQueue{Name: scheduler.TaskQueueName},
 		Input:            inputPayload,
 		Identity:         request.Identity,
@@ -3153,9 +3153,106 @@ func (wh *WorkflowHandler) DescribeSchedule(ctx context.Context, request *workfl
 		return nil, errRequestNotSet
 	}
 
-	panic("FIXME")
-	// TODO: turn into loop: query, check running, signal
-	return nil, nil
+	namespaceID, err := wh.namespaceRegistry.GetNamespaceID(namespace.Name(request.GetNamespace()))
+	if err != nil {
+		return nil, err
+	}
+
+	// FIXME: get memo + searchattributes here
+
+	// TODO: replace this loop with synchronous update
+
+	sentRefreshAlready := make(map[string]struct{})
+
+	for i := 0; i < 10; i++ {
+		req := &historyservice.QueryWorkflowRequest{
+			NamespaceId: namespaceID.String(),
+			Request: &workflowservice.QueryWorkflowRequest{
+				Namespace: request.Namespace,
+				Execution: &commonpb.WorkflowExecution{WorkflowId: request.ScheduleId},
+				Query:     &querypb.WorkflowQuery{QueryType: scheduler.QueryNameDescribe},
+			},
+		}
+		res, err := wh.historyClient.QueryWorkflow(ctx, req)
+		if err != nil {
+			return nil, err
+		}
+
+		var response schedspb.DescribeResponse
+		err = payloads.Decode(res.GetResponse().GetQueryResult(), &response)
+		if err != nil {
+			return nil, err
+		}
+
+		// for all running workflows started by the schedule, we should check that they're
+		// still running, and if not, poke the schedule to refresh
+		runningIds, err := wh.collectCompletedWorkflows(ctx, namespaceID, response.GetInfo().GetRunningWorkflowIds())
+		if err != nil {
+			return nil, err
+		}
+
+		var needRefresh []string
+		for _, id := range runningIds {
+			if _, ok := sentRefreshAlready[id]; !ok {
+				needRefresh = append(needRefresh, id)
+				sentRefreshAlready[id] = struct{}{}
+			}
+		}
+
+		// FIXME: this condition isn't right, need to know the refresh actually happened
+		if len(needRefresh) == 0 {
+			return &workflowservice.DescribeScheduleResponse{
+				Schedule:         response.Schedule,
+				Info:             response.Info,
+				Memo:             nil, //FIXME
+				SearchAttributes: nil, //FIXME
+				ConflictToken:    response.ConflictToken,
+			}, nil
+		}
+
+		if len(needRefresh) > 10 {
+			// this is very unlikely, but in this case we don't want to do too much work here,
+			// so just trim the list. we'll catch the rest next time.
+			wh.throttledLogger.Warn("schedule has lots of running workflows",
+				tag.WorkflowNamespace(request.Namespace),
+				tag.ScheduleID(request.ScheduleId),
+				tag.Counter(len(needRefresh)),
+			)
+			runningIds = needRefresh[:10]
+		}
+
+		if len(needRefresh) > 0 {
+			// poke to refresh
+			input := &schedspb.RefreshRequest{
+				WorkflowId: needRefresh,
+			}
+			inputPayloads, err := payloads.Encode(input)
+			if err != nil {
+				return nil, err
+			}
+			_, err = wh.historyClient.SignalWorkflowExecution(ctx, &historyservice.SignalWorkflowExecutionRequest{
+				NamespaceId: namespaceID.String(),
+				SignalRequest: &workflowservice.SignalWorkflowExecutionRequest{
+					Namespace:         request.Namespace,
+					WorkflowExecution: &commonpb.WorkflowExecution{WorkflowId: request.ScheduleId},
+					SignalName:        scheduler.SignalNameRefresh,
+					Input:             inputPayloads,
+					Identity:          "internal refresh from describe request",
+					RequestId:         uuid.New(),
+				},
+			})
+			if err != nil {
+				return nil, err
+			}
+		}
+
+		// the scheduler will start activities to get the final status of those workflows, but
+		// they might not complete by the time we query again. leave a little time to refresh.
+		// TODO: convert to backoff.Retry
+		time.Sleep(100 * time.Millisecond)
+	}
+
+	return nil, serviceerror.NewUnavailable("too many iterations of describe/refresh")
 }
 
 // Changes the configuration or state of an existing schedule.
@@ -3342,7 +3439,10 @@ func (wh *WorkflowHandler) ListScheduleMatchingTimes(ctx context.Context, reques
 	}
 
 	var response workflowservice.ListScheduleMatchingTimesResponse
-	payloads.Decode(res.GetResponse().GetQueryResult(), &response)
+	err = payloads.Decode(res.GetResponse().GetQueryResult(), &response)
+	if err != nil {
+		return nil, err
+	}
 
 	return &response, nil
 }
@@ -4124,4 +4224,23 @@ func (wh *WorkflowHandler) trimHistoryNode(
 			tag.Error(err),
 		)
 	}
+}
+
+func (wh *WorkflowHandler) collectCompletedWorkflows(ctx context.Context, namespaceID namespace.ID, workflowIDs []string) ([]string, error) {
+	// this will almost always be called with a very small number of workflow ids, most likely
+	// one, so just make calls sequentially.
+	var out []string
+	for _, workflowID := range workflowIDs {
+		response, err := wh.historyClient.GetMutableState(ctx, &historyservice.GetMutableStateRequest{
+			NamespaceId: namespaceID.String(),
+			Execution:   &commonpb.WorkflowExecution{WorkflowId: workflowID},
+		})
+		if err != nil {
+			return nil, err
+		}
+		if response.WorkflowStatus != enumspb.WORKFLOW_EXECUTION_STATUS_RUNNING {
+			out = append(out, workflowID)
+		}
+	}
+	return out, nil
 }

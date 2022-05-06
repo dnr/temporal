@@ -80,6 +80,7 @@ message RefreshRequest {
 message DescribeResponse {
     temporal.api.schedule.v1.Schedule schedule = 1;
     temporal.api.schedule.v1.ScheduleInfo info = 2;
+    bytes conflict_token = 3;
 }
 
 message WatchWorkflowRequest {
