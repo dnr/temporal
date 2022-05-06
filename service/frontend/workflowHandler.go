@@ -82,6 +82,8 @@ var (
 	errContextNearDeadline = serviceerror.NewDeadlineExceeded("context near deadline")
 	// Tail room for context deadline to bail out from retry for long poll.
 	longPollTailRoom = time.Second
+
+	errWaitForRefresh = serviceerror.NewDeadlineExceeded("waiting for schedule to refresh status of completed workflows")
 )
 
 type (
@@ -3188,8 +3190,9 @@ func (wh *WorkflowHandler) DescribeSchedule(ctx context.Context, request *workfl
 	// then query to get current state from the workflow itself
 	// TODO: turn this whole thing into a synchronous update
 	sentRefresh := make(map[string]struct{})
-OuterLoop:
-	for i := 0; i < 10; i++ {
+	var describeScheduleResponse *workflowservice.DescribeScheduleResponse
+
+	op := func(ctx context.Context) error {
 		req := &historyservice.QueryWorkflowRequest{
 			NamespaceId: namespaceID.String(),
 			Request: &workflowservice.QueryWorkflowRequest{
@@ -3200,13 +3203,13 @@ OuterLoop:
 		}
 		res, err := wh.historyClient.QueryWorkflow(ctx, req)
 		if err != nil {
-			return nil, err
+			return err
 		}
 
 		var response schedspb.DescribeResponse
 		err = payloads.Decode(res.GetResponse().GetQueryResult(), &response)
 		if err != nil {
-			return nil, err
+			return err
 		}
 
 		// for all running workflows started by the schedule, we should check that they're
@@ -3215,33 +3218,30 @@ OuterLoop:
 		for _, workflowID := range response.GetInfo().GetRunningWorkflowIds() {
 			if _, ok := sentRefresh[workflowID]; ok {
 				// we asked the schedule to refresh this one because it wasn't running, but
-				// it's still reporting it
-				time.Sleep(100 * time.Millisecond)
-				continue OuterLoop
+				// it's still reporting it as running
+				return errWaitForRefresh
 			}
 
 			// we'll usually have just zero or one of these so we can just do them sequentially
-			msResponse, err := wh.historyClient.GetMutableState(ctx, &historyservice.GetMutableStateRequest{
+			if msResponse, err := wh.historyClient.GetMutableState(ctx, &historyservice.GetMutableStateRequest{
 				NamespaceId: namespaceID.String(),
 				Execution:   &commonpb.WorkflowExecution{WorkflowId: workflowID},
-			})
-			if err != nil {
-				return nil, err
+			}); err != nil {
+				return err
+			} else if msResponse.WorkflowStatus != enumspb.WORKFLOW_EXECUTION_STATUS_RUNNING {
+				needRefresh = append(needRefresh, workflowID)
 			}
-			if msResponse.WorkflowStatus == enumspb.WORKFLOW_EXECUTION_STATUS_RUNNING {
-				continue
-			}
-			needRefresh = append(needRefresh, workflowID)
 		}
 
 		if len(needRefresh) == 0 {
-			return &workflowservice.DescribeScheduleResponse{
+			describeScheduleResponse = &workflowservice.DescribeScheduleResponse{
 				Schedule:         response.Schedule,
 				Info:             response.Info,
 				Memo:             describeResponse.GetWorkflowExecutionInfo().Memo,
 				SearchAttributes: describeResponse.GetWorkflowExecutionInfo().SearchAttributes,
 				ConflictToken:    response.ConflictToken,
-			}, nil
+			}
+			return nil
 		}
 
 		if len(needRefresh) > 10 {
@@ -3261,7 +3261,7 @@ OuterLoop:
 		}
 		inputPayloads, err := payloads.Encode(input)
 		if err != nil {
-			return nil, err
+			return err
 		}
 		_, err = wh.historyClient.SignalWorkflowExecution(ctx, &historyservice.SignalWorkflowExecutionRequest{
 			NamespaceId: namespaceID.String(),
@@ -3275,20 +3275,24 @@ OuterLoop:
 			},
 		})
 		if err != nil {
-			return nil, err
+			return err
 		}
 
 		for _, workflowID := range needRefresh {
 			sentRefresh[workflowID] = struct{}{}
 		}
 
-		// the scheduler will start activities to get the final status of those workflows, but
-		// they might not complete by the time we query again. leave a little time to refresh.
-		// FIXME: convert to backoff.Retry
-		time.Sleep(100 * time.Millisecond)
+		return errWaitForRefresh
 	}
 
-	return nil, serviceerror.NewUnavailable("too many iterations of describe/refresh")
+	policy := backoff.NewExponentialRetryPolicy(50 * time.Millisecond)
+	isWaitErr := func(e error) bool { return e == errWaitForRefresh }
+	err = backoff.RetryContext(ctx, op, policy, isWaitErr)
+	if err != nil {
+		return nil, err
+	}
+
+	return describeScheduleResponse, nil
 }
 
 // Changes the configuration or state of an existing schedule.
