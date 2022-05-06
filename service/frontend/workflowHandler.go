@@ -3238,9 +3238,49 @@ func (wh *WorkflowHandler) PatchSchedule(ctx context.Context, request *workflows
 		return nil, errRequestNotSet
 	}
 
-	panic("FIXME")
-	// TODO: turn into signal
-	return nil, nil
+	if len(request.GetRequestId()) > wh.config.MaxIDLengthLimit() {
+		return nil, errRequestIDTooLong
+	}
+
+	namespaceID, err := wh.namespaceRegistry.GetNamespaceID(namespace.Name(request.GetNamespace()))
+	if err != nil {
+		return nil, err
+	}
+
+	inputPayloads, err := payloads.Encode(request.Patch)
+
+	sizeLimitError := wh.config.BlobSizeLimitError(request.GetNamespace())
+	sizeLimitWarn := wh.config.BlobSizeLimitWarn(request.GetNamespace())
+	if err := common.CheckEventBlobSizeLimit(
+		inputPayloads.Size(),
+		sizeLimitWarn,
+		sizeLimitError,
+		namespaceID.String(),
+		request.GetScheduleId(),
+		"", // don't have runid yet
+		wh.metricsScope(ctx).Tagged(metrics.CommandTypeTag(enumspb.COMMAND_TYPE_UNSPECIFIED.String())),
+		wh.throttledLogger,
+		tag.BlobSizeViolationOperation("PatchSchedule"),
+	); err != nil {
+		return nil, err
+	}
+
+	_, err = wh.historyClient.SignalWorkflowExecution(ctx, &historyservice.SignalWorkflowExecutionRequest{
+		NamespaceId: namespaceID.String(),
+		SignalRequest: &workflowservice.SignalWorkflowExecutionRequest{
+			Namespace:         request.Namespace,
+			WorkflowExecution: &commonpb.WorkflowExecution{WorkflowId: request.ScheduleId},
+			SignalName:        scheduler.SignalNamePatch,
+			Input:             inputPayloads,
+			Identity:          request.Identity,
+			RequestId:         request.RequestId,
+		},
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return &workflowservice.PatchScheduleResponse{}, nil
 }
 
 // Lists matching times within a range.
