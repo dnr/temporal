@@ -3097,6 +3097,10 @@ func (wh *WorkflowHandler) CreateSchedule(ctx context.Context, request *workflow
 		}
 	}
 
+	// size limits will be validated on history. note that the start workflow request is
+	// embedded in the schedule, which is in the scheduler input. so if the scheduler itself
+	// doesn't exceed the limit, the started workflows should be safe as well.
+
 	// Set up input to scheduler workflow
 	input := &schedspb.StartScheduleArgs{
 		Schedule:     request.Schedule,
@@ -3169,9 +3173,53 @@ func (wh *WorkflowHandler) UpdateSchedule(ctx context.Context, request *workflow
 		return nil, errRequestNotSet
 	}
 
-	panic("FIXME")
-	// TODO: turn into signal
-	return nil, nil
+	if len(request.GetRequestId()) > wh.config.MaxIDLengthLimit() {
+		return nil, errRequestIDTooLong
+	}
+
+	namespaceID, err := wh.namespaceRegistry.GetNamespaceID(namespace.Name(request.GetNamespace()))
+	if err != nil {
+		return nil, err
+	}
+
+	input := &schedspb.FullUpdateRequest{
+		Schedule:      request.Schedule,
+		ConflictToken: request.ConflictToken,
+	}
+	inputPayloads, err := payloads.Encode(input)
+
+	sizeLimitError := wh.config.BlobSizeLimitError(request.GetNamespace())
+	sizeLimitWarn := wh.config.BlobSizeLimitWarn(request.GetNamespace())
+	if err := common.CheckEventBlobSizeLimit(
+		inputPayloads.Size(),
+		sizeLimitWarn,
+		sizeLimitError,
+		namespaceID.String(),
+		request.GetScheduleId(),
+		"", // don't have runid yet
+		wh.metricsScope(ctx).Tagged(metrics.CommandTypeTag(enumspb.COMMAND_TYPE_UNSPECIFIED.String())),
+		wh.throttledLogger,
+		tag.BlobSizeViolationOperation("UpdateSchedule"),
+	); err != nil {
+		return nil, err
+	}
+
+	_, err = wh.historyClient.SignalWorkflowExecution(ctx, &historyservice.SignalWorkflowExecutionRequest{
+		NamespaceId: namespaceID.String(),
+		SignalRequest: &workflowservice.SignalWorkflowExecutionRequest{
+			Namespace:         request.Namespace,
+			WorkflowExecution: &commonpb.WorkflowExecution{WorkflowId: request.ScheduleId},
+			SignalName:        scheduler.SignalNameUpdate,
+			Input:             inputPayloads,
+			Identity:          request.Identity,
+			RequestId:         request.RequestId,
+		},
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return &workflowservice.UpdateScheduleResponse{}, nil
 }
 
 // Makes a specific change to a schedule or triggers an immediate action.

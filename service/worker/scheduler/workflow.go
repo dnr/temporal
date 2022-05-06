@@ -54,6 +54,10 @@ const (
 	// id, used for validation in the frontend.
 	AppendedTimestampForValidation = "-2009-11-10T23:00:00Z"
 
+	SignalNameUpdate  = "update"
+	SignalNamePatch   = "patch"
+	SignalNameRefresh = "refresh"
+
 	// The number of future action times to include in Describe.
 	futureActionCount = 10
 	// The number of recent actual action results to include in Describe.
@@ -316,13 +320,13 @@ func (s *scheduler) canTakeScheduledAction(manual, decrement bool) bool {
 func (s *scheduler) sleep(nextSleep time.Duration, hasNext bool) {
 	sel := workflow.NewSelector(s.ctx)
 
-	upCh := workflow.GetSignalChannel(s.ctx, "update")
+	upCh := workflow.GetSignalChannel(s.ctx, SignalNameUpdate)
 	sel.AddReceive(upCh, s.handleUpdateSignal)
 
-	reqCh := workflow.GetSignalChannel(s.ctx, "patch")
+	reqCh := workflow.GetSignalChannel(s.ctx, SignalNamePatch)
 	sel.AddReceive(reqCh, s.handlePatchSignal)
 
-	refreshCh := workflow.GetSignalChannel(s.ctx, "refresh")
+	refreshCh := workflow.GetSignalChannel(s.ctx, SignalNameRefresh)
 	sel.AddReceive(refreshCh, s.handleRefreshSignal)
 
 	if hasNext {
