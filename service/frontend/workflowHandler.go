@@ -3363,9 +3363,25 @@ func (wh *WorkflowHandler) DeleteSchedule(ctx context.Context, request *workflow
 		return nil, errRequestNotSet
 	}
 
-	panic("FIXME")
-	// TODO: turn into terminate
-	return nil, nil
+	namespaceID, err := wh.namespaceRegistry.GetNamespaceID(namespace.Name(request.GetNamespace()))
+	if err != nil {
+		return nil, err
+	}
+
+	_, err = wh.historyClient.TerminateWorkflowExecution(ctx, &historyservice.TerminateWorkflowExecutionRequest{
+		NamespaceId: namespaceID.String(),
+		TerminateRequest: &workflowservice.TerminateWorkflowExecutionRequest{
+			Namespace:         request.Namespace,
+			WorkflowExecution: &commonpb.WorkflowExecution{WorkflowId: request.ScheduleId},
+			Reason:            "terminated by DeleteSchedule",
+			Identity:          request.Identity,
+		},
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return &workflowservice.DeleteScheduleResponse{}, nil
 }
 
 // List all schedules in a namespace.
