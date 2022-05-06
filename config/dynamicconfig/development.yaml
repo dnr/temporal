@@ -25,5 +25,9 @@ history.defaultWorkflowRetryPolicy:
 system.advancedVisibilityWritingMode:
   - value: "off"
     constraints: {}
+matching.numTaskqueueWritePartitions:
+- value: 1
+matching.numTaskqueueReadPartitions:
+- value: 1
 #system.enableParentClosePolicyWorker:
 #  - value: true
