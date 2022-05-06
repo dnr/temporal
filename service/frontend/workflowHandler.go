@@ -45,6 +45,7 @@ import (
 	historyspb "go.temporal.io/server/api/history/v1"
 	"go.temporal.io/server/api/historyservice/v1"
 	"go.temporal.io/server/api/matchingservice/v1"
+	schedspb "go.temporal.io/server/api/schedule/v1"
 	tokenspb "go.temporal.io/server/api/token/v1"
 	"go.temporal.io/server/common"
 	"go.temporal.io/server/common/archiver"
@@ -59,12 +60,14 @@ import (
 	"go.temporal.io/server/common/log/tag"
 	"go.temporal.io/server/common/metrics"
 	"go.temporal.io/server/common/namespace"
+	"go.temporal.io/server/common/payloads"
 	"go.temporal.io/server/common/persistence"
 	"go.temporal.io/server/common/persistence/serialization"
 	"go.temporal.io/server/common/persistence/visibility/manager"
 	"go.temporal.io/server/common/primitives/timestamp"
 	"go.temporal.io/server/common/rpc/interceptor"
 	"go.temporal.io/server/common/searchattribute"
+	"go.temporal.io/server/service/worker/scheduler"
 )
 
 var _ Handler = (*WorkflowHandler)(nil)
@@ -3025,8 +3028,108 @@ func (wh *WorkflowHandler) CreateSchedule(ctx context.Context, request *workflow
 		return nil, errRequestNotSet
 	}
 
-	panic("FIXME")
-	return nil, nil
+	// a schedule id is a workflow id so validate it the same way
+	if err := wh.validateWorkflowID(request.ScheduleId); err != nil {
+		return nil, err
+	}
+
+	wh.logger.Debug("Received CreateSchedule", tag.ScheduleID(request.ScheduleId))
+
+	if request.GetRequestId() == "" {
+		return nil, errRequestIDNotSet
+	}
+
+	if len(request.GetRequestId()) > wh.config.MaxIDLengthLimit() {
+		return nil, errRequestIDTooLong
+	}
+
+	namespaceName := namespace.Name(request.Namespace)
+	namespaceID, err := wh.namespaceRegistry.GetNamespaceID(namespaceName)
+	if err != nil {
+		return nil, err
+	}
+
+	err = wh.processIncomingSearchAttributes(request.GetSearchAttributes(), namespaceName)
+	if err != nil {
+		return nil, err
+	}
+
+	if startWorkflow := request.GetSchedule().GetAction().GetStartWorkflow(); startWorkflow != nil {
+		// validate inner start workflow request
+
+		if err := wh.validateWorkflowID(startWorkflow.WorkflowId + scheduler.AppendedTimestampForValidation); err != nil {
+			return nil, err
+		}
+
+		if startWorkflow.WorkflowType == nil || startWorkflow.WorkflowType.GetName() == "" {
+			return nil, errWorkflowTypeNotSet
+		}
+
+		if len(startWorkflow.WorkflowType.GetName()) > wh.config.MaxIDLengthLimit() {
+			return nil, errWorkflowTypeTooLong
+		}
+
+		if err := wh.validateTaskQueue(startWorkflow.TaskQueue); err != nil {
+			return nil, err
+		}
+
+		if err := wh.validateStartWorkflowTimeouts(&workflowservice.StartWorkflowExecutionRequest{
+			WorkflowExecutionTimeout: startWorkflow.WorkflowExecutionTimeout,
+			WorkflowRunTimeout:       startWorkflow.WorkflowRunTimeout,
+			WorkflowTaskTimeout:      startWorkflow.WorkflowTaskTimeout,
+		}); err != nil {
+			return nil, err
+		}
+
+		if len(startWorkflow.CronSchedule) > 0 {
+			return nil, errCronNotAllowed
+		}
+
+		if startWorkflow.WorkflowIdReusePolicy != enumspb.WORKFLOW_ID_REUSE_POLICY_UNSPECIFIED &&
+			startWorkflow.WorkflowIdReusePolicy != enumspb.WORKFLOW_ID_REUSE_POLICY_ALLOW_DUPLICATE {
+			return nil, errIDReusePolicyNotAllowed
+		}
+
+		// map search attributes to aliases here, since we don't go through the frontend when starting later
+		err = wh.processIncomingSearchAttributes(startWorkflow.GetSearchAttributes(), namespaceName)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	// Set up input to scheduler workflow
+	input := &schedspb.StartScheduleArgs{
+		Schedule:     request.Schedule,
+		InitialPatch: request.InitialPatch,
+		State: &schedspb.InternalState{
+			Namespace:   namespaceName.String(),
+			NamespaceId: namespaceID.String(),
+		},
+	}
+	inputPayload, err := payloads.Encode(input)
+	if err != nil {
+		return nil, err
+	}
+	// Create StartWorkflowExecutionRequest
+	startReq := &workflowservice.StartWorkflowExecutionRequest{
+		Namespace:        request.Namespace,
+		WorkflowId:       request.ScheduleId,
+		WorkflowType:     &commonpb.WorkflowType{Name: scheduler.WorkflowName},
+		TaskQueue:        &taskqueuepb.TaskQueue{Name: scheduler.TaskQueueName},
+		Input:            inputPayload,
+		Identity:         request.Identity,
+		RequestId:        request.RequestId,
+		Memo:             request.Memo,
+		SearchAttributes: request.SearchAttributes,
+	}
+	_, err = wh.historyClient.StartWorkflowExecution(ctx, common.CreateHistoryStartWorkflowRequest(namespaceID.String(), startReq, nil, time.Now().UTC()))
+
+	if err != nil {
+		return nil, err
+	}
+	return &workflowservice.CreateScheduleResponse{
+		ConflictToken: scheduler.InitialConflictToken,
+	}, nil
 }
 
 // Returns the schedule description and current state of an existing schedule.
@@ -3046,6 +3149,7 @@ func (wh *WorkflowHandler) DescribeSchedule(ctx context.Context, request *workfl
 	}
 
 	panic("FIXME")
+	// TODO: turn into loop: query, check running, signal
 	return nil, nil
 }
 
@@ -3066,6 +3170,7 @@ func (wh *WorkflowHandler) UpdateSchedule(ctx context.Context, request *workflow
 	}
 
 	panic("FIXME")
+	// TODO: turn into signal
 	return nil, nil
 }
 
@@ -3086,6 +3191,7 @@ func (wh *WorkflowHandler) PatchSchedule(ctx context.Context, request *workflows
 	}
 
 	panic("FIXME")
+	// TODO: turn into signal
 	return nil, nil
 }
 
@@ -3106,6 +3212,7 @@ func (wh *WorkflowHandler) ListScheduleMatchingTimes(ctx context.Context, reques
 	}
 
 	panic("FIXME")
+	// TODO: turn into query
 	return nil, nil
 }
 
@@ -3126,6 +3233,7 @@ func (wh *WorkflowHandler) DeleteSchedule(ctx context.Context, request *workflow
 	}
 
 	panic("FIXME")
+	// TODO: turn into terminate
 	return nil, nil
 }
 
@@ -3146,6 +3254,7 @@ func (wh *WorkflowHandler) ListSchedules(ctx context.Context, request *workflows
 	}
 
 	panic("FIXME")
+	// TODO: turn into visibility query
 	return nil, nil
 }
 

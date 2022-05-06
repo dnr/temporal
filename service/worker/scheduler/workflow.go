@@ -50,6 +50,10 @@ import (
 )
 
 const (
+	// This is an example of a timestamp that's appended to the workflow
+	// id, used for validation in the frontend.
+	AppendedTimestampForValidation = "-2009-11-10T23:00:00Z"
+
 	// The number of future action times to include in Describe.
 	futureActionCount = 10
 	// The number of recent actual action results to include in Describe.
@@ -81,6 +85,8 @@ type (
 )
 
 var (
+	InitialConflictToken = make([]byte, 8)
+
 	defaultActivityRetryPolicy = &temporal.RetryPolicy{
 		InitialInterval: 1 * time.Second,
 		MaximumInterval: 30 * time.Second,
@@ -118,7 +124,9 @@ func (s *scheduler) run() error {
 		s.Info = &schedpb.ScheduleInfo{
 			CreateTime: s.State.LastProcessedTime,
 		}
-		s.incSeqNo()
+		if len(s.State.ConflictToken) != 8 {
+			s.State.ConflictToken = InitialConflictToken
+		}
 	}
 
 	// A schedule may be created with an initial Patch, e.g. start one immediately. Handle that now.
@@ -450,7 +458,7 @@ func (s *scheduler) describe() (*schedspb.DescribeResponse, error) {
 
 func (s *scheduler) incSeqNo() {
 	if len(s.State.ConflictToken) != 8 {
-		s.State.ConflictToken = make([]byte, 8)
+		s.State.ConflictToken = InitialConflictToken
 	}
 	v := binary.BigEndian.Uint64(s.State.ConflictToken)
 	binary.BigEndian.PutUint64(s.State.ConflictToken, v+1)
@@ -598,6 +606,7 @@ func (s *scheduler) startWorkflow(
 	start *schedspb.BufferedStart,
 	newWorkflow *workflowpb.NewWorkflowExecutionInfo,
 ) (*schedpb.ScheduleActionResult, error) {
+	// must match AppendedTimestampForValidation
 	workflowID := newWorkflow.WorkflowId + "-" + start.NominalTime.UTC().Format(time.RFC3339)
 	// FIXME: need to set NonRetryableErrorTypes?
 	ctx := workflow.WithActivityOptions(s.ctx, workflow.ActivityOptions{RetryPolicy: defaultActivityRetryPolicy})
