@@ -72,9 +72,6 @@ const (
 	// TODO: replace with event count or hint from server
 	iterationsBeforeContinueAsNew = 500
 
-	defaultCatchupWindow = 60 * time.Second
-	minCatchupWindow     = 10 * time.Second
-
 	searchAttrStartTime    = "TemporalScheduledStartTime"
 	searchAttrScheduleById = "TemporalScheduledById"
 )
@@ -94,8 +91,12 @@ type (
 	}
 
 	watcherPair struct {
-		id string
+		id     string
 		future workflow.Future
+	}
+
+	catchupWindowParams struct {
+		Default, Min time.Duration
 	}
 )
 
@@ -107,17 +108,21 @@ var (
 		MaximumInterval: 30 * time.Second,
 	}
 
+	defaultCatchupWindowParams = catchupWindowParams{
+		Default: 60 * time.Second,
+		Min:     10 * time.Second,
+	}
+
 	errUpdateConflict = errors.New("Conflicting concurrent update")
 	errInternal       = errors.New("Internal logic error")
 )
 
 func SchedulerWorkflow(ctx workflow.Context, args *schedspb.StartScheduleArgs) error {
-	id := workflow.GetInfo(ctx).WorkflowExecution.ID
 	scheduler := &scheduler{
 		StartScheduleArgs: *args,
 		ctx:               ctx,
 		a:                 nil,
-		logger:            sdklog.With(workflow.GetLogger(ctx), "schedule-id", id),
+		logger:            sdklog.With(workflow.GetLogger(ctx), "schedule-id", args.State.ScheduleId),
 		watchers:          make(map[string]workflow.Future),
 	}
 	return scheduler.run()
@@ -348,7 +353,7 @@ func (s *scheduler) sleep(nextSleep time.Duration, hasNext bool) {
 		sel.AddFuture(tmr, func(_ workflow.Future) {})
 	}
 
-	// TODO: is sorting required here?
+	// need to sort watchers for determinism
 	for _, pair := range s.sortedWatchers() {
 		sel.AddFuture(pair.future, func(f workflow.Future) { s.wfWatcherReturned(pair.id, f) })
 	}
@@ -513,25 +518,23 @@ func (s *scheduler) checkConflict(token []byte) error {
 }
 
 func (s *scheduler) getCatchupWindow() time.Duration {
-	// Use MutableSideEffect so that we can change the defaults without breaking determinism.
-	get := func(ctx workflow.Context) interface{} {
-		cw := s.Schedule.Policies.CatchupWindow
-		if cw == nil {
-			return defaultCatchupWindow
-		} else if *cw < minCatchupWindow {
-			return minCatchupWindow
-		} else {
-			return *cw
-		}
+	// TODO: re-enable this after it works?
+	// // Use MutableSideEffect so that we can change the defaults without breaking determinism.
+	// get := func(ctx workflow.Context) interface{} { return defaultCatchupWindowParams }
+	// eq := func(a, b interface{}) bool { return a.(catchupWindowParams) == b.(catchupWindowParams) }
+	// var params catchupWindowParams
+	// if err := workflow.MutableSideEffect(s.ctx, "defaultCatchupWindowParams", get, eq).Get(&params); err != nil {
+	// 	panic("can't decode catchupWindowParams:" + err.Error())
+	// }
+	params := defaultCatchupWindowParams
+	cw := s.Schedule.Policies.CatchupWindow
+	if cw == nil {
+		return params.Default
+	} else if *cw < params.Min {
+		return params.Min
+	} else {
+		return *cw
 	}
-	eq := func(a, b interface{}) bool {
-		return a.(time.Duration) == b.(time.Duration)
-	}
-	var cw time.Duration
-	if workflow.MutableSideEffect(s.ctx, "getCatchupWindow", get, eq).Get(&cw) != nil {
-		return defaultCatchupWindow
-	}
-	return cw
 }
 
 func (s *scheduler) resolveOverlapPolicy(overlapPolicy enumspb.ScheduleOverlapPolicy) enumspb.ScheduleOverlapPolicy {
@@ -670,9 +673,10 @@ func (s *scheduler) startWorkflow(
 			RequestId:                s.newUUIDString(),
 			WorkflowIdReusePolicy:    enumspb.WORKFLOW_ID_REUSE_POLICY_ALLOW_DUPLICATE,
 			RetryPolicy:              newWorkflow.RetryPolicy,
-			Memo:                     newWorkflow.Memo,
-			SearchAttributes:         s.addSearchAttr(newWorkflow.SearchAttributes, nominalTimeSec),
-			Header:                   newWorkflow.Header,
+			// FIXME: do we have have to use a slice instead of a map for memo/searchattr/header so it's deterministic?
+			Memo:             newWorkflow.Memo,
+			SearchAttributes: s.addSearchAttr(newWorkflow.SearchAttributes, nominalTimeSec),
+			Header:           newWorkflow.Header,
 		},
 		// StartTime:            start.ActualTime, // used to set expiration time, so use actual instead of nominal
 		StartTime:            timestamp.TimePtr(s.now()), // TODO: what makes mose sense here? if manual then now else ActualTime?
@@ -696,8 +700,7 @@ func (s *scheduler) startWorkflow(
 }
 
 func (s *scheduler) identity() string {
-	info := workflow.GetInfo(s.ctx)
-	return fmt.Sprintf("temporal-scheduler-%s-%s", s.State.Namespace, info.WorkflowExecution.ID)
+	return fmt.Sprintf("temporal-scheduler-%s-%s", s.State.Namespace, s.State.ScheduleId)
 }
 
 func (s *scheduler) addSearchAttr(
@@ -708,8 +711,7 @@ func (s *scheduler) addSearchAttr(
 	if p, err := payload.Encode(nominal); err == nil {
 		fields[searchAttrStartTime] = p
 	}
-	info := workflow.GetInfo(s.ctx)
-	if p, err := payload.Encode(info.WorkflowExecution.ID); err == nil {
+	if p, err := payload.Encode(s.State.ScheduleId); err == nil {
 		fields[searchAttrScheduleById] = p
 	}
 	return &commonpb.SearchAttributes{
@@ -778,10 +780,10 @@ func (s *scheduler) newUUIDString() string {
 }
 
 func (s *scheduler) sortedWatchers() []watcherPair {
-	out:=make([]watcherPair,0,len(s.watchers))
-	for id, f := range s.watchers{
-		out=append(out,watcherPair{id,f})
+	out := make([]watcherPair, 0, len(s.watchers))
+	for id, f := range s.watchers {
+		out = append(out, watcherPair{id, f})
 	}
-	slices.SortFunc(out,func(a, b watcherPair) bool {return a.id < b.id})
+	slices.SortFunc(out, func(a, b watcherPair) bool { return a.id < b.id })
 	return out
 }

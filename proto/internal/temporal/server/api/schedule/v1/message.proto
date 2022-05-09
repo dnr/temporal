@@ -49,6 +49,10 @@ message BufferedStart {
 message InternalState {
     string namespace = 1;
     string namespace_id = 2;
+    // this is just the workflow id of the scheduler, but accessing that from the workflow is
+    // currently not available during replay, so we just pass it in here.
+    string schedule_id = 8;
+
     google.protobuf.Timestamp last_processed_time = 3 [(gogoproto.stdtime) = true];
     repeated BufferedStart buffered_starts = 4;
 

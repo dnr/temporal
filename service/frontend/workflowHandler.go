@@ -3112,6 +3112,7 @@ func (wh *WorkflowHandler) CreateSchedule(ctx context.Context, request *workflow
 		State: &schedspb.InternalState{
 			Namespace:   namespaceName.String(),
 			NamespaceId: namespaceID.String(),
+			ScheduleId:  request.ScheduleId,
 		},
 	}
 	inputPayload, err := payloads.Encode(input)
