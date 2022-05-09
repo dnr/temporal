@@ -453,7 +453,8 @@ func (s *scheduler) handleDescribeQuery() (*schedspb.DescribeResponse, error) {
 		s.Info.FutureActionTimes = make([]*time.Time, 0, futureActionCount)
 		t1 := timestamp.TimeValue(s.State.LastProcessedTime)
 		for len(s.Info.FutureActionTimes) < futureActionCount {
-			_, t1, has := s.cspec.getNextTime(t1)
+			var has bool
+			_, t1, has = s.cspec.getNextTime(t1)
 			if !has {
 				break
 			}
