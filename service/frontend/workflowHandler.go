@@ -3120,15 +3120,16 @@ func (wh *WorkflowHandler) CreateSchedule(ctx context.Context, request *workflow
 	}
 	// Create StartWorkflowExecutionRequest
 	startReq := &workflowservice.StartWorkflowExecutionRequest{
-		Namespace:        request.Namespace,
-		WorkflowId:       request.ScheduleId,
-		WorkflowType:     &commonpb.WorkflowType{Name: scheduler.WorkflowType},
-		TaskQueue:        &taskqueuepb.TaskQueue{Name: scheduler.TaskQueueName},
-		Input:            inputPayload,
-		Identity:         request.Identity,
-		RequestId:        request.RequestId,
-		Memo:             request.Memo,
-		SearchAttributes: request.SearchAttributes,
+		Namespace:             request.Namespace,
+		WorkflowId:            request.ScheduleId,
+		WorkflowType:          &commonpb.WorkflowType{Name: scheduler.WorkflowType},
+		TaskQueue:             &taskqueuepb.TaskQueue{Name: scheduler.TaskQueueName},
+		Input:                 inputPayload,
+		Identity:              request.Identity,
+		RequestId:             request.RequestId,
+		WorkflowIdReusePolicy: enumspb.WORKFLOW_ID_REUSE_POLICY_ALLOW_DUPLICATE,
+		Memo:                  request.Memo,
+		SearchAttributes:      request.SearchAttributes,
 	}
 	_, err = wh.historyClient.StartWorkflowExecution(ctx, common.CreateHistoryStartWorkflowRequest(namespaceID.String(), startReq, nil, time.Now().UTC()))
 
