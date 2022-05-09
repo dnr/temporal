@@ -642,7 +642,8 @@ func (s *scheduler) startWorkflow(
 	newWorkflow *workflowpb.NewWorkflowExecutionInfo,
 ) (*schedpb.ScheduleActionResult, error) {
 	// must match AppendedTimestampForValidation
-	workflowID := newWorkflow.WorkflowId + "-" + start.NominalTime.UTC().Format(time.RFC3339)
+	nominalTimeSec := start.NominalTime.UTC().Truncate(time.Second)
+	workflowID := newWorkflow.WorkflowId + "-" + nominalTimeSec.Format(time.RFC3339)
 	// FIXME: need to set NonRetryableErrorTypes?
 	ctx := workflow.WithActivityOptions(s.ctx, workflow.ActivityOptions{
 		ScheduleToCloseTimeout: s.getCatchupWindow(),
@@ -664,10 +665,11 @@ func (s *scheduler) startWorkflow(
 			WorkflowIdReusePolicy:    enumspb.WORKFLOW_ID_REUSE_POLICY_ALLOW_DUPLICATE,
 			RetryPolicy:              newWorkflow.RetryPolicy,
 			Memo:                     newWorkflow.Memo,
-			SearchAttributes:         s.addSearchAttr(newWorkflow.SearchAttributes, start.NominalTime.UTC()),
+			SearchAttributes:         s.addSearchAttr(newWorkflow.SearchAttributes, nominalTimeSec),
 			Header:                   newWorkflow.Header,
 		},
-		StartTime:            start.ActualTime, // used to set expiration time, so use actual instead of nominal
+		// StartTime:            start.ActualTime, // used to set expiration time, so use actual instead of nominal
+		StartTime:            timestamp.TimePtr(s.now()), // TODO: what makes mose sense here? if manual then now else ActualTime?
 		LastCompletionResult: s.State.LastCompletionResult,
 		ContinuedFailure:     s.State.ContinuedFailure,
 	}
