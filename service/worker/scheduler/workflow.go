@@ -643,7 +643,10 @@ func (s *scheduler) startWorkflow(
 	// must match AppendedTimestampForValidation
 	workflowID := newWorkflow.WorkflowId + "-" + start.NominalTime.UTC().Format(time.RFC3339)
 	// FIXME: need to set NonRetryableErrorTypes?
-	ctx := workflow.WithActivityOptions(s.ctx, workflow.ActivityOptions{RetryPolicy: defaultActivityRetryPolicy})
+	ctx := workflow.WithActivityOptions(s.ctx, workflow.ActivityOptions{
+		ScheduleToCloseTimeout: s.getCatchupWindow(),
+		RetryPolicy: defaultActivityRetryPolicy,
+	})
 	req := &schedspb.StartWorkflowRequest{
 		NamespaceId: s.State.NamespaceId,
 		Request: &workflowservice.StartWorkflowExecutionRequest{
