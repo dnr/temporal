@@ -92,6 +92,11 @@ type (
 		// watchers for currently-running workflows
 		watchers map[string]workflow.Future
 	}
+
+	watcherPair struct {
+		id string
+		future workflow.Future
+	}
 )
 
 var (
@@ -343,8 +348,9 @@ func (s *scheduler) sleep(nextSleep time.Duration, hasNext bool) {
 		sel.AddFuture(tmr, func(_ workflow.Future) {})
 	}
 
-	for id, fut := range s.watchers {
-		sel.AddFuture(fut, func(f workflow.Future) { s.wfWatcherReturned(id, f) })
+	// TODO: is sorting required here?
+	for _, pair := range s.sortedWatchers() {
+		sel.AddFuture(pair.future, func(f workflow.Future) { s.wfWatcherReturned(pair.id, f) })
 	}
 
 	s.logger.Debug("sleeping", "hasNext", hasNext, "watchers", len(s.watchers))
@@ -769,4 +775,13 @@ func (s *scheduler) newUUIDString() string {
 		return uuid.NewString()
 	}).Get(&str)
 	return str
+}
+
+func (s *scheduler) sortedWatchers() []watcherPair {
+	out:=make([]watcherPair,0,len(s.watchers))
+	for id, f := range s.watchers{
+		out=append(out,watcherPair{id,f})
+	}
+	slices.SortFunc(out,func(a, b watcherPair) bool {return a.id < b.id})
+	return out
 }
