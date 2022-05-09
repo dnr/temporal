@@ -376,7 +376,7 @@ func (s *scheduler) wfWatcherReturned(id string, f workflow.Future) {
 	if idx := slices.Index(s.Info.RunningWorkflowIds, id); idx >= 0 {
 		s.Info.RunningWorkflowIds = slices.Delete(s.Info.RunningWorkflowIds, idx, idx+1)
 	} else {
-		s.logger.Error("completed workflow not found in running list", "workflow", id)
+		s.logger.Error("closed workflow not found in running list", "workflow", id)
 	}
 
 	// handle pause-on-failure
@@ -610,7 +610,7 @@ func (s *scheduler) processBuffer() bool {
 		}
 	}
 
-	// If we still have a buffer here, then we're waiting for started workflow(s) to complete
+	// If we still have a buffer here, then we're waiting for started workflow(s) to be closed
 	// (maybe one we just started). In order to get woken up, we need to be watching at least
 	// one of them with an activity. We only need one watcher at a time, though: after that one
 	// returns, we'll end up back here and start the next one.
@@ -646,7 +646,7 @@ func (s *scheduler) startWorkflow(
 	// FIXME: need to set NonRetryableErrorTypes?
 	ctx := workflow.WithActivityOptions(s.ctx, workflow.ActivityOptions{
 		ScheduleToCloseTimeout: s.getCatchupWindow(),
-		RetryPolicy: defaultActivityRetryPolicy,
+		RetryPolicy:            defaultActivityRetryPolicy,
 	})
 	req := &schedspb.StartWorkflowRequest{
 		NamespaceId: s.State.NamespaceId,

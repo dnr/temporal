@@ -104,7 +104,7 @@ func processBuffer[T overlappable](
 			if isRunning {
 				// an actual workflow is running, terminate it (asynchronously)
 				action.needTerminate = true
-				// keep in buffer so it will get started once cancel completes
+				// keep in buffer so it will get started once terminate completes
 				action.newBuffer = append(action.newBuffer, start)
 			} else {
 				// it's not running yet, it's just the one we were going to start. replace it

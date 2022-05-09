@@ -121,7 +121,7 @@ func (a *activities) tryWatchWorkflow(ctx context.Context, req *schedspb.WatchWo
 
 	if pollRes.WorkflowStatus == enumspb.WORKFLOW_EXECUTION_STATUS_RUNNING {
 		if req.LongPoll {
-			return nil, errTryAgain // not completed yet, just try again
+			return nil, errTryAgain // not closed yet, just try again
 		}
 		return makeResponse(nil, nil), nil
 	}
@@ -133,7 +133,7 @@ func (a *activities) tryWatchWorkflow(ctx context.Context, req *schedspb.WatchWo
 		Execution:              req.Execution,
 		MaximumPageSize:        1,
 		HistoryEventFilterType: enumspb.HISTORY_EVENT_FILTER_TYPE_CLOSE_EVENT,
-		SkipArchival:           true, // should be recently completed, no need for archival
+		SkipArchival:           true, // should be recently closed, no need for archival
 	}
 	histRes, err := a.FrontendClient.GetWorkflowExecutionHistory(ctx2, histReq)
 
