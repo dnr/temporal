@@ -3173,11 +3173,18 @@ func (wh *WorkflowHandler) DescribeSchedule(ctx context.Context, request *workfl
 		},
 	})
 	if err != nil {
+		// TODO: rewrite "workflow" in error messages to "schedule"
 		return nil, err
 	}
 
+	executionInfo:=describeResponse.GetWorkflowExecutionInfo()
+	if executionInfo.GetStatus()!=enumspb.WORKFLOW_EXECUTION_STATUS_RUNNING {
+		// only treat running schedules as existing
+		return nil,serviceerror.NewNotFound("schedule not found")
+	}
+
 	// map search attributes
-	if sa := describeResponse.GetWorkflowExecutionInfo().GetSearchAttributes(); sa != nil {
+	if sa := executionInfo.GetSearchAttributes(); sa != nil {
 		saTypeMap, err := wh.saProvider.GetSearchAttributes(wh.config.ESIndexName, false)
 		if err != nil {
 			return nil, serviceerror.NewUnavailable(fmt.Sprintf(errUnableToGetSearchAttributesMessage, err))
