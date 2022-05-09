@@ -661,7 +661,7 @@ func (s *scheduler) startWorkflow(
 			WorkflowRunTimeout:       newWorkflow.WorkflowRunTimeout,
 			WorkflowTaskTimeout:      newWorkflow.WorkflowTaskTimeout,
 			Identity:                 s.identity(),
-			RequestId:                uuid.NewString(),
+			RequestId:                s.newUUIDString(),
 			WorkflowIdReusePolicy:    enumspb.WORKFLOW_ID_REUSE_POLICY_ALLOW_DUPLICATE,
 			RetryPolicy:              newWorkflow.RetryPolicy,
 			Memo:                     newWorkflow.Memo,
@@ -738,7 +738,7 @@ func (s *scheduler) cancelWorkflow(id string) {
 	areq := &schedspb.CancelWorkflowRequest{
 		NamespaceId: s.State.NamespaceId,
 		Namespace:   s.State.Namespace,
-		RequestId:   uuid.NewString(),
+		RequestId:   s.newUUIDString(),
 		Identity:    s.identity(),
 		Execution:   &commonpb.WorkflowExecution{WorkflowId: id},
 	}
@@ -761,4 +761,12 @@ func (s *scheduler) terminateWorkflow(id string) {
 	}
 	workflow.ExecuteActivity(ctx, s.a.TerminateWorkflow, areq)
 	// do not wait for terminate to complete
+}
+
+func (s *scheduler) newUUIDString() string {
+	var str string
+	workflow.SideEffect(s.ctx, func(ctx workflow.Context) interface{} {
+		return uuid.NewString()
+	}).Get(&str)
+	return str
 }
