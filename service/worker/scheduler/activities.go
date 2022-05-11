@@ -165,50 +165,38 @@ func (a *activities) tryWatchWorkflow(ctx context.Context, req *schedspb.WatchWo
 
 	switch pollRes.WorkflowStatus {
 	case enumspb.WORKFLOW_EXECUTION_STATUS_COMPLETED:
-		attrs := lastEvent.GetWorkflowExecutionCompletedEventAttributes()
-		if attrs == nil {
+		if attrs := lastEvent.GetWorkflowExecutionCompletedEventAttributes(); attrs == nil {
 			return nil, errInternal
-		}
-		if len(attrs.NewExecutionRunId) > 0 {
+		} else if len(attrs.NewExecutionRunId) > 0 {
+			// this shouldn't happen because we don't allow old-cron workflows as scheduled, but follow it anyway
 			return nil, errFollow(attrs.NewExecutionRunId)
+		} else {
+			return makeResponse(attrs.Result, nil), nil
 		}
-		return makeResponse(attrs.Result, nil), nil
 	case enumspb.WORKFLOW_EXECUTION_STATUS_FAILED:
-		attrs := lastEvent.GetWorkflowExecutionFailedEventAttributes()
-		if attrs == nil {
+		if attrs := lastEvent.GetWorkflowExecutionFailedEventAttributes(); attrs == nil {
 			return nil, errInternal
-		}
-		if len(attrs.NewExecutionRunId) > 0 {
+		} else if len(attrs.NewExecutionRunId) > 0 {
 			return nil, errFollow(attrs.NewExecutionRunId)
+		} else {
+			return makeResponse(nil, attrs.Failure), nil
 		}
-		return makeResponse(nil, attrs.Failure), nil
-	case enumspb.WORKFLOW_EXECUTION_STATUS_CANCELED:
-		attrs := lastEvent.GetWorkflowExecutionCanceledEventAttributes()
-		if attrs == nil {
-			return nil, errInternal
-		}
-		return makeResponse(nil, nil), nil
-	case enumspb.WORKFLOW_EXECUTION_STATUS_TERMINATED:
-		attrs := lastEvent.GetWorkflowExecutionTerminatedEventAttributes()
-		if attrs == nil {
-			return nil, errInternal
-		}
+	case enumspb.WORKFLOW_EXECUTION_STATUS_CANCELED, enumspb.WORKFLOW_EXECUTION_STATUS_TERMINATED:
 		return makeResponse(nil, nil), nil
 	case enumspb.WORKFLOW_EXECUTION_STATUS_CONTINUED_AS_NEW:
-		attrs := lastEvent.GetWorkflowExecutionContinuedAsNewEventAttributes()
-		if attrs == nil {
+		if attrs := lastEvent.GetWorkflowExecutionContinuedAsNewEventAttributes(); attrs == nil {
 			return nil, errInternal
-		}
-		return nil, errFollow(attrs.NewExecutionRunId)
-	case enumspb.WORKFLOW_EXECUTION_STATUS_TIMED_OUT:
-		attrs := lastEvent.GetWorkflowExecutionTimedOutEventAttributes()
-		if attrs == nil {
-			return nil, errInternal
-		}
-		if len(attrs.NewExecutionRunId) > 0 {
+		} else {
 			return nil, errFollow(attrs.NewExecutionRunId)
 		}
-		return makeResponse(nil, nil), nil
+	case enumspb.WORKFLOW_EXECUTION_STATUS_TIMED_OUT:
+		if attrs := lastEvent.GetWorkflowExecutionTimedOutEventAttributes(); attrs == nil {
+			return nil, errInternal
+		} else if len(attrs.NewExecutionRunId) > 0 {
+			return nil, errFollow(attrs.NewExecutionRunId)
+		} else {
+			return makeResponse(nil, nil), nil
+		}
 	}
 
 	return nil, errInternal
