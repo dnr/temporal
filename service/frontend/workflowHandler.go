@@ -3237,9 +3237,18 @@ func (wh *WorkflowHandler) DescribeSchedule(ctx context.Context, request *workfl
 				// Note: do not send runid here so that we always get the latest one
 				Execution: &commonpb.WorkflowExecution{WorkflowId: ex.WorkflowId},
 			}); err != nil {
-				// FIXME: some errors (e.g. not found) should be considered need refresh, not error
-				return err
-			} else if msResponse.WorkflowStatus != enumspb.WORKFLOW_EXECUTION_STATUS_RUNNING {
+				switch err.(type) {
+				case *serviceerror.NotFound:
+					// if it doesn't exist (past retention period) it's certainly not running
+					needRefresh = append(needRefresh, ex)
+				default:
+					return err
+				}
+			} else if msResponse.WorkflowStatus != enumspb.WORKFLOW_EXECUTION_STATUS_RUNNING ||
+				msResponse.FirstExecutionRunId != ex.RunId {
+				// there is no running execution of this workflow id, or there is a running
+				// execution, but it's not part of the chain that we started.
+				// either way, the workflow that we started is not running.
 				needRefresh = append(needRefresh, ex)
 			}
 		}

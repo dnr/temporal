@@ -109,9 +109,19 @@ func (a *activities) tryWatchWorkflow(ctx context.Context, req *schedspb.WatchWo
 	pollRes, err := a.HistoryClient.PollMutableState(ctx, pollReq)
 
 	// FIXME: separate out retriable vs unretriable errors
-	// FIXME: treat not found as not running with unknown status
 	if err != nil {
 		return nil, err
+	}
+
+	if pollRes.FirstExecutionRunId != req.FirstExecutionRunId {
+		if len(req.Execution.RunId) == 0 {
+			// there is a workflow running but it's not part of the chain we're
+			// looking for. search for the one we want by runid.
+			return nil, errFollow(req.FirstExecutionRunId)
+		}
+		// we explicitly searched for a chain we started by runid, and found
+		// something that's part of a different chain. this should never happen.
+		return nil, errInternal
 	}
 
 	makeResponse := func(result *commonpb.Payloads, failure *failurepb.Failure) *schedspb.WatchWorkflowResponse {
@@ -123,8 +133,6 @@ func (a *activities) tryWatchWorkflow(ctx context.Context, req *schedspb.WatchWo
 		}
 		return res
 	}
-
-	// TODO: check FirstExecutionRunId to make sure it's the same chain
 
 	if pollRes.WorkflowStatus == enumspb.WORKFLOW_EXECUTION_STATUS_RUNNING {
 		if req.LongPoll {
