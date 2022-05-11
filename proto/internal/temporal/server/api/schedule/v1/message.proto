@@ -31,7 +31,6 @@ import "temporal/api/enums/v1/workflow.proto";
 import "temporal/api/schedule/v1/message.proto";
 import "temporal/api/workflowservice/v1/request_response.proto";
 
-import "google/protobuf/duration.proto";
 import "google/protobuf/timestamp.proto";
 
 import "dependencies/gogoproto/gogo.proto";
@@ -77,8 +76,10 @@ message FullUpdateRequest {
 }
 
 message RefreshRequest {
-    // List of workflow ids that are completed now
-    repeated string workflow_id = 1;
+    // List of workflows that we think are completed now.
+    // Note that the run ids in here are first execution run ids, not
+    // necessarily the most recent run id for the workflow.
+    repeated temporal.api.common.v1.WorkflowExecution workflows = 1;
 }
 
 message DescribeResponse {
@@ -90,8 +91,11 @@ message DescribeResponse {
 message WatchWorkflowRequest {
     string namespace = 1;
     string namespace_id = 2;
+    // Note: this will be sent to the activity with empty execution.run_id, and
+    // the run id that we started in first_execution_run_id.
     temporal.api.common.v1.WorkflowExecution execution = 3;
-    bool long_poll = 4;
+    string first_execution_run_id = 4;
+    bool long_poll = 5;
 }
 
 message WatchWorkflowResponse {
@@ -120,13 +124,16 @@ message CancelWorkflowRequest {
     string namespace_id = 2;
     string request_id = 3;
     string identity = 4;
-    temporal.api.common.v1.WorkflowExecution execution = 5;
+    string workflow_id = 5;
+    string first_execution_run_id = 6;
+    string reason = 7;
 }
 
 message TerminateWorkflowRequest {
     string namespace = 1;
     string namespace_id = 2;
     string identity = 3;
-    temporal.api.common.v1.WorkflowExecution execution = 4;
-    string reason = 5;
+    string workflow_id = 4;
+    string first_execution_run_id = 5;
+    string reason = 6;
 }

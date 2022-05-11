@@ -384,8 +384,9 @@ func (s *scheduler) wfWatcherReturned(id string, f workflow.Future) {
 	}
 
 	// now we know it's not running, remove from running workflow list
-	if idx := slices.Index(s.Info.RunningWorkflowIds, id); idx >= 0 {
-		s.Info.RunningWorkflowIds = slices.Delete(s.Info.RunningWorkflowIds, idx, idx+1)
+	match := func(ex *commonpb.WorkflowExecution) bool { return ex.WorkflowId == id }
+	if idx := slices.IndexFunc(s.Info.RunningWorkflows, match); idx >= 0 {
+		s.Info.RunningWorkflows = slices.Delete(s.Info.RunningWorkflows, idx, idx+1)
 	} else {
 		s.logger.Error("closed workflow not found in running list", "workflow", id)
 	}
@@ -451,9 +452,9 @@ func (s *scheduler) handleRefreshSignal(ch workflow.ReceiveChannel, _ bool) {
 	var refresh schedspb.RefreshRequest
 	ch.Receive(s.ctx, &refresh)
 	s.logger.Debug("Got refresh signal", "refresh", refresh.String())
-	for _, id := range refresh.WorkflowId {
-		if _, ok := s.watchers[id]; !ok {
-			s.startWatcher(id, false)
+	for _, ex := range refresh.Workflows {
+		if _, ok := s.watchers[ex.WorkflowId]; !ok {
+			s.startWatcher(ex, false)
 		}
 	}
 }
@@ -578,7 +579,7 @@ func (s *scheduler) processBuffer() bool {
 		return false
 	}
 
-	isRunning := len(s.Info.RunningWorkflowIds) > 0
+	isRunning := len(s.Info.RunningWorkflows) > 0
 	tryAgain := false
 
 	action := processBuffer(s.State.BufferedStarts, isRunning, s.resolveOverlapPolicy)
@@ -610,12 +611,12 @@ func (s *scheduler) processBuffer() bool {
 
 	// Terminate or cancel if required (terminate overrides cancel if both are present)
 	if action.needTerminate {
-		for _, id := range s.Info.RunningWorkflowIds {
-			s.terminateWorkflow(id)
+		for _, ex := range s.Info.RunningWorkflows {
+			s.terminateWorkflow(ex)
 		}
 	} else if action.needCancel {
-		for _, id := range s.Info.RunningWorkflowIds {
-			s.cancelWorkflow(id)
+		for _, ex := range s.Info.RunningWorkflows {
+			s.cancelWorkflow(ex)
 		}
 	}
 
@@ -624,8 +625,8 @@ func (s *scheduler) processBuffer() bool {
 	// one of them with an activity. We only need one watcher at a time, though: after that one
 	// returns, we'll end up back here and start the next one.
 	if len(s.State.BufferedStarts) > 0 && len(s.watchers) == 0 {
-		if len(s.Info.RunningWorkflowIds) > 0 {
-			s.startWatcher(s.Info.RunningWorkflowIds[0], true)
+		if len(s.Info.RunningWorkflows) > 0 {
+			s.startWatcher(s.Info.RunningWorkflows[0], true)
 		} else {
 			s.logger.Error("have buffered workflows but none running")
 		}
@@ -642,7 +643,7 @@ func (s *scheduler) recordAction(result *schedpb.ScheduleActionResult) {
 		s.Info.RecentActions = s.Info.RecentActions[extra:]
 	}
 	if result.StartWorkflowResult != nil {
-		s.Info.RunningWorkflowIds = append(s.Info.RunningWorkflowIds, result.StartWorkflowResult.WorkflowId)
+		s.Info.RunningWorkflows = append(s.Info.RunningWorkflows, result.StartWorkflowResult)
 	}
 }
 
@@ -719,8 +720,8 @@ func (s *scheduler) addSearchAttr(
 	}
 }
 
-func (s *scheduler) startWatcher(id string, longPoll bool) {
-	s.logger.Debug("starting watcher", "workflow", id)
+func (s *scheduler) startWatcher(ex *commonpb.WorkflowExecution, longPoll bool) {
+	s.logger.Debug("starting watcher", "workflow", ex.WorkflowId, "first_ex_run_id", ex.RunId)
 
 	ctx := workflow.WithActivityOptions(s.ctx, workflow.ActivityOptions{
 		StartToCloseTimeout: 365 * 24 * time.Hour,
@@ -731,41 +732,46 @@ func (s *scheduler) startWatcher(id string, longPoll bool) {
 	req := &schedspb.WatchWorkflowRequest{
 		Namespace:   s.State.Namespace,
 		NamespaceId: s.State.NamespaceId,
-		Execution:   &commonpb.WorkflowExecution{WorkflowId: id},
-		LongPoll:    longPoll,
+		// Note: do not send runid here so that we always get the latest one
+		Execution:           &commonpb.WorkflowExecution{WorkflowId: ex.WorkflowId},
+		FirstExecutionRunId: ex.RunId,
+		LongPoll:            longPoll,
 	}
-	s.watchers[id] = workflow.ExecuteActivity(ctx, s.a.WatchWorkflow, req)
+	s.watchers[ex.WorkflowId] = workflow.ExecuteActivity(ctx, s.a.WatchWorkflow, req)
 }
 
-func (s *scheduler) cancelWorkflow(id string) {
+func (s *scheduler) cancelWorkflow(ex *commonpb.WorkflowExecution) {
 	ctx := workflow.WithActivityOptions(s.ctx, workflow.ActivityOptions{
 		StartToCloseTimeout: 1 * time.Minute,
 		// FIXME: need to set NonRetryableErrorTypes?
 		RetryPolicy: defaultActivityRetryPolicy,
 	})
 	areq := &schedspb.CancelWorkflowRequest{
-		NamespaceId: s.State.NamespaceId,
-		Namespace:   s.State.Namespace,
-		RequestId:   s.newUUIDString(),
-		Identity:    s.identity(),
-		Execution:   &commonpb.WorkflowExecution{WorkflowId: id},
+		NamespaceId:         s.State.NamespaceId,
+		Namespace:           s.State.Namespace,
+		RequestId:           s.newUUIDString(),
+		Identity:            s.identity(),
+		WorkflowId:          ex.WorkflowId,
+		FirstExecutionRunId: ex.RunId,
+		Reason:              "cancelled by schedule overlap policy",
 	}
 	workflow.ExecuteActivity(ctx, s.a.CancelWorkflow, areq)
 	// do not wait for cancel to complete
 }
 
-func (s *scheduler) terminateWorkflow(id string) {
+func (s *scheduler) terminateWorkflow(ex *commonpb.WorkflowExecution) {
 	ctx := workflow.WithActivityOptions(s.ctx, workflow.ActivityOptions{
 		StartToCloseTimeout: 1 * time.Minute,
 		// FIXME: need to set NonRetryableErrorTypes?
 		RetryPolicy: defaultActivityRetryPolicy,
 	})
 	areq := &schedspb.TerminateWorkflowRequest{
-		NamespaceId: s.State.NamespaceId,
-		Namespace:   s.State.Namespace,
-		Identity:    s.identity(),
-		Execution:   &commonpb.WorkflowExecution{WorkflowId: id},
-		Reason:      "terminated by schedule overlap policy",
+		NamespaceId:         s.State.NamespaceId,
+		Namespace:           s.State.Namespace,
+		Identity:            s.identity(),
+		WorkflowId:          ex.WorkflowId,
+		FirstExecutionRunId: ex.RunId,
+		Reason:              "terminated by schedule overlap policy",
 	}
 	workflow.ExecuteActivity(ctx, s.a.TerminateWorkflow, areq)
 	// do not wait for terminate to complete

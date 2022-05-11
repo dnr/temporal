@@ -3178,10 +3178,10 @@ func (wh *WorkflowHandler) DescribeSchedule(ctx context.Context, request *workfl
 		return nil, err
 	}
 
-	executionInfo:=describeResponse.GetWorkflowExecutionInfo()
-	if executionInfo.GetStatus()!=enumspb.WORKFLOW_EXECUTION_STATUS_RUNNING {
+	executionInfo := describeResponse.GetWorkflowExecutionInfo()
+	if executionInfo.GetStatus() != enumspb.WORKFLOW_EXECUTION_STATUS_RUNNING {
 		// only treat running schedules as existing
-		return nil,serviceerror.NewNotFound("schedule not found")
+		return nil, serviceerror.NewNotFound("schedule not found")
 	}
 
 	// map search attributes
@@ -3223,9 +3223,9 @@ func (wh *WorkflowHandler) DescribeSchedule(ctx context.Context, request *workfl
 
 		// for all running workflows started by the schedule, we should check that they're
 		// still running, and if not, poke the schedule to refresh
-		var needRefresh []string
-		for _, workflowID := range response.GetInfo().GetRunningWorkflowIds() {
-			if _, ok := sentRefresh[workflowID]; ok {
+		var needRefresh []*commonpb.WorkflowExecution
+		for _, ex := range response.GetInfo().GetRunningWorkflows() {
+			if _, ok := sentRefresh[ex.WorkflowId]; ok {
 				// we asked the schedule to refresh this one because it wasn't running, but
 				// it's still reporting it as running
 				return errWaitForRefresh
@@ -3234,11 +3234,13 @@ func (wh *WorkflowHandler) DescribeSchedule(ctx context.Context, request *workfl
 			// we'll usually have just zero or one of these so we can just do them sequentially
 			if msResponse, err := wh.historyClient.GetMutableState(ctx, &historyservice.GetMutableStateRequest{
 				NamespaceId: namespaceID.String(),
-				Execution:   &commonpb.WorkflowExecution{WorkflowId: workflowID},
+				// Note: do not send runid here so that we always get the latest one
+				Execution: &commonpb.WorkflowExecution{WorkflowId: ex.WorkflowId},
 			}); err != nil {
+				// FIXME: some errors (e.g. not found) should be considered need refresh, not error
 				return err
 			} else if msResponse.WorkflowStatus != enumspb.WORKFLOW_EXECUTION_STATUS_RUNNING {
-				needRefresh = append(needRefresh, workflowID)
+				needRefresh = append(needRefresh, ex)
 			}
 		}
 
@@ -3266,7 +3268,7 @@ func (wh *WorkflowHandler) DescribeSchedule(ctx context.Context, request *workfl
 
 		// poke to refresh
 		input := &schedspb.RefreshRequest{
-			WorkflowId: needRefresh,
+			Workflows: needRefresh,
 		}
 		inputPayloads, err := payloads.Encode(input)
 		if err != nil {
@@ -3287,8 +3289,8 @@ func (wh *WorkflowHandler) DescribeSchedule(ctx context.Context, request *workfl
 			return err
 		}
 
-		for _, workflowID := range needRefresh {
-			sentRefresh[workflowID] = struct{}{}
+		for _, ex := range needRefresh {
+			sentRefresh[ex.WorkflowId] = struct{}{}
 		}
 
 		return errWaitForRefresh

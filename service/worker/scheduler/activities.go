@@ -93,6 +93,10 @@ func (a *activities) tryWatchWorkflow(ctx context.Context, req *schedspb.WatchWo
 
 	// poll history service directly instead of just going to frontend to avoid
 	// using resources on frontend while waiting.
+	// note that on the first time through the loop, Execution.RunId will be
+	// empty, so we'll get the latest run, whatever it is (whether it's part of
+	// the desired chain or not). if we have to follow (unlikely), we'll end up
+	// back here with non-empty RunId.
 	pollReq := &historyservice.PollMutableStateRequest{
 		NamespaceId: req.NamespaceId,
 		Execution:   req.Execution,
@@ -105,6 +109,7 @@ func (a *activities) tryWatchWorkflow(ctx context.Context, req *schedspb.WatchWo
 	pollRes, err := a.HistoryClient.PollMutableState(ctx, pollReq)
 
 	// FIXME: separate out retriable vs unretriable errors
+	// FIXME: treat not found as not running with unknown status
 	if err != nil {
 		return nil, err
 	}
@@ -118,6 +123,8 @@ func (a *activities) tryWatchWorkflow(ctx context.Context, req *schedspb.WatchWo
 		}
 		return res
 	}
+
+	// TODO: check FirstExecutionRunId to make sure it's the same chain
 
 	if pollRes.WorkflowStatus == enumspb.WORKFLOW_EXECUTION_STATUS_RUNNING {
 		if req.LongPoll {
@@ -218,10 +225,12 @@ func (a *activities) CancelWorkflow(ctx context.Context, req *schedspb.CancelWor
 	rreq := &historyservice.RequestCancelWorkflowExecutionRequest{
 		NamespaceId: req.NamespaceId,
 		CancelRequest: &workflowservice.RequestCancelWorkflowExecutionRequest{
-			Namespace:         req.Namespace,
-			WorkflowExecution: req.Execution,
-			Identity:          req.Identity,
-			RequestId:         req.RequestId,
+			Namespace:           req.Namespace,
+			WorkflowExecution:   &commonpb.WorkflowExecution{WorkflowId: req.WorkflowId},
+			Identity:            req.Identity,
+			RequestId:           req.RequestId,
+			FirstExecutionRunId: req.FirstExecutionRunId,
+			Reason:              req.Reason,
 		},
 	}
 	_, err := a.HistoryClient.RequestCancelWorkflowExecution(ctx, rreq)
@@ -243,10 +252,11 @@ func (a *activities) TerminateWorkflow(ctx context.Context, req *schedspb.Termin
 	rreq := &historyservice.TerminateWorkflowExecutionRequest{
 		NamespaceId: req.NamespaceId,
 		TerminateRequest: &workflowservice.TerminateWorkflowExecutionRequest{
-			Namespace:         req.Namespace,
-			WorkflowExecution: req.Execution,
-			Reason:            req.Reason,
-			Identity:          req.Identity,
+			Namespace:           req.Namespace,
+			WorkflowExecution:   &commonpb.WorkflowExecution{WorkflowId: req.WorkflowId},
+			Reason:              req.Reason,
+			Identity:            req.Identity,
+			FirstExecutionRunId: req.FirstExecutionRunId,
 		},
 	}
 	_, err := a.HistoryClient.TerminateWorkflowExecution(ctx, rreq)
