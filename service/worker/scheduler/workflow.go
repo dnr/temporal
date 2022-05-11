@@ -685,6 +685,7 @@ func (s *scheduler) startWorkflow(
 		ContinuedFailure:     s.State.ContinuedFailure,
 	}
 	var res schedspb.StartWorkflowResponse
+	// TODO: should this be a local activity instead?
 	err := workflow.ExecuteActivity(ctx, s.a.StartWorkflow, req).Get(s.ctx, &res)
 	if err != nil {
 		return nil, err
@@ -755,6 +756,7 @@ func (s *scheduler) cancelWorkflow(ex *commonpb.WorkflowExecution) {
 		FirstExecutionRunId: ex.RunId,
 		Reason:              "cancelled by schedule overlap policy",
 	}
+	// TODO: should this be a local activity instead?
 	workflow.ExecuteActivity(ctx, s.a.CancelWorkflow, areq)
 	// do not wait for cancel to complete
 }
@@ -773,6 +775,7 @@ func (s *scheduler) terminateWorkflow(ex *commonpb.WorkflowExecution) {
 		FirstExecutionRunId: ex.RunId,
 		Reason:              "terminated by schedule overlap policy",
 	}
+	// TODO: should this be a local activity instead?
 	workflow.ExecuteActivity(ctx, s.a.TerminateWorkflow, areq)
 	// do not wait for terminate to complete
 }
