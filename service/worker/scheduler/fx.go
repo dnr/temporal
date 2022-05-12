@@ -56,7 +56,7 @@ type (
 
 	fxResult struct {
 		fx.Out
-		Component workercommon.PerNamespaceWorkerComponent `group:"perNamespaceWorkerComponent"`
+		Component workercommon.WorkerComponent `group:"perNamespaceWorkerComponent"`
 	}
 )
 
@@ -72,8 +72,8 @@ func NewResult(params activityDeps) fxResult {
 	}
 }
 
-func (s *workerComponent) DedicatedWorkerOptions() *workercommon.PerNamespaceDedicatedWorkerOptions {
-	return &workercommon.PerNamespaceDedicatedWorkerOptions{
+func (s *workerComponent) DedicatedWorkerOptions() *workercommon.DedicatedWorkerOptions {
+	return &workercommon.DedicatedWorkerOptions{
 		TaskQueue: TaskQueueName,
 		// TODO: maybe make dynamic config
 		NumWorkers: 1,
