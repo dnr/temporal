@@ -303,7 +303,9 @@ func (s *calendarSuite) TestDaysInMonth() {
 }
 
 func FuzzCalendar(f *testing.F) {
-	zones := []string{ // random selection
+	// partially random selection but including at least one with dst
+	// transitions at midnight
+	zones := []string{
 		"UTC",
 		"US/Pacific",
 		"America/Montreal",

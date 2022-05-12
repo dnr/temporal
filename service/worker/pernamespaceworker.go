@@ -44,13 +44,17 @@ import (
 	workercommon "go.temporal.io/server/service/worker/common"
 )
 
+const (
+	perNamespaceWorkerManagerListenerKey = "perNamespaceWorkerManager"
+)
+
 type (
 	perNamespaceWorkerManagerInitParams struct {
 		fx.In
 		Logger            log.Logger
 		SdkClientFactory  sdk.ClientFactory
 		NamespaceRegistry namespace.Registry
-		Components        []workercommon.PerNamespaceWorkerComponent `group:"perNamespaceWorkerComponent"`
+		Components        []workercommon.WorkerComponent `group:"perNamespaceWorkerComponent"`
 	}
 
 	perNamespaceWorkerManager struct {
@@ -62,7 +66,7 @@ type (
 		namespaceRegistry namespace.Registry
 		self              *membership.HostInfo
 		serviceResolver   membership.ServiceResolver
-		components        []workercommon.PerNamespaceWorkerComponent
+		components        []workercommon.WorkerComponent
 
 		membershipChangedCh chan *membership.ChangedEvent
 
@@ -75,7 +79,7 @@ type (
 		wm *perNamespaceWorkerManager
 
 		lock    sync.Mutex
-		workers map[workercommon.PerNamespaceWorkerComponent]*worker
+		workers map[workercommon.WorkerComponent]*worker
 	}
 
 	worker struct {
@@ -119,7 +123,7 @@ func (wm *perNamespaceWorkerManager) Start(
 	// this will call namespaceCallback with current namespaces
 	wm.namespaceRegistry.RegisterStateChangeCallback(wm, wm.namespaceCallback)
 
-	wm.serviceResolver.AddListener("perNamespaceWorkerManager", wm.membershipChangedCh)
+	wm.serviceResolver.AddListener(perNamespaceWorkerManagerListenerKey, wm.membershipChangedCh)
 	go wm.membershipChangedListener()
 
 	wm.logger.Info("", tag.ComponentPerNSWorkerManager, tag.LifeCycleStarted)
@@ -137,7 +141,7 @@ func (wm *perNamespaceWorkerManager) Stop() {
 	wm.logger.Info("", tag.ComponentPerNSWorkerManager, tag.LifeCycleStopping)
 
 	wm.namespaceRegistry.UnregisterStateChangeCallback(wm)
-	wm.serviceResolver.RemoveListener("perNamespaceWorkerManager")
+	wm.serviceResolver.RemoveListener(perNamespaceWorkerManagerListenerKey)
 	close(wm.membershipChangedCh)
 
 	wm.lock.Lock()
@@ -175,7 +179,7 @@ func (wm *perNamespaceWorkerManager) getWorkerSet(ns *namespace.Namespace) *work
 	ws := &workerSet{
 		ns:      ns,
 		wm:      wm,
-		workers: make(map[workercommon.PerNamespaceWorkerComponent]*worker),
+		workers: make(map[workercommon.WorkerComponent]*worker),
 	}
 
 	wm.workerSets[ns.ID()] = ws
@@ -203,7 +207,7 @@ func (ws *workerSet) refresh() {
 }
 
 func (ws *workerSet) refreshComponent(
-	cmp workercommon.PerNamespaceWorkerComponent,
+	cmp workercommon.WorkerComponent,
 	nsExists bool,
 ) {
 	op := func() error {
@@ -244,6 +248,8 @@ func (ws *workerSet) refreshComponent(
 			}
 
 			ws.workers[cmp] = worker
+			ws.wm.logger.Info("", tag.ComponentPerNSWorkerManager, tag.LifeCycleStarted, tag.WorkflowNamespace(ws.ns.Name().String()), tag.WorkerComponent(cmp))
+
 			return nil
 		} else {
 			ws.lock.Lock()
@@ -252,7 +258,9 @@ func (ws *workerSet) refreshComponent(
 			if worker, ok := ws.workers[cmp]; ok {
 				worker.stop()
 				delete(ws.workers, cmp)
+				ws.wm.logger.Info("", tag.ComponentPerNSWorkerManager, tag.LifeCycleStopped, tag.WorkflowNamespace(ws.ns.Name().String()), tag.WorkerComponent(cmp))
 			}
+
 			return nil
 		}
 	}
@@ -260,7 +268,7 @@ func (ws *workerSet) refreshComponent(
 	backoff.Retry(op, policy, nil)
 }
 
-func (ws *workerSet) startWorker(wc workercommon.PerNamespaceWorkerComponent) (*worker, error) {
+func (ws *workerSet) startWorker(wc workercommon.WorkerComponent) (*worker, error) {
 	client, err := ws.wm.sdkClientFactory.NewClient(ws.ns.Name().String(), ws.wm.logger)
 	if err != nil {
 		return nil, err
@@ -269,6 +277,8 @@ func (ws *workerSet) startWorker(wc workercommon.PerNamespaceWorkerComponent) (*
 	options := wc.DedicatedWorkerOptions()
 	sdkworker := sdkworker.New(client, options.TaskQueue, options.Options)
 	wc.Register(sdkworker)
+	// TODO: use Run() and handle post-startup errors by recreating worker
+	// (after sdk supports returning post-startup errors from Run)
 	err = sdkworker.Start()
 	if err != nil {
 		return nil, err
