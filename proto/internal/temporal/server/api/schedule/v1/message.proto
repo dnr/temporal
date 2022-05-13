@@ -124,16 +124,17 @@ message CancelWorkflowRequest {
     string namespace_id = 2;
     string request_id = 3;
     string identity = 4;
-    string workflow_id = 5;
-    string first_execution_run_id = 6;
-    string reason = 7;
+    // Note: run id in execution is first execution run id
+    temporal.api.common.v1.WorkflowExecution execution = 5;
+    string reason = 6;
 }
 
 message TerminateWorkflowRequest {
     string namespace = 1;
     string namespace_id = 2;
-    string identity = 3;
-    string workflow_id = 4;
-    string first_execution_run_id = 5;
+    string request_id = 3;
+    string identity = 4;
+    // Note: run id in execution is first execution run id
+    temporal.api.common.v1.WorkflowExecution execution = 5;
     string reason = 6;
 }

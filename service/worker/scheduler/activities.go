@@ -27,13 +27,13 @@ package scheduler
 import (
 	"context"
 	"errors"
+	"fmt"
 	"reflect"
 	"time"
 
 	commonpb "go.temporal.io/api/common/v1"
 	enumspb "go.temporal.io/api/enums/v1"
 	failurepb "go.temporal.io/api/failure/v1"
-	"go.temporal.io/api/serviceerror"
 	"go.temporal.io/api/workflowservice/v1"
 	"go.temporal.io/sdk/activity"
 	"go.temporal.io/sdk/temporal"
@@ -53,7 +53,10 @@ type (
 )
 
 var (
-	errTryAgain = errors.New("try again")
+	errTryAgain   = errors.New("try again")
+	errWrongChain = errors.New("found running workflow that's part of wrong chain")
+	errNoEvents   = errors.New("GetEvents didn't return any events")
+	errNoAttrs    = errors.New("last event did not have correct attrs")
 )
 
 func (e errFollow) Error() string { return string(e) }
@@ -70,10 +73,7 @@ func (a *activities) StartWorkflow(ctx context.Context, req *schedspb.StartWorkf
 
 	res, err := a.HistoryClient.StartWorkflowExecution(ctx, request)
 	if err != nil {
-		if common.IsServiceTransientError(err) {
-			return nil, temporal.NewApplicationError(err.Error(), reflect.TypeOf(err).Name())
-		}
-		return nil, temporal.NewNonRetryableApplicationError(err.Error(), reflect.TypeOf(err).Name(), nil)
+		return nil, translateError(err, "StartWorkflowExecution")
 	}
 
 	// TODO: ideally, get the time of the workflow execution started event
@@ -106,9 +106,7 @@ func (a *activities) tryWatchWorkflow(ctx context.Context, req *schedspb.WatchWo
 	}
 	// if long-polling, this will block up for workflow completion to 20s (default) and return
 	// the current mutable state at that point
-	pollRes, err := a.HistoryClient.PollMutableState(ctx, pollReq)
-
-	// FIXME: separate out retriable vs unretriable errors
+	pollRes, err := a.HistoryClient.PollMutableState(ctx2, pollReq)
 	if err != nil {
 		return nil, err
 	}
@@ -121,7 +119,7 @@ func (a *activities) tryWatchWorkflow(ctx context.Context, req *schedspb.WatchWo
 		}
 		// we explicitly searched for a chain we started by runid, and found
 		// something that's part of a different chain. this should never happen.
-		return nil, errInternal
+		return nil, errWrongChain
 	}
 
 	makeResponse := func(result *commonpb.Payloads, failure *failurepb.Failure) *schedspb.WatchWorkflowResponse {
@@ -152,21 +150,20 @@ func (a *activities) tryWatchWorkflow(ctx context.Context, req *schedspb.WatchWo
 	}
 	histRes, err := a.FrontendClient.GetWorkflowExecutionHistory(ctx2, histReq)
 
-	// FIXME: separate out retriable vs unretriable errors
 	if err != nil {
 		return nil, err
 	}
 
 	events := histRes.GetHistory().GetEvents()
 	if len(events) < 1 {
-		return nil, errInternal
+		return nil, errNoEvents
 	}
 	lastEvent := events[0]
 
 	switch pollRes.WorkflowStatus {
 	case enumspb.WORKFLOW_EXECUTION_STATUS_COMPLETED:
 		if attrs := lastEvent.GetWorkflowExecutionCompletedEventAttributes(); attrs == nil {
-			return nil, errInternal
+			return nil, errNoAttrs
 		} else if len(attrs.NewExecutionRunId) > 0 {
 			// this shouldn't happen because we don't allow old-cron workflows as scheduled, but follow it anyway
 			return nil, errFollow(attrs.NewExecutionRunId)
@@ -175,7 +172,7 @@ func (a *activities) tryWatchWorkflow(ctx context.Context, req *schedspb.WatchWo
 		}
 	case enumspb.WORKFLOW_EXECUTION_STATUS_FAILED:
 		if attrs := lastEvent.GetWorkflowExecutionFailedEventAttributes(); attrs == nil {
-			return nil, errInternal
+			return nil, errNoAttrs
 		} else if len(attrs.NewExecutionRunId) > 0 {
 			return nil, errFollow(attrs.NewExecutionRunId)
 		} else {
@@ -185,13 +182,13 @@ func (a *activities) tryWatchWorkflow(ctx context.Context, req *schedspb.WatchWo
 		return makeResponse(nil, nil), nil
 	case enumspb.WORKFLOW_EXECUTION_STATUS_CONTINUED_AS_NEW:
 		if attrs := lastEvent.GetWorkflowExecutionContinuedAsNewEventAttributes(); attrs == nil {
-			return nil, errInternal
+			return nil, errNoAttrs
 		} else {
 			return nil, errFollow(attrs.NewExecutionRunId)
 		}
 	case enumspb.WORKFLOW_EXECUTION_STATUS_TIMED_OUT:
 		if attrs := lastEvent.GetWorkflowExecutionTimedOutEventAttributes(); attrs == nil {
-			return nil, errInternal
+			return nil, errNoAttrs
 		} else if len(attrs.NewExecutionRunId) > 0 {
 			return nil, errFollow(attrs.NewExecutionRunId)
 		} else {
@@ -199,13 +196,15 @@ func (a *activities) tryWatchWorkflow(ctx context.Context, req *schedspb.WatchWo
 		}
 	}
 
-	return nil, errInternal
+	return nil, errors.New("unknown workflow status")
 }
 
 func (a *activities) WatchWorkflow(ctx context.Context, req *schedspb.WatchWorkflowRequest) (*schedspb.WatchWorkflowResponse, error) {
 	for {
 		activity.RecordHeartbeat(ctx)
 		res, err := a.tryWatchWorkflow(ctx, req)
+		// long poll should return before our deadline, but even if it doesn't,
+		// we can still try again within the same activity
 		if err == errTryAgain || common.IsContextDeadlineExceededErr(err) {
 			continue
 		}
@@ -213,7 +212,7 @@ func (a *activities) WatchWorkflow(ctx context.Context, req *schedspb.WatchWorkf
 			req.Execution.RunId = string(newRunID)
 			continue
 		}
-		return res, err
+		return res, translateError(err, "WatchWorkflow")
 	}
 }
 
@@ -221,51 +220,48 @@ func (a *activities) CancelWorkflow(ctx context.Context, req *schedspb.CancelWor
 	rreq := &historyservice.RequestCancelWorkflowExecutionRequest{
 		NamespaceId: req.NamespaceId,
 		CancelRequest: &workflowservice.RequestCancelWorkflowExecutionRequest{
-			Namespace:           req.Namespace,
-			WorkflowExecution:   &commonpb.WorkflowExecution{WorkflowId: req.WorkflowId},
+			Namespace: req.Namespace,
+			// only set WorkflowId so we cancel the latest, but restricted by FirstExecutionRunId
+			WorkflowExecution:   &commonpb.WorkflowExecution{WorkflowId: req.Execution.WorkflowId},
 			Identity:            req.Identity,
 			RequestId:           req.RequestId,
-			FirstExecutionRunId: req.FirstExecutionRunId,
+			FirstExecutionRunId: req.Execution.RunId,
 			Reason:              req.Reason,
 		},
 	}
 	_, err := a.HistoryClient.RequestCancelWorkflowExecution(ctx, rreq)
 
-	// FIXME: check this error handling
-	switch err := err.(type) {
-	case nil:
-		return nil
-	case *serviceerror.Unavailable:
-		return temporal.NewApplicationError(err.Error(), reflect.TypeOf(err).Name())
-	case *serviceerror.Internal:
-		return temporal.NewApplicationError(err.Error(), reflect.TypeOf(err).Name())
-	default:
-		return temporal.NewNonRetryableApplicationError(err.Error(), reflect.TypeOf(err).Name(), nil)
-	}
+	return translateError(err, "RequestCancelWorkflowExecution")
 }
 
 func (a *activities) TerminateWorkflow(ctx context.Context, req *schedspb.TerminateWorkflowRequest) error {
 	rreq := &historyservice.TerminateWorkflowExecutionRequest{
 		NamespaceId: req.NamespaceId,
 		TerminateRequest: &workflowservice.TerminateWorkflowExecutionRequest{
-			Namespace:           req.Namespace,
-			WorkflowExecution:   &commonpb.WorkflowExecution{WorkflowId: req.WorkflowId},
+			Namespace: req.Namespace,
+			// only set WorkflowId so we cancel the latest, but restricted by FirstExecutionRunId
+			WorkflowExecution:   &commonpb.WorkflowExecution{WorkflowId: req.Execution.WorkflowId},
 			Reason:              req.Reason,
 			Identity:            req.Identity,
-			FirstExecutionRunId: req.FirstExecutionRunId,
+			FirstExecutionRunId: req.Execution.RunId,
 		},
 	}
 	_, err := a.HistoryClient.TerminateWorkflowExecution(ctx, rreq)
 
-	// FIXME: check this error handling
-	switch err := err.(type) {
-	case nil:
+	return translateError(err, "TerminateWorkflowExecution")
+}
+
+func errType(err error) string {
+	return reflect.TypeOf(err).Name()
+}
+
+func translateError(err error, msgPrefix string) error {
+	if err == nil {
 		return nil
-	case *serviceerror.Unavailable:
-		return temporal.NewApplicationError(err.Error(), reflect.TypeOf(err).Name())
-	case *serviceerror.Internal:
-		return temporal.NewApplicationError(err.Error(), reflect.TypeOf(err).Name())
-	default:
-		return temporal.NewNonRetryableApplicationError(err.Error(), reflect.TypeOf(err).Name(), nil)
 	}
+	message := fmt.Sprintf("%s: %s", msgPrefix, err.Error())
+	if common.IsServiceTransientError(err) {
+		return temporal.NewApplicationErrorWithCause(message, errType(err), err)
+	}
+	return temporal.NewNonRetryableApplicationError(message, errType(err), err)
 }

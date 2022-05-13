@@ -113,8 +113,7 @@ var (
 		Min:     10 * time.Second,
 	}
 
-	errUpdateConflict = errors.New("Conflicting concurrent update")
-	errInternal       = errors.New("Internal logic error")
+	errUpdateConflict = errors.New("conflicting concurrent update")
 )
 
 func SchedulerWorkflow(ctx workflow.Context, args *schedspb.StartScheduleArgs) error {
@@ -304,9 +303,10 @@ func (s *scheduler) processTimeRange(
 		}
 		// Peek at paused/remaining actions state and don't even bother adding
 		// to buffer if we're not going to take an action now.
-		if s.canTakeScheduledAction(manual, false) {
-			s.addStart(nominalTime, nextTime, overlapPolicy, manual)
+		if !s.canTakeScheduledAction(manual, false) {
+			continue
 		}
+		s.addStart(nominalTime, nextTime, overlapPolicy, manual)
 	}
 	return 0, false
 }
@@ -624,6 +624,7 @@ func (s *scheduler) processBuffer() bool {
 	// (maybe one we just started). In order to get woken up, we need to be watching at least
 	// one of them with an activity. We only need one watcher at a time, though: after that one
 	// returns, we'll end up back here and start the next one.
+	// FIXME: this part seems to be broken
 	if len(s.State.BufferedStarts) > 0 && len(s.watchers) == 0 {
 		if len(s.Info.RunningWorkflows) > 0 {
 			s.startWatcher(s.Info.RunningWorkflows[0], true)
@@ -654,11 +655,30 @@ func (s *scheduler) startWorkflow(
 	// must match AppendedTimestampForValidation
 	nominalTimeSec := start.NominalTime.UTC().Truncate(time.Second)
 	workflowID := newWorkflow.WorkflowId + "-" + nominalTimeSec.Format(time.RFC3339)
-	// FIXME: need to set NonRetryableErrorTypes?
+
+	scheduleToCloseTimeout := 60 * time.Second
+	if !start.Manual {
+		// use catchup window to set timeout
+		deadline := start.ActualTime.Add(s.getCatchupWindow())
+		scheduleToCloseTimeout = deadline.Sub(s.now())
+	}
+	if scheduleToCloseTimeout < 5*time.Second {
+		scheduleToCloseTimeout = 5 * time.Second
+	}
+
 	ctx := workflow.WithActivityOptions(s.ctx, workflow.ActivityOptions{
-		ScheduleToCloseTimeout: s.getCatchupWindow(),
+		ScheduleToCloseTimeout: scheduleToCloseTimeout,
 		RetryPolicy:            defaultActivityRetryPolicy,
 	})
+
+	// this timestamp is the one used to set the deadline for workflow execution timeout
+	startTime := timestamp.TimePtr(s.now())
+	if !start.Manual {
+		// use the scheduled time for workflow execution timeout even if we started late
+		// TODO: is this being too smart? should we just leave it as the current time?
+		startTime = start.ActualTime
+	}
+
 	req := &schedspb.StartWorkflowRequest{
 		NamespaceId: s.State.NamespaceId,
 		Request: &workflowservice.StartWorkflowExecutionRequest{
@@ -674,13 +694,11 @@ func (s *scheduler) startWorkflow(
 			RequestId:                s.newUUIDString(),
 			WorkflowIdReusePolicy:    enumspb.WORKFLOW_ID_REUSE_POLICY_ALLOW_DUPLICATE,
 			RetryPolicy:              newWorkflow.RetryPolicy,
-			// FIXME: do we have have to use a slice instead of a map for memo/searchattr/header so it's deterministic?
-			Memo:             newWorkflow.Memo,
-			SearchAttributes: s.addSearchAttr(newWorkflow.SearchAttributes, nominalTimeSec),
-			Header:           newWorkflow.Header,
+			Memo:                     newWorkflow.Memo,
+			SearchAttributes:         s.addSearchAttr(newWorkflow.SearchAttributes, nominalTimeSec),
+			Header:                   newWorkflow.Header,
 		},
-		// StartTime:            start.ActualTime, // used to set expiration time, so use actual instead of nominal
-		StartTime:            timestamp.TimePtr(s.now()), // TODO: what makes mose sense here? if manual then now else ActualTime?
+		StartTime:            startTime,
 		LastCompletionResult: s.State.LastCompletionResult,
 		ContinuedFailure:     s.State.ContinuedFailure,
 	}
@@ -722,13 +740,10 @@ func (s *scheduler) addSearchAttr(
 }
 
 func (s *scheduler) startWatcher(ex *commonpb.WorkflowExecution, longPoll bool) {
-	s.logger.Debug("starting watcher", "workflow", ex.WorkflowId, "first_ex_run_id", ex.RunId)
-
 	ctx := workflow.WithActivityOptions(s.ctx, workflow.ActivityOptions{
 		StartToCloseTimeout: 365 * 24 * time.Hour,
-		// FIXME: need to set NonRetryableErrorTypes?
-		RetryPolicy:      defaultActivityRetryPolicy,
-		HeartbeatTimeout: 65 * time.Second,
+		RetryPolicy:         defaultActivityRetryPolicy,
+		HeartbeatTimeout:    65 * time.Second,
 	})
 	req := &schedspb.WatchWorkflowRequest{
 		Namespace:   s.State.Namespace,
@@ -744,17 +759,15 @@ func (s *scheduler) startWatcher(ex *commonpb.WorkflowExecution, longPoll bool) 
 func (s *scheduler) cancelWorkflow(ex *commonpb.WorkflowExecution) {
 	ctx := workflow.WithActivityOptions(s.ctx, workflow.ActivityOptions{
 		StartToCloseTimeout: 1 * time.Minute,
-		// FIXME: need to set NonRetryableErrorTypes?
-		RetryPolicy: defaultActivityRetryPolicy,
+		RetryPolicy:         defaultActivityRetryPolicy,
 	})
 	areq := &schedspb.CancelWorkflowRequest{
-		NamespaceId:         s.State.NamespaceId,
-		Namespace:           s.State.Namespace,
-		RequestId:           s.newUUIDString(),
-		Identity:            s.identity(),
-		WorkflowId:          ex.WorkflowId,
-		FirstExecutionRunId: ex.RunId,
-		Reason:              "cancelled by schedule overlap policy",
+		NamespaceId: s.State.NamespaceId,
+		Namespace:   s.State.Namespace,
+		RequestId:   s.newUUIDString(),
+		Identity:    s.identity(),
+		Execution:   ex,
+		Reason:      "cancelled by schedule overlap policy",
 	}
 	// TODO: should this be a local activity instead?
 	workflow.ExecuteActivity(ctx, s.a.CancelWorkflow, areq)
@@ -764,16 +777,15 @@ func (s *scheduler) cancelWorkflow(ex *commonpb.WorkflowExecution) {
 func (s *scheduler) terminateWorkflow(ex *commonpb.WorkflowExecution) {
 	ctx := workflow.WithActivityOptions(s.ctx, workflow.ActivityOptions{
 		StartToCloseTimeout: 1 * time.Minute,
-		// FIXME: need to set NonRetryableErrorTypes?
-		RetryPolicy: defaultActivityRetryPolicy,
+		RetryPolicy:         defaultActivityRetryPolicy,
 	})
 	areq := &schedspb.TerminateWorkflowRequest{
-		NamespaceId:         s.State.NamespaceId,
-		Namespace:           s.State.Namespace,
-		Identity:            s.identity(),
-		WorkflowId:          ex.WorkflowId,
-		FirstExecutionRunId: ex.RunId,
-		Reason:              "terminated by schedule overlap policy",
+		NamespaceId: s.State.NamespaceId,
+		Namespace:   s.State.Namespace,
+		RequestId:   s.newUUIDString(),
+		Identity:    s.identity(),
+		Execution:   ex,
+		Reason:      "terminated by schedule overlap policy",
 	}
 	// TODO: should this be a local activity instead?
 	workflow.ExecuteActivity(ctx, s.a.TerminateWorkflow, areq)

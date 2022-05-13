@@ -3574,7 +3574,7 @@ func (wh *WorkflowHandler) ListSchedules(ctx context.Context, request *workflows
 		return nil, err
 	}
 
-	// FIXME: should we respect this here?
+	// TODO: should we respect this here?
 	if wh.config.DisableListVisibilityByFilter(namespaceName.String()) {
 		return nil, errNoPermission
 	}
@@ -3597,7 +3597,7 @@ func (wh *WorkflowHandler) ListSchedules(ctx context.Context, request *workflows
 		schedules[i] = &schedpb.ScheduleListEntry{
 			ScheduleId: ex.GetExecution().GetWorkflowId(),
 			Memo:       ex.GetMemo(),
-			// FIXME: where does search attribute mapping happen?
+			// TODO: is this correct? where does search attribute mapping happen?
 			SearchAttributes: ex.GetSearchAttributes(),
 		}
 	}
