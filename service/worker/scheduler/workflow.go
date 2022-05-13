@@ -378,15 +378,13 @@ func (s *scheduler) wfWatcherReturned(id string, f workflow.Future) {
 	var res schedspb.WatchWorkflowResponse
 	err := f.Get(s.ctx, &res)
 	if err != nil {
-		// shouldn't happen since this is a select callback
 		s.logger.Error("error from workflow watcher future", "error", err)
 		return
 	}
 
 	if res.Status == enumspb.WORKFLOW_EXECUTION_STATUS_RUNNING {
-		// This could happen if someone suggested we should check up on a workflow because it's
-		// not running, but we found it is actually running. Just ignore.
-		s.logger.Warn("watcher returned for running workflow")
+		// this should only happen for a refresh, not a long-poll
+		s.logger.Debug("watcher returned for running workflow")
 		return
 	}
 

@@ -34,6 +34,7 @@ import (
 	commonpb "go.temporal.io/api/common/v1"
 	enumspb "go.temporal.io/api/enums/v1"
 	failurepb "go.temporal.io/api/failure/v1"
+	"go.temporal.io/api/serviceerror"
 	"go.temporal.io/api/workflowservice/v1"
 	"go.temporal.io/sdk/activity"
 	"go.temporal.io/sdk/temporal"
@@ -123,6 +124,11 @@ func (a *activities) tryWatchWorkflow(ctx context.Context, req *schedspb.WatchWo
 	// the current mutable state at that point
 	pollRes, err := a.HistoryClient.PollMutableState(ctx2, pollReq)
 	if err != nil {
+		switch err.(type) {
+		case *serviceerror.NotFound, *serviceerror.NamespaceNotFound:
+			// just turn this into a success, with unspecified status
+			return &schedspb.WatchWorkflowResponse{Status: enumspb.WORKFLOW_EXECUTION_STATUS_UNSPECIFIED}, nil
+		}
 		return nil, err
 	}
 
