@@ -562,18 +562,9 @@ func (s *scheduler) addStart(nominalTime, actualTime time.Time, overlapPolicy en
 func (s *scheduler) processBuffer() bool {
 	s.logger.Debug("processBuffer")
 
-	// We should try to do something reasonable with any combination of overlap
-	// policies in the buffer, although some combinations don't make much sense
-	// and would require a convoluted series of calls to set up.
-	//
-	// Buffer entries that have unspecified overlap policy are resolved to the
-	// current policy here, not earlier, so that updates to the policy can
-	// affect them.
-
 	// Make sure we have something to start. If not, we can clear the buffer.
-	// This part will have to change when we support more actions.
 	req := s.Schedule.Action.GetStartWorkflow()
-	if req == nil {
+	if req == nil || len(s.State.BufferedStarts) == 0 {
 		s.State.BufferedStarts = nil
 		s.logger.Debug("processBuffer: no action")
 		return false
@@ -695,7 +686,7 @@ func (s *scheduler) startWorkflow(
 			WorkflowIdReusePolicy:    enumspb.WORKFLOW_ID_REUSE_POLICY_ALLOW_DUPLICATE,
 			RetryPolicy:              newWorkflow.RetryPolicy,
 			Memo:                     newWorkflow.Memo,
-			SearchAttributes:         s.addSearchAttr(newWorkflow.SearchAttributes, nominalTimeSec),
+			SearchAttributes:         s.addSearchAttrs(newWorkflow.SearchAttributes, nominalTimeSec),
 			Header:                   newWorkflow.Header,
 		},
 		StartTime:            startTime,
@@ -723,7 +714,7 @@ func (s *scheduler) identity() string {
 	return fmt.Sprintf("temporal-scheduler-%s-%s", s.State.Namespace, s.State.ScheduleId)
 }
 
-func (s *scheduler) addSearchAttr(
+func (s *scheduler) addSearchAttrs(
 	attrs *commonpb.SearchAttributes,
 	nominal time.Time,
 ) *commonpb.SearchAttributes {

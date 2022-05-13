@@ -55,6 +55,14 @@ func processBuffer[T overlappable](
 	isRunning bool,
 	resolve func(enumspb.ScheduleOverlapPolicy) enumspb.ScheduleOverlapPolicy,
 ) processBufferResult[T] {
+	// We should try to do something reasonable with any combination of overlap
+	// policies in the buffer, although some combinations don't make much sense
+	// and would require a convoluted series of calls to set up.
+	//
+	// Buffer entries that have unspecified overlap policy are resolved to the
+	// current policy here, not earlier, so that updates to the policy can
+	// affect them.
+
 	var action processBufferResult[T]
 	var zeroVal T
 
