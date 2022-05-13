@@ -3198,7 +3198,7 @@ func (wh *WorkflowHandler) DescribeSchedule(ctx context.Context, request *workfl
 
 	// then query to get current state from the workflow itself
 	// TODO: turn this whole thing into a synchronous update
-	sentRefresh := make(map[string]struct{})
+	sentRefresh := make(map[commonpb.WorkflowExecution]struct{})
 	var describeScheduleResponse *workflowservice.DescribeScheduleResponse
 
 	op := func(ctx context.Context) error {
@@ -3225,7 +3225,7 @@ func (wh *WorkflowHandler) DescribeSchedule(ctx context.Context, request *workfl
 		// still running, and if not, poke the schedule to refresh
 		var needRefresh []*commonpb.WorkflowExecution
 		for _, ex := range response.GetInfo().GetRunningWorkflows() {
-			if _, ok := sentRefresh[ex.WorkflowId]; ok {
+			if _, ok := sentRefresh[*ex]; ok {
 				// we asked the schedule to refresh this one because it wasn't running, but
 				// it's still reporting it as running
 				return errWaitForRefresh
@@ -3239,7 +3239,7 @@ func (wh *WorkflowHandler) DescribeSchedule(ctx context.Context, request *workfl
 			}); err != nil {
 				switch err.(type) {
 				case *serviceerror.NotFound:
-					// if it doesn't exist (past retention period) it's certainly not running
+					// if it doesn't exist (past retention period?) it's certainly not running
 					needRefresh = append(needRefresh, ex)
 				default:
 					return err
@@ -3299,7 +3299,7 @@ func (wh *WorkflowHandler) DescribeSchedule(ctx context.Context, request *workfl
 		}
 
 		for _, ex := range needRefresh {
-			sentRefresh[ex.WorkflowId] = struct{}{}
+			sentRefresh[*ex] = struct{}{}
 		}
 
 		return errWaitForRefresh
