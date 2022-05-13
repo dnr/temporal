@@ -41,27 +41,42 @@ import (
 	"go.temporal.io/server/api/historyservice/v1"
 	schedspb "go.temporal.io/server/api/schedule/v1"
 	"go.temporal.io/server/common"
+	"go.temporal.io/server/common/namespace"
 	"go.temporal.io/server/common/primitives/timestamp"
 )
 
 type (
 	activities struct {
 		activityDeps
+		namespace   namespace.Name
+		namespaceID namespace.ID
 	}
 
 	errFollow string
 )
 
 var (
-	errTryAgain   = errors.New("try again")
-	errWrongChain = errors.New("found running workflow that's part of wrong chain")
-	errNoEvents   = errors.New("GetEvents didn't return any events")
-	errNoAttrs    = errors.New("last event did not have correct attrs")
+	errTryAgain          = errors.New("try again")
+	errWrongChain        = errors.New("found running workflow that's part of wrong chain")
+	errNoEvents          = errors.New("GetEvents didn't return any events")
+	errNoAttrs           = errors.New("last event did not have correct attrs")
+	errNamespaceMismatch = errors.New("namespace mismatch")
 )
 
 func (e errFollow) Error() string { return string(e) }
 
+func (a *activities) checkNamespace(namespace, namespaceID string) error {
+	if namespace != a.namespace.String() || namespaceID != a.namespaceID.String() {
+		return errNamespaceMismatch
+	}
+	return nil
+}
+
 func (a *activities) StartWorkflow(ctx context.Context, req *schedspb.StartWorkflowRequest) (*schedspb.StartWorkflowResponse, error) {
+	if err := a.checkNamespace(req.Request.Namespace, req.NamespaceId); err != nil {
+		return nil, err
+	}
+
 	request := common.CreateHistoryStartWorkflowRequest(
 		req.NamespaceId,
 		req.Request,
@@ -200,6 +215,10 @@ func (a *activities) tryWatchWorkflow(ctx context.Context, req *schedspb.WatchWo
 }
 
 func (a *activities) WatchWorkflow(ctx context.Context, req *schedspb.WatchWorkflowRequest) (*schedspb.WatchWorkflowResponse, error) {
+	if err := a.checkNamespace(req.Namespace, req.NamespaceId); err != nil {
+		return nil, err
+	}
+
 	for {
 		activity.RecordHeartbeat(ctx)
 		res, err := a.tryWatchWorkflow(ctx, req)
@@ -217,6 +236,10 @@ func (a *activities) WatchWorkflow(ctx context.Context, req *schedspb.WatchWorkf
 }
 
 func (a *activities) CancelWorkflow(ctx context.Context, req *schedspb.CancelWorkflowRequest) error {
+	if err := a.checkNamespace(req.Namespace, req.NamespaceId); err != nil {
+		return err
+	}
+
 	rreq := &historyservice.RequestCancelWorkflowExecutionRequest{
 		NamespaceId: req.NamespaceId,
 		CancelRequest: &workflowservice.RequestCancelWorkflowExecutionRequest{
@@ -235,6 +258,10 @@ func (a *activities) CancelWorkflow(ctx context.Context, req *schedspb.CancelWor
 }
 
 func (a *activities) TerminateWorkflow(ctx context.Context, req *schedspb.TerminateWorkflowRequest) error {
+	if err := a.checkNamespace(req.Namespace, req.NamespaceId); err != nil {
+		return err
+	}
+
 	rreq := &historyservice.TerminateWorkflowExecutionRequest{
 		NamespaceId: req.NamespaceId,
 		TerminateRequest: &workflowservice.TerminateWorkflowExecutionRequest{

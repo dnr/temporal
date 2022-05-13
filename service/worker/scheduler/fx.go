@@ -33,6 +33,7 @@ import (
 	"go.temporal.io/server/api/historyservice/v1"
 	"go.temporal.io/server/common/log"
 	"go.temporal.io/server/common/metrics"
+	"go.temporal.io/server/common/namespace"
 	workercommon "go.temporal.io/server/service/worker/common"
 )
 
@@ -80,11 +81,15 @@ func (s *workerComponent) DedicatedWorkerOptions() *workercommon.DedicatedWorker
 	}
 }
 
-func (s *workerComponent) Register(worker sdkworker.Worker) {
+func (s *workerComponent) Register(worker sdkworker.Worker, ns *namespace.Namespace) {
 	worker.RegisterWorkflowWithOptions(SchedulerWorkflow, workflow.RegisterOptions{Name: WorkflowType})
-	worker.RegisterActivity(s.activities())
+	worker.RegisterActivity(s.activities(ns.Name(), ns.ID()))
 }
 
-func (s *workerComponent) activities() *activities {
-	return &activities{activityDeps: s.activityDeps}
+func (s *workerComponent) activities(name namespace.Name, id namespace.ID) *activities {
+	return &activities{
+		activityDeps: s.activityDeps,
+		namespace:    name,
+		namespaceID:  id,
+	}
 }
