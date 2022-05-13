@@ -86,13 +86,20 @@ type (
 
 		cspec *compiledSpec
 
-		// watchers for currently-running workflows
-		watchers map[string]workflow.Future
+		// Watchers for currently-running workflows. There are two types of watchers: refresh
+		// and long-poll. Refresh are created when we want to start a new workflow but think we
+		// might have one or more already running, or when we get a refresh signal because
+		// someone is doing Describe. They do a short poll to check if a workflow is still
+		// running. Long-poll are created when we have buffered workflows and need to know when
+		// a running one is closed. There should be at most one watcher for a given workflow
+		// id, of either type.
+		watchers map[string]watcher
 	}
 
-	watcherPair struct {
-		id     string
-		future workflow.Future
+	watcher struct {
+		id       string
+		future   workflow.Future
+		longPoll bool
 	}
 
 	catchupWindowParams struct {
@@ -122,7 +129,7 @@ func SchedulerWorkflow(ctx workflow.Context, args *schedspb.StartScheduleArgs) e
 		ctx:               ctx,
 		a:                 nil,
 		logger:            sdklog.With(workflow.GetLogger(ctx), "schedule-id", args.State.ScheduleId),
-		watchers:          make(map[string]workflow.Future),
+		watchers:          make(map[string]watcher),
 	}
 	return scheduler.run()
 }
@@ -354,8 +361,8 @@ func (s *scheduler) sleep(nextSleep time.Duration, hasNext bool) {
 	}
 
 	// need to sort watchers for determinism
-	for _, pair := range s.sortedWatchers() {
-		sel.AddFuture(pair.future, func(f workflow.Future) { s.wfWatcherReturned(pair.id, f) })
+	for _, watcher := range s.sortedWatchers() {
+		sel.AddFuture(watcher.future, func(f workflow.Future) { s.wfWatcherReturned(watcher.id, f) })
 	}
 
 	s.logger.Debug("sleeping", "hasNext", hasNext, "watchers", len(s.watchers))
@@ -453,9 +460,7 @@ func (s *scheduler) handleRefreshSignal(ch workflow.ReceiveChannel, _ bool) {
 	ch.Receive(s.ctx, &refresh)
 	s.logger.Debug("Got refresh signal", "refresh", refresh.String())
 	for _, ex := range refresh.Workflows {
-		if _, ok := s.watchers[ex.WorkflowId]; !ok {
-			s.startWatcher(ex, false)
-		}
+		s.startWatcher(ex, false)
 	}
 }
 
@@ -556,6 +561,24 @@ func (s *scheduler) addStart(nominalTime, actualTime time.Time, overlapPolicy en
 		OverlapPolicy: overlapPolicy,
 		Manual:        manual,
 	})
+	// we have a new start to process, so we need to make sure that we have up-to-date status
+	// on any workflows that we started.
+	s.refreshAll()
+}
+
+func (s *scheduler) refreshAll() {
+	for _, ex := range s.Info.RunningWorkflows {
+		s.startWatcher(ex, false)
+	}
+}
+
+func (s *scheduler) anyRefreshing() bool {
+	for _, watcher := range s.watchers {
+		if !watcher.longPoll {
+			return true
+		}
+	}
+	return false
 }
 
 // processBuffer should return true if there might be more work to do right now.
@@ -570,19 +593,13 @@ func (s *scheduler) processBuffer() bool {
 		return false
 	}
 
-	isRunning := len(s.Info.RunningWorkflows) > 0
-
-	if isRunning && len(s.watchers) == 0 {
-		// we think we have a workflow running, but it might have closed already. if we have
-		// any long-poll watchers currently, then we know at least one workflow is still
-		// running (otherwise the watcher would have returned), so we don't need to do
-		// anything. but if we have no watchers, then we need to refresh.
-		for _, ex := range s.Info.RunningWorkflows {
-			future := s.startWatcher(ex, false)
-			s.wfWatcherReturned(ex.WorkflowId, future)
-		}
+	if s.anyRefreshing() {
+		// blocked until all refreshes complete
+		s.logger.Debug("processBuffer: waiting for refresh")
+		return false
 	}
 
+	isRunning := len(s.Info.RunningWorkflows) > 0
 	tryAgain := false
 
 	action := processBuffer(s.State.BufferedStarts, isRunning, s.resolveOverlapPolicy)
@@ -705,7 +722,7 @@ func (s *scheduler) startWorkflow(
 		ContinuedFailure:     s.State.ContinuedFailure,
 	}
 	var res schedspb.StartWorkflowResponse
-	// TODO: should this be a local activity instead?
+	// TODO: should this be a local activity instead? or should it be async?
 	err := workflow.ExecuteActivity(ctx, s.a.StartWorkflow, req).Get(s.ctx, &res)
 	if err != nil {
 		return nil, err
@@ -741,7 +758,12 @@ func (s *scheduler) addSearchAttrs(
 	}
 }
 
-func (s *scheduler) startWatcher(ex *commonpb.WorkflowExecution, longPoll bool) workflow.Future {
+func (s *scheduler) startWatcher(ex *commonpb.WorkflowExecution, longPoll bool) {
+	if _, ok := s.watchers[ex.WorkflowId]; ok {
+		// only one watcher per workflow id
+		return
+	}
+
 	ctx := workflow.WithActivityOptions(s.ctx, workflow.ActivityOptions{
 		StartToCloseTimeout: 365 * 24 * time.Hour,
 		RetryPolicy:         defaultActivityRetryPolicy,
@@ -756,8 +778,11 @@ func (s *scheduler) startWatcher(ex *commonpb.WorkflowExecution, longPoll bool) 
 		LongPoll:            longPoll,
 	}
 	future := workflow.ExecuteActivity(ctx, s.a.WatchWorkflow, req)
-	s.watchers[ex.WorkflowId] = future
-	return future
+	s.watchers[ex.WorkflowId] = watcher{
+		id:       ex.WorkflowId,
+		future:   future,
+		longPoll: longPoll,
+	}
 }
 
 func (s *scheduler) cancelWorkflow(ex *commonpb.WorkflowExecution) {
@@ -804,11 +829,8 @@ func (s *scheduler) newUUIDString() string {
 	return str
 }
 
-func (s *scheduler) sortedWatchers() []watcherPair {
-	out := make([]watcherPair, 0, len(s.watchers))
-	for id, f := range s.watchers {
-		out = append(out, watcherPair{id, f})
-	}
-	slices.SortFunc(out, func(a, b watcherPair) bool { return a.id < b.id })
-	return out
+func (s *scheduler) sortedWatchers() []watcher {
+	watchers := maps.Values(s.watchers)
+	slices.SortFunc(watchers, func(a, b watcher) bool { return a.id < b.id })
+	return watchers
 }
