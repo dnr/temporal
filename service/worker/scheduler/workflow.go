@@ -571,6 +571,18 @@ func (s *scheduler) processBuffer() bool {
 	}
 
 	isRunning := len(s.Info.RunningWorkflows) > 0
+
+	if isRunning && len(s.watchers) == 0 {
+		// we think we have a workflow running, but it might have closed already. if we have
+		// any long-poll watchers currently, then we know at least one workflow is still
+		// running (otherwise the watcher would have returned), so we don't need to do
+		// anything. but if we have no watchers, then we need to refresh.
+		for _, ex := range s.Info.RunningWorkflows {
+			future := s.startWatcher(ex, false)
+			s.wfWatcherReturned(ex.WorkflowId, future)
+		}
+	}
+
 	tryAgain := false
 
 	action := processBuffer(s.State.BufferedStarts, isRunning, s.resolveOverlapPolicy)
@@ -615,7 +627,6 @@ func (s *scheduler) processBuffer() bool {
 	// (maybe one we just started). In order to get woken up, we need to be watching at least
 	// one of them with an activity. We only need one watcher at a time, though: after that one
 	// returns, we'll end up back here and start the next one.
-	// FIXME: this part seems to be broken
 	if len(s.State.BufferedStarts) > 0 && len(s.watchers) == 0 {
 		if len(s.Info.RunningWorkflows) > 0 {
 			s.startWatcher(s.Info.RunningWorkflows[0], true)
@@ -730,7 +741,7 @@ func (s *scheduler) addSearchAttrs(
 	}
 }
 
-func (s *scheduler) startWatcher(ex *commonpb.WorkflowExecution, longPoll bool) {
+func (s *scheduler) startWatcher(ex *commonpb.WorkflowExecution, longPoll bool) workflow.Future {
 	ctx := workflow.WithActivityOptions(s.ctx, workflow.ActivityOptions{
 		StartToCloseTimeout: 365 * 24 * time.Hour,
 		RetryPolicy:         defaultActivityRetryPolicy,
@@ -744,7 +755,9 @@ func (s *scheduler) startWatcher(ex *commonpb.WorkflowExecution, longPoll bool) 
 		FirstExecutionRunId: ex.RunId,
 		LongPoll:            longPoll,
 	}
-	s.watchers[ex.WorkflowId] = workflow.ExecuteActivity(ctx, s.a.WatchWorkflow, req)
+	future := workflow.ExecuteActivity(ctx, s.a.WatchWorkflow, req)
+	s.watchers[ex.WorkflowId] = future
+	return future
 }
 
 func (s *scheduler) cancelWorkflow(ex *commonpb.WorkflowExecution) {
