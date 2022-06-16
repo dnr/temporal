@@ -3,7 +3,6 @@ func (c *retryableClient) DescribeMutableState(
 	request *adminservice.DescribeMutableStateRequest,
 	opts ...grpc.CallOption,
 ) (*adminservice.DescribeMutableStateResponse, error) {
-
 	var resp *adminservice.DescribeMutableStateResponse
 	op := func() error {
 		var err error

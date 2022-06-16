@@ -10,5 +10,4 @@ func (c *clientImpl) MergeDLQMessages(
 	ctx, cancel := c.createContext(ctx)
 	defer cancel()
 	return client.MergeDLQMessages(ctx, request, opts...)
-
 }

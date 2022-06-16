@@ -1,5 +1,5 @@
 func (c *metricClient) RespondActivityTaskFailed(
-	context context.Context,
+	ctx context.Context,
 	request *historyservice.RespondActivityTaskFailedRequest,
 	opts ...grpc.CallOption,
 ) (_ *historyservice.RespondActivityTaskFailedResponse, retError error) {
@@ -9,5 +9,5 @@ func (c *metricClient) RespondActivityTaskFailed(
 		c.finishMetricsRecording(scope, stopwatch, retError)
 	}()
 
-	return c.client.RespondActivityTaskFailed(context, request, opts...)
+	return c.client.RespondActivityTaskFailed(ctx, request, opts...)
 }

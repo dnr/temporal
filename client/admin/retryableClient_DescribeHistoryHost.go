@@ -3,7 +3,6 @@ func (c *retryableClient) DescribeHistoryHost(
 	request *adminservice.DescribeHistoryHostRequest,
 	opts ...grpc.CallOption,
 ) (*adminservice.DescribeHistoryHostResponse, error) {
-
 	var resp *adminservice.DescribeHistoryHostResponse
 	op := func() error {
 		var err error

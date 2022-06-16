@@ -5,6 +5,7 @@ func (c *metricClient) ResendReplicationTasks(
 ) (*adminservice.ResendReplicationTasksResponse, error) {
 
 	c.metricsClient.IncCounter(metrics.AdminClientResendReplicationTasksScope, metrics.ClientRequests)
+
 	sw := c.metricsClient.StartTimer(metrics.AdminClientResendReplicationTasksScope, metrics.ClientLatency)
 	resp, err := c.client.ResendReplicationTasks(ctx, request, opts...)
 	sw.Stop()

@@ -3,7 +3,6 @@ func (c *retryableClient) ListClusters(
 	request *adminservice.ListClustersRequest,
 	opts ...grpc.CallOption,
 ) (*adminservice.ListClustersResponse, error) {
-
 	var resp *adminservice.ListClustersResponse
 	op := func() error {
 		var err error

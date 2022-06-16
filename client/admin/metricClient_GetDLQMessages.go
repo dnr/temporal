@@ -5,6 +5,7 @@ func (c *metricClient) GetDLQMessages(
 ) (*adminservice.GetDLQMessagesResponse, error) {
 
 	c.metricsClient.IncCounter(metrics.AdminClientGetDLQMessagesScope, metrics.ClientRequests)
+
 	sw := c.metricsClient.StartTimer(metrics.AdminClientGetDLQMessagesScope, metrics.ClientLatency)
 	resp, err := c.client.GetDLQMessages(ctx, request, opts...)
 	sw.Stop()

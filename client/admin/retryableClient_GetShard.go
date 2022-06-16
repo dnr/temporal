@@ -3,7 +3,6 @@ func (c *retryableClient) GetShard(
 	request *adminservice.GetShardRequest,
 	opts ...grpc.CallOption,
 ) (*adminservice.GetShardResponse, error) {
-
 	var resp *adminservice.GetShardResponse
 	op := func() error {
 		var err error

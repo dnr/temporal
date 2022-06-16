@@ -3,11 +3,10 @@ func (c *clientImpl) GetShard(
 	request *historyservice.GetShardRequest,
 	opts ...grpc.CallOption,
 ) (*historyservice.GetShardResponse, error) {
-	client, err := c.getClientForShardID(request.GetShardId())
+	client, err := c.getClientForShardID(request.ShardId)
 	if err != nil {
 		return nil, err
 	}
-
 	var response *historyservice.GetShardResponse
 	op := func(ctx context.Context, client historyservice.HistoryServiceClient) error {
 		var err error
@@ -16,7 +15,6 @@ func (c *clientImpl) GetShard(
 		response, err = client.GetShard(ctx, request, opts...)
 		return err
 	}
-
 	err = c.executeWithRedirect(ctx, client, op)
 	if err != nil {
 		return nil, err

@@ -3,7 +3,6 @@ func (c *clientImpl) RegisterNamespace(
 	request *workflowservice.RegisterNamespaceRequest,
 	opts ...grpc.CallOption,
 ) (*workflowservice.RegisterNamespaceResponse, error) {
-
 	client, err := c.getRandomClient()
 	if err != nil {
 		return nil, err

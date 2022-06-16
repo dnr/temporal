@@ -3,7 +3,6 @@ func (c *retryableClient) AddSearchAttributes(
 	request *adminservice.AddSearchAttributesRequest,
 	opts ...grpc.CallOption,
 ) (*adminservice.AddSearchAttributesResponse, error) {
-
 	var resp *adminservice.AddSearchAttributesResponse
 	op := func() error {
 		var err error

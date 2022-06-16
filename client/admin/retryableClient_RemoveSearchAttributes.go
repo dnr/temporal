@@ -3,7 +3,6 @@ func (c *retryableClient) RemoveSearchAttributes(
 	request *adminservice.RemoveSearchAttributesRequest,
 	opts ...grpc.CallOption,
 ) (*adminservice.RemoveSearchAttributesResponse, error) {
-
 	var resp *adminservice.RemoveSearchAttributesResponse
 	op := func() error {
 		var err error

@@ -3,7 +3,6 @@ func (c *retryableClient) ListHistoryTasks(
 	request *adminservice.ListHistoryTasksRequest,
 	opts ...grpc.CallOption,
 ) (*adminservice.ListHistoryTasksResponse, error) {
-
 	var resp *adminservice.ListHistoryTasksResponse
 	op := func() error {
 		var err error

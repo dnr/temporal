@@ -1,5 +1,5 @@
 func (c *metricClient) RecordActivityTaskHeartbeat(
-	context context.Context,
+	ctx context.Context,
 	request *historyservice.RecordActivityTaskHeartbeatRequest,
 	opts ...grpc.CallOption,
 ) (_ *historyservice.RecordActivityTaskHeartbeatResponse, retError error) {
@@ -9,5 +9,5 @@ func (c *metricClient) RecordActivityTaskHeartbeat(
 		c.finishMetricsRecording(scope, stopwatch, retError)
 	}()
 
-	return c.client.RecordActivityTaskHeartbeat(context, request, opts...)
+	return c.client.RecordActivityTaskHeartbeat(ctx, request, opts...)
 }

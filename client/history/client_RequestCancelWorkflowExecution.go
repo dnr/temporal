@@ -1,12 +1,12 @@
 func (c *clientImpl) RequestCancelWorkflowExecution(
 	ctx context.Context,
 	request *historyservice.RequestCancelWorkflowExecutionRequest,
-	opts ...grpc.CallOption) (*historyservice.RequestCancelWorkflowExecutionResponse, error) {
+	opts ...grpc.CallOption,
+) (*historyservice.RequestCancelWorkflowExecutionResponse, error) {
 	client, err := c.getClientForWorkflowID(request.NamespaceId, request.CancelRequest.WorkflowExecution.WorkflowId)
 	if err != nil {
 		return nil, err
 	}
-
 	var response *historyservice.RequestCancelWorkflowExecutionResponse
 	op := func(ctx context.Context, client historyservice.HistoryServiceClient) error {
 		var err error

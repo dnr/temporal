@@ -9,6 +9,5 @@ func (c *clientImpl) ListTaskQueuePartitions(
 	}
 	ctx, cancel := c.createContext(ctx)
 	defer cancel()
-
 	return client.ListTaskQueuePartitions(ctx, request, opts...)
 }

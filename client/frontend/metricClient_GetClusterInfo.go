@@ -5,6 +5,7 @@ func (c *metricClient) GetClusterInfo(
 ) (*workflowservice.GetClusterInfoResponse, error) {
 
 	c.metricsClient.IncCounter(metrics.FrontendClientGetClusterInfoScope, metrics.ClientRequests)
+
 	sw := c.metricsClient.StartTimer(metrics.FrontendClientGetClusterInfoScope, metrics.ClientLatency)
 	resp, err := c.client.GetClusterInfo(ctx, request, opts...)
 	sw.Stop()

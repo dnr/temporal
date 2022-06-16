@@ -1,9 +1,13 @@
 func (c *metricClient) RemoveTask(
-	context context.Context,
+	ctx context.Context,
 	request *historyservice.RemoveTaskRequest,
 	opts ...grpc.CallOption,
 ) (_ *historyservice.RemoveTaskResponse, retError error) {
-	resp, err := c.client.RemoveTask(context, request, opts...)
 
-	return resp, err
+	scope, stopwatch := c.startMetricsRecording(metrics.HistoryClientRemoveTaskScope)
+	defer func() {
+		c.finishMetricsRecording(scope, stopwatch, retError)
+	}()
+
+	return c.client.RemoveTask(ctx, request, opts...)
 }

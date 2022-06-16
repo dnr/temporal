@@ -3,11 +3,10 @@ func (c *clientImpl) RefreshWorkflowTasks(
 	request *historyservice.RefreshWorkflowTasksRequest,
 	opts ...grpc.CallOption,
 ) (*historyservice.RefreshWorkflowTasksResponse, error) {
-	client, err := c.getClientForWorkflowID(request.NamespaceId, request.GetRequest().GetExecution().GetWorkflowId())
+	client, err := c.getClientForWorkflowID(request.NamespaceId, request.Request.Execution.WorkflowId)
 	if err != nil {
 		return nil, err
 	}
-
 	var response *historyservice.RefreshWorkflowTasksResponse
 	op := func(ctx context.Context, client historyservice.HistoryServiceClient) error {
 		var err error

@@ -5,6 +5,7 @@ func (c *metricClient) RefreshWorkflowTasks(
 ) (*adminservice.RefreshWorkflowTasksResponse, error) {
 
 	c.metricsClient.IncCounter(metrics.AdminClientRefreshWorkflowTasksScope, metrics.ClientRequests)
+
 	sw := c.metricsClient.StartTimer(metrics.AdminClientRefreshWorkflowTasksScope, metrics.ClientLatency)
 	resp, err := c.client.RefreshWorkflowTasks(ctx, request, opts...)
 	sw.Stop()

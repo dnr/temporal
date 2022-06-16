@@ -1,9 +1,13 @@
 func (c *metricClient) DescribeHistoryHost(
-	context context.Context,
+	ctx context.Context,
 	request *historyservice.DescribeHistoryHostRequest,
 	opts ...grpc.CallOption,
 ) (_ *historyservice.DescribeHistoryHostResponse, retError error) {
-	resp, err := c.client.DescribeHistoryHost(context, request, opts...)
 
-	return resp, err
+	scope, stopwatch := c.startMetricsRecording(metrics.HistoryClientDescribeHistoryHostScope)
+	defer func() {
+		c.finishMetricsRecording(scope, stopwatch, retError)
+	}()
+
+	return c.client.DescribeHistoryHost(ctx, request, opts...)
 }

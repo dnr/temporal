@@ -1,12 +1,12 @@
 func (c *clientImpl) StartWorkflowExecution(
 	ctx context.Context,
 	request *historyservice.StartWorkflowExecutionRequest,
-	opts ...grpc.CallOption) (*historyservice.StartWorkflowExecutionResponse, error) {
+	opts ...grpc.CallOption,
+) (*historyservice.StartWorkflowExecutionResponse, error) {
 	client, err := c.getClientForWorkflowID(request.NamespaceId, request.StartRequest.WorkflowId)
 	if err != nil {
 		return nil, err
 	}
-
 	var response *historyservice.StartWorkflowExecutionResponse
 	op := func(ctx context.Context, client historyservice.HistoryServiceClient) error {
 		var err error

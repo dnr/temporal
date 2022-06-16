@@ -1,5 +1,5 @@
 func (c *metricClient) RespondWorkflowTaskCompleted(
-	context context.Context,
+	ctx context.Context,
 	request *historyservice.RespondWorkflowTaskCompletedRequest,
 	opts ...grpc.CallOption,
 ) (_ *historyservice.RespondWorkflowTaskCompletedResponse, retError error) {
@@ -9,5 +9,5 @@ func (c *metricClient) RespondWorkflowTaskCompleted(
 		c.finishMetricsRecording(scope, stopwatch, retError)
 	}()
 
-	return c.client.RespondWorkflowTaskCompleted(context, request, opts...)
+	return c.client.RespondWorkflowTaskCompleted(ctx, request, opts...)
 }

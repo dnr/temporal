@@ -9,6 +9,5 @@ func (c *clientImpl) DeleteSchedule(
 	}
 	ctx, cancel := c.createContext(ctx)
 	defer cancel()
-
 	return client.DeleteSchedule(ctx, request, opts...)
 }

@@ -1,5 +1,5 @@
 func (c *metricClient) SignalWithStartWorkflowExecution(
-	context context.Context,
+	ctx context.Context,
 	request *historyservice.SignalWithStartWorkflowExecutionRequest,
 	opts ...grpc.CallOption,
 ) (_ *historyservice.SignalWithStartWorkflowExecutionResponse, retError error) {
@@ -9,5 +9,5 @@ func (c *metricClient) SignalWithStartWorkflowExecution(
 		c.finishMetricsRecording(scope, stopwatch, retError)
 	}()
 
-	return c.client.SignalWithStartWorkflowExecution(context, request, opts...)
+	return c.client.SignalWithStartWorkflowExecution(ctx, request, opts...)
 }

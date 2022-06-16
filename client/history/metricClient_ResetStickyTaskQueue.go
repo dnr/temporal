@@ -1,5 +1,5 @@
 func (c *metricClient) ResetStickyTaskQueue(
-	context context.Context,
+	ctx context.Context,
 	request *historyservice.ResetStickyTaskQueueRequest,
 	opts ...grpc.CallOption,
 ) (_ *historyservice.ResetStickyTaskQueueResponse, retError error) {
@@ -9,5 +9,5 @@ func (c *metricClient) ResetStickyTaskQueue(
 		c.finishMetricsRecording(scope, stopwatch, retError)
 	}()
 
-	return c.client.ResetStickyTaskQueue(context, request, opts...)
+	return c.client.ResetStickyTaskQueue(ctx, request, opts...)
 }

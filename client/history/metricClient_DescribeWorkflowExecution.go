@@ -1,5 +1,5 @@
 func (c *metricClient) DescribeWorkflowExecution(
-	context context.Context,
+	ctx context.Context,
 	request *historyservice.DescribeWorkflowExecutionRequest,
 	opts ...grpc.CallOption,
 ) (_ *historyservice.DescribeWorkflowExecutionResponse, retError error) {
@@ -9,5 +9,5 @@ func (c *metricClient) DescribeWorkflowExecution(
 		c.finishMetricsRecording(scope, stopwatch, retError)
 	}()
 
-	return c.client.DescribeWorkflowExecution(context, request, opts...)
+	return c.client.DescribeWorkflowExecution(ctx, request, opts...)
 }

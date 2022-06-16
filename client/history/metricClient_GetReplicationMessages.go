@@ -1,13 +1,13 @@
 func (c *metricClient) GetReplicationMessages(
-	context context.Context,
+	ctx context.Context,
 	request *historyservice.GetReplicationMessagesRequest,
 	opts ...grpc.CallOption,
 ) (_ *historyservice.GetReplicationMessagesResponse, retError error) {
 
-	scope, stopwatch := c.startMetricsRecording(metrics.HistoryClientGetReplicationTasksScope)
+	scope, stopwatch := c.startMetricsRecording(metrics.HistoryClientGetReplicationMessagesScope)
 	defer func() {
 		c.finishMetricsRecording(scope, stopwatch, retError)
 	}()
 
-	return c.client.GetReplicationMessages(context, request, opts...)
+	return c.client.GetReplicationMessages(ctx, request, opts...)
 }

@@ -1,7 +1,8 @@
 func (c *clientImpl) RemoveSignalMutableState(
 	ctx context.Context,
 	request *historyservice.RemoveSignalMutableStateRequest,
-	opts ...grpc.CallOption) (*historyservice.RemoveSignalMutableStateResponse, error) {
+	opts ...grpc.CallOption,
+) (*historyservice.RemoveSignalMutableStateResponse, error) {
 	client, err := c.getClientForWorkflowID(request.NamespaceId, request.WorkflowExecution.WorkflowId)
 	if err != nil {
 		return nil, err
@@ -18,5 +19,5 @@ func (c *clientImpl) RemoveSignalMutableState(
 	if err != nil {
 		return nil, err
 	}
-	return response, err
+	return response, nil
 }

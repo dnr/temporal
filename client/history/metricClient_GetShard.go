@@ -1,9 +1,13 @@
 func (c *metricClient) GetShard(
-	context context.Context,
+	ctx context.Context,
 	request *historyservice.GetShardRequest,
 	opts ...grpc.CallOption,
 ) (_ *historyservice.GetShardResponse, retError error) {
-	resp, err := c.client.GetShard(context, request, opts...)
 
-	return resp, err
+	scope, stopwatch := c.startMetricsRecording(metrics.HistoryClientGetShardScope)
+	defer func() {
+		c.finishMetricsRecording(scope, stopwatch, retError)
+	}()
+
+	return c.client.GetShard(ctx, request, opts...)
 }

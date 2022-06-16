@@ -1,5 +1,5 @@
 func (c *metricClient) ReplicateEventsV2(
-	context context.Context,
+	ctx context.Context,
 	request *historyservice.ReplicateEventsV2Request,
 	opts ...grpc.CallOption,
 ) (_ *historyservice.ReplicateEventsV2Response, retError error) {
@@ -9,5 +9,5 @@ func (c *metricClient) ReplicateEventsV2(
 		c.finishMetricsRecording(scope, stopwatch, retError)
 	}()
 
-	return c.client.ReplicateEventsV2(context, request, opts...)
+	return c.client.ReplicateEventsV2(ctx, request, opts...)
 }

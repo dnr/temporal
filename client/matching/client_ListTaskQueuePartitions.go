@@ -1,4 +1,9 @@
-func (c *clientImpl) ListTaskQueuePartitions(ctx context.Context, request *matchingservice.ListTaskQueuePartitionsRequest, opts ...grpc.CallOption) (*matchingservice.ListTaskQueuePartitionsResponse, error) {
+func (c *clientImpl) ListTaskQueuePartitions(
+	ctx context.Context,
+	request *matchingservice.ListTaskQueuePartitionsRequest,
+	opts ...grpc.CallOption,
+) (*matchingservice.ListTaskQueuePartitionsResponse, error) {
+
 	client, err := c.getClientForTaskqueue(request.TaskQueue.GetName())
 	if err != nil {
 		return nil, err

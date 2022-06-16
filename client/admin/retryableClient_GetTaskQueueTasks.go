@@ -3,7 +3,6 @@ func (c *retryableClient) GetTaskQueueTasks(
 	request *adminservice.GetTaskQueueTasksRequest,
 	opts ...grpc.CallOption,
 ) (*adminservice.GetTaskQueueTasksResponse, error) {
-
 	var resp *adminservice.GetTaskQueueTasksResponse
 	op := func() error {
 		var err error

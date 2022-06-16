@@ -3,7 +3,6 @@ func (c *retryableClient) AddOrUpdateRemoteCluster(
 	request *adminservice.AddOrUpdateRemoteClusterRequest,
 	opts ...grpc.CallOption,
 ) (*adminservice.AddOrUpdateRemoteClusterResponse, error) {
-
 	var resp *adminservice.AddOrUpdateRemoteClusterResponse
 	op := func() error {
 		var err error

@@ -3,11 +3,10 @@ func (c *clientImpl) QueryWorkflow(
 	request *historyservice.QueryWorkflowRequest,
 	opts ...grpc.CallOption,
 ) (*historyservice.QueryWorkflowResponse, error) {
-	client, err := c.getClientForWorkflowID(request.NamespaceId, request.GetRequest().GetExecution().GetWorkflowId())
+	client, err := c.getClientForWorkflowID(request.NamespaceId, request.Request.Execution.WorkflowId)
 	if err != nil {
 		return nil, err
 	}
-
 	var response *historyservice.QueryWorkflowResponse
 	op := func(ctx context.Context, client historyservice.HistoryServiceClient) error {
 		var err error

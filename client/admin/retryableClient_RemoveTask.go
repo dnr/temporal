@@ -3,7 +3,6 @@ func (c *retryableClient) RemoveTask(
 	request *adminservice.RemoveTaskRequest,
 	opts ...grpc.CallOption,
 ) (*adminservice.RemoveTaskResponse, error) {
-
 	var resp *adminservice.RemoveTaskResponse
 	op := func() error {
 		var err error

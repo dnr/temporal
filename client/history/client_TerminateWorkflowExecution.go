@@ -1,12 +1,12 @@
 func (c *clientImpl) TerminateWorkflowExecution(
 	ctx context.Context,
 	request *historyservice.TerminateWorkflowExecutionRequest,
-	opts ...grpc.CallOption) (*historyservice.TerminateWorkflowExecutionResponse, error) {
+	opts ...grpc.CallOption,
+) (*historyservice.TerminateWorkflowExecutionResponse, error) {
 	client, err := c.getClientForWorkflowID(request.NamespaceId, request.TerminateRequest.WorkflowExecution.WorkflowId)
 	if err != nil {
 		return nil, err
 	}
-
 	var response *historyservice.TerminateWorkflowExecutionResponse
 	op := func(ctx context.Context, client historyservice.HistoryServiceClient) error {
 		var err error
@@ -20,5 +20,4 @@ func (c *clientImpl) TerminateWorkflowExecution(
 		return nil, err
 	}
 	return response, nil
-
 }

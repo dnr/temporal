@@ -1,5 +1,5 @@
 func (c *metricClient) SyncShardStatus(
-	context context.Context,
+	ctx context.Context,
 	request *historyservice.SyncShardStatusRequest,
 	opts ...grpc.CallOption,
 ) (_ *historyservice.SyncShardStatusResponse, retError error) {
@@ -9,5 +9,5 @@ func (c *metricClient) SyncShardStatus(
 		c.finishMetricsRecording(scope, stopwatch, retError)
 	}()
 
-	return c.client.SyncShardStatus(context, request, opts...)
+	return c.client.SyncShardStatus(ctx, request, opts...)
 }

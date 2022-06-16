@@ -3,12 +3,10 @@ func (c *clientImpl) ReapplyEvents(
 	request *historyservice.ReapplyEventsRequest,
 	opts ...grpc.CallOption,
 ) (*historyservice.ReapplyEventsResponse, error) {
-	client, err := c.getClientForWorkflowID(request.NamespaceId,
-		request.GetRequest().GetWorkflowExecution().GetWorkflowId())
+	client, err := c.getClientForWorkflowID(request.NamespaceId, request.Request.WorkflowExecution.WorkflowId)
 	if err != nil {
 		return nil, err
 	}
-
 	var response *historyservice.ReapplyEventsResponse
 	op := func(ctx context.Context, client historyservice.HistoryServiceClient) error {
 		var err error
@@ -22,5 +20,4 @@ func (c *clientImpl) ReapplyEvents(
 		return nil, err
 	}
 	return response, nil
-
 }

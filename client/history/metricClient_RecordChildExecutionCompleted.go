@@ -1,5 +1,5 @@
 func (c *metricClient) RecordChildExecutionCompleted(
-	context context.Context,
+	ctx context.Context,
 	request *historyservice.RecordChildExecutionCompletedRequest,
 	opts ...grpc.CallOption,
 ) (_ *historyservice.RecordChildExecutionCompletedResponse, retError error) {
@@ -9,5 +9,5 @@ func (c *metricClient) RecordChildExecutionCompleted(
 		c.finishMetricsRecording(scope, stopwatch, retError)
 	}()
 
-	return c.client.RecordChildExecutionCompleted(context, request, opts...)
+	return c.client.RecordChildExecutionCompleted(ctx, request, opts...)
 }

@@ -1,5 +1,5 @@
 func (c *metricClient) RespondActivityTaskCanceled(
-	context context.Context,
+	ctx context.Context,
 	request *historyservice.RespondActivityTaskCanceledRequest,
 	opts ...grpc.CallOption,
 ) (_ *historyservice.RespondActivityTaskCanceledResponse, retError error) {
@@ -9,5 +9,5 @@ func (c *metricClient) RespondActivityTaskCanceled(
 		c.finishMetricsRecording(scope, stopwatch, retError)
 	}()
 
-	return c.client.RespondActivityTaskCanceled(context, request, opts...)
+	return c.client.RespondActivityTaskCanceled(ctx, request, opts...)
 }

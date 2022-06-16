@@ -5,6 +5,7 @@ func (c *metricClient) PurgeDLQMessages(
 ) (*adminservice.PurgeDLQMessagesResponse, error) {
 
 	c.metricsClient.IncCounter(metrics.AdminClientPurgeDLQMessagesScope, metrics.ClientRequests)
+
 	sw := c.metricsClient.StartTimer(metrics.AdminClientPurgeDLQMessagesScope, metrics.ClientLatency)
 	resp, err := c.client.PurgeDLQMessages(ctx, request, opts...)
 	sw.Stop()

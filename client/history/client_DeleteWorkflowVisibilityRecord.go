@@ -3,11 +3,10 @@ func (c *clientImpl) DeleteWorkflowVisibilityRecord(
 	request *historyservice.DeleteWorkflowVisibilityRecordRequest,
 	opts ...grpc.CallOption,
 ) (*historyservice.DeleteWorkflowVisibilityRecordResponse, error) {
-	client, err := c.getClientForWorkflowID(request.NamespaceId, request.GetExecution().GetWorkflowId())
+	client, err := c.getClientForWorkflowID(request.NamespaceId, request.Execution.WorkflowId)
 	if err != nil {
 		return nil, err
 	}
-
 	var response *historyservice.DeleteWorkflowVisibilityRecordResponse
 	op := func(ctx context.Context, client historyservice.HistoryServiceClient) error {
 		var err error

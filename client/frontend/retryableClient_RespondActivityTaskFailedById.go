@@ -9,6 +9,6 @@ func (c *retryableClient) RespondActivityTaskFailedById(
 		resp, err = c.client.RespondActivityTaskFailedById(ctx, request, opts...)
 		return err
 	}
-
-	return resp, backoff.Retry(op, c.policy, c.isRetryable)
+	err := backoff.Retry(op, c.policy, c.isRetryable)
+	return resp, err
 }

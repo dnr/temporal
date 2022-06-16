@@ -1,5 +1,5 @@
 func (c *metricClient) PollMutableState(
-	context context.Context,
+	ctx context.Context,
 	request *historyservice.PollMutableStateRequest,
 	opts ...grpc.CallOption,
 ) (_ *historyservice.PollMutableStateResponse, retError error) {
@@ -9,5 +9,5 @@ func (c *metricClient) PollMutableState(
 		c.finishMetricsRecording(scope, stopwatch, retError)
 	}()
 
-	return c.client.PollMutableState(context, request, opts...)
+	return c.client.PollMutableState(ctx, request, opts...)
 }

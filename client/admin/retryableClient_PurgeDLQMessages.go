@@ -3,7 +3,6 @@ func (c *retryableClient) PurgeDLQMessages(
 	request *adminservice.PurgeDLQMessagesRequest,
 	opts ...grpc.CallOption,
 ) (*adminservice.PurgeDLQMessagesResponse, error) {
-
 	var resp *adminservice.PurgeDLQMessagesResponse
 	op := func() error {
 		var err error

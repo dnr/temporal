@@ -1,16 +1,17 @@
 func (c *clientImpl) RespondActivityTaskCanceled(
 	ctx context.Context,
 	request *historyservice.RespondActivityTaskCanceledRequest,
-	opts ...grpc.CallOption) (*historyservice.RespondActivityTaskCanceledResponse, error) {
+	opts ...grpc.CallOption,
+) (*historyservice.RespondActivityTaskCanceledResponse, error) {
 	taskToken, err := c.tokenSerializer.Deserialize(request.CancelRequest.TaskToken)
 	if err != nil {
 		return nil, err
 	}
 	client, err := c.getClientForWorkflowID(request.NamespaceId, taskToken.GetWorkflowId())
+
 	if err != nil {
 		return nil, err
 	}
-
 	var response *historyservice.RespondActivityTaskCanceledResponse
 	op := func(ctx context.Context, client historyservice.HistoryServiceClient) error {
 		var err error
@@ -24,5 +25,4 @@ func (c *clientImpl) RespondActivityTaskCanceled(
 		return nil, err
 	}
 	return response, nil
-
 }

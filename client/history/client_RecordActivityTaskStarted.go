@@ -1,12 +1,12 @@
 func (c *clientImpl) RecordActivityTaskStarted(
 	ctx context.Context,
 	request *historyservice.RecordActivityTaskStartedRequest,
-	opts ...grpc.CallOption) (*historyservice.RecordActivityTaskStartedResponse, error) {
+	opts ...grpc.CallOption,
+) (*historyservice.RecordActivityTaskStartedResponse, error) {
 	client, err := c.getClientForWorkflowID(request.NamespaceId, request.WorkflowExecution.WorkflowId)
 	if err != nil {
 		return nil, err
 	}
-
 	var response *historyservice.RecordActivityTaskStartedResponse
 	op := func(ctx context.Context, client historyservice.HistoryServiceClient) error {
 		var err error

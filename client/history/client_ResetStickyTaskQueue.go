@@ -1,12 +1,12 @@
 func (c *clientImpl) ResetStickyTaskQueue(
 	ctx context.Context,
 	request *historyservice.ResetStickyTaskQueueRequest,
-	opts ...grpc.CallOption) (*historyservice.ResetStickyTaskQueueResponse, error) {
+	opts ...grpc.CallOption,
+) (*historyservice.ResetStickyTaskQueueResponse, error) {
 	client, err := c.getClientForWorkflowID(request.NamespaceId, request.Execution.WorkflowId)
 	if err != nil {
 		return nil, err
 	}
-
 	var response *historyservice.ResetStickyTaskQueueResponse
 	op := func(ctx context.Context, client historyservice.HistoryServiceClient) error {
 		var err error

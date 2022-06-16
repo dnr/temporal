@@ -4,14 +4,14 @@ func (c *metricClient) RemoveTask(
 	opts ...grpc.CallOption,
 ) (*adminservice.RemoveTaskResponse, error) {
 
-	c.metricsClient.IncCounter(metrics.AdminClientCloseShardScope, metrics.ClientRequests)
+	c.metricsClient.IncCounter(metrics.AdminClientRemoveTaskScope, metrics.ClientRequests)
 
-	sw := c.metricsClient.StartTimer(metrics.AdminClientCloseShardScope, metrics.ClientLatency)
+	sw := c.metricsClient.StartTimer(metrics.AdminClientRemoveTaskScope, metrics.ClientLatency)
 	resp, err := c.client.RemoveTask(ctx, request, opts...)
 	sw.Stop()
 
 	if err != nil {
-		c.metricsClient.IncCounter(metrics.AdminClientCloseShardScope, metrics.ClientFailures)
+		c.metricsClient.IncCounter(metrics.AdminClientRemoveTaskScope, metrics.ClientFailures)
 	}
 	return resp, err
 }

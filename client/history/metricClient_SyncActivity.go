@@ -1,5 +1,5 @@
 func (c *metricClient) SyncActivity(
-	context context.Context,
+	ctx context.Context,
 	request *historyservice.SyncActivityRequest,
 	opts ...grpc.CallOption,
 ) (_ *historyservice.SyncActivityResponse, retError error) {
@@ -9,5 +9,5 @@ func (c *metricClient) SyncActivity(
 		c.finishMetricsRecording(scope, stopwatch, retError)
 	}()
 
-	return c.client.SyncActivity(context, request, opts...)
+	return c.client.SyncActivity(ctx, request, opts...)
 }

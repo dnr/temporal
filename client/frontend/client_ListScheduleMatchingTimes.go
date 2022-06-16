@@ -9,6 +9,5 @@ func (c *clientImpl) ListScheduleMatchingTimes(
 	}
 	ctx, cancel := c.createContext(ctx)
 	defer cancel()
-
 	return client.ListScheduleMatchingTimes(ctx, request, opts...)
 }

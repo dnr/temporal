@@ -1,12 +1,12 @@
 func (c *clientImpl) DescribeWorkflowExecution(
 	ctx context.Context,
 	request *historyservice.DescribeWorkflowExecutionRequest,
-	opts ...grpc.CallOption) (*historyservice.DescribeWorkflowExecutionResponse, error) {
+	opts ...grpc.CallOption,
+) (*historyservice.DescribeWorkflowExecutionResponse, error) {
 	client, err := c.getClientForWorkflowID(request.NamespaceId, request.Request.Execution.WorkflowId)
 	if err != nil {
 		return nil, err
 	}
-
 	var response *historyservice.DescribeWorkflowExecutionResponse
 	op := func(ctx context.Context, client historyservice.HistoryServiceClient) error {
 		var err error

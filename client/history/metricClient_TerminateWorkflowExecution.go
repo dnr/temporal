@@ -1,5 +1,5 @@
 func (c *metricClient) TerminateWorkflowExecution(
-	context context.Context,
+	ctx context.Context,
 	request *historyservice.TerminateWorkflowExecutionRequest,
 	opts ...grpc.CallOption,
 ) (_ *historyservice.TerminateWorkflowExecutionResponse, retError error) {
@@ -9,5 +9,5 @@ func (c *metricClient) TerminateWorkflowExecution(
 		c.finishMetricsRecording(scope, stopwatch, retError)
 	}()
 
-	return c.client.TerminateWorkflowExecution(context, request, opts...)
+	return c.client.TerminateWorkflowExecution(ctx, request, opts...)
 }

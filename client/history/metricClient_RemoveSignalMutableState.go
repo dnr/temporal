@@ -1,5 +1,5 @@
 func (c *metricClient) RemoveSignalMutableState(
-	context context.Context,
+	ctx context.Context,
 	request *historyservice.RemoveSignalMutableStateRequest,
 	opts ...grpc.CallOption,
 ) (_ *historyservice.RemoveSignalMutableStateResponse, retError error) {
@@ -9,5 +9,5 @@ func (c *metricClient) RemoveSignalMutableState(
 		c.finishMetricsRecording(scope, stopwatch, retError)
 	}()
 
-	return c.client.RemoveSignalMutableState(context, request, opts...)
+	return c.client.RemoveSignalMutableState(ctx, request, opts...)
 }

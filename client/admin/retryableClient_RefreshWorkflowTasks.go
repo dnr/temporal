@@ -3,7 +3,6 @@ func (c *retryableClient) RefreshWorkflowTasks(
 	request *adminservice.RefreshWorkflowTasksRequest,
 	opts ...grpc.CallOption,
 ) (*adminservice.RefreshWorkflowTasksResponse, error) {
-
 	var resp *adminservice.RefreshWorkflowTasksResponse
 	op := func() error {
 		var err error

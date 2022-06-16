@@ -3,7 +3,6 @@ func (c *retryableClient) MergeDLQMessages(
 	request *adminservice.MergeDLQMessagesRequest,
 	opts ...grpc.CallOption,
 ) (*adminservice.MergeDLQMessagesResponse, error) {
-
 	var resp *adminservice.MergeDLQMessagesResponse
 	op := func() error {
 		var err error

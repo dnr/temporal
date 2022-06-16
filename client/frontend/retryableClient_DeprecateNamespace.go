@@ -9,6 +9,6 @@ func (c *retryableClient) DeprecateNamespace(
 		resp, err = c.client.DeprecateNamespace(ctx, request, opts...)
 		return err
 	}
-
-	return resp, backoff.Retry(op, c.policy, c.isRetryable)
+	err := backoff.Retry(op, c.policy, c.isRetryable)
+	return resp, err
 }

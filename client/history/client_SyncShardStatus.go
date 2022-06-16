@@ -1,14 +1,12 @@
 func (c *clientImpl) SyncShardStatus(
 	ctx context.Context,
 	request *historyservice.SyncShardStatusRequest,
-	opts ...grpc.CallOption) (*historyservice.SyncShardStatusResponse, error) {
-
-	// we do not have a workflow ID here, instead, we have something even better
-	client, err := c.getClientForShardID(request.GetShardId())
+	opts ...grpc.CallOption,
+) (*historyservice.SyncShardStatusResponse, error) {
+	client, err := c.getClientForShardID(request.ShardId)
 	if err != nil {
 		return nil, err
 	}
-
 	var response *historyservice.SyncShardStatusResponse
 	op := func(ctx context.Context, client historyservice.HistoryServiceClient) error {
 		var err error
@@ -22,5 +20,4 @@ func (c *clientImpl) SyncShardStatus(
 		return nil, err
 	}
 	return response, nil
-
 }

@@ -3,14 +3,15 @@ func (c *metricClient) GetNamespaceReplicationMessages(
 	request *adminservice.GetNamespaceReplicationMessagesRequest,
 	opts ...grpc.CallOption,
 ) (*adminservice.GetNamespaceReplicationMessagesResponse, error) {
-	c.metricsClient.IncCounter(metrics.FrontendClientGetNamespaceReplicationTasksScope, metrics.ClientRequests)
 
-	sw := c.metricsClient.StartTimer(metrics.FrontendClientGetNamespaceReplicationTasksScope, metrics.ClientLatency)
+	c.metricsClient.IncCounter(metrics.AdminClientGetNamespaceReplicationMessagesScope, metrics.ClientRequests)
+
+	sw := c.metricsClient.StartTimer(metrics.AdminClientGetNamespaceReplicationMessagesScope, metrics.ClientLatency)
 	resp, err := c.client.GetNamespaceReplicationMessages(ctx, request, opts...)
 	sw.Stop()
 
 	if err != nil {
-		c.metricsClient.IncCounter(metrics.FrontendClientGetNamespaceReplicationTasksScope, metrics.ClientFailures)
+		c.metricsClient.IncCounter(metrics.AdminClientGetNamespaceReplicationMessagesScope, metrics.ClientFailures)
 	}
 	return resp, err
 }

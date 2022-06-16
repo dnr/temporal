@@ -1,9 +1,13 @@
 func (c *metricClient) RebuildMutableState(
-	context context.Context,
+	ctx context.Context,
 	request *historyservice.RebuildMutableStateRequest,
 	opts ...grpc.CallOption,
 ) (_ *historyservice.RebuildMutableStateResponse, retError error) {
-	resp, err := c.client.RebuildMutableState(context, request, opts...)
 
-	return resp, err
+	scope, stopwatch := c.startMetricsRecording(metrics.HistoryClientRebuildMutableStateScope)
+	defer func() {
+		c.finishMetricsRecording(scope, stopwatch, retError)
+	}()
+
+	return c.client.RebuildMutableState(ctx, request, opts...)
 }

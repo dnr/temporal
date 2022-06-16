@@ -7,7 +7,6 @@ func (c *clientImpl) VerifyChildExecutionCompletionRecorded(
 	if err != nil {
 		return nil, err
 	}
-
 	var response *historyservice.VerifyChildExecutionCompletionRecordedResponse
 	op := func(ctx context.Context, client historyservice.HistoryServiceClient) error {
 		var err error

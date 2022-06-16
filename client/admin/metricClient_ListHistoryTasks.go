@@ -3,6 +3,7 @@ func (c *metricClient) ListHistoryTasks(
 	request *adminservice.ListHistoryTasksRequest,
 	opts ...grpc.CallOption,
 ) (*adminservice.ListHistoryTasksResponse, error) {
+
 	c.metricsClient.IncCounter(metrics.AdminClientListHistoryTasksScope, metrics.ClientRequests)
 
 	sw := c.metricsClient.StartTimer(metrics.AdminClientListHistoryTasksScope, metrics.ClientLatency)

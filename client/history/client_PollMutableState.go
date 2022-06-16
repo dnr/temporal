@@ -1,12 +1,12 @@
 func (c *clientImpl) PollMutableState(
 	ctx context.Context,
 	request *historyservice.PollMutableStateRequest,
-	opts ...grpc.CallOption) (*historyservice.PollMutableStateResponse, error) {
+	opts ...grpc.CallOption,
+) (*historyservice.PollMutableStateResponse, error) {
 	client, err := c.getClientForWorkflowID(request.NamespaceId, request.Execution.WorkflowId)
 	if err != nil {
 		return nil, err
 	}
-
 	var response *historyservice.PollMutableStateResponse
 	op := func(ctx context.Context, client historyservice.HistoryServiceClient) error {
 		var err error

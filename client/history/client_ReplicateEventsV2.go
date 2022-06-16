@@ -1,12 +1,12 @@
 func (c *clientImpl) ReplicateEventsV2(
 	ctx context.Context,
 	request *historyservice.ReplicateEventsV2Request,
-	opts ...grpc.CallOption) (*historyservice.ReplicateEventsV2Response, error) {
-	client, err := c.getClientForWorkflowID(request.NamespaceId, request.WorkflowExecution.GetWorkflowId())
+	opts ...grpc.CallOption,
+) (*historyservice.ReplicateEventsV2Response, error) {
+	client, err := c.getClientForWorkflowID(request.NamespaceId, request.WorkflowExecution.WorkflowId)
 	if err != nil {
 		return nil, err
 	}
-
 	var response *historyservice.ReplicateEventsV2Response
 	op := func(ctx context.Context, client historyservice.HistoryServiceClient) error {
 		var err error
@@ -20,5 +20,4 @@ func (c *clientImpl) ReplicateEventsV2(
 		return nil, err
 	}
 	return response, nil
-
 }

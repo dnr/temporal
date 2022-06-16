@@ -3,7 +3,6 @@ func (c *retryableClient) GetDLQMessages(
 	request *adminservice.GetDLQMessagesRequest,
 	opts ...grpc.CallOption,
 ) (*adminservice.GetDLQMessagesResponse, error) {
-
 	var resp *adminservice.GetDLQMessagesResponse
 	op := func() error {
 		var err error

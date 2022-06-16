@@ -3,7 +3,6 @@ func (c *retryableClient) GetWorkflowExecutionRawHistoryV2(
 	request *adminservice.GetWorkflowExecutionRawHistoryV2Request,
 	opts ...grpc.CallOption,
 ) (*adminservice.GetWorkflowExecutionRawHistoryV2Response, error) {
-
 	var resp *adminservice.GetWorkflowExecutionRawHistoryV2Response
 	op := func() error {
 		var err error

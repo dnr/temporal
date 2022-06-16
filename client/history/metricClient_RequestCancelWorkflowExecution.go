@@ -1,5 +1,5 @@
 func (c *metricClient) RequestCancelWorkflowExecution(
-	context context.Context,
+	ctx context.Context,
 	request *historyservice.RequestCancelWorkflowExecutionRequest,
 	opts ...grpc.CallOption,
 ) (_ *historyservice.RequestCancelWorkflowExecutionResponse, retError error) {
@@ -9,5 +9,5 @@ func (c *metricClient) RequestCancelWorkflowExecution(
 		c.finishMetricsRecording(scope, stopwatch, retError)
 	}()
 
-	return c.client.RequestCancelWorkflowExecution(context, request, opts...)
+	return c.client.RequestCancelWorkflowExecution(ctx, request, opts...)
 }

@@ -5,6 +5,7 @@ func (c *metricClient) DeleteWorkflowExecution(
 ) (*adminservice.DeleteWorkflowExecutionResponse, error) {
 
 	c.metricsClient.IncCounter(metrics.AdminClientDeleteWorkflowExecutionScope, metrics.ClientRequests)
+
 	sw := c.metricsClient.StartTimer(metrics.AdminClientDeleteWorkflowExecutionScope, metrics.ClientLatency)
 	resp, err := c.client.DeleteWorkflowExecution(ctx, request, opts...)
 	sw.Stop()

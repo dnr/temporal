@@ -1,5 +1,5 @@
 func (c *metricClient) ReapplyEvents(
-	context context.Context,
+	ctx context.Context,
 	request *historyservice.ReapplyEventsRequest,
 	opts ...grpc.CallOption,
 ) (_ *historyservice.ReapplyEventsResponse, retError error) {
@@ -9,5 +9,5 @@ func (c *metricClient) ReapplyEvents(
 		c.finishMetricsRecording(scope, stopwatch, retError)
 	}()
 
-	return c.client.ReapplyEvents(context, request, opts...)
+	return c.client.ReapplyEvents(ctx, request, opts...)
 }

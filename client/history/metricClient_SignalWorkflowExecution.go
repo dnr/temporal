@@ -1,5 +1,5 @@
 func (c *metricClient) SignalWorkflowExecution(
-	context context.Context,
+	ctx context.Context,
 	request *historyservice.SignalWorkflowExecutionRequest,
 	opts ...grpc.CallOption,
 ) (_ *historyservice.SignalWorkflowExecutionResponse, retError error) {
@@ -9,5 +9,5 @@ func (c *metricClient) SignalWorkflowExecution(
 		c.finishMetricsRecording(scope, stopwatch, retError)
 	}()
 
-	return c.client.SignalWorkflowExecution(context, request, opts...)
+	return c.client.SignalWorkflowExecution(ctx, request, opts...)
 }

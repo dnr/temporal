@@ -3,11 +3,10 @@ func (c *clientImpl) GenerateLastHistoryReplicationTasks(
 	request *historyservice.GenerateLastHistoryReplicationTasksRequest,
 	opts ...grpc.CallOption,
 ) (*historyservice.GenerateLastHistoryReplicationTasksResponse, error) {
-	client, err := c.getClientForWorkflowID(request.NamespaceId, request.GetExecution().GetWorkflowId())
+	client, err := c.getClientForWorkflowID(request.NamespaceId, request.Execution.WorkflowId)
 	if err != nil {
 		return nil, err
 	}
-
 	var response *historyservice.GenerateLastHistoryReplicationTasksResponse
 	op := func(ctx context.Context, client historyservice.HistoryServiceClient) error {
 		var err error

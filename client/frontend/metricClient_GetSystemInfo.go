@@ -5,6 +5,7 @@ func (c *metricClient) GetSystemInfo(
 ) (*workflowservice.GetSystemInfoResponse, error) {
 
 	c.metricsClient.IncCounter(metrics.FrontendClientGetSystemInfoScope, metrics.ClientRequests)
+
 	sw := c.metricsClient.StartTimer(metrics.FrontendClientGetSystemInfoScope, metrics.ClientLatency)
 	resp, err := c.client.GetSystemInfo(ctx, request, opts...)
 	sw.Stop()

@@ -1,12 +1,12 @@
 func (c *clientImpl) SignalWorkflowExecution(
 	ctx context.Context,
 	request *historyservice.SignalWorkflowExecutionRequest,
-	opts ...grpc.CallOption) (*historyservice.SignalWorkflowExecutionResponse, error) {
+	opts ...grpc.CallOption,
+) (*historyservice.SignalWorkflowExecutionResponse, error) {
 	client, err := c.getClientForWorkflowID(request.NamespaceId, request.SignalRequest.WorkflowExecution.WorkflowId)
 	if err != nil {
 		return nil, err
 	}
-
 	var response *historyservice.SignalWorkflowExecutionResponse
 	op := func(ctx context.Context, client historyservice.HistoryServiceClient) error {
 		var err error
@@ -20,5 +20,4 @@ func (c *clientImpl) SignalWorkflowExecution(
 		return nil, err
 	}
 	return response, nil
-
 }

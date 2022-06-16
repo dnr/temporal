@@ -7,7 +7,6 @@ func (c *clientImpl) VerifyFirstWorkflowTaskScheduled(
 	if err != nil {
 		return nil, err
 	}
-
 	var response *historyservice.VerifyFirstWorkflowTaskScheduledResponse
 	op := func(ctx context.Context, client historyservice.HistoryServiceClient) error {
 		var err error
@@ -21,5 +20,4 @@ func (c *clientImpl) VerifyFirstWorkflowTaskScheduled(
 		return nil, err
 	}
 	return response, nil
-
 }

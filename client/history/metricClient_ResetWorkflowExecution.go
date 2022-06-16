@@ -1,5 +1,5 @@
 func (c *metricClient) ResetWorkflowExecution(
-	context context.Context,
+	ctx context.Context,
 	request *historyservice.ResetWorkflowExecutionRequest,
 	opts ...grpc.CallOption,
 ) (_ *historyservice.ResetWorkflowExecutionResponse, retError error) {
@@ -9,5 +9,5 @@ func (c *metricClient) ResetWorkflowExecution(
 		c.finishMetricsRecording(scope, stopwatch, retError)
 	}()
 
-	return c.client.ResetWorkflowExecution(context, request, opts...)
+	return c.client.ResetWorkflowExecution(ctx, request, opts...)
 }

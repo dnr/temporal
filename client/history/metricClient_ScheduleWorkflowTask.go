@@ -1,5 +1,5 @@
 func (c *metricClient) ScheduleWorkflowTask(
-	context context.Context,
+	ctx context.Context,
 	request *historyservice.ScheduleWorkflowTaskRequest,
 	opts ...grpc.CallOption,
 ) (_ *historyservice.ScheduleWorkflowTaskResponse, retError error) {
@@ -9,5 +9,5 @@ func (c *metricClient) ScheduleWorkflowTask(
 		c.finishMetricsRecording(scope, stopwatch, retError)
 	}()
 
-	return c.client.ScheduleWorkflowTask(context, request, opts...)
+	return c.client.ScheduleWorkflowTask(ctx, request, opts...)
 }

@@ -3,7 +3,6 @@ func (c *retryableClient) ResendReplicationTasks(
 	request *adminservice.ResendReplicationTasksRequest,
 	opts ...grpc.CallOption,
 ) (*adminservice.ResendReplicationTasksResponse, error) {
-
 	var resp *adminservice.ResendReplicationTasksResponse
 	op := func() error {
 		var err error

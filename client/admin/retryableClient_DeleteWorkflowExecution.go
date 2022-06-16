@@ -3,7 +3,6 @@ func (c *retryableClient) DeleteWorkflowExecution(
 	request *adminservice.DeleteWorkflowExecutionRequest,
 	opts ...grpc.CallOption,
 ) (*adminservice.DeleteWorkflowExecutionResponse, error) {
-
 	var resp *adminservice.DeleteWorkflowExecutionResponse
 	op := func() error {
 		var err error

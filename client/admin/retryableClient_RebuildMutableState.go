@@ -3,7 +3,6 @@ func (c *retryableClient) RebuildMutableState(
 	request *adminservice.RebuildMutableStateRequest,
 	opts ...grpc.CallOption,
 ) (*adminservice.RebuildMutableStateResponse, error) {
-
 	var resp *adminservice.RebuildMutableStateResponse
 	op := func() error {
 		var err error

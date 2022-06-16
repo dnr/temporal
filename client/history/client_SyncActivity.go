@@ -1,13 +1,12 @@
 func (c *clientImpl) SyncActivity(
 	ctx context.Context,
 	request *historyservice.SyncActivityRequest,
-	opts ...grpc.CallOption) (*historyservice.SyncActivityResponse, error) {
-
-	client, err := c.getClientForWorkflowID(request.NamespaceId, request.GetWorkflowId())
+	opts ...grpc.CallOption,
+) (*historyservice.SyncActivityResponse, error) {
+	client, err := c.getClientForWorkflowID(request.NamespaceId, request.WorkflowId)
 	if err != nil {
 		return nil, err
 	}
-
 	var response *historyservice.SyncActivityResponse
 	op := func(ctx context.Context, client historyservice.HistoryServiceClient) error {
 		var err error
@@ -21,5 +20,4 @@ func (c *clientImpl) SyncActivity(
 		return nil, err
 	}
 	return response, nil
-
 }

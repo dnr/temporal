@@ -1,5 +1,5 @@
 func (c *metricClient) GetMutableState(
-	context context.Context,
+	ctx context.Context,
 	request *historyservice.GetMutableStateRequest,
 	opts ...grpc.CallOption,
 ) (_ *historyservice.GetMutableStateResponse, retError error) {
@@ -9,5 +9,5 @@ func (c *metricClient) GetMutableState(
 		c.finishMetricsRecording(scope, stopwatch, retError)
 	}()
 
-	return c.client.GetMutableState(context, request, opts...)
+	return c.client.GetMutableState(ctx, request, opts...)
 }

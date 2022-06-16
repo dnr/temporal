@@ -5,6 +5,7 @@ func (c *metricClient) MergeDLQMessages(
 ) (*adminservice.MergeDLQMessagesResponse, error) {
 
 	c.metricsClient.IncCounter(metrics.AdminClientMergeDLQMessagesScope, metrics.ClientRequests)
+
 	sw := c.metricsClient.StartTimer(metrics.AdminClientMergeDLQMessagesScope, metrics.ClientLatency)
 	resp, err := c.client.MergeDLQMessages(ctx, request, opts...)
 	sw.Stop()

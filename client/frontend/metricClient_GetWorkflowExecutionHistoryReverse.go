@@ -3,6 +3,7 @@ func (c *metricClient) GetWorkflowExecutionHistoryReverse(
 	request *workflowservice.GetWorkflowExecutionHistoryReverseRequest,
 	opts ...grpc.CallOption,
 ) (*workflowservice.GetWorkflowExecutionHistoryReverseResponse, error) {
+
 	c.metricsClient.IncCounter(metrics.FrontendClientGetWorkflowExecutionHistoryReverseScope, metrics.ClientRequests)
 
 	sw := c.metricsClient.StartTimer(metrics.FrontendClientGetWorkflowExecutionHistoryReverseScope, metrics.ClientLatency)

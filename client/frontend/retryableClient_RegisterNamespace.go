@@ -9,6 +9,6 @@ func (c *retryableClient) RegisterNamespace(
 		resp, err = c.client.RegisterNamespace(ctx, request, opts...)
 		return err
 	}
-
-	return resp, backoff.Retry(op, c.policy, c.isRetryable)
+	err := backoff.Retry(op, c.policy, c.isRetryable)
+	return resp, err
 }

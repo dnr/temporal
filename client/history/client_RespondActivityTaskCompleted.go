@@ -1,16 +1,17 @@
 func (c *clientImpl) RespondActivityTaskCompleted(
 	ctx context.Context,
 	request *historyservice.RespondActivityTaskCompletedRequest,
-	opts ...grpc.CallOption) (*historyservice.RespondActivityTaskCompletedResponse, error) {
+	opts ...grpc.CallOption,
+) (*historyservice.RespondActivityTaskCompletedResponse, error) {
 	taskToken, err := c.tokenSerializer.Deserialize(request.CompleteRequest.TaskToken)
 	if err != nil {
 		return nil, err
 	}
 	client, err := c.getClientForWorkflowID(request.NamespaceId, taskToken.GetWorkflowId())
+
 	if err != nil {
 		return nil, err
 	}
-
 	var response *historyservice.RespondActivityTaskCompletedResponse
 	op := func(ctx context.Context, client historyservice.HistoryServiceClient) error {
 		var err error
@@ -24,5 +25,4 @@ func (c *clientImpl) RespondActivityTaskCompleted(
 		return nil, err
 	}
 	return response, nil
-
 }
