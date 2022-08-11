@@ -49,11 +49,6 @@ import (
 type (
 	// Factory can be used to create RPC clients for temporal services
 	Factory interface {
-		NewHistoryClient() (historyservice.HistoryServiceClient, error)
-		NewMatchingClient(namespaceIDToName NamespaceIDToNameFunc) (matchingservice.MatchingServiceClient, error)
-		NewRemoteFrontendClient(rpcAddress string) (workflowservice.WorkflowServiceClient, error)
-		NewLocalFrontendClient() (workflowservice.WorkflowServiceClient, error)
-
 		NewHistoryClientWithTimeout(timeout time.Duration) (historyservice.HistoryServiceClient, error)
 		NewMatchingClientWithTimeout(namespaceIDToName NamespaceIDToNameFunc, timeout time.Duration, longPollTimeout time.Duration) (matchingservice.MatchingServiceClient, error)
 		NewRemoteFrontendClientWithTimeout(rpcAddress string, timeout time.Duration, longPollTimeout time.Duration) workflowservice.WorkflowServiceClient
@@ -128,22 +123,6 @@ func (p *factoryProviderImpl) NewFactory(
 		logger:                logger,
 		throttledLogger:       throttledLogger,
 	}
-}
-
-func (cf *rpcClientFactory) NewHistoryClient() (historyservice.HistoryServiceClient, error) {
-	return cf.NewHistoryClientWithTimeout(history.DefaultTimeout)
-}
-
-func (cf *rpcClientFactory) NewMatchingClient(namespaceIDToName NamespaceIDToNameFunc) (matchingservice.MatchingServiceClient, error) {
-	return cf.NewMatchingClientWithTimeout(namespaceIDToName, matching.DefaultTimeout, matching.DefaultLongPollTimeout)
-}
-
-func (cf *rpcClientFactory) NewRemoteFrontendClient(rpcAddress string) (workflowservice.WorkflowServiceClient, error) {
-	return cf.NewRemoteFrontendClientWithTimeout(rpcAddress, frontend.DefaultTimeout, frontend.DefaultLongPollTimeout), nil
-}
-
-func (cf *rpcClientFactory) NewLocalFrontendClient() (workflowservice.WorkflowServiceClient, error) {
-	return cf.NewLocalFrontendClientWithTimeout(frontend.DefaultTimeout, frontend.DefaultLongPollTimeout)
 }
 
 func (cf *rpcClientFactory) NewHistoryClientWithTimeout(timeout time.Duration) (historyservice.HistoryServiceClient, error) {
