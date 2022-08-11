@@ -77,6 +77,8 @@ func NewClientFactory(hostPort string, tlsConfig *tls.Config, metricsHandler *Me
 }
 
 func (f *clientFactory) NewClient(namespaceName string, logger log.Logger) (sdkclient.Client, error) {
+	// TODO: after upgrading SDK, use NewClientFromExisting so all clients share a connection
+
 	var client sdkclient.Client
 
 	// Retry for up to 1m, handles frontend service not ready

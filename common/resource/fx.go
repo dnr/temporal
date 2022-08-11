@@ -114,6 +114,7 @@ var Module = fx.Options(
 	fx.Provide(MatchingRawClientProvider),
 	fx.Provide(MatchingClientProvider),
 	membership.HostInfoProviderModule,
+	membership.GRPCResolverProviderModule,
 	fx.Invoke(RegisterBootstrapContainer),
 	fx.Provide(PersistenceConfigProvider),
 	fx.Provide(MetricsClientProvider),
@@ -389,14 +390,15 @@ func ArchiverProviderProvider(cfg *config.Config) provider.ArchiverProvider {
 }
 
 func SdkClientFactoryProvider(cfg *config.Config, tlsConfigProvider encryption.TLSConfigProvider, provider metrics.MetricsHandler) (sdk.ClientFactory, error) {
-	tlsFrontendConfig, err := tlsConfigProvider.GetFrontendClientConfig()
+	// FIXME: should this use GetFrontendClientTlsConfig or GetInternodeClientConfig?
+	tlsClientConfig, err := tlsConfigProvider.GetInternodeClientConfig()
 	if err != nil {
 		return nil, fmt.Errorf("unable to load frontend TLS configuration: %w", err)
 	}
 
 	return sdk.NewClientFactory(
-		cfg.PublicClient.HostPort,
-		tlsFrontendConfig,
+		membership.MakeGRPCResolverURL(common.FrontendServiceName),
+		tlsClientConfig,
 		sdk.NewMetricsHandler(provider),
 	), nil
 }

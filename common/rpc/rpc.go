@@ -38,6 +38,7 @@ import (
 	"go.temporal.io/server/common/dynamicconfig"
 	"go.temporal.io/server/common/log"
 	"go.temporal.io/server/common/log/tag"
+	"go.temporal.io/server/common/membership"
 	"go.temporal.io/server/common/rpc/encryption"
 )
 
@@ -206,18 +207,19 @@ func (d *RPCFactory) CreateRemoteFrontendGRPCConnection(rpcAddress string) *grpc
 }
 
 // CreateLocalFrontendGRPCConnection creates connection for internal calls
-func (d *RPCFactory) CreateLocalFrontendGRPCConnection(rpcAddress string) *grpc.ClientConn {
+func (d *RPCFactory) CreateLocalFrontendGRPCConnection() *grpc.ClientConn {
 	var tlsClientConfig *tls.Config
 	var err error
 	if d.tlsFactory != nil {
-		tlsClientConfig, err = d.tlsFactory.GetFrontendClientConfig()
+		// FIXME: should this use GetFrontendClientTlsConfig or GetInternodeClientConfig?
+		tlsClientConfig, err = d.tlsFactory.GetInternodeClientConfig()
 		if err != nil {
 			d.logger.Fatal("Failed to create tls config for gRPC connection", tag.Error(err))
 			return nil
 		}
 	}
 
-	return d.dial(rpcAddress, tlsClientConfig)
+	return d.dial(membership.MakeGRPCResolverURL(common.FrontendServiceName), tlsClientConfig)
 }
 
 // CreateInternodeGRPCConnection creates connection for gRPC calls
