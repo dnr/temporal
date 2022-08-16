@@ -374,13 +374,7 @@ func (c *temporalImpl) startFrontend(hosts map[string][]string, startWG *sync.Wa
 		fx.Provide(func() *cluster.Config { return c.clusterMetadataConfig }),
 		fx.Provide(func() carchiver.ArchivalMetadata { return c.archiverMetadata }),
 		fx.Provide(func() provider.ArchiverProvider { return c.archiverProvider }),
-		fx.Provide(func() sdk.ClientFactory {
-			return sdk.NewClientFactory(
-				c.FrontendGRPCAddress(),
-				nil,
-				sdk.NewMetricsHandler(metrics.NoopMetricsHandler),
-			)
-		}),
+		fx.Provide(sdkClientFactoryProvider),
 		fx.Provide(func() metrics.MetricsHandler { return metrics.NoopMetricsHandler }),
 		fx.Provide(func() []grpc.UnaryServerInterceptor { return nil }),
 		fx.Provide(func() authorization.Authorizer { return nil }),
@@ -388,7 +382,7 @@ func (c *temporalImpl) startFrontend(hosts map[string][]string, startWG *sync.Wa
 		fx.Provide(func() authorization.JWTAudienceMapper { return nil }),
 		fx.Provide(func() client.FactoryProvider { return client.NewFactoryProvider() }),
 		fx.Provide(func() searchattribute.Mapper { return nil }),
-		// Comment the line above and uncomment the line bellow to test with search attributes mapper.
+		// Comment the line above and uncomment the line below to test with search attributes mapper.
 		// fx.Provide(func() searchattribute.Mapper { return NewSearchAttributeTestMapper() }),
 		fx.Provide(func() resolver.ServiceResolver { return resolver.NewNoopResolver() }),
 		fx.Provide(persistenceClient.FactoryProvider),
@@ -471,16 +465,10 @@ func (c *temporalImpl) startHistory(
 			fx.Provide(func() *cluster.Config { return c.clusterMetadataConfig }),
 			fx.Provide(func() carchiver.ArchivalMetadata { return c.archiverMetadata }),
 			fx.Provide(func() provider.ArchiverProvider { return c.archiverProvider }),
-			fx.Provide(func() sdk.ClientFactory {
-				return sdk.NewClientFactory(
-					c.FrontendGRPCAddress(),
-					nil,
-					sdk.NewMetricsHandler(metrics.NoopMetricsHandler),
-				)
-			}),
+			fx.Provide(sdkClientFactoryProvider),
 			fx.Provide(func() client.FactoryProvider { return client.NewFactoryProvider() }),
 			fx.Provide(func() searchattribute.Mapper { return nil }),
-			// Comment the line above and uncomment the line bellow to test with search attributes mapper.
+			// Comment the line above and uncomment the line below to test with search attributes mapper.
 			// fx.Provide(func() searchattribute.Mapper { return NewSearchAttributeTestMapper() }),
 			fx.Provide(func() resolver.ServiceResolver { return resolver.NewNoopResolver() }),
 			fx.Provide(persistenceClient.FactoryProvider),
@@ -649,13 +637,7 @@ func (c *temporalImpl) startWorker(hosts map[string][]string, startWG *sync.Wait
 		fx.Provide(func() *cluster.Config { return &clusterConfigCopy }),
 		fx.Provide(func() carchiver.ArchivalMetadata { return c.archiverMetadata }),
 		fx.Provide(func() provider.ArchiverProvider { return c.archiverProvider }),
-		fx.Provide(func() sdk.ClientFactory {
-			return sdk.NewClientFactory(
-				c.FrontendGRPCAddress(),
-				nil,
-				sdk.NewMetricsHandler(metrics.NoopMetricsHandler),
-			)
-		}),
+		fx.Provide(sdkClientFactoryProvider),
 		fx.Provide(func() sdk.WorkerFactory { return sdk.NewWorkerFactory() }),
 		fx.Provide(func() client.FactoryProvider { return client.NewFactoryProvider() }),
 		fx.Provide(func() searchattribute.Mapper { return nil }),
@@ -748,6 +730,14 @@ func copyPersistenceConfig(pConfig config.Persistence) (config.Persistence, erro
 	}
 	pConfig.DataStores = copiedDataStores
 	return pConfig, nil
+}
+
+func sdkClientFactoryProvider(metricsHandler metrics.MetricsHandler) sdk.ClientFactory {
+	return sdk.NewClientFactory(
+		membership.MakeGRPCResolverURL(common.FrontendServiceName),
+		nil,
+		sdk.NewMetricsHandler(metricsHandler),
+	)
 }
 
 type rpcFactoryImpl struct {
