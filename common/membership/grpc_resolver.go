@@ -98,7 +98,8 @@ func (m *grpcResolver) resolve() {
 	members := m.r.Members()
 	if len(members) == 0 {
 		// grpc considers it an error if we report no addresses, and fails the connection eagerly.
-		// Instead, just wait until we're notified by membership.
+		// Instead, just poke membership and then wait until it notifies us.
+		m.r.RequestRefresh()
 		return
 	}
 	addresses := make([]resolver.Address, 0, len(members))
