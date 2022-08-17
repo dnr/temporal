@@ -31,6 +31,7 @@ import "dependencies/gogoproto/gogo.proto";
 import "temporal/api/common/v1/message.proto";
 import "temporal/api/enums/v1/workflow.proto";
 import "temporal/api/failure/v1/message.proto";
+import "temporal/api/taskqueue/v1/message.proto";
 import "temporal/api/workflow/v1/message.proto";
 
 import "temporal/server/api/clock/v1/message.proto";
@@ -139,6 +140,8 @@ message WorkflowExecutionInfo {
     // Used to check if visibility close task is processed before deleting the workflow execution.
     int64 close_visibility_task_id = 65;
     google.protobuf.Timestamp close_time = 66 [(gogoproto.stdtime) = true];
+    // For build-id based versioning. Build id of last workflow task completed, or missing if not versioned.
+    temporal.api.taskqueue.v1.VersionId worker_versioning_id = 67;
 }
 
 message ExecutionStats {

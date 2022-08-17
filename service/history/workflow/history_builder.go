@@ -235,14 +235,16 @@ func (b *HistoryBuilder) AddWorkflowTaskCompletedEvent(
 	startedEventID int64,
 	identity string,
 	checksum string,
+	workerVersioningID *taskqueuepb.VersionId,
 ) *historypb.HistoryEvent {
 	event := b.createNewHistoryEvent(enumspb.EVENT_TYPE_WORKFLOW_TASK_COMPLETED, b.timeSource.Now())
 	event.Attributes = &historypb.HistoryEvent_WorkflowTaskCompletedEventAttributes{
 		WorkflowTaskCompletedEventAttributes: &historypb.WorkflowTaskCompletedEventAttributes{
-			ScheduledEventId: scheduledEventID,
-			StartedEventId:   startedEventID,
-			Identity:         identity,
-			BinaryChecksum:   checksum,
+			ScheduledEventId:   scheduledEventID,
+			StartedEventId:     startedEventID,
+			Identity:           identity,
+			BinaryChecksum:     checksum,
+			WorkerVersioningId: workerVersioningID,
 		},
 	}
 

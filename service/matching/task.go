@@ -26,6 +26,7 @@ package matching
 
 import (
 	commonpb "go.temporal.io/api/common/v1"
+	taskqueuepb "go.temporal.io/api/taskqueue/v1"
 
 	enumsspb "go.temporal.io/server/api/enums/v1"
 	"go.temporal.io/server/api/matchingservice/v1"
@@ -51,7 +52,7 @@ type (
 		activityTaskInfo *matchingservice.PollActivityTaskQueueResponse
 	}
 	// internalTask represents an activity, workflow, query or started (received from another host).
-	// this struct is more like a union and only one of [ query, event, forwarded ] is
+	// this struct is more like a union and only one of [ query, event, started ] is
 	// non-nil for any given task
 	internalTask struct {
 		event            *genericTaskInfo // non-nil for activity or workflow task that's locally generated
@@ -154,6 +155,20 @@ func (task *internalTask) pollActivityTaskQueueResponse() *matchingservice.PollA
 		return task.started.activityTaskInfo
 	}
 	return nil
+}
+
+func (task *internalTask) lastBuildID() *taskqueuepb.VersionId {
+	switch {
+	case task.event != nil:
+		// FIXME: Data was observed to be nil in a test. how is that possible?
+		return task.event.Data.GetWorkerVersioningId()
+	case task.query != nil:
+		return task.query.request.GetWorkerVersioningId()
+	default:
+		// This case shouldn't happen: lastBuildID is only called from the Offer methods, so we
+		// should have an event or query task.
+		return nil
+	}
 }
 
 // finish marks a task as finished. Should be called after a poller picks up a task

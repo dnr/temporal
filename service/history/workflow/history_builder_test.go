@@ -666,6 +666,7 @@ func (s *historyBuilderSuite) TestWorkflowTaskCompleted() {
 		startedEventID,
 		testIdentity,
 		checksum,
+		&taskqueuepb.VersionId{WorkerBuildId: "build_id_9"},
 	)
 	s.Equal(event, s.flush())
 	s.Equal(&historypb.HistoryEvent{
@@ -676,10 +677,11 @@ func (s *historyBuilderSuite) TestWorkflowTaskCompleted() {
 		Version:   s.version,
 		Attributes: &historypb.HistoryEvent_WorkflowTaskCompletedEventAttributes{
 			WorkflowTaskCompletedEventAttributes: &historypb.WorkflowTaskCompletedEventAttributes{
-				ScheduledEventId: scheduledEventID,
-				StartedEventId:   startedEventID,
-				Identity:         testIdentity,
-				BinaryChecksum:   checksum,
+				ScheduledEventId:   scheduledEventID,
+				StartedEventId:     startedEventID,
+				Identity:           testIdentity,
+				BinaryChecksum:     checksum,
+				WorkerVersioningId: &taskqueuepb.VersionId{WorkerBuildId: "build_id_9"},
 			},
 		},
 	}, event)

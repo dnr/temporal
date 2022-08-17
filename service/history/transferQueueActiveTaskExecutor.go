@@ -173,12 +173,13 @@ func (t *transferQueueActiveTaskExecutor) processActivityTask(
 	}
 
 	timeout := timestamp.DurationValue(ai.ScheduleToStartTimeout)
+	workerVersioningID := mutableState.GetWorkerVersioningID()
 
 	// NOTE: do not access anything related mutable state after this lock release
 	// release the context lock since we no longer need mutable state builder and
 	// the rest of logic is making RPC call, which takes time.
 	release(nil)
-	return t.pushActivity(ctx, task, &timeout)
+	return t.pushActivity(ctx, task, &timeout, workerVersioningID)
 }
 
 func (t *transferQueueActiveTaskExecutor) processWorkflowTask(
@@ -238,12 +239,14 @@ func (t *transferQueueActiveTaskExecutor) processWorkflowTask(
 	}
 
 	originalTaskQueue := mutableState.GetExecutionInfo().TaskQueue
+	workerVersioningID := mutableState.GetWorkerVersioningID()
+
 	// NOTE: do not access anything related mutable state after this lock release
 	// release the context lock since we no longer need mutable state builder and
 	// the rest of logic is making RPC call, which takes time.
 	release(nil)
 
-	err = t.pushWorkflowTask(ctx, task, taskQueue, timestamp.DurationFromSeconds(taskScheduleToStartTimeoutSeconds))
+	err = t.pushWorkflowTask(ctx, task, taskQueue, timestamp.DurationFromSeconds(taskScheduleToStartTimeoutSeconds), workerVersioningID)
 
 	if _, ok := err.(*serviceerrors.StickyWorkerUnavailable); ok {
 		// sticky worker is unavailable, switch to original task queue
@@ -258,7 +261,7 @@ func (t *transferQueueActiveTaskExecutor) processWorkflowTask(
 		// There is no need to reset sticky, because if this task is picked by new worker, the new worker will reset
 		// the sticky queue to a new one. However, if worker is completely down, that schedule_to_start timeout task
 		// will re-create a new non-sticky task and reset sticky.
-		err = t.pushWorkflowTask(ctx, task, taskQueue, timestamp.DurationFromSeconds(taskScheduleToStartTimeoutSeconds))
+		err = t.pushWorkflowTask(ctx, task, taskQueue, timestamp.DurationFromSeconds(taskScheduleToStartTimeoutSeconds), workerVersioningID)
 	}
 	return err
 }

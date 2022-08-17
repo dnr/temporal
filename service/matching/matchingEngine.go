@@ -87,6 +87,11 @@ type (
 		queueType   enumspb.TaskQueueKind
 	}
 
+	pollMetadata struct {
+		maxDispatchPerSecond *float64
+		workerVersioningID   taskqueuepb.VersionId // for task queue versioning
+	}
+
 	matchingEngineImpl struct {
 		status               int32
 		taskManager          persistence.TaskManager
@@ -280,13 +285,14 @@ func (e *matchingEngineImpl) AddWorkflowTask(
 		expirationTime = timestamp.TimePtr(now.Add(expirationDuration))
 	}
 	taskInfo := &persistencespb.TaskInfo{
-		NamespaceId:      namespaceID.String(),
-		RunId:            addRequest.Execution.GetRunId(),
-		WorkflowId:       addRequest.Execution.GetWorkflowId(),
-		ScheduledEventId: addRequest.GetScheduledEventId(),
-		Clock:            addRequest.GetClock(),
-		ExpiryTime:       expirationTime,
-		CreateTime:       now,
+		NamespaceId:        namespaceID.String(),
+		RunId:              addRequest.Execution.GetRunId(),
+		WorkflowId:         addRequest.Execution.GetWorkflowId(),
+		ScheduledEventId:   addRequest.GetScheduledEventId(),
+		Clock:              addRequest.GetClock(),
+		ExpiryTime:         expirationTime,
+		CreateTime:         now,
+		WorkerVersioningId: addRequest.WorkerVersioningId,
 	}
 
 	return tqm.AddTask(hCtx.Context, addTaskParams{
@@ -303,7 +309,6 @@ func (e *matchingEngineImpl) AddActivityTask(
 	addRequest *matchingservice.AddActivityTaskRequest,
 ) (bool, error) {
 	namespaceID := namespace.ID(addRequest.GetNamespaceId())
-	runID := addRequest.Execution.GetRunId()
 	taskQueueName := addRequest.TaskQueue.GetName()
 	taskQueueKind := addRequest.TaskQueue.GetKind()
 
@@ -326,13 +331,14 @@ func (e *matchingEngineImpl) AddActivityTask(
 		expirationTime = timestamp.TimePtr(now.Add(expirationDuration))
 	}
 	taskInfo := &persistencespb.TaskInfo{
-		NamespaceId:      namespaceID.String(),
-		RunId:            runID,
-		WorkflowId:       addRequest.Execution.GetWorkflowId(),
-		ScheduledEventId: addRequest.GetScheduledEventId(),
-		Clock:            addRequest.GetClock(),
-		CreateTime:       now,
-		ExpiryTime:       expirationTime,
+		NamespaceId:        namespaceID.String(),
+		RunId:              addRequest.Execution.GetRunId(),
+		WorkflowId:         addRequest.Execution.GetWorkflowId(),
+		ScheduledEventId:   addRequest.GetScheduledEventId(),
+		Clock:              addRequest.GetClock(),
+		CreateTime:         now,
+		ExpiryTime:         expirationTime,
+		WorkerVersioningId: addRequest.WorkerVersioningId,
 	}
 
 	return tlMgr.AddTask(hCtx.Context, addTaskParams{
@@ -368,7 +374,11 @@ pollLoop:
 			return nil, err
 		}
 		taskQueueKind := request.TaskQueue.GetKind()
-		task, err := e.getTask(pollerCtx, taskQueue, nil, taskQueueKind)
+		pollMetadata := &pollMetadata{}
+		if request.WorkerVersioningId != nil {
+			pollMetadata.workerVersioningID = *request.WorkerVersioningId
+		}
+		task, err := e.getTask(pollerCtx, taskQueue, pollMetadata, taskQueueKind)
 		if err != nil {
 			// TODO: Is empty poll the best reply for errPumpClosed?
 			if err == ErrNoTasks || err == errPumpClosed {
@@ -470,16 +480,19 @@ pollLoop:
 			return nil, err
 		}
 
-		var maxDispatch *float64
-		if request.TaskQueueMetadata != nil && request.TaskQueueMetadata.MaxTasksPerSecond != nil {
-			maxDispatch = &request.TaskQueueMetadata.MaxTasksPerSecond.Value
-		}
 		// Add frontend generated pollerID to context so taskqueueMgr can support cancellation of
 		// long-poll when frontend calls CancelOutstandingPoll API
 		pollerCtx := context.WithValue(hCtx.Context, pollerIDKey, pollerID)
 		pollerCtx = context.WithValue(pollerCtx, identityKey, request.GetIdentity())
 		taskQueueKind := request.TaskQueue.GetKind()
-		task, err := e.getTask(pollerCtx, taskQueue, maxDispatch, taskQueueKind)
+		pollMetadata := &pollMetadata{}
+		if request.WorkerVersioningId != nil {
+			pollMetadata.workerVersioningID = *request.WorkerVersioningId
+		}
+		if request.TaskQueueMetadata != nil && request.TaskQueueMetadata.MaxTasksPerSecond != nil {
+			pollMetadata.maxDispatchPerSecond = &request.TaskQueueMetadata.MaxTasksPerSecond.Value
+		}
+		task, err := e.getTask(pollerCtx, taskQueue, pollMetadata, taskQueueKind)
 		if err != nil {
 			// TODO: Is empty poll the best reply for errPumpClosed?
 			if err == ErrNoTasks || err == errPumpClosed {
@@ -736,7 +749,7 @@ func (e *matchingEngineImpl) GetWorkerBuildIdOrdering(
 		}
 		return nil, err
 	}
-	verDat, err := tqMgr.GetVersioningData(hCtx.Context)
+	data, err := tqMgr.GetVersioningData(hCtx.Context)
 	if err != nil {
 		if _, ok := err.(*serviceerror.NotFound); ok {
 			return &matchingservice.GetWorkerBuildIdOrderingResponse{}, nil
@@ -744,7 +757,7 @@ func (e *matchingEngineImpl) GetWorkerBuildIdOrdering(
 		return nil, err
 	}
 	return &matchingservice.GetWorkerBuildIdOrderingResponse{
-		Response: ToBuildIdOrderingResponse(verDat, int(req.GetRequest().GetMaxDepth())),
+		Response: data.ToBuildIdOrderingResponse(int(req.GetRequest().GetMaxDepth())),
 	}, nil
 }
 
@@ -786,17 +799,17 @@ func (e *matchingEngineImpl) GetTaskQueueMetadata(
 		return nil, err
 	}
 	resp := &matchingservice.GetTaskQueueMetadataResponse{}
-	verDatHash := req.GetWantVersioningDataCurhash()
+	wantHash := req.GetWantVersioningDataCurhash()
 	// This isn't != nil, because gogoproto will round-trip serialize an empty byte array in a request
 	// into a nil field.
-	if len(verDatHash) > 0 {
-		vDat, err := tqMgr.GetVersioningData(hCtx)
+	if len(wantHash) > 0 {
+		data, err := tqMgr.GetVersioningData(hCtx)
 		if err != nil {
 			return nil, err
 		}
-		if !bytes.Equal(HashVersioningData(vDat), verDatHash) {
+		if !bytes.Equal(data.Hash(), wantHash) {
 			resp.VersioningDataResp = &matchingservice.GetTaskQueueMetadataResponse_VersioningData{
-				VersioningData: vDat,
+				VersioningData: data.GetData(),
 			}
 		}
 	}
@@ -846,14 +859,14 @@ func (e *matchingEngineImpl) getAllPartitions(
 func (e *matchingEngineImpl) getTask(
 	ctx context.Context,
 	taskQueue *taskQueueID,
-	maxDispatchPerSecond *float64,
+	pollMetadata *pollMetadata,
 	taskQueueKind enumspb.TaskQueueKind,
 ) (*internalTask, error) {
 	tlMgr, err := e.getTaskQueueManager(ctx, taskQueue, taskQueueKind, true)
 	if err != nil {
 		return nil, err
 	}
-	return tlMgr.GetTask(ctx, maxDispatchPerSecond)
+	return tlMgr.GetTask(ctx, pollMetadata)
 }
 
 func (e *matchingEngineImpl) unloadTaskQueue(unloadTQM taskQueueManager) {

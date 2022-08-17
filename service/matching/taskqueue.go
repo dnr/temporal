@@ -185,3 +185,7 @@ func (tid *taskQueueID) String() string {
 	b.WriteString("]")
 	return b.String()
 }
+
+func (tid *taskQueueID) OwnsVersioningData() bool {
+	return tid.IsRoot() && tid.taskType == enumspb.TASK_QUEUE_TYPE_WORKFLOW
+}

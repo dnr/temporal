@@ -856,6 +856,12 @@ func (wh *WorkflowHandler) PollWorkflowTaskQueue(ctx context.Context, request *w
 	}
 	namespaceID := namespaceEntry.ID()
 
+	// Copy WorkerVersioningId to BinaryChecksum if BinaryChecksum is missing (small
+	// optimization to save space in the poll request).
+	if len(request.WorkerVersioningId.GetWorkerBuildId()) > 0 && len(request.BinaryChecksum) == 0 {
+		request.BinaryChecksum = request.WorkerVersioningId.WorkerBuildId
+	}
+
 	wh.logger.Debug("Poll workflow task queue.", tag.WorkflowNamespace(namespaceEntry.Name().String()), tag.WorkflowNamespaceID(namespaceID.String()))
 	if err := wh.checkBadBinary(namespaceEntry, request.GetBinaryChecksum()); err != nil {
 		return nil, err
@@ -2812,6 +2818,7 @@ func (wh *WorkflowHandler) GetSystemInfo(ctx context.Context, request *workflows
 			ActivityFailureIncludeHeartbeat: true,
 			SupportsSchedules:               true,
 			EncodedFailureAttributes:        true,
+			BuildIdBasedVersioning:          true,
 		},
 	}, nil
 }
@@ -3623,9 +3630,9 @@ func (wh *WorkflowHandler) StartBatchOperation(
 	}
 
 	input := &batcher.BatchParams{
-		Namespace:       request.GetNamespace(),
-		Query:           request.GetVisibilityQuery(),
-		Reason:          request.GetReason(),
+		Namespace: request.GetNamespace(),
+		Query:     request.GetVisibilityQuery(),
+		// Reason:          request.GetReason(),
 		BatchType:       operationType,
 		TerminateParams: batcher.TerminateParams{},
 		CancelParams:    batcher.CancelParams{},
@@ -3639,7 +3646,7 @@ func (wh *WorkflowHandler) StartBatchOperation(
 	memo := &commonpb.Memo{
 		Fields: map[string]*commonpb.Payload{
 			batcher.BatchOperationTypeMemo: payload.EncodeString(operationType),
-			batcher.BatchReasonMemo:        payload.EncodeString(request.GetReason()),
+			// batcher.BatchReasonMemo:        payload.EncodeString(request.GetReason()),
 		},
 	}
 

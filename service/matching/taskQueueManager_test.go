@@ -290,7 +290,7 @@ func TestReaderSignaling(t *testing.T) {
 func runOneShotPoller(ctx context.Context, tqm taskQueueManager) (*goro.Handle, chan interface{}) {
 	out := make(chan interface{}, 1)
 	handle := goro.NewHandle(ctx).Go(func(ctx context.Context) error {
-		task, err := tqm.GetTask(ctx, &rpsInf)
+		task, err := tqm.GetTask(ctx, &pollMetadata{maxDispatchPerSecond: &rpsInf})
 		if task == nil {
 			out <- err
 			return nil
@@ -396,7 +396,7 @@ func TestDescribeTaskQueue(t *testing.T) {
 	require.Equal(t, tlm.config.RangeSize, taskIDBlock.GetEndId())
 
 	// Add a poller and complete all tasks
-	tlm.pollerHistory.updatePollerInfo(pollerIdentity(PollerIdentity), nil)
+	tlm.pollerHistory.updatePollerInfo(pollerIdentity(PollerIdentity), &pollMetadata{})
 	for i := int64(0); i < taskCount; i++ {
 		tlm.taskAckManager.completeTask(startTaskID + i)
 	}
@@ -407,7 +407,7 @@ func TestDescribeTaskQueue(t *testing.T) {
 	require.NotEmpty(t, descResp.Pollers[0].GetLastAccessTime())
 
 	rps := 5.0
-	tlm.pollerHistory.updatePollerInfo(pollerIdentity(PollerIdentity), &rps)
+	tlm.pollerHistory.updatePollerInfo(pollerIdentity(PollerIdentity), &pollMetadata{maxDispatchPerSecond: &rps})
 	descResp = tlm.DescribeTaskQueue(includeTaskStatus)
 	require.Equal(t, 1, len(descResp.GetPollers()))
 	require.Equal(t, PollerIdentity, descResp.Pollers[0].GetIdentity())
@@ -437,7 +437,7 @@ func TestCheckIdleTaskQueue(t *testing.T) {
 	// Active poll-er
 	tlm = mustCreateTestTaskQueueManagerWithConfig(t, controller, tqCfg)
 	tlm.Start()
-	tlm.pollerHistory.updatePollerInfo(pollerIdentity("test-poll"), nil)
+	tlm.pollerHistory.updatePollerInfo(pollerIdentity("test-poll"), &pollMetadata{})
 	require.Equal(t, 1, len(tlm.GetAllPollerInfo()))
 	time.Sleep(1 * time.Second)
 	require.Equal(t, common.DaemonStatusStarted, atomic.LoadInt32(&tlm.status))
@@ -502,7 +502,7 @@ func TestAddTaskStandby(t *testing.T) {
 	require.False(t, syncMatch)
 }
 
-func TestTaskQueueSubParitionFetchesVersioningInfoFromRootPartitionOnInit(t *testing.T) {
+func TestTaskQueuePartitionFetchesVersioningInfoFromRootPartitionOnInit(t *testing.T) {
 	controller := gomock.NewController(t)
 	defer controller.Finish()
 	ctx := context.Background()
@@ -535,13 +535,13 @@ func TestTaskQueueSubParitionFetchesVersioningInfoFromRootPartitionOnInit(t *tes
 		})
 	subTq.Start()
 	require.NoError(t, subTq.WaitUntilInitialized(ctx))
-	verDat, err := subTq.GetVersioningData(ctx)
+	newData, err := subTq.GetVersioningData(ctx)
 	require.NoError(t, err)
-	require.Equal(t, data, verDat)
+	require.Equal(t, data, newData.GetData())
 	subTq.Stop()
 }
 
-func TestTaskQueueSubParitionSendsCurrentHashOfVersioningDataWhenFetching(t *testing.T) {
+func TestTaskQueuePartitionSendsCurrentHashOfVersioningDataWhenFetching(t *testing.T) {
 	controller := gomock.NewController(t)
 	defer controller.Finish()
 	ctx := context.Background()
@@ -550,15 +550,16 @@ func TestTaskQueueSubParitionSendsCurrentHashOfVersioningDataWhenFetching(t *tes
 	tqCfg := defaultTqmTestOpts(controller)
 	tqCfg.tqId = subTqId
 
-	data := &persistencespb.VersioningData{
+	rawData := &persistencespb.VersioningData{
 		CurrentDefault: mkVerIdNode("0"),
 	}
 	asResp := &matchingservice.GetTaskQueueMetadataResponse{
 		VersioningDataResp: &matchingservice.GetTaskQueueMetadataResponse_VersioningData{
-			VersioningData: data,
+			VersioningData: rawData,
 		},
 	}
-	dataHash := HashVersioningData(data)
+	data := newVersioningData(rawData)
+	dataHash := data.Hash()
 
 	subTq := mustCreateTestTaskQueueManagerWithConfig(t, controller, tqCfg,
 		func(tqm *taskQueueManagerImpl) {
@@ -573,7 +574,7 @@ func TestTaskQueueSubParitionSendsCurrentHashOfVersioningDataWhenFetching(t *tes
 			tqm.matchingClient = mockMatchingClient
 		})
 	// Cram some versioning data in there so it will have something to hash when fetching
-	subTq.db.versioningData = data
+	subTq.db.versioningData = newVersioningData(rawData)
 	// Don't start it. Just explicitly call fetching function.
 	res, err := subTq.fetchMetadataFromRootPartition(ctx)
 	require.NotNil(t, res)
@@ -624,7 +625,7 @@ func TestTaskQueueRootPartitionNotifiesChildrenOfInvalidation(t *testing.T) {
 	rootTq.Stop()
 }
 
-func TestTaskQueueSubPartitionPollsPeriodically(t *testing.T) {
+func TestTaskQueuePartitionPollsPeriodically(t *testing.T) {
 	controller := gomock.NewController(t)
 	defer controller.Finish()
 	ctx := context.Background()
@@ -659,7 +660,7 @@ func TestTaskQueueSubPartitionPollsPeriodically(t *testing.T) {
 	subTq.Stop()
 }
 
-func TestTaskQueueSubPartitionDoesNotPollIfNoDataThenPollsWhenInvalidated(t *testing.T) {
+func TestTaskQueuePartitionDoesNotPollIfNoDataThenPollsWhenInvalidated(t *testing.T) {
 	controller := gomock.NewController(t)
 	defer controller.Finish()
 	ctx := context.Background()
@@ -676,12 +677,12 @@ func TestTaskQueueSubPartitionDoesNotPollIfNoDataThenPollsWhenInvalidated(t *tes
 			VersioningData: nil,
 		},
 	}
-	verDat := &persistencespb.VersioningData{
+	data := &persistencespb.VersioningData{
 		CurrentDefault: mkVerIdNode("0"),
 	}
 	hasDatResp := &matchingservice.GetTaskQueueMetadataResponse{
 		VersioningDataResp: &matchingservice.GetTaskQueueMetadataResponse_VersioningData{
-			VersioningData: verDat,
+			VersioningData: data,
 		},
 	}
 
@@ -700,12 +701,12 @@ func TestTaskQueueSubPartitionDoesNotPollIfNoDataThenPollsWhenInvalidated(t *tes
 	// Wait a bit to make sure we *don't* end up polling (if we do, mock will fail with >2 fetches)
 	time.Sleep(time.Millisecond * 25)
 	// Explicitly try to get versioning data. Since we don't have any cached, it'll explicitly fetch.
-	vDat, err := subTq.GetVersioningData(ctx)
+	newData, err := subTq.GetVersioningData(ctx)
 	require.NoError(t, err)
-	require.Nil(t, vDat)
+	require.Nil(t, newData)
 	// Now invalidate, the poll loop should be started, so we'll see at least one more mock call
 	err = subTq.InvalidateMetadata(&matchingservice.InvalidateTaskQueueMetadataRequest{
-		VersioningData: verDat,
+		VersioningData: data,
 	})
 	require.NoError(t, err)
 	time.Sleep(time.Millisecond * 20)
@@ -751,9 +752,9 @@ func TestTaskQueueManagerWaitInitFailThenPass(t *testing.T) {
 	// call hasn't happened yet.
 	controller.Finish()
 	// Get the data and see it's set
-	dat, err := tq.GetVersioningData(ctx)
+	newData, err := tq.GetVersioningData(ctx)
 	require.NoError(t, err)
-	require.Equal(t, data, dat)
+	require.Equal(t, data, newData.GetData())
 	tq.Stop()
 }
 
@@ -825,12 +826,12 @@ func TestActivityQueueGetsVersioningDataFromWorkflowQueue(t *testing.T) {
 	actTqPart.Start()
 	require.NoError(t, actTqPart.WaitUntilInitialized(ctx))
 
-	verDat, err := actTq.GetVersioningData(ctx)
+	newData, err := actTq.GetVersioningData(ctx)
 	require.NoError(t, err)
-	require.Equal(t, data, verDat)
-	verDat, err = actTqPart.GetVersioningData(ctx)
+	require.Equal(t, data, newData.GetData())
+	newData, err = actTqPart.GetVersioningData(ctx)
 	require.NoError(t, err)
-	require.Equal(t, data, verDat)
+	require.Equal(t, data, newData.GetData())
 
 	actTq.Stop()
 	actTqPart.Stop()

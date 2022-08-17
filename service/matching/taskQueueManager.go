@@ -106,7 +106,7 @@ type (
 		// GetTask blocks waiting for a task Returns error when context deadline is exceeded
 		// maxDispatchPerSecond is the max rate at which tasks are allowed to be dispatched
 		// from this task queue to pollers
-		GetTask(ctx context.Context, maxDispatchPerSecond *float64) (*internalTask, error)
+		GetTask(ctx context.Context, pollMetadata *pollMetadata) (*internalTask, error)
 		// DispatchTask dispatches a task to a poller. When there are no pollers to pick
 		// up the task, this method will return error. Task will not be persisted to db
 		DispatchTask(ctx context.Context, task *internalTask) error
@@ -114,7 +114,7 @@ type (
 		// if dispatched to local poller then nil and nil is returned.
 		DispatchQueryTask(ctx context.Context, taskID string, request *matchingservice.QueryWorkflowRequest) (*matchingservice.QueryWorkflowResponse, error)
 		// GetVersioningData returns the versioning data for this task queue
-		GetVersioningData(ctx context.Context) (*persistencespb.VersioningData, error)
+		GetVersioningData(ctx context.Context) (*versioningData, error)
 		// MutateVersioningData allows callers to update versioning data for this task queue
 		MutateVersioningData(ctx context.Context, mutator func(*persistencespb.VersioningData) error) error
 		// InvalidateMetadata allows callers to invalidate cached data on this task queue
@@ -201,7 +201,17 @@ func newTaskQueueManager(
 
 	taskQueueConfig := newTaskQueueConfig(taskQueue, config, nsName)
 
-	db := newTaskQueueDB(e.taskManager, taskQueue.namespaceID, taskQueue, taskQueueKind, e.logger)
+	// broadcasts versioning data changes to blocked goroutines in TaskMatcher
+	versioningDataBroadcaster := newBroadcaster[*versioningData]()
+
+	db := newTaskQueueDB(
+		e.taskManager,
+		taskQueue.namespaceID,
+		taskQueue,
+		taskQueueKind,
+		e.logger,
+		versioningDataBroadcaster.Send,
+	)
 	logger := log.With(e.logger,
 		tag.WorkflowTaskQueueName(taskQueue.name),
 		tag.WorkflowTaskQueueType(taskQueue.taskType),
@@ -252,7 +262,7 @@ func newTaskQueueManager(
 	if tlMgr.isFowardingAllowed(taskQueue, taskQueueKind) {
 		fwdr = newForwarder(&taskQueueConfig.forwarderConfig, taskQueue, taskQueueKind, e.matchingClient)
 	}
-	tlMgr.matcher = newTaskMatcher(taskQueueConfig, fwdr, tlMgr.metricScope)
+	tlMgr.matcher = newTaskMatcher(taskQueueConfig, fwdr, tlMgr.metricScope, versioningDataBroadcaster)
 	for _, opt := range opts {
 		opt(tlMgr)
 	}
@@ -349,6 +359,16 @@ func (c *taskQueueManagerImpl) AddTask(
 
 	taskInfo := params.taskInfo
 
+	if taskInfo.WorkerVersioningId != nil {
+		// The caller expects this task queue to use versioning. We need to ensure we have
+		// versioning info loaded here (it's automatic if we're the root, but if we're not the
+		// root then we have to get it from the root).
+		_, err := c.GetVersioningData(ctx)
+		if err != nil {
+			return false, err
+		}
+	}
+
 	namespaceEntry, err := c.namespaceRegistry.GetNamespaceByID(namespace.ID(taskInfo.GetNamespaceId()))
 	if err != nil {
 		return false, err
@@ -381,7 +401,7 @@ func (c *taskQueueManagerImpl) AddTask(
 // to be dispatched from this task queue to pollers
 func (c *taskQueueManagerImpl) GetTask(
 	ctx context.Context,
-	maxDispatchPerSecond *float64,
+	pollMetadata *pollMetadata,
 ) (*internalTask, error) {
 	c.liveness.markAlive(time.Now())
 
@@ -408,10 +428,10 @@ func (c *taskQueueManagerImpl) GetTask(
 
 	identity, ok := ctx.Value(identityKey).(string)
 	if ok && identity != "" {
-		c.pollerHistory.updatePollerInfo(pollerIdentity(identity), maxDispatchPerSecond)
+		c.pollerHistory.updatePollerInfo(pollerIdentity(identity), pollMetadata)
 		defer func() {
 			// to update timestamp when long poll ends
-			c.pollerHistory.updatePollerInfo(pollerIdentity(identity), maxDispatchPerSecond)
+			c.pollerHistory.updatePollerInfo(pollerIdentity(identity), pollMetadata)
 		}()
 	}
 
@@ -425,13 +445,13 @@ func (c *taskQueueManagerImpl) GetTask(
 	// one rateLimiter for this entire task queue and as we get polls,
 	// we update the ratelimiter rps if it has changed from the last
 	// value. Last poller wins if different pollers provide different values
-	c.matcher.UpdateRatelimit(maxDispatchPerSecond)
+	c.matcher.UpdateRatelimit(pollMetadata.maxDispatchPerSecond)
 
 	if !namespaceEntry.ActiveInCluster(c.clusterMeta.GetCurrentClusterName()) {
-		return c.matcher.PollForQuery(childCtx)
+		return c.matcher.PollForQuery(childCtx, pollMetadata)
 	}
 
-	task, err := c.matcher.Poll(childCtx)
+	task, err := c.matcher.Poll(childCtx, pollMetadata)
 	if err != nil {
 		return nil, err
 	}
@@ -462,21 +482,21 @@ func (c *taskQueueManagerImpl) DispatchQueryTask(
 	return c.matcher.OfferQuery(ctx, task)
 }
 
-// GetVersioningData returns the versioning data for the task queue if any. If this task queue is a sub-partition and
-// has no cached data, it will explicitly attempt a fetch from the root partition.
-func (c *taskQueueManagerImpl) GetVersioningData(ctx context.Context) (*persistencespb.VersioningData, error) {
-	vd, err := c.db.GetVersioningData(ctx)
+// GetVersioningData returns the versioning data for the task queue if any. If this task queue is a non-root-partition
+// and has no cached data, it will explicitly attempt a fetch from the root partition.
+func (c *taskQueueManagerImpl) GetVersioningData(ctx context.Context) (*versioningData, error) {
+	data, err := c.db.GetVersioningData(ctx)
 	if errors.Is(err, errVersioningDataNotPresentOnPartition) {
 		// If this is a non-root-partition with no versioning data, this call is indicating we might expect to find
 		// some. Since we may not have started the poller, we want to explicitly attempt to fetch now, because
 		// it's possible some was added to the root partition, but it failed to invalidate this partition.
 		return c.fetchMetadataFromRootPartition(ctx)
 	}
-	return vd, err
+	return data, err
 }
 
 func (c *taskQueueManagerImpl) MutateVersioningData(ctx context.Context, mutator func(*persistencespb.VersioningData) error) error {
-	newDat, err := c.db.MutateVersioningData(ctx, mutator)
+	newData, err := c.db.MutateVersioningData(ctx, mutator)
 	c.signalIfFatal(err)
 	if err != nil {
 		return err
@@ -498,10 +518,10 @@ func (c *taskQueueManagerImpl) MutateVersioningData(ctx context.Context, mutator
 						NamespaceId:    c.taskQueueID.namespaceID.String(),
 						TaskQueue:      tq,
 						TaskQueueType:  tqt,
-						VersioningData: newDat,
+						VersioningData: newData,
 					})
 				if err != nil {
-					c.logger.Warn("Failed to notify sub-partition of invalidated versioning data",
+					c.logger.Warn("Failed to notify partition of invalidated versioning data",
 						tag.WorkflowTaskQueueName(tq), tag.Error(err))
 				}
 				wg.Done()
@@ -514,7 +534,7 @@ func (c *taskQueueManagerImpl) MutateVersioningData(ctx context.Context, mutator
 
 func (c *taskQueueManagerImpl) InvalidateMetadata(request *matchingservice.InvalidateTaskQueueMetadataRequest) error {
 	if request.GetVersioningData() != nil {
-		if c.taskQueueID.IsRoot() && c.taskQueueID.taskType == enumspb.TASK_QUEUE_TYPE_WORKFLOW {
+		if c.taskQueueID.OwnsVersioningData() {
 			// Should never happen. Root partitions do not get their versioning data invalidated.
 			c.logger.Warn("A root workflow partition was told to invalidate its versioning data, this should not happen")
 			return nil
@@ -732,35 +752,35 @@ func (c *taskQueueManagerImpl) fetchMetadataFromRootPartitionOnInit(ctx context.
 
 // fetchMetadataFromRootPartition fetches metadata from root partition iff this partition is not a root partition.
 // Returns the fetched data, if fetching was necessary and successful.
-func (c *taskQueueManagerImpl) fetchMetadataFromRootPartition(ctx context.Context) (*persistencespb.VersioningData, error) {
+func (c *taskQueueManagerImpl) fetchMetadataFromRootPartition(ctx context.Context) (*versioningData, error) {
 	// Nothing to do if we are the root partition of a workflow queue, since we should own the data.
 	// (for versioning - any later added metadata may need to not abort so early)
-	if c.taskQueueID.IsRoot() && c.taskQueueID.taskType == enumspb.TASK_QUEUE_TYPE_WORKFLOW {
+	if c.taskQueueID.OwnsVersioningData() {
 		return nil, nil
 	}
 
-	curDat, err := c.db.GetVersioningData(ctx)
+	currentData, err := c.db.GetVersioningData(ctx)
 	if err != nil && !errors.Is(err, errVersioningDataNotPresentOnPartition) {
 		return nil, err
 	}
-	curHash := HashVersioningData(curDat)
+	currentHash := currentData.Hash()
 
 	rootTqName := c.taskQueueID.GetRoot()
-	if len(curHash) == 0 {
+	if len(currentHash) == 0 {
 		// if we have no data, make sure we send a sigil value, so it's known we desire versioning data
-		curHash = []byte{0}
+		currentHash = []byte{0}
 	}
 	res, err := c.matchingClient.GetTaskQueueMetadata(ctx, &matchingservice.GetTaskQueueMetadataRequest{
 		NamespaceId:               c.taskQueueID.namespaceID.String(),
 		TaskQueue:                 rootTqName,
-		WantVersioningDataCurhash: curHash,
+		WantVersioningDataCurhash: currentHash,
 	})
 	// If the root partition returns nil here, then that means our data matched, and we don't need to update.
 	// If it's nil because it never existed, then we'd never have any data.
 	// It can't be nil due to removing versions, as that would result in a non-nil container with
 	// nil inner fields.
 	if !res.GetMatchedReqHash() {
-		c.db.setVersioningDataForNonRootPartition(res.GetVersioningData())
+		currentData = c.db.setVersioningDataForNonRootPartition(res.GetVersioningData())
 	}
 	// We want to start the poller as long as the root partition has any kind of data (or fetching hasn't worked)
 	if res.GetMatchedReqHash() || res.GetVersioningData() != nil || err != nil {
@@ -769,7 +789,7 @@ func (c *taskQueueManagerImpl) fetchMetadataFromRootPartition(ctx context.Contex
 	if err != nil {
 		return nil, err
 	}
-	return res.GetVersioningData(), nil
+	return currentData, nil
 }
 
 // StartIfUnstarted starts the poller if it's not already started. The passed in function is called repeatedly
@@ -794,8 +814,8 @@ func (mp *metadataPoller) pollLoop() {
 		case <-ticker.C:
 			// In case the interval has changed
 			ticker.Reset(mp.pollIntervalCfgFn())
-			dat, err := mp.tqMgr.fetchMetadataFromRootPartition(context.TODO())
-			if dat == nil && err == nil {
+			data, err := mp.tqMgr.fetchMetadataFromRootPartition(context.TODO())
+			if data == nil && err == nil {
 				// Can stop polling since there is no versioning data. Loop will be restarted if we
 				// are told to invalidate the data, or we attempt to fetch it via GetVersioningData.
 				return
