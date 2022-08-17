@@ -140,8 +140,8 @@ type (
 		taskReader        *taskReader // reads tasks from db and async matches it with poller
 		liveness          *liveness
 		taskGC            *taskGC
-		taskAckManager    ackManager   // tracks ackLevel for delivered messages
-		matcher           *TaskMatcher // for matching a task producer with a poller
+		taskAckManager    ackManager  // tracks ackLevel for delivered messages
+		matcher           TaskMatcher // for matching a task producer with a poller
 		namespaceRegistry namespace.Registry
 		logger            log.Logger
 		matchingClient    matchingservice.MatchingServiceClient

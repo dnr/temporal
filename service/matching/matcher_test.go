@@ -58,8 +58,8 @@ type MatcherTestSuite struct {
 	fwdr        *Forwarder
 	cfg         *taskQueueConfig
 	taskQueue   *taskQueueID
-	matcher     *TaskMatcher // matcher for child partition
-	rootMatcher *TaskMatcher // matcher for parent partition
+	matcher     *taskMatcherImpl // matcher for child partition
+	rootMatcher *taskMatcherImpl // matcher for parent partition
 }
 
 func TestMatcherSuite(t *testing.T) {

@@ -38,7 +38,18 @@ import (
 // TaskMatcher matches a task producer with a task consumer
 // Producers are usually rpc calls from history or taskReader
 // that drains backlog from db. Consumers are the task queue pollers
-type TaskMatcher struct {
+
+type TaskMatcher interface {
+	Offer(ctx context.Context, task *internalTask) (bool, error)
+	OfferQuery(ctx context.Context, task *internalTask) (*matchingservice.QueryWorkflowResponse, error)
+	MustOffer(ctx context.Context, task *internalTask) error
+	Poll(ctx context.Context) (*internalTask, error)
+	PollForQuery(ctx context.Context) (*internalTask, error)
+	UpdateRatelimit(rps *float64)
+	Rate() float64
+}
+
+type taskMatcherImpl struct {
 	config *taskQueueConfig
 
 	// synchronous task channel to match producer/consumer
@@ -67,7 +78,7 @@ const (
 // newTaskMatcher returns an task matcher instance. The returned instance can be
 // used by task producers and consumers to find a match. Both sync matches and non-sync
 // matches should use this implementation
-func newTaskMatcher(config *taskQueueConfig, fwdr *Forwarder, scope metrics.Scope) *TaskMatcher {
+func newTaskMatcher(config *taskQueueConfig, fwdr *Forwarder, scope metrics.Scope) TaskMatcher {
 	dynamicRateBurst := quotas.NewMutableRateBurst(
 		defaultTaskDispatchRPS,
 		int(defaultTaskDispatchRPS),
@@ -84,7 +95,7 @@ func newTaskMatcher(config *taskQueueConfig, fwdr *Forwarder, scope metrics.Scop
 			config.AdminNamespaceToPartitionDispatchRate,
 		),
 	})
-	return &TaskMatcher{
+	return &taskMatcherImpl{
 		config:           config,
 		dynamicRateBurst: dynamicRateBurst,
 		rateLimiter:      limiter,
@@ -125,7 +136,7 @@ func newTaskMatcher(config *taskQueueConfig, fwdr *Forwarder, scope metrics.Scop
 //  - ratelimit is exceeded (does not apply to query task)
 //  - context deadline is exceeded
 //  - task is matched and consumer returns error in response channel
-func (tm *TaskMatcher) Offer(ctx context.Context, task *internalTask) (bool, error) {
+func (tm *taskMatcherImpl) Offer(ctx context.Context, task *internalTask) (bool, error) {
 	if !task.isForwarded() {
 		if err := tm.rateLimiter.Wait(ctx); err != nil {
 			tm.scope.IncCounter(metrics.SyncThrottlePerTaskQueueCounter)
@@ -167,7 +178,7 @@ func (tm *TaskMatcher) Offer(ctx context.Context, task *internalTask) (bool, err
 	}
 }
 
-func (tm *TaskMatcher) offerOrTimeout(ctx context.Context, task *internalTask) (bool, error) {
+func (tm *taskMatcherImpl) offerOrTimeout(ctx context.Context, task *internalTask) (bool, error) {
 	select {
 	case tm.taskC <- task: // poller picked up the task
 		if task.responseC != nil {
@@ -187,7 +198,7 @@ func (tm *TaskMatcher) offerOrTimeout(ctx context.Context, task *internalTask) (
 // OfferQuery will either match task to local poller or will forward query task.
 // Local match is always attempted before forwarding is attempted. If local match occurs
 // response and error are both nil, if forwarding occurs then response or error is returned.
-func (tm *TaskMatcher) OfferQuery(ctx context.Context, task *internalTask) (*matchingservice.QueryWorkflowResponse, error) {
+func (tm *taskMatcherImpl) OfferQuery(ctx context.Context, task *internalTask) (*matchingservice.QueryWorkflowResponse, error) {
 	select {
 	case tm.queryTaskC <- task:
 		<-task.responseC
@@ -224,7 +235,7 @@ func (tm *TaskMatcher) OfferQuery(ctx context.Context, task *internalTask) (*mat
 // MustOffer blocks until a consumer is found to handle this task
 // Returns error only when context is canceled or the ratelimit is set to zero (allow nothing)
 // The passed in context MUST NOT have a deadline associated with it
-func (tm *TaskMatcher) MustOffer(ctx context.Context, task *internalTask) error {
+func (tm *taskMatcherImpl) MustOffer(ctx context.Context, task *internalTask) error {
 	if err := tm.rateLimiter.Wait(ctx); err != nil {
 		return err
 	}
@@ -281,18 +292,18 @@ forLoop:
 // Poll blocks until a task is found or context deadline is exceeded
 // On success, the returned task could be a query task or a regular task
 // Returns ErrNoTasks when context deadline is exceeded
-func (tm *TaskMatcher) Poll(ctx context.Context) (*internalTask, error) {
+func (tm *taskMatcherImpl) Poll(ctx context.Context) (*internalTask, error) {
 	return tm.poll(ctx, false)
 }
 
 // PollForQuery blocks until a *query* task is found or context deadline is exceeded
 // Returns ErrNoTasks when context deadline is exceeded
-func (tm *TaskMatcher) PollForQuery(ctx context.Context) (*internalTask, error) {
+func (tm *taskMatcherImpl) PollForQuery(ctx context.Context) (*internalTask, error) {
 	return tm.poll(ctx, true)
 }
 
 // UpdateRatelimit updates the task dispatch rate
-func (tm *TaskMatcher) UpdateRatelimit(rps *float64) {
+func (tm *taskMatcherImpl) UpdateRatelimit(rps *float64) {
 	if rps == nil {
 		return
 	}
@@ -315,11 +326,11 @@ func (tm *TaskMatcher) UpdateRatelimit(rps *float64) {
 }
 
 // Rate returns the current rate at which tasks are dispatched
-func (tm *TaskMatcher) Rate() float64 {
+func (tm *taskMatcherImpl) Rate() float64 {
 	return tm.rateLimiter.Rate()
 }
 
-func (tm *TaskMatcher) poll(ctx context.Context, queryOnly bool) (*internalTask, error) {
+func (tm *taskMatcherImpl) poll(ctx context.Context, queryOnly bool) (*internalTask, error) {
 	taskC, queryTaskC := tm.taskC, tm.queryTaskC
 	if queryOnly {
 		taskC = nil
@@ -400,20 +411,20 @@ func (tm *TaskMatcher) poll(ctx context.Context, queryOnly bool) (*internalTask,
 	}
 }
 
-func (tm *TaskMatcher) fwdrPollReqTokenC() <-chan *ForwarderReqToken {
+func (tm *taskMatcherImpl) fwdrPollReqTokenC() <-chan *ForwarderReqToken {
 	if tm.fwdr == nil {
 		return nil
 	}
 	return tm.fwdr.PollReqTokenC()
 }
 
-func (tm *TaskMatcher) fwdrAddReqTokenC() <-chan *ForwarderReqToken {
+func (tm *taskMatcherImpl) fwdrAddReqTokenC() <-chan *ForwarderReqToken {
 	if tm.fwdr == nil {
 		return nil
 	}
 	return tm.fwdr.AddReqTokenC()
 }
 
-func (tm *TaskMatcher) isForwardingAllowed() bool {
+func (tm *taskMatcherImpl) isForwardingAllowed() bool {
 	return tm.fwdr != nil
 }
