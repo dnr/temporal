@@ -99,6 +99,11 @@ func NewTaskQueueNameWithPartition(baseName string, partition int) (QualifiedTas
 	return tqName, err
 }
 
+// FIXME: remove this hack
+func (tn *QualifiedTaskQueueName) isVersioned() bool {
+	return strings.HasPrefix(tn.baseName, "v:")
+}
+
 // IsRoot returns true if this task queue is a root partition
 func (tn *QualifiedTaskQueueName) IsRoot() bool {
 	return tn.partition == 0

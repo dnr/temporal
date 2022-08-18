@@ -51,7 +51,7 @@ type (
 		activityTaskInfo *matchingservice.PollActivityTaskQueueResponse
 	}
 	// internalTask represents an activity, workflow, query or started (received from another host).
-	// this struct is more like a union and only one of [ query, event, forwarded ] is
+	// this struct is more like a union and only one of [ query, event, started ] is
 	// non-nil for any given task
 	internalTask struct {
 		event            *genericTaskInfo // non-nil for activity or workflow task that's locally generated
@@ -150,6 +150,18 @@ func (task *internalTask) pollActivityTaskQueueResponse() *matchingservice.PollA
 		return task.started.activityTaskInfo
 	}
 	return nil
+}
+
+func (task *internalTask) lastBuildID() string {
+	switch {
+	case task.event != nil:
+		return task.event.Data.LastWorkflowTaskBuildId
+	case task.query != nil:
+		return task.query.request.LastWorkflowTaskBuildId
+	default:
+		// FIXME: can this ever happen? what should we return?
+		return ""
+	}
 }
 
 // finish marks a task as finished. Should be called after a poller picks up a task

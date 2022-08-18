@@ -311,7 +311,7 @@ func (db *taskQueueDB) getVersioningDataLocked(
 	}
 	db.versioningData = tqInfo.TaskQueueInfo.GetVersioningData()
 
-	return tqInfo.TaskQueueInfo.GetVersioningData(), nil
+	return db.versioningData, nil
 }
 
 // MutateVersioningData allows callers to update versioning data for this task queue. The pointer passed to the

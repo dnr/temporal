@@ -26,38 +26,36 @@ package matching
 
 import (
 	"context"
+	"errors"
 	"math"
+	"sync"
 	"time"
 
 	enumsspb "go.temporal.io/server/api/enums/v1"
 	"go.temporal.io/server/api/matchingservice/v1"
+	persistencespb "go.temporal.io/server/api/persistence/v1"
 	"go.temporal.io/server/common/metrics"
 	"go.temporal.io/server/common/quotas"
 )
 
-// TaskMatcher matches a task producer with a task consumer
-// Producers are usually rpc calls from history or taskReader
-// that drains backlog from db. Consumers are the task queue pollers
-type TaskMatcher interface {
-	Offer(ctx context.Context, task *internalTask) (bool, error)
-	OfferQuery(ctx context.Context, task *internalTask) (*matchingservice.QueryWorkflowResponse, error)
-	MustOffer(ctx context.Context, task *internalTask) error
-	Poll(ctx context.Context, pollMetadata *pollMetadata) (*internalTask, error)
-	PollForQuery(ctx context.Context, pollMetadata *pollMetadata) (*internalTask, error)
-	UpdateRatelimit(rps *float64)
-	Rate() float64
-}
+const (
+	// FIXME: move to shared package
+	LatestDefaultBuildID = "__latest_default__"
+)
 
-type taskMatcherImpl struct {
+type versioningTaskMatcherImpl struct {
 	config *taskQueueConfig
 
-	// synchronous task channel to match producer/consumer
-	taskC chan *internalTask
+	getVersioningData func(context.Context) (*persistencespb.VersioningData, error)
+
+	// synchronous task channels
+	taskCs sync.Map // map[string]chan *internalTask
+
 	// synchronous task channel to match query task - the reason to have
 	// separate channel for this is because there are cases when consumers
 	// are interested in queryTasks but not others. Example is when namespace is
 	// not active in a cluster
-	queryTaskC chan *internalTask
+	queryTaskCs sync.Map // map[string]chan *internalTask
 
 	// dynamicRate is the dynamic rate & burst for rate limiter
 	dynamicRateBurst quotas.MutableRateBurst
@@ -69,15 +67,8 @@ type taskMatcherImpl struct {
 	numPartitions func() int    // number of task queue partitions
 }
 
-const (
-	defaultTaskDispatchRPS    = 100000.0
-	defaultTaskDispatchRPSTTL = time.Minute
-)
-
-// newTaskMatcher returns an task matcher instance. The returned instance can be
-// used by task producers and consumers to find a match. Both sync matches and non-sync
-// matches should use this implementation
-func newTaskMatcher(config *taskQueueConfig, fwdr *Forwarder, scope metrics.Scope) TaskMatcher {
+func newVersionedTaskMatched(config *taskQueueConfig, fwdr *Forwarder, scope metrics.Scope,
+	getVersioningData func(context.Context) (*persistencespb.VersioningData, error)) TaskMatcher {
 	dynamicRateBurst := quotas.NewMutableRateBurst(
 		defaultTaskDispatchRPS,
 		int(defaultTaskDispatchRPS),
@@ -94,15 +85,14 @@ func newTaskMatcher(config *taskQueueConfig, fwdr *Forwarder, scope metrics.Scop
 			config.AdminNamespaceToPartitionDispatchRate,
 		),
 	})
-	return &taskMatcherImpl{
-		config:           config,
-		dynamicRateBurst: dynamicRateBurst,
-		rateLimiter:      limiter,
-		scope:            scope,
-		fwdr:             fwdr,
-		taskC:            make(chan *internalTask),
-		queryTaskC:       make(chan *internalTask),
-		numPartitions:    config.NumReadPartitions,
+	return &versioningTaskMatcherImpl{
+		config:            config,
+		getVersioningData: getVersioningData,
+		dynamicRateBurst:  dynamicRateBurst,
+		rateLimiter:       limiter,
+		scope:             scope,
+		fwdr:              fwdr,
+		numPartitions:     config.NumReadPartitions,
 	}
 }
 
@@ -135,7 +125,18 @@ func newTaskMatcher(config *taskQueueConfig, fwdr *Forwarder, scope metrics.Scop
 //  - ratelimit is exceeded (does not apply to query task)
 //  - context deadline is exceeded
 //  - task is matched and consumer returns error in response channel
-func (tm *taskMatcherImpl) Offer(ctx context.Context, task *internalTask) (bool, error) {
+//
+// VERSIONING NOTES:
+// tasks come from history with either a build id of the previous wft, or else LatestDefaultBuildID
+// if this is the first workflow task. they should get matched to a compatible poller.
+// can also return error if bad buildID was sent with task, or bad versioning info
+func (tm *versioningTaskMatcherImpl) Offer(ctx context.Context, task *internalTask) (bool, error) {
+	target, err := tm.findLatestCompatibleVersion(ctx, task.lastBuildID())
+	if err != nil {
+		return false, err
+	}
+	taskC := tm.getTaskChannel(&tm.taskCs, target)
+
 	if !task.isForwarded() {
 		if err := tm.rateLimiter.Wait(ctx); err != nil {
 			tm.scope.IncCounter(metrics.SyncThrottlePerTaskQueueCounter)
@@ -144,7 +145,7 @@ func (tm *taskMatcherImpl) Offer(ctx context.Context, task *internalTask) (bool,
 	}
 
 	select {
-	case tm.taskC <- task: // poller picked up the task
+	case taskC <- task: // poller picked up the task
 		if task.responseC != nil {
 			// if there is a response channel, block until resp is received
 			// and return error if the response contains error
@@ -169,7 +170,7 @@ func (tm *taskMatcherImpl) Offer(ctx context.Context, task *internalTask) (bool,
 				task.isForwarded() { // task came from a child partition
 				// a forwarded backlog task from a child partition, block trying
 				// to match with a poller until ctx timeout
-				return tm.offerOrTimeout(ctx, task)
+				return tm.offerOrTimeout(ctx, task, taskC)
 			}
 		}
 
@@ -177,9 +178,12 @@ func (tm *taskMatcherImpl) Offer(ctx context.Context, task *internalTask) (bool,
 	}
 }
 
-func (tm *taskMatcherImpl) offerOrTimeout(ctx context.Context, task *internalTask) (bool, error) {
+// VERSIONING NOTES:
+// in theory we should re-resolve the latest version if version data changes while we're
+// blocked here. but this is only for trySyncMatch, default 200ms. so we don't really have to.
+func (tm *versioningTaskMatcherImpl) offerOrTimeout(ctx context.Context, task *internalTask, taskC chan *internalTask) (bool, error) {
 	select {
-	case tm.taskC <- task: // poller picked up the task
+	case taskC <- task: // poller picked up the task
 		if task.responseC != nil {
 			select {
 			case err := <-task.responseC:
@@ -192,14 +196,21 @@ func (tm *taskMatcherImpl) offerOrTimeout(ctx context.Context, task *internalTas
 	case <-ctx.Done():
 		return false, nil
 	}
+	return false, nil
 }
 
 // OfferQuery will either match task to local poller or will forward query task.
 // Local match is always attempted before forwarding is attempted. If local match occurs
 // response and error are both nil, if forwarding occurs then response or error is returned.
-func (tm *taskMatcherImpl) OfferQuery(ctx context.Context, task *internalTask) (*matchingservice.QueryWorkflowResponse, error) {
+func (tm *versioningTaskMatcherImpl) OfferQuery(ctx context.Context, task *internalTask) (*matchingservice.QueryWorkflowResponse, error) {
+	target, err := tm.findLatestCompatibleVersion(ctx, task.lastBuildID())
+	if err != nil {
+		return nil, err
+	}
+	queryTaskC := tm.getTaskChannel(&tm.queryTaskCs, target)
+
 	select {
-	case tm.queryTaskC <- task:
+	case queryTaskC <- task:
 		<-task.responseC
 		return nil, nil
 	default:
@@ -208,8 +219,9 @@ func (tm *taskMatcherImpl) OfferQuery(ctx context.Context, task *internalTask) (
 	fwdrTokenC := tm.fwdrAddReqTokenC()
 
 	for {
+		// FIXME: add case to re-resolve queryTaskC sometimes (when versioning data changes)
 		select {
-		case tm.queryTaskC <- task:
+		case queryTaskC <- task:
 			<-task.responseC
 			return nil, nil
 		case token := <-fwdrTokenC:
@@ -234,15 +246,26 @@ func (tm *taskMatcherImpl) OfferQuery(ctx context.Context, task *internalTask) (
 // MustOffer blocks until a consumer is found to handle this task
 // Returns error only when context is canceled or the ratelimit is set to zero (allow nothing)
 // The passed in context MUST NOT have a deadline associated with it
-func (tm *taskMatcherImpl) MustOffer(ctx context.Context, task *internalTask) error {
+//
+// VERSIONING NOTES:
+// tasks come from history with either a build id of the previous wft, or else LatestDefaultBuildID
+// if this is the first workflow task. they should get matched to a compatible poller.
+// can also return error if bad buildID was sent with task, or bad versioning info
+func (tm *versioningTaskMatcherImpl) MustOffer(ctx context.Context, task *internalTask) error {
 	if err := tm.rateLimiter.Wait(ctx); err != nil {
 		return err
 	}
 
+	target, err := tm.findLatestCompatibleVersion(ctx, task.lastBuildID())
+	if err != nil {
+		return err
+	}
+	taskC := tm.getTaskChannel(&tm.taskCs, target)
+
 	// attempt a match with local poller first. When that
 	// doesn't succeed, try both local match and remote match
 	select {
-	case tm.taskC <- task:
+	case taskC <- task:
 		return nil
 	case <-ctx.Done():
 		return ctx.Err()
@@ -251,8 +274,9 @@ func (tm *taskMatcherImpl) MustOffer(ctx context.Context, task *internalTask) er
 
 forLoop:
 	for {
+		// FIXME: add case to re-resolve taskC sometimes (when versioning data changes)
 		select {
-		case tm.taskC <- task:
+		case taskC <- task:
 			return nil
 		case token := <-tm.fwdrAddReqTokenC():
 			childCtx, cancel := context.WithTimeout(ctx, time.Second*2)
@@ -265,7 +289,7 @@ forLoop:
 				// the next forwarded call after this childCtx expires. Till then, we block
 				// hoping for a local poller match
 				select {
-				case tm.taskC <- task:
+				case taskC <- task:
 					cancel()
 					return nil
 				case <-childCtx.Done():
@@ -291,18 +315,26 @@ forLoop:
 // Poll blocks until a task is found or context deadline is exceeded
 // On success, the returned task could be a query task or a regular task
 // Returns ErrNoTasks when context deadline is exceeded
-func (tm *taskMatcherImpl) Poll(ctx context.Context, pollMetadata *pollMetadata) (*internalTask, error) {
-	return tm.poll(ctx, false)
+//
+// VERSIONING NOTES:
+// polls come with a specific build id. they should only be sent tasks that are compatible with
+// that build id.
+func (tm *versioningTaskMatcherImpl) Poll(ctx context.Context, pollMetadata *pollMetadata) (*internalTask, error) {
+	return tm.poll(ctx, false, pollMetadata)
 }
 
 // PollForQuery blocks until a *query* task is found or context deadline is exceeded
 // Returns ErrNoTasks when context deadline is exceeded
-func (tm *taskMatcherImpl) PollForQuery(ctx context.Context, pollMetadata *pollMetadata) (*internalTask, error) {
-	return tm.poll(ctx, true)
+//
+// VERSIONING NOTES:
+// polls come with a specific build id. they should only be sent tasks that are compatible with
+// that build id.
+func (tm *versioningTaskMatcherImpl) PollForQuery(ctx context.Context, pollMetadata *pollMetadata) (*internalTask, error) {
+	return tm.poll(ctx, true, pollMetadata)
 }
 
 // UpdateRatelimit updates the task dispatch rate
-func (tm *taskMatcherImpl) UpdateRatelimit(rps *float64) {
+func (tm *versioningTaskMatcherImpl) UpdateRatelimit(rps *float64) {
 	if rps == nil {
 		return
 	}
@@ -325,14 +357,19 @@ func (tm *taskMatcherImpl) UpdateRatelimit(rps *float64) {
 }
 
 // Rate returns the current rate at which tasks are dispatched
-func (tm *taskMatcherImpl) Rate() float64 {
+func (tm *versioningTaskMatcherImpl) Rate() float64 {
 	return tm.rateLimiter.Rate()
 }
 
-func (tm *taskMatcherImpl) poll(ctx context.Context, queryOnly bool) (*internalTask, error) {
-	taskC, queryTaskC := tm.taskC, tm.queryTaskC
-	if queryOnly {
-		taskC = nil
+func (tm *versioningTaskMatcherImpl) poll(ctx context.Context, queryOnly bool, pollMetadata *pollMetadata) (*internalTask, error) {
+	buildID := pollMetadata.workerVersioningBuildID
+	if buildID == "" {
+		return nil, errors.New("poll on versioned task queue missing build id")
+	}
+	queryTaskC := tm.getTaskChannel(&tm.queryTaskCs, buildID)
+	var taskC chan *internalTask
+	if !queryOnly {
+		taskC = tm.getTaskChannel(&tm.taskCs, buildID)
 	}
 
 	// We want to effectively do a prioritized select, but Go select is random
@@ -410,20 +447,62 @@ func (tm *taskMatcherImpl) poll(ctx context.Context, queryOnly bool) (*internalT
 	}
 }
 
-func (tm *taskMatcherImpl) fwdrPollReqTokenC() <-chan *ForwarderReqToken {
+func (tm *versioningTaskMatcherImpl) fwdrPollReqTokenC() <-chan *ForwarderReqToken {
 	if tm.fwdr == nil {
 		return nil
 	}
 	return tm.fwdr.PollReqTokenC()
 }
 
-func (tm *taskMatcherImpl) fwdrAddReqTokenC() <-chan *ForwarderReqToken {
+func (tm *versioningTaskMatcherImpl) fwdrAddReqTokenC() <-chan *ForwarderReqToken {
 	if tm.fwdr == nil {
 		return nil
 	}
 	return tm.fwdr.AddReqTokenC()
 }
 
-func (tm *taskMatcherImpl) isForwardingAllowed() bool {
+func (tm *versioningTaskMatcherImpl) isForwardingAllowed() bool {
 	return tm.fwdr != nil
+}
+
+func (tm *versioningTaskMatcherImpl) findLatestCompatibleVersion(ctx context.Context, buildID string) (string, error) {
+	index, err := tm.getVersioningDataIndex(ctx)
+	if err != nil {
+		return "", err
+	}
+	if target, ok := index[buildID]; ok {
+		return target, nil
+	}
+	return "", errors.New("unknown build id")
+}
+
+func (tm *versioningTaskMatcherImpl) getVersioningDataIndex(ctx context.Context) (map[string]string, error) {
+	// FIXME: cache this instead of building every time
+	data, err := tm.getVersioningData(ctx)
+	if err != nil {
+		return nil, err
+	} else if data == nil {
+		return nil, errors.New("versioned queue has no versioning data")
+	}
+
+	m := make(map[string]string)
+	m[LatestDefaultBuildID] = data.CurrentDefault.Version.WorkerBuildId
+	for _, leaf := range data.CompatibleLeaves {
+		target := leaf.Version.WorkerBuildId
+		m[target] = target
+		for _ = 0; leaf != nil; leaf = leaf.PreviousCompatible {
+			m[leaf.Version.WorkerBuildId] = target
+		}
+	}
+	return m, nil
+}
+
+func (tm *versioningTaskMatcherImpl) getTaskChannel(m *sync.Map, buildID string) chan *internalTask {
+	// optimistic load to avoid allocation
+	if ch, ok := m.Load(buildID); ok {
+		return ch.(chan *internalTask)
+	}
+	// if not, try again
+	ch, _ := m.LoadOrStore(buildID, make(chan *internalTask))
+	return ch.(chan *internalTask)
 }

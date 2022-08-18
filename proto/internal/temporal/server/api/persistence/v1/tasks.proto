@@ -46,6 +46,9 @@ message TaskInfo {
     google.protobuf.Timestamp create_time = 5 [(gogoproto.stdtime) = true];
     google.protobuf.Timestamp expiry_time = 6 [(gogoproto.stdtime) = true];
     temporal.server.api.clock.v1.VectorClock clock = 7;
+    // For task queue versioning. Build id of previous workflow task, or special value for
+    // first workflow task.
+    string last_workflow_task_build_id = 8;
 }
 
 // task_queue column

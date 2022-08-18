@@ -106,7 +106,7 @@ type (
 		// GetTask blocks waiting for a task Returns error when context deadline is exceeded
 		// maxDispatchPerSecond is the max rate at which tasks are allowed to be dispatched
 		// from this task queue to pollers
-		GetTask(ctx context.Context, maxDispatchPerSecond *float64) (*internalTask, error)
+		GetTask(ctx context.Context, pollMetadata *pollMetadata) (*internalTask, error)
 		// DispatchTask dispatches a task to a poller. When there are no pollers to pick
 		// up the task, this method will return error. Task will not be persisted to db
 		DispatchTask(ctx context.Context, task *internalTask) error
@@ -252,7 +252,12 @@ func newTaskQueueManager(
 	if tlMgr.isFowardingAllowed(taskQueue, taskQueueKind) {
 		fwdr = newForwarder(&taskQueueConfig.forwarderConfig, taskQueue, taskQueueKind, e.matchingClient)
 	}
-	tlMgr.matcher = newTaskMatcher(taskQueueConfig, fwdr, tlMgr.metricScope)
+	// FIXME: need to make this more dynamic later
+	if taskQueue.isVersioned() {
+		tlMgr.matcher = newVersionedTaskMatched(taskQueueConfig, fwdr, tlMgr.metricScope, db.GetVersioningData)
+	} else {
+		tlMgr.matcher = newTaskMatcher(taskQueueConfig, fwdr, tlMgr.metricScope)
+	}
 	for _, opt := range opts {
 		opt(tlMgr)
 	}
@@ -381,7 +386,7 @@ func (c *taskQueueManagerImpl) AddTask(
 // to be dispatched from this task queue to pollers
 func (c *taskQueueManagerImpl) GetTask(
 	ctx context.Context,
-	maxDispatchPerSecond *float64,
+	pollMetadata *pollMetadata,
 ) (*internalTask, error) {
 	c.liveness.markAlive(time.Now())
 
@@ -408,10 +413,10 @@ func (c *taskQueueManagerImpl) GetTask(
 
 	identity, ok := ctx.Value(identityKey).(string)
 	if ok && identity != "" {
-		c.pollerHistory.updatePollerInfo(pollerIdentity(identity), maxDispatchPerSecond)
+		c.pollerHistory.updatePollerInfo(pollerIdentity(identity), pollMetadata)
 		defer func() {
 			// to update timestamp when long poll ends
-			c.pollerHistory.updatePollerInfo(pollerIdentity(identity), maxDispatchPerSecond)
+			c.pollerHistory.updatePollerInfo(pollerIdentity(identity), pollMetadata)
 		}()
 	}
 
@@ -425,13 +430,13 @@ func (c *taskQueueManagerImpl) GetTask(
 	// one rateLimiter for this entire task queue and as we get polls,
 	// we update the ratelimiter rps if it has changed from the last
 	// value. Last poller wins if different pollers provide different values
-	c.matcher.UpdateRatelimit(maxDispatchPerSecond)
+	c.matcher.UpdateRatelimit(pollMetadata.maxDispatchPerSecond)
 
 	if !namespaceEntry.ActiveInCluster(c.clusterMeta.GetCurrentClusterName()) {
-		return c.matcher.PollForQuery(childCtx)
+		return c.matcher.PollForQuery(childCtx, pollMetadata)
 	}
 
-	task, err := c.matcher.Poll(childCtx)
+	task, err := c.matcher.Poll(childCtx, pollMetadata)
 	if err != nil {
 		return nil, err
 	}
