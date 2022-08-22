@@ -297,7 +297,7 @@ func (db *taskQueueDB) getVersioningDataLocked(
 		return db.versioningData, nil
 	}
 
-	if !db.taskQueue.IsRoot() || db.taskQueue.taskType != enumspb.TASK_QUEUE_TYPE_WORKFLOW {
+	if !db.taskQueue.OwnsVersioningData() {
 		return nil, errVersioningDataNotPresentOnPartition
 	}
 
@@ -319,7 +319,7 @@ func (db *taskQueueDB) getVersioningDataLocked(
 //
 // On success returns a pointer to the updated data (which must not be mutated).
 func (db *taskQueueDB) MutateVersioningData(ctx context.Context, mutator func(*persistencespb.VersioningData) error) (*persistencespb.VersioningData, error) {
-	if !db.taskQueue.IsRoot() || db.taskQueue.taskType != enumspb.TASK_QUEUE_TYPE_WORKFLOW {
+	if !db.taskQueue.OwnsVersioningData() {
 		return nil, errVersioningDataNoMutateNonRoot
 	}
 	db.Lock()
@@ -364,7 +364,7 @@ func (db *taskQueueDB) updateTaskQueue(
 ) (*persistence.UpdateTaskQueueResponse, error) {
 	reqToPersist := request
 	// Only the root workflow task queue stores versioning information
-	if !db.taskQueue.IsRoot() || db.taskQueue.taskType != enumspb.TASK_QUEUE_TYPE_WORKFLOW {
+	if !db.taskQueue.OwnsVersioningData() {
 		tqInfoSansVerDat := *request.TaskQueueInfo
 		tqInfoSansVerDat.VersioningData = nil
 		reqClone := *request

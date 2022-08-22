@@ -519,7 +519,7 @@ func (c *taskQueueManagerImpl) MutateVersioningData(ctx context.Context, mutator
 
 func (c *taskQueueManagerImpl) InvalidateMetadata(request *matchingservice.InvalidateTaskQueueMetadataRequest) error {
 	if request.GetVersioningData() != nil {
-		if c.taskQueueID.IsRoot() && c.taskQueueID.taskType == enumspb.TASK_QUEUE_TYPE_WORKFLOW {
+		if c.taskQueueID.OwnsVersioningData() {
 			// Should never happen. Root partitions do not get their versioning data invalidated.
 			c.logger.Warn("A root workflow partition was told to invalidate its versioning data, this should not happen")
 			return nil
@@ -740,7 +740,7 @@ func (c *taskQueueManagerImpl) fetchMetadataFromRootPartitionOnInit(ctx context.
 func (c *taskQueueManagerImpl) fetchMetadataFromRootPartition(ctx context.Context) (*persistencespb.VersioningData, error) {
 	// Nothing to do if we are the root partition of a workflow queue, since we should own the data.
 	// (for versioning - any later added metadata may need to not abort so early)
-	if c.taskQueueID.IsRoot() && c.taskQueueID.taskType == enumspb.TASK_QUEUE_TYPE_WORKFLOW {
+	if c.taskQueueID.OwnsVersioningData() {
 		return nil, nil
 	}
 
