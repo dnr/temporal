@@ -363,8 +363,8 @@ func (db *taskQueueDB) updateTaskQueue(
 	request *persistence.UpdateTaskQueueRequest,
 ) (*persistence.UpdateTaskQueueResponse, error) {
 	reqToPersist := request
-	// Only the root task queue stores versioning information
-	if !db.taskQueue.IsRoot() {
+	// Only the root workflow task queue stores versioning information
+	if !db.taskQueue.IsRoot() || db.taskQueue.taskType != enumspb.TASK_QUEUE_TYPE_WORKFLOW {
 		tqInfoSansVerDat := *request.TaskQueueInfo
 		tqInfoSansVerDat.VersioningData = nil
 		reqClone := *request

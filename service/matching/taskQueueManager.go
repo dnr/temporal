@@ -506,7 +506,7 @@ func (c *taskQueueManagerImpl) MutateVersioningData(ctx context.Context, mutator
 						VersioningData: newDat,
 					})
 				if err != nil {
-					c.logger.Warn("Failed to notify sub-partition of invalidated versioning data",
+					c.logger.Warn("Failed to notify partition of invalidated versioning data",
 						tag.WorkflowTaskQueueName(tq), tag.Error(err))
 				}
 				wg.Done()

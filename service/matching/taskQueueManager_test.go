@@ -503,7 +503,7 @@ func TestAddTaskStandby(t *testing.T) {
 	require.False(t, syncMatch)
 }
 
-func TestTaskQueueSubParitionFetchesVersioningInfoFromRootPartitionOnInit(t *testing.T) {
+func TestTaskQueuePartitionFetchesVersioningInfoFromRootPartitionOnInit(t *testing.T) {
 	controller := gomock.NewController(t)
 	defer controller.Finish()
 	ctx := context.Background()
@@ -542,7 +542,7 @@ func TestTaskQueueSubParitionFetchesVersioningInfoFromRootPartitionOnInit(t *tes
 	subTq.Stop()
 }
 
-func TestTaskQueueSubParitionSendsCurrentHashOfVersioningDataWhenFetching(t *testing.T) {
+func TestTaskQueuePartitionSendsCurrentHashOfVersioningDataWhenFetching(t *testing.T) {
 	controller := gomock.NewController(t)
 	defer controller.Finish()
 	ctx := context.Background()
@@ -625,7 +625,7 @@ func TestTaskQueueRootPartitionNotifiesChildrenOfInvalidation(t *testing.T) {
 	rootTq.Stop()
 }
 
-func TestTaskQueueSubPartitionPollsPeriodically(t *testing.T) {
+func TestTaskQueuePartitionPollsPeriodically(t *testing.T) {
 	controller := gomock.NewController(t)
 	defer controller.Finish()
 	ctx := context.Background()
@@ -660,7 +660,7 @@ func TestTaskQueueSubPartitionPollsPeriodically(t *testing.T) {
 	subTq.Stop()
 }
 
-func TestTaskQueueSubPartitionDoesNotPollIfNoDataThenPollsWhenInvalidated(t *testing.T) {
+func TestTaskQueuePartitionDoesNotPollIfNoDataThenPollsWhenInvalidated(t *testing.T) {
 	controller := gomock.NewController(t)
 	defer controller.Finish()
 	ctx := context.Background()

@@ -61,7 +61,7 @@ func depthLimiter(g *persistence.VersioningData, maxDepth int, noMutate bool) *w
 	compatLeaves := g.GetCompatibleLeaves()
 	if maxDepth > 0 {
 		if noMutate {
-			curDefault = proto.Clone(g.GetCurrentDefault()).(*taskqueuepb.VersionIdNode)
+			curDefault = common.CloneProto(g.GetCurrentDefault())
 		}
 		curNode := curDefault
 		curDepth := 1
