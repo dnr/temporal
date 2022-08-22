@@ -254,7 +254,7 @@ func newTaskQueueManager(
 	}
 	// FIXME: need to make this more dynamic later
 	if taskQueue.isVersioned() {
-		tlMgr.matcher = newVersionedTaskMatcher(taskQueueConfig, fwdr, tlMgr.metricScope, db.GetVersioningData)
+		tlMgr.matcher = newVersionedTaskMatcher(taskQueueConfig, fwdr, tlMgr.metricScope, tlMgr.GetVersioningData)
 	} else {
 		tlMgr.matcher = newTaskMatcher(taskQueueConfig, fwdr, tlMgr.metricScope)
 	}
