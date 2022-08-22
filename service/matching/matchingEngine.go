@@ -750,7 +750,7 @@ func (e *matchingEngineImpl) GetWorkerBuildIdOrdering(
 		return nil, err
 	}
 	return &matchingservice.GetWorkerBuildIdOrderingResponse{
-		Response: ToBuildIdOrderingResponse(verDat, int(req.GetRequest().GetMaxDepth())),
+		Response: verDat.ToBuildIdOrderingResponse(int(req.GetRequest().GetMaxDepth())),
 	}, nil
 }
 
@@ -800,9 +800,9 @@ func (e *matchingEngineImpl) GetTaskQueueMetadata(
 		if err != nil {
 			return nil, err
 		}
-		if !bytes.Equal(HashVersioningData(vDat), verDatHash) {
+		if !bytes.Equal(vDat.Hash(), verDatHash) {
 			resp.VersioningDataResp = &matchingservice.GetTaskQueueMetadataResponse_VersioningData{
-				VersioningData: vDat,
+				VersioningData: vDat.GetData(),
 			}
 		}
 	}

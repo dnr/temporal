@@ -26,6 +26,7 @@ package matching
 
 import (
 	"encoding/binary"
+	"errors"
 	"fmt"
 
 	"github.com/dgryski/go-farm"
@@ -34,20 +35,77 @@ import (
 	"go.temporal.io/api/serviceerror"
 	taskqueuepb "go.temporal.io/api/taskqueue/v1"
 	"go.temporal.io/api/workflowservice/v1"
-	"go.temporal.io/server/api/persistence/v1"
+	persistencespb "go.temporal.io/server/api/persistence/v1"
+	"go.temporal.io/server/common"
 )
 
-func ToBuildIdOrderingResponse(g *persistence.VersioningData, maxDepth int) *workflowservice.GetWorkerBuildIdOrderingResponse {
-	return depthLimiter(g, maxDepth, true)
+type (
+	// versioningData is a thin wrapper around persistencespb.VersioningData that maintains an
+	// index and wraps a mutation operation. versioningData is immutable once constructed.
+	versioningData struct {
+		data  persistencespb.VersioningData
+		index map[string]string
+	}
+)
+
+func newVersioningData(data *persistencespb.VersioningData) *versioningData {
+	return &versioningData{
+		data:  *data,
+		index: makeIndex(data),
+	}
 }
 
-// HashVersioningData returns a farm.Fingerprint64 hash of the versioning data as bytes. If the data is nonexistent or
-// invalid, returns nil.
-func HashVersioningData(data *persistence.VersioningData) []byte {
-	if data == nil || data.GetCurrentDefault() == nil {
+func makeIndex(data *persistencespb.VersioningData) map[string]string {
+	index := make(map[string]string)
+	index[LatestDefaultBuildID] = data.CurrentDefault.Version.WorkerBuildId
+	for _, leaf := range data.CompatibleLeaves {
+		target := leaf.Version.WorkerBuildId
+		index[target] = target
+		for _ = 0; leaf != nil; leaf = leaf.PreviousCompatible {
+			index[leaf.Version.WorkerBuildId] = target
+		}
+	}
+	return index
+}
+
+func (v *versioningData) GetData() *persistencespb.VersioningData {
+	if v == nil {
 		return nil
 	}
-	asBytes, err := data.Marshal()
+	return &v.data
+}
+
+func (v *versioningData) GetTarget(buildID string) (string, error) {
+	if target, ok := v.index[buildID]; ok {
+		return target, nil
+	}
+	return "", errors.New("unknown build id") // FIXME: to global var
+}
+
+func (v *versioningData) Mutate(mutator func(*persistencespb.VersioningData) error) (*versioningData, error) {
+	data := v.GetData()
+	if data == nil {
+		data = &persistencespb.VersioningData{}
+	}
+	data = common.CloneProto(data)
+	err := mutator(data)
+	if err != nil {
+		return nil, err
+	}
+	return newVersioningData(data), nil
+}
+
+func (v *versioningData) ToBuildIdOrderingResponse(maxDepth int) *workflowservice.GetWorkerBuildIdOrderingResponse {
+	return depthLimiter(v.GetData(), maxDepth, true)
+}
+
+// Hash returns a farm.Fingerprint64 Hash of the versioning data as bytes. If the data is nonexistent or
+// invalid, returns nil.
+func (v *versioningData) Hash() []byte {
+	if v == nil || v.data.GetCurrentDefault() == nil {
+		return nil
+	}
+	asBytes, err := v.data.Marshal()
 	if err != nil {
 		return nil
 	}
@@ -56,7 +114,8 @@ func HashVersioningData(data *persistence.VersioningData) []byte {
 	return b
 }
 
-func depthLimiter(g *persistence.VersioningData, maxDepth int, noMutate bool) *workflowservice.GetWorkerBuildIdOrderingResponse {
+func depthLimiter(g *persistencespb.VersioningData, maxDepth int, noMutate bool) *workflowservice.GetWorkerBuildIdOrderingResponse {
+	// note: g can be nil here
 	curDefault := g.GetCurrentDefault()
 	compatLeaves := g.GetCompatibleLeaves()
 	if maxDepth > 0 {
@@ -126,7 +185,7 @@ func depthLimiter(g *persistence.VersioningData, maxDepth int, noMutate bool) *w
 // 4. Unset a version as a default. It will be dropped and its previous incompatible version becomes default.
 // 5. Unset a version as a compatible. It will be dropped and its previous compatible version will become the new
 //    compatible leaf for that branch.
-func UpdateVersionsGraph(existingData *persistence.VersioningData, req *workflowservice.UpdateWorkerBuildIdOrderingRequest, maxSize int) error {
+func UpdateVersionsGraph(existingData *persistencespb.VersioningData, req *workflowservice.UpdateWorkerBuildIdOrderingRequest, maxSize int) error {
 	if req.GetVersionId().GetWorkerBuildId() == "" {
 		return serviceerror.NewInvalidArgument(
 			"request to update worker build id ordering is missing a valid version identifier")
@@ -140,7 +199,7 @@ func UpdateVersionsGraph(existingData *persistence.VersioningData, req *workflow
 	return nil
 }
 
-func updateImpl(existingData *persistence.VersioningData, req *workflowservice.UpdateWorkerBuildIdOrderingRequest) error {
+func updateImpl(existingData *persistencespb.VersioningData, req *workflowservice.UpdateWorkerBuildIdOrderingRequest) error {
 	// If the version is to become the new default, add it to the list of current defaults, possibly replacing
 	// the currently set one.
 	if req.GetBecomeDefault() {
@@ -232,7 +291,7 @@ func updateImpl(existingData *persistence.VersioningData, req *workflowservice.U
 // which already point at it as their previous compatible version, that chain will be followed out to the leaf, which
 // will be returned.
 func findCompatibleNode(
-	existingData *persistence.VersioningData,
+	existingData *persistencespb.VersioningData,
 	versionId *taskqueuepb.VersionId,
 ) (*taskqueuepb.VersionIdNode, int) {
 	// First search down from all existing compatible leaves, as if any of those chains point at the desired version,

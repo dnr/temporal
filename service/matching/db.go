@@ -55,7 +55,7 @@ type (
 		taskQueueKind  enumspb.TaskQueueKind
 		rangeID        int64
 		ackLevel       int64
-		versioningData *persistencespb.VersioningData
+		versioningData *versioningData
 		store          persistence.TaskManager
 		logger         log.Logger
 	}
@@ -140,7 +140,7 @@ func (db *taskQueueDB) takeOverTaskQueueLocked(
 		}
 		db.ackLevel = response.TaskQueueInfo.AckLevel
 		db.rangeID = response.RangeID + 1
-		db.versioningData = response.TaskQueueInfo.VersioningData
+		db.versioningData = newVersioningData(response.TaskQueueInfo.VersioningData)
 		return nil
 
 	case *serviceerror.NotFound:
@@ -283,7 +283,7 @@ func (db *taskQueueDB) CompleteTasksLessThan(
 // will cause cache inconsistency.
 func (db *taskQueueDB) GetVersioningData(
 	ctx context.Context,
-) (*persistencespb.VersioningData, error) {
+) (*versioningData, error) {
 	db.Lock()
 	defer db.Unlock()
 	return db.getVersioningDataLocked(ctx)
@@ -292,7 +292,7 @@ func (db *taskQueueDB) GetVersioningData(
 // db.Lock() must be held before calling
 func (db *taskQueueDB) getVersioningDataLocked(
 	ctx context.Context,
-) (*persistencespb.VersioningData, error) {
+) (*versioningData, error) {
 	if db.versioningData != nil {
 		return db.versioningData, nil
 	}
@@ -309,7 +309,7 @@ func (db *taskQueueDB) getVersioningDataLocked(
 	if err != nil {
 		return nil, err
 	}
-	db.versioningData = tqInfo.TaskQueueInfo.GetVersioningData()
+	db.versioningData = newVersioningData(tqInfo.TaskQueueInfo.GetVersioningData())
 
 	return db.versioningData, nil
 }
@@ -325,20 +325,18 @@ func (db *taskQueueDB) MutateVersioningData(ctx context.Context, mutator func(*p
 	db.Lock()
 	defer db.Unlock()
 
-	verDat, err := db.getVersioningDataLocked(ctx)
+	oldData, err := db.getVersioningDataLocked(ctx)
 	if err != nil {
 		return nil, err
 	}
 
-	if verDat == nil {
-		verDat = &persistencespb.VersioningData{}
-	}
-	if err := mutator(verDat); err != nil {
+	newData, err := oldData.Mutate(mutator)
+	if err != nil {
 		return nil, err
 	}
 
 	queueInfo := db.cachedQueueInfo()
-	queueInfo.VersioningData = verDat
+	queueInfo.VersioningData = newData.GetData()
 
 	_, err = db.updateTaskQueue(ctx, &persistence.UpdateTaskQueueRequest{
 		RangeID:       db.rangeID,
@@ -346,15 +344,16 @@ func (db *taskQueueDB) MutateVersioningData(ctx context.Context, mutator func(*p
 		PrevRangeID:   db.rangeID,
 	})
 	if err == nil {
-		db.versioningData = verDat
+		db.versioningData = newData
 	}
-	return verDat, err
+	return newData.GetData(), err
 }
 
-func (db *taskQueueDB) setVersioningDataForNonRootPartition(verDat *persistencespb.VersioningData) {
+func (db *taskQueueDB) setVersioningDataForNonRootPartition(verDat *persistencespb.VersioningData) *versioningData {
 	db.Lock()
 	defer db.Unlock()
-	db.versioningData = verDat
+	db.versioningData = newVersioningData(verDat)
+	return db.versioningData
 }
 
 // Use this rather than calling UpdateTaskQueue directly on the store
@@ -392,7 +391,7 @@ func (db *taskQueueDB) cachedQueueInfo() *persistencespb.TaskQueueInfo {
 		TaskType:       db.taskQueue.taskType,
 		Kind:           db.taskQueueKind,
 		AckLevel:       db.ackLevel,
-		VersioningData: db.versioningData,
+		VersioningData: db.versioningData.GetData(),
 		ExpiryTime:     db.expiryTime(),
 		LastUpdateTime: timestamp.TimeNowPtrUtc(),
 	}

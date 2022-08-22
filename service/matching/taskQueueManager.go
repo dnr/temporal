@@ -114,7 +114,7 @@ type (
 		// if dispatched to local poller then nil and nil is returned.
 		DispatchQueryTask(ctx context.Context, taskID string, request *matchingservice.QueryWorkflowRequest) (*matchingservice.QueryWorkflowResponse, error)
 		// GetVersioningData returns the versioning data for this task queue
-		GetVersioningData(ctx context.Context) (*persistencespb.VersioningData, error)
+		GetVersioningData(ctx context.Context) (*versioningData, error)
 		// MutateVersioningData allows callers to update versioning data for this task queue
 		MutateVersioningData(ctx context.Context, mutator func(*persistencespb.VersioningData) error) error
 		// InvalidateMetadata allows callers to invalidate cached data on this task queue
@@ -254,7 +254,7 @@ func newTaskQueueManager(
 	}
 	// FIXME: need to make this more dynamic later
 	if taskQueue.isVersioned() {
-		tlMgr.matcher = newVersionedTaskMatched(taskQueueConfig, fwdr, tlMgr.metricScope, db.GetVersioningData)
+		tlMgr.matcher = newVersionedTaskMatcher(taskQueueConfig, fwdr, tlMgr.metricScope, db.GetVersioningData)
 	} else {
 		tlMgr.matcher = newTaskMatcher(taskQueueConfig, fwdr, tlMgr.metricScope)
 	}
@@ -467,17 +467,17 @@ func (c *taskQueueManagerImpl) DispatchQueryTask(
 	return c.matcher.OfferQuery(ctx, task)
 }
 
-// GetVersioningData returns the versioning data for the task queue if any. If this task queue is a sub-partition and
-// has no cached data, it will explicitly attempt a fetch from the root partition.
-func (c *taskQueueManagerImpl) GetVersioningData(ctx context.Context) (*persistencespb.VersioningData, error) {
-	vd, err := c.db.GetVersioningData(ctx)
+// GetVersioningData returns the versioning data for the task queue if any. If this task queue is a non-root-partition
+// and has no cached data, it will explicitly attempt a fetch from the root partition.
+func (c *taskQueueManagerImpl) GetVersioningData(ctx context.Context) (*versioningData, error) {
+	data, err := c.db.GetVersioningData(ctx)
 	if errors.Is(err, errVersioningDataNotPresentOnPartition) {
 		// If this is a non-root-partition with no versioning data, this call is indicating we might expect to find
 		// some. Since we may not have started the poller, we want to explicitly attempt to fetch now, because
 		// it's possible some was added to the root partition, but it failed to invalidate this partition.
 		return c.fetchMetadataFromRootPartition(ctx)
 	}
-	return vd, err
+	return data, err
 }
 
 func (c *taskQueueManagerImpl) MutateVersioningData(ctx context.Context, mutator func(*persistencespb.VersioningData) error) error {
@@ -737,7 +737,7 @@ func (c *taskQueueManagerImpl) fetchMetadataFromRootPartitionOnInit(ctx context.
 
 // fetchMetadataFromRootPartition fetches metadata from root partition iff this partition is not a root partition.
 // Returns the fetched data, if fetching was necessary and successful.
-func (c *taskQueueManagerImpl) fetchMetadataFromRootPartition(ctx context.Context) (*persistencespb.VersioningData, error) {
+func (c *taskQueueManagerImpl) fetchMetadataFromRootPartition(ctx context.Context) (*versioningData, error) {
 	// Nothing to do if we are the root partition of a workflow queue, since we should own the data.
 	// (for versioning - any later added metadata may need to not abort so early)
 	if c.taskQueueID.OwnsVersioningData() {
@@ -748,7 +748,7 @@ func (c *taskQueueManagerImpl) fetchMetadataFromRootPartition(ctx context.Contex
 	if err != nil && !errors.Is(err, errVersioningDataNotPresentOnPartition) {
 		return nil, err
 	}
-	curHash := HashVersioningData(curDat)
+	curHash := curDat.Hash()
 
 	rootTqName := c.taskQueueID.GetRoot()
 	if len(curHash) == 0 {
@@ -765,7 +765,7 @@ func (c *taskQueueManagerImpl) fetchMetadataFromRootPartition(ctx context.Contex
 	// It can't be nil due to removing versions, as that would result in a non-nil container with
 	// nil inner fields.
 	if !res.GetMatchedReqHash() {
-		c.db.setVersioningDataForNonRootPartition(res.GetVersioningData())
+		curDat = c.db.setVersioningDataForNonRootPartition(res.GetVersioningData())
 	}
 	// We want to start the poller as long as the root partition has any kind of data (or fetching hasn't worked)
 	if res.GetMatchedReqHash() || res.GetVersioningData() != nil || err != nil {
@@ -774,7 +774,7 @@ func (c *taskQueueManagerImpl) fetchMetadataFromRootPartition(ctx context.Contex
 	if err != nil {
 		return nil, err
 	}
-	return res.GetVersioningData(), nil
+	return curDat, nil
 }
 
 // StartIfUnstarted starts the poller if it's not already started. The passed in function is called repeatedly

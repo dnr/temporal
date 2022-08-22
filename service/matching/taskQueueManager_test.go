@@ -574,7 +574,7 @@ func TestTaskQueuePartitionSendsCurrentHashOfVersioningDataWhenFetching(t *testi
 			tqm.matchingClient = mockMatchingClient
 		})
 	// Cram some versioning data in there so it will have something to hash when fetching
-	subTq.db.versioningData = data
+	subTq.db.versioningData = newVersioningData(data)
 	// Don't start it. Just explicitly call fetching function.
 	res, err := subTq.fetchMetadataFromRootPartition(ctx)
 	require.NotNil(t, res)

@@ -33,7 +33,6 @@ import (
 
 	enumsspb "go.temporal.io/server/api/enums/v1"
 	"go.temporal.io/server/api/matchingservice/v1"
-	persistencespb "go.temporal.io/server/api/persistence/v1"
 	"go.temporal.io/server/common/metrics"
 	"go.temporal.io/server/common/quotas"
 )
@@ -46,7 +45,7 @@ const (
 type versioningTaskMatcherImpl struct {
 	config *taskQueueConfig
 
-	getVersioningData func(context.Context) (*persistencespb.VersioningData, error)
+	getVersioningData func(context.Context) (*versioningData, error)
 
 	// synchronous task channels
 	taskCs sync.Map // map[string]chan *internalTask
@@ -67,8 +66,8 @@ type versioningTaskMatcherImpl struct {
 	numPartitions func() int    // number of task queue partitions
 }
 
-func newVersionedTaskMatched(config *taskQueueConfig, fwdr *Forwarder, scope metrics.Scope,
-	getVersioningData func(context.Context) (*persistencespb.VersioningData, error)) TaskMatcher {
+func newVersionedTaskMatcher(config *taskQueueConfig, fwdr *Forwarder, scope metrics.Scope,
+	getVersioningData func(context.Context) (*versioningData, error)) TaskMatcher {
 	dynamicRateBurst := quotas.NewMutableRateBurst(
 		defaultTaskDispatchRPS,
 		int(defaultTaskDispatchRPS),
@@ -466,35 +465,13 @@ func (tm *versioningTaskMatcherImpl) isForwardingAllowed() bool {
 }
 
 func (tm *versioningTaskMatcherImpl) findLatestCompatibleVersion(ctx context.Context, buildID string) (string, error) {
-	index, err := tm.getVersioningDataIndex(ctx)
-	if err != nil {
-		return "", err
-	}
-	if target, ok := index[buildID]; ok {
-		return target, nil
-	}
-	return "", errors.New("unknown build id")
-}
-
-func (tm *versioningTaskMatcherImpl) getVersioningDataIndex(ctx context.Context) (map[string]string, error) {
-	// FIXME: cache this instead of building every time
 	data, err := tm.getVersioningData(ctx)
 	if err != nil {
-		return nil, err
+		return "", err
 	} else if data == nil {
-		return nil, errors.New("versioned queue has no versioning data")
+		return "", errors.New("versioned queue has no versioning data")
 	}
-
-	m := make(map[string]string)
-	m[LatestDefaultBuildID] = data.CurrentDefault.Version.WorkerBuildId
-	for _, leaf := range data.CompatibleLeaves {
-		target := leaf.Version.WorkerBuildId
-		m[target] = target
-		for _ = 0; leaf != nil; leaf = leaf.PreviousCompatible {
-			m[leaf.Version.WorkerBuildId] = target
-		}
-	}
-	return m, nil
+	return data.GetTarget(buildID)
 }
 
 func (tm *versioningTaskMatcherImpl) getTaskChannel(m *sync.Map, buildID string) chan *internalTask {
