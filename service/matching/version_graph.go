@@ -49,6 +49,10 @@ type (
 	}
 )
 
+var (
+	errUnknownBuildID = errors.New("unknown build id")
+)
+
 func newVersioningData(data *persistencespb.VersioningData) *versioningData {
 	return &versioningData{
 		data:  *data,
@@ -80,15 +84,11 @@ func (v *versioningData) GetTarget(buildID string) (string, error) {
 	if target, ok := v.index[buildID]; ok {
 		return target, nil
 	}
-	return "", errors.New("unknown build id") // FIXME: to global var
+	return "", errUnknownBuildID
 }
 
 func (v *versioningData) CloneAndApplyMutation(mutator func(*persistencespb.VersioningData) error) (*versioningData, error) {
-	data := v.GetData()
-	if data == nil {
-		data = &persistencespb.VersioningData{}
-	}
-	data = common.CloneProto(data)
+	data := common.CloneProto(v.GetData())
 	err := mutator(data)
 	if err != nil {
 		return nil, err
