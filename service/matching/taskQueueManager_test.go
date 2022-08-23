@@ -291,7 +291,7 @@ func TestReaderSignaling(t *testing.T) {
 func runOneShotPoller(ctx context.Context, tqm taskQueueManager) (*goro.Handle, chan interface{}) {
 	out := make(chan interface{}, 1)
 	handle := goro.NewHandle(ctx).Go(func(ctx context.Context) error {
-		task, err := tqm.GetTask(ctx, &rpsInf)
+		task, err := tqm.GetTask(ctx, &pollMetadata{maxDispatchPerSecond: &rpsInf})
 		if task == nil {
 			out <- err
 			return nil
@@ -408,7 +408,7 @@ func TestDescribeTaskQueue(t *testing.T) {
 	require.NotEmpty(t, descResp.Pollers[0].GetLastAccessTime())
 
 	rps := 5.0
-	tlm.pollerHistory.updatePollerInfo(pollerIdentity(PollerIdentity), &rps)
+	tlm.pollerHistory.updatePollerInfo(pollerIdentity(PollerIdentity), &pollMetadata{maxDispatchPerSecond: &rps})
 	descResp = tlm.DescribeTaskQueue(includeTaskStatus)
 	require.Equal(t, 1, len(descResp.GetPollers()))
 	require.Equal(t, PollerIdentity, descResp.Pollers[0].GetIdentity())
@@ -551,15 +551,16 @@ func TestTaskQueuePartitionSendsCurrentHashOfVersioningDataWhenFetching(t *testi
 	tqCfg := defaultTqmTestOpts(controller)
 	tqCfg.tqId = subTqId
 
-	data := &persistencespb.VersioningData{
+	rawData := &persistencespb.VersioningData{
 		CurrentDefault: mkVerIdNode("0"),
 	}
 	asResp := &matchingservice.GetTaskQueueMetadataResponse{
 		VersioningDataResp: &matchingservice.GetTaskQueueMetadataResponse_VersioningData{
-			VersioningData: data,
+			VersioningData: rawData,
 		},
 	}
-	dataHash := HashVersioningData(data)
+	data := newVersioningData(rawData)
+	dataHash := data.Hash()
 
 	subTq := mustCreateTestTaskQueueManagerWithConfig(t, controller, tqCfg,
 		func(tqm *taskQueueManagerImpl) {
@@ -574,7 +575,7 @@ func TestTaskQueuePartitionSendsCurrentHashOfVersioningDataWhenFetching(t *testi
 			tqm.matchingClient = mockMatchingClient
 		})
 	// Cram some versioning data in there so it will have something to hash when fetching
-	subTq.db.versioningData = newVersioningData(data)
+	subTq.db.versioningData = newVersioningData(rawData)
 	// Don't start it. Just explicitly call fetching function.
 	res, err := subTq.fetchMetadataFromRootPartition(ctx)
 	require.NotNil(t, res)

@@ -71,7 +71,7 @@ func TestNewDefaultGraphUpdate(t *testing.T) {
 	assert.Equal(t, n0, data.CurrentDefault.PreviousIncompatible.PreviousIncompatible)
 	assert.Equal(t, "0", data.CurrentDefault.PreviousIncompatible.PreviousIncompatible.Version.GetWorkerBuildId())
 
-	asResp := ToBuildIdOrderingResponse(data, 0)
+	asResp := newVersioningData(data).ToBuildIdOrderingResponse(0)
 	assert.Equal(t, 0, len(asResp.GetCompatibleLeaves()))
 }
 
@@ -159,7 +159,7 @@ func TestNewCompatibleWithNodeDeepInIncompatChain(t *testing.T) {
 	assert.Equal(t, "0.1", data.CompatibleLeaves[0].Version.GetWorkerBuildId())
 	assert.Equal(t, "0", data.CompatibleLeaves[0].PreviousCompatible.Version.GetWorkerBuildId())
 
-	asResp := ToBuildIdOrderingResponse(data, 0)
+	asResp := newVersioningData(data).ToBuildIdOrderingResponse(0)
 	assert.Equal(t, 1, len(asResp.GetCompatibleLeaves()))
 	assert.Equal(t, "0.1", asResp.CompatibleLeaves[0].Version.GetWorkerBuildId())
 }
@@ -402,7 +402,7 @@ func FuzzVersionGraphEnsureNoSameTypeDefaults(f *testing.F) {
 			addedNodes = append(addedNodes, id)
 			err := UpdateVersionsGraph(data, req, 0)
 			assert.NoError(t, err)
-			assert.NotNil(t, ToBuildIdOrderingResponse(data, 0))
+			assert.NotNil(t, newVersioningData(data).ToBuildIdOrderingResponse(0))
 		}
 	})
 }

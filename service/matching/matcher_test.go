@@ -62,8 +62,15 @@ type MatcherTestSuite struct {
 	rootMatcher *TaskMatcher // matcher for parent partition
 }
 
+type noVersioningData struct{}
+
 func TestMatcherSuite(t *testing.T) {
 	suite.Run(t, new(MatcherTestSuite))
+}
+
+func (*noVersioningData) Peek() *versioningData { return nil }
+func (*noVersioningData) Listen() (*versioningData, chan *versioningData, func()) {
+	return nil, nil, func() {}
 }
 
 func (t *MatcherTestSuite) SetupTest() {
@@ -80,11 +87,11 @@ func (t *MatcherTestSuite) SetupTest() {
 	}
 	t.cfg = tlCfg
 	t.fwdr = newForwarder(&t.cfg.forwarderConfig, t.taskQueue, enumspb.TASK_QUEUE_KIND_NORMAL, t.client)
-	t.matcher = newTaskMatcher(tlCfg, t.fwdr, metrics.NoopScope)
+	t.matcher = newTaskMatcher(tlCfg, t.fwdr, metrics.NoopScope, &noVersioningData{})
 
 	rootTaskQueue := newTestTaskQueueID(t.taskQueue.namespaceID, t.taskQueue.Parent(20), enumspb.TASK_QUEUE_TYPE_WORKFLOW)
 	rootTaskqueueCfg := newTaskQueueConfig(rootTaskQueue, cfg, "test-namespace")
-	t.rootMatcher = newTaskMatcher(rootTaskqueueCfg, nil, metrics.NoopScope)
+	t.rootMatcher = newTaskMatcher(rootTaskqueueCfg, nil, metrics.NoopScope, &noVersioningData{})
 }
 
 func (t *MatcherTestSuite) TearDownTest() {
@@ -101,7 +108,7 @@ func (t *MatcherTestSuite) TestLocalSyncMatch() {
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 		close(pollStarted)
-		task, err := t.matcher.Poll(ctx)
+		task, err := t.matcher.Poll(ctx, &pollMetadata{})
 		cancel()
 		if err == nil {
 			task.finish(nil)
@@ -137,7 +144,7 @@ func (t *MatcherTestSuite) testRemoteSyncMatch(taskSource enumsspb.TaskSource) {
 			// so lets delay polling by a bit to verify that
 			time.Sleep(time.Millisecond * 10)
 		}
-		task, err := t.matcher.Poll(ctx)
+		task, err := t.matcher.Poll(ctx, &pollMetadata{})
 		cancel()
 		if err == nil && !task.isStarted() {
 			task.finish(nil)
@@ -148,7 +155,7 @@ func (t *MatcherTestSuite) testRemoteSyncMatch(taskSource enumsspb.TaskSource) {
 	var remotePollResp matchingservice.PollWorkflowTaskQueueResponse
 	t.client.EXPECT().PollWorkflowTaskQueue(gomock.Any(), gomock.Any(), gomock.Any()).Do(
 		func(arg0 context.Context, arg1 *matchingservice.PollWorkflowTaskQueueRequest, arg2 ...interface{}) {
-			task, err := t.rootMatcher.Poll(arg0)
+			task, err := t.rootMatcher.Poll(arg0, &pollMetadata{})
 			if err != nil {
 				remotePollErr = err
 			} else {
@@ -219,7 +226,7 @@ func (t *MatcherTestSuite) TestQueryLocalSyncMatch() {
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 		close(pollStarted)
-		task, err := t.matcher.PollForQuery(ctx)
+		task, err := t.matcher.PollForQuery(ctx, &pollMetadata{})
 		cancel()
 		if err == nil && task.isQuery() {
 			task.finish(nil)
@@ -242,7 +249,7 @@ func (t *MatcherTestSuite) TestQueryRemoteSyncMatch() {
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 		<-pollSigC
-		task, err := t.matcher.PollForQuery(ctx)
+		task, err := t.matcher.PollForQuery(ctx, &pollMetadata{})
 		cancel()
 		if err == nil && task.isQuery() {
 			task.finish(nil)
@@ -254,7 +261,7 @@ func (t *MatcherTestSuite) TestQueryRemoteSyncMatch() {
 	var remotePollResp matchingservice.PollWorkflowTaskQueueResponse
 	t.client.EXPECT().PollWorkflowTaskQueue(gomock.Any(), gomock.Any(), gomock.Any()).Do(
 		func(arg0 context.Context, arg1 *matchingservice.PollWorkflowTaskQueueRequest, arg2 ...interface{}) {
-			task, err := t.rootMatcher.PollForQuery(arg0)
+			task, err := t.rootMatcher.PollForQuery(arg0, &pollMetadata{})
 			if err != nil {
 				remotePollErr = err
 			} else if task.isQuery() {
@@ -305,7 +312,7 @@ func (t *MatcherTestSuite) TestQueryRemoteSyncMatchError() {
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 		<-pollSigC
-		task, err := t.matcher.PollForQuery(ctx)
+		task, err := t.matcher.PollForQuery(ctx, &pollMetadata{})
 		cancel()
 		if err == nil && task.isQuery() {
 			matched = true
@@ -344,7 +351,7 @@ func (t *MatcherTestSuite) TestMustOfferLocalMatch() {
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 		close(pollStarted)
-		task, err := t.matcher.Poll(ctx)
+		task, err := t.matcher.Poll(ctx, &pollMetadata{})
 		cancel()
 		if err == nil {
 			task.finish(nil)
@@ -372,7 +379,7 @@ func (t *MatcherTestSuite) TestMustOfferRemoteMatch() {
 			wg.Done()
 			<-pollSigC
 			time.Sleep(time.Millisecond * 500) // delay poll to verify that offer blocks on parent
-			task, err := t.rootMatcher.Poll(arg0)
+			task, err := t.rootMatcher.Poll(arg0, &pollMetadata{})
 			if err != nil {
 				remotePollErr = err
 			} else {
@@ -386,7 +393,7 @@ func (t *MatcherTestSuite) TestMustOfferRemoteMatch() {
 
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
-		t.matcher.Poll(ctx)
+		t.matcher.Poll(ctx, &pollMetadata{})
 		cancel()
 	}()
 
@@ -443,7 +450,7 @@ func (t *MatcherTestSuite) TestRemotePoll() {
 	}()
 
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-	task, err := t.matcher.Poll(ctx)
+	task, err := t.matcher.Poll(ctx, &pollMetadata{})
 	cancel()
 	t.NoError(err)
 	t.NotNil(req)
@@ -467,7 +474,7 @@ func (t *MatcherTestSuite) TestRemotePollForQuery() {
 	}()
 
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-	task, err := t.matcher.PollForQuery(ctx)
+	task, err := t.matcher.PollForQuery(ctx, &pollMetadata{})
 	cancel()
 	t.NoError(err)
 	t.NotNil(req)
