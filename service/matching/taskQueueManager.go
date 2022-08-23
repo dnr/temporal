@@ -481,7 +481,7 @@ func (c *taskQueueManagerImpl) GetVersioningData(ctx context.Context) (*versioni
 }
 
 func (c *taskQueueManagerImpl) MutateVersioningData(ctx context.Context, mutator func(*persistencespb.VersioningData) error) error {
-	newDat, err := c.db.MutateVersioningData(ctx, mutator)
+	newData, err := c.db.MutateVersioningData(ctx, mutator)
 	c.signalIfFatal(err)
 	if err != nil {
 		return err
@@ -503,7 +503,7 @@ func (c *taskQueueManagerImpl) MutateVersioningData(ctx context.Context, mutator
 						NamespaceId:    c.taskQueueID.namespaceID.String(),
 						TaskQueue:      tq,
 						TaskQueueType:  tqt,
-						VersioningData: newDat,
+						VersioningData: newData,
 					})
 				if err != nil {
 					c.logger.Warn("Failed to notify partition of invalidated versioning data",
@@ -744,28 +744,28 @@ func (c *taskQueueManagerImpl) fetchMetadataFromRootPartition(ctx context.Contex
 		return nil, nil
 	}
 
-	curDat, err := c.db.GetVersioningData(ctx)
+	currentData, err := c.db.GetVersioningData(ctx)
 	if err != nil && !errors.Is(err, errVersioningDataNotPresentOnPartition) {
 		return nil, err
 	}
-	curHash := curDat.Hash()
+	currentHash := currentData.Hash()
 
 	rootTqName := c.taskQueueID.GetRoot()
-	if len(curHash) == 0 {
+	if len(currentHash) == 0 {
 		// if we have no data, make sure we send a sigil value, so it's known we desire versioning data
-		curHash = []byte{0}
+		currentHash = []byte{0}
 	}
 	res, err := c.matchingClient.GetTaskQueueMetadata(ctx, &matchingservice.GetTaskQueueMetadataRequest{
 		NamespaceId:               c.taskQueueID.namespaceID.String(),
 		TaskQueue:                 rootTqName,
-		WantVersioningDataCurhash: curHash,
+		WantVersioningDataCurhash: currentHash,
 	})
 	// If the root partition returns nil here, then that means our data matched, and we don't need to update.
 	// If it's nil because it never existed, then we'd never have any data.
 	// It can't be nil due to removing versions, as that would result in a non-nil container with
 	// nil inner fields.
 	if !res.GetMatchedReqHash() {
-		curDat = c.db.setVersioningDataForNonRootPartition(res.GetVersioningData())
+		currentData = c.db.setVersioningDataForNonRootPartition(res.GetVersioningData())
 	}
 	// We want to start the poller as long as the root partition has any kind of data (or fetching hasn't worked)
 	if res.GetMatchedReqHash() || res.GetVersioningData() != nil || err != nil {
@@ -774,7 +774,7 @@ func (c *taskQueueManagerImpl) fetchMetadataFromRootPartition(ctx context.Contex
 	if err != nil {
 		return nil, err
 	}
-	return curDat, nil
+	return currentData, nil
 }
 
 // StartIfUnstarted starts the poller if it's not already started. The passed in function is called repeatedly
@@ -799,8 +799,8 @@ func (mp *metadataPoller) pollLoop() {
 		case <-ticker.C:
 			// In case the interval has changed
 			ticker.Reset(mp.pollIntervalCfgFn())
-			dat, err := mp.tqMgr.fetchMetadataFromRootPartition(context.TODO())
-			if dat == nil && err == nil {
+			data, err := mp.tqMgr.fetchMetadataFromRootPartition(context.TODO())
+			if data == nil && err == nil {
 				// Can stop polling since there is no versioning data. Loop will be restarted if we
 				// are told to invalidate the data, or we attempt to fetch it via GetVersioningData.
 				return

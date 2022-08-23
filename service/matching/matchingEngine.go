@@ -742,7 +742,7 @@ func (e *matchingEngineImpl) GetWorkerBuildIdOrdering(
 		}
 		return nil, err
 	}
-	verDat, err := tqMgr.GetVersioningData(hCtx.Context)
+	data, err := tqMgr.GetVersioningData(hCtx.Context)
 	if err != nil {
 		if _, ok := err.(*serviceerror.NotFound); ok {
 			return &matchingservice.GetWorkerBuildIdOrderingResponse{}, nil
@@ -750,7 +750,7 @@ func (e *matchingEngineImpl) GetWorkerBuildIdOrdering(
 		return nil, err
 	}
 	return &matchingservice.GetWorkerBuildIdOrderingResponse{
-		Response: verDat.ToBuildIdOrderingResponse(int(req.GetRequest().GetMaxDepth())),
+		Response: data.ToBuildIdOrderingResponse(int(req.GetRequest().GetMaxDepth())),
 	}, nil
 }
 
@@ -792,17 +792,17 @@ func (e *matchingEngineImpl) GetTaskQueueMetadata(
 		return nil, err
 	}
 	resp := &matchingservice.GetTaskQueueMetadataResponse{}
-	verDatHash := req.GetWantVersioningDataCurhash()
+	wantHash := req.GetWantVersioningDataCurhash()
 	// This isn't != nil, because gogoproto will round-trip serialize an empty byte array in a request
 	// into a nil field.
-	if len(verDatHash) > 0 {
-		vDat, err := tqMgr.GetVersioningData(hCtx)
+	if len(wantHash) > 0 {
+		data, err := tqMgr.GetVersioningData(hCtx)
 		if err != nil {
 			return nil, err
 		}
-		if !bytes.Equal(vDat.Hash(), verDatHash) {
+		if !bytes.Equal(data.Hash(), wantHash) {
 			resp.VersioningDataResp = &matchingservice.GetTaskQueueMetadataResponse_VersioningData{
-				VersioningData: vDat.GetData(),
+				VersioningData: data.GetData(),
 			}
 		}
 	}

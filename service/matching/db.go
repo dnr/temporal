@@ -350,10 +350,10 @@ func (db *taskQueueDB) MutateVersioningData(ctx context.Context, mutator func(*p
 	return newData.GetData(), nil
 }
 
-func (db *taskQueueDB) setVersioningDataForNonRootPartition(verDat *persistencespb.VersioningData) *versioningData {
+func (db *taskQueueDB) setVersioningDataForNonRootPartition(data *persistencespb.VersioningData) *versioningData {
 	db.Lock()
 	defer db.Unlock()
-	db.versioningData = newVersioningData(verDat)
+	db.versioningData = newVersioningData(data)
 	return db.versioningData
 }
 
@@ -365,10 +365,10 @@ func (db *taskQueueDB) updateTaskQueue(
 	reqToPersist := request
 	// Only the root workflow task queue stores versioning information
 	if !db.taskQueue.OwnsVersioningData() {
-		tqInfoSansVerDat := *request.TaskQueueInfo
-		tqInfoSansVerDat.VersioningData = nil
+		tqInfoWithoutVersioningData := *request.TaskQueueInfo
+		tqInfoWithoutVersioningData.VersioningData = nil
 		reqClone := *request
-		reqClone.TaskQueueInfo = &tqInfoSansVerDat
+		reqClone.TaskQueueInfo = &tqInfoWithoutVersioningData
 		reqToPersist = &reqClone
 	}
 	return db.store.UpdateTaskQueue(ctx, reqToPersist)

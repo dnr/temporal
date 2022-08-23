@@ -536,9 +536,9 @@ func TestTaskQueuePartitionFetchesVersioningInfoFromRootPartitionOnInit(t *testi
 		})
 	subTq.Start()
 	require.NoError(t, subTq.WaitUntilInitialized(ctx))
-	verDat, err := subTq.GetVersioningData(ctx)
+	newData, err := subTq.GetVersioningData(ctx)
 	require.NoError(t, err)
-	require.Equal(t, data, verDat)
+	require.Equal(t, data, newData)
 	subTq.Stop()
 }
 
@@ -677,12 +677,12 @@ func TestTaskQueuePartitionDoesNotPollIfNoDataThenPollsWhenInvalidated(t *testin
 			VersioningData: nil,
 		},
 	}
-	verDat := &persistencespb.VersioningData{
+	data := &persistencespb.VersioningData{
 		CurrentDefault: mkVerIdNode("0"),
 	}
 	hasDatResp := &matchingservice.GetTaskQueueMetadataResponse{
 		VersioningDataResp: &matchingservice.GetTaskQueueMetadataResponse_VersioningData{
-			VersioningData: verDat,
+			VersioningData: data,
 		},
 	}
 
@@ -701,12 +701,12 @@ func TestTaskQueuePartitionDoesNotPollIfNoDataThenPollsWhenInvalidated(t *testin
 	// Wait a bit to make sure we *don't* end up polling (if we do, mock will fail with >2 fetches)
 	time.Sleep(time.Millisecond * 25)
 	// Explicitly try to get versioning data. Since we don't have any cached, it'll explicitly fetch.
-	vDat, err := subTq.GetVersioningData(ctx)
+	newData, err := subTq.GetVersioningData(ctx)
 	require.NoError(t, err)
-	require.Nil(t, vDat)
+	require.Nil(t, newData)
 	// Now invalidate, the poll loop should be started, so we'll see at least one more mock call
 	err = subTq.InvalidateMetadata(&matchingservice.InvalidateTaskQueueMetadataRequest{
-		VersioningData: verDat,
+		VersioningData: data,
 	})
 	require.NoError(t, err)
 	time.Sleep(time.Millisecond * 20)
@@ -752,9 +752,9 @@ func TestTaskQueueManagerWaitInitFailThenPass(t *testing.T) {
 	// call hasn't happened yet.
 	controller.Finish()
 	// Get the data and see it's set
-	dat, err := tq.GetVersioningData(ctx)
+	newData, err := tq.GetVersioningData(ctx)
 	require.NoError(t, err)
-	require.Equal(t, data, dat)
+	require.Equal(t, data, newData)
 	tq.Stop()
 }
 
@@ -826,12 +826,12 @@ func TestActivityQueueGetsVersioningDataFromWorkflowQueue(t *testing.T) {
 	actTqPart.Start()
 	require.NoError(t, actTqPart.WaitUntilInitialized(ctx))
 
-	verDat, err := actTq.GetVersioningData(ctx)
+	newData, err := actTq.GetVersioningData(ctx)
 	require.NoError(t, err)
-	require.Equal(t, data, verDat)
-	verDat, err = actTqPart.GetVersioningData(ctx)
+	require.Equal(t, data, newData)
+	newData, err = actTqPart.GetVersioningData(ctx)
 	require.NoError(t, err)
-	require.Equal(t, data, verDat)
+	require.Equal(t, data, newData)
 
 	actTq.Stop()
 	actTqPart.Stop()
