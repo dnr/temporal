@@ -32,4 +32,5 @@ const (
 // Reserved build ID values
 const (
 	LatestDefaultBuildID = "__default__"
+	UnversionedBuildID   = "__unversioned__"
 )

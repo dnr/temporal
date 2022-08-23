@@ -201,10 +201,17 @@ func newTaskQueueManager(
 
 	taskQueueConfig := newTaskQueueConfig(taskQueue, config, nsName)
 
-	// broadcasts versioning data changes to blocked goroutines
-	broadcaster := newBroadcaster[*versioningData]()
+	// broadcasts versioning data changes to blocked goroutines in TaskMatcher
+	versioningDataBroadcaster := newBroadcaster[*versioningData]()
 
-	db := newTaskQueueDB(e.taskManager, taskQueue.namespaceID, taskQueue, taskQueueKind, e.logger, broadcaster.Send)
+	db := newTaskQueueDB(
+		e.taskManager,
+		taskQueue.namespaceID,
+		taskQueue,
+		taskQueueKind,
+		e.logger,
+		versioningDataBroadcaster.Send,
+	)
 	logger := log.With(e.logger,
 		tag.WorkflowTaskQueueName(taskQueue.name),
 		tag.WorkflowTaskQueueType(taskQueue.taskType),
@@ -255,12 +262,7 @@ func newTaskQueueManager(
 	if tlMgr.isFowardingAllowed(taskQueue, taskQueueKind) {
 		fwdr = newForwarder(&taskQueueConfig.forwarderConfig, taskQueue, taskQueueKind, e.matchingClient)
 	}
-	// FIXME: need to make this more dynamic later
-	if taskQueue.isVersioned() {
-		tlMgr.matcher = newVersionedTaskMatcher(taskQueueConfig, fwdr, tlMgr.metricScope, broadcaster.Listen)
-	} else {
-		tlMgr.matcher = newTaskMatcher(taskQueueConfig, fwdr, tlMgr.metricScope)
-	}
+	tlMgr.matcher = newTaskMatcher(taskQueueConfig, fwdr, tlMgr.metricScope, versioningDataBroadcaster)
 	for _, opt := range opts {
 		opt(tlMgr)
 	}

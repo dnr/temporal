@@ -27,37 +27,49 @@ package matching
 import (
 	"context"
 	"math"
+	"sync"
 	"time"
 
 	enumsspb "go.temporal.io/server/api/enums/v1"
 	"go.temporal.io/server/api/matchingservice/v1"
 	"go.temporal.io/server/common/metrics"
+	"go.temporal.io/server/common/primitives"
 	"go.temporal.io/server/common/quotas"
 )
 
 // TaskMatcher matches a task producer with a task consumer
 // Producers are usually rpc calls from history or taskReader
 // that drains backlog from db. Consumers are the task queue pollers
-type TaskMatcher struct {
-	config *taskQueueConfig
+type (
+	TaskMatcher struct {
+		config *taskQueueConfig
 
-	// synchronous task channel to match producer/consumer
-	taskC chan *internalTask
-	// synchronous task channel to match query task - the reason to have
-	// separate channel for this is because there are cases when consumers
-	// are interested in queryTasks but not others. Example is when namespace is
-	// not active in a cluster
-	queryTaskC chan *internalTask
+		// synchronous task channels
+		taskCs sync.Map // string -> chan *internalTask
 
-	// dynamicRate is the dynamic rate & burst for rate limiter
-	dynamicRateBurst quotas.MutableRateBurst
-	// rateLimiter that limits the rate at which tasks can be dispatched to consumers
-	rateLimiter quotas.RateLimiter
+		// synchronous task channel to match query task - the reason to have
+		// separate channel for this is because there are cases when consumers
+		// are interested in queryTasks but not others. Example is when namespace is
+		// not active in a cluster
+		queryTaskCs sync.Map // string -> chan *internalTask
 
-	fwdr          *Forwarder
-	scope         metrics.Scope // namespace metric scope
-	numPartitions func() int    // number of task queue partitions
-}
+		// dynamicRate is the dynamic rate & burst for rate limiter
+		dynamicRateBurst quotas.MutableRateBurst
+		// rateLimiter that limits the rate at which tasks can be dispatched to consumers
+		rateLimiter quotas.RateLimiter
+
+		fwdr          *Forwarder
+		scope         metrics.Scope // namespace metric scope
+		numPartitions func() int    // number of task queue partitions
+
+		versioningDataSource versioningDataSource
+	}
+
+	versioningDataSource interface {
+		Peek() *versioningData
+		Listen() (*versioningData, chan *versioningData, func())
+	}
+)
 
 const (
 	defaultTaskDispatchRPS    = 100000.0
@@ -67,7 +79,12 @@ const (
 // newTaskMatcher returns an task matcher instance. The returned instance can be
 // used by task producers and consumers to find a match. Both sync matches and non-sync
 // matches should use this implementation
-func newTaskMatcher(config *taskQueueConfig, fwdr *Forwarder, scope metrics.Scope) *TaskMatcher {
+func newTaskMatcher(
+	config *taskQueueConfig,
+	fwdr *Forwarder,
+	scope metrics.Scope,
+	versioningDataSource versioningDataSource,
+) *TaskMatcher {
 	dynamicRateBurst := quotas.NewMutableRateBurst(
 		defaultTaskDispatchRPS,
 		int(defaultTaskDispatchRPS),
@@ -85,14 +102,13 @@ func newTaskMatcher(config *taskQueueConfig, fwdr *Forwarder, scope metrics.Scop
 		),
 	})
 	return &TaskMatcher{
-		config:           config,
-		dynamicRateBurst: dynamicRateBurst,
-		rateLimiter:      limiter,
-		scope:            scope,
-		fwdr:             fwdr,
-		taskC:            make(chan *internalTask),
-		queryTaskC:       make(chan *internalTask),
-		numPartitions:    config.NumReadPartitions,
+		config:               config,
+		dynamicRateBurst:     dynamicRateBurst,
+		rateLimiter:          limiter,
+		scope:                scope,
+		fwdr:                 fwdr,
+		numPartitions:        config.NumReadPartitions,
+		versioningDataSource: versioningDataSource,
 	}
 }
 
@@ -125,6 +141,13 @@ func newTaskMatcher(config *taskQueueConfig, fwdr *Forwarder, scope metrics.Scop
 //  - ratelimit is exceeded (does not apply to query task)
 //  - context deadline is exceeded
 //  - task is matched and consumer returns error in response channel
+//
+// VERSIONING NOTES:
+// Tasks come from history with either a build id of the previous wft, or else LatestDefaultBuildID
+// if this is the first workflow task. They should get matched to a compatible poller.
+// Can also return error if bad buildID was sent with task, or bad versioning info.
+// This is only used for sync match, which has a small timeout. So we can ignore the
+// possibility of versioning data changing while we're blocked in here.
 func (tm *TaskMatcher) Offer(ctx context.Context, task *internalTask) (bool, error) {
 	if !task.isForwarded() {
 		if err := tm.rateLimiter.Wait(ctx); err != nil {
@@ -133,8 +156,15 @@ func (tm *TaskMatcher) Offer(ctx context.Context, task *internalTask) (bool, err
 		}
 	}
 
+	versioningData := tm.versioningDataSource.Peek()
+	target, err := versioningData.GetTarget(task.lastBuildID())
+	if err != nil {
+		return false, err
+	}
+	taskC := getTaskChannel(&tm.taskCs, target)
+
 	select {
-	case tm.taskC <- task: // poller picked up the task
+	case taskC <- task: // poller picked up the task
 		if task.responseC != nil {
 			// if there is a response channel, block until resp is received
 			// and return error if the response contains error
@@ -143,53 +173,61 @@ func (tm *TaskMatcher) Offer(ctx context.Context, task *internalTask) (bool, err
 		}
 		return false, nil
 	default:
-		// no poller waiting for tasks, try forwarding this task to the
-		// root partition if possible
-		select {
-		case token := <-tm.fwdrAddReqTokenC():
-			if err := tm.fwdr.ForwardTask(ctx, task); err == nil {
-				// task was remotely sync matched on the parent partition
-				token.release()
-				return true, nil
-			}
-			token.release()
-		default:
-			if !tm.isForwardingAllowed() && // we are the root partition and forwarding is not possible
-				task.source == enumsspb.TASK_SOURCE_DB_BACKLOG && // task was from backlog (stored in db)
-				task.isForwarded() { // task came from a child partition
-				// a forwarded backlog task from a child partition, block trying
-				// to match with a poller until ctx timeout
-				return tm.offerOrTimeout(ctx, task)
-			}
-		}
+	}
 
+	// no poller waiting for tasks, try forwarding this task to the
+	// root partition if possible
+	select {
+	case token := <-tm.fwdrAddReqTokenC():
+		defer token.release()
+		if err := tm.fwdr.ForwardTask(ctx, task); err == nil {
+			// task was remotely sync matched on the parent partition
+			return true, nil
+		}
+		return false, nil
+	default:
+	}
+
+	// check if we should block. we need all of:
+	// 1. we are the root partition, so forwarding is not possible
+	// 2. task was from backlog (stored in db)
+	// 3. task came from a child partition
+	if tm.isForwardingAllowed() || // 1
+		task.source != enumsspb.TASK_SOURCE_DB_BACKLOG || // 2
+		!task.isForwarded() { // 3
 		return false, nil
 	}
-}
-
-func (tm *TaskMatcher) offerOrTimeout(ctx context.Context, task *internalTask) (bool, error) {
+	// this is a forwarded backlog task from a child partition, block trying
+	// to match with a poller until ctx timeout
 	select {
-	case tm.taskC <- task: // poller picked up the task
+	case taskC <- task: // poller picked up the task
 		if task.responseC != nil {
 			select {
 			case err := <-task.responseC:
 				return true, err
 			case <-ctx.Done():
-				return false, nil
 			}
 		}
-		return false, nil
 	case <-ctx.Done():
-		return false, nil
 	}
+	return false, nil
 }
 
 // OfferQuery will either match task to local poller or will forward query task.
 // Local match is always attempted before forwarding is attempted. If local match occurs
 // response and error are both nil, if forwarding occurs then response or error is returned.
 func (tm *TaskMatcher) OfferQuery(ctx context.Context, task *internalTask) (*matchingservice.QueryWorkflowResponse, error) {
+	versioningData, newVersioningDataCh, cancelListen := tm.versioningDataSource.Listen()
+	defer cancelListen()
+reresolve:
+	target, err := versioningData.GetTarget(task.lastBuildID())
+	if err != nil {
+		return nil, err
+	}
+	queryTaskC := getTaskChannel(&tm.queryTaskCs, target)
+
 	select {
-	case tm.queryTaskC <- task:
+	case queryTaskC <- task:
 		<-task.responseC
 		return nil, nil
 	default:
@@ -199,7 +237,7 @@ func (tm *TaskMatcher) OfferQuery(ctx context.Context, task *internalTask) (*mat
 
 	for {
 		select {
-		case tm.queryTaskC <- task:
+		case queryTaskC <- task:
 			<-task.responseC
 			return nil, nil
 		case token := <-fwdrTokenC:
@@ -215,6 +253,8 @@ func (tm *TaskMatcher) OfferQuery(ctx context.Context, task *internalTask) (*mat
 				continue
 			}
 			return nil, err
+		case versioningData = <-newVersioningDataCh:
+			goto reresolve
 		case <-ctx.Done():
 			return nil, ctx.Err()
 		}
@@ -224,15 +264,29 @@ func (tm *TaskMatcher) OfferQuery(ctx context.Context, task *internalTask) (*mat
 // MustOffer blocks until a consumer is found to handle this task
 // Returns error only when context is canceled or the ratelimit is set to zero (allow nothing)
 // The passed in context MUST NOT have a deadline associated with it
+//
+// VERSIONING NOTES:
+// Tasks come from history with either a build id of the previous wft, or else LatestDefaultBuildID
+// if this is the first workflow task. They should get matched to a compatible poller.
+// Can also return error if bad buildID was sent with task, or bad versioning info.
 func (tm *TaskMatcher) MustOffer(ctx context.Context, task *internalTask) error {
 	if err := tm.rateLimiter.Wait(ctx); err != nil {
 		return err
 	}
 
+	versioningData, newVersioningDataCh, cancelListen := tm.versioningDataSource.Listen()
+	defer cancelListen()
+reresolve:
+	target, err := versioningData.GetTarget(task.lastBuildID())
+	if err != nil {
+		return err
+	}
+	taskC := getTaskChannel(&tm.taskCs, target)
+
 	// attempt a match with local poller first. When that
 	// doesn't succeed, try both local match and remote match
 	select {
-	case tm.taskC <- task:
+	case taskC <- task:
 		return nil
 	case <-ctx.Done():
 		return ctx.Err()
@@ -242,7 +296,7 @@ func (tm *TaskMatcher) MustOffer(ctx context.Context, task *internalTask) error 
 forLoop:
 	for {
 		select {
-		case tm.taskC <- task:
+		case taskC <- task:
 			return nil
 		case token := <-tm.fwdrAddReqTokenC():
 			childCtx, cancel := context.WithTimeout(ctx, time.Second*2)
@@ -255,7 +309,7 @@ forLoop:
 				// the next forwarded call after this childCtx expires. Till then, we block
 				// hoping for a local poller match
 				select {
-				case tm.taskC <- task:
+				case taskC <- task:
 					cancel()
 					return nil
 				case <-childCtx.Done():
@@ -272,6 +326,8 @@ forLoop:
 			// task from the database
 			task.finish(nil)
 			return nil
+		case versioningData = <-newVersioningDataCh:
+			goto reresolve
 		case <-ctx.Done():
 			return ctx.Err()
 		}
@@ -281,14 +337,22 @@ forLoop:
 // Poll blocks until a task is found or context deadline is exceeded
 // On success, the returned task could be a query task or a regular task
 // Returns ErrNoTasks when context deadline is exceeded
+//
+// VERSIONING NOTES:
+// Polls come with a specific build id. They should only be sent tasks that are compatible with
+// that build id, if they are the latest in that compatible set.
 func (tm *TaskMatcher) Poll(ctx context.Context, pollMetadata *pollMetadata) (*internalTask, error) {
-	return tm.poll(ctx, false)
+	return tm.poll(ctx, pollMetadata, false)
 }
 
 // PollForQuery blocks until a *query* task is found or context deadline is exceeded
 // Returns ErrNoTasks when context deadline is exceeded
+//
+// VERSIONING NOTES:
+// Polls come with a specific build id. They should only be sent tasks that are compatible with
+// that build id, if they are the latest in that compatible set.
 func (tm *TaskMatcher) PollForQuery(ctx context.Context, pollMetadata *pollMetadata) (*internalTask, error) {
-	return tm.poll(ctx, true)
+	return tm.poll(ctx, pollMetadata, true)
 }
 
 // UpdateRatelimit updates the task dispatch rate
@@ -319,10 +383,15 @@ func (tm *TaskMatcher) Rate() float64 {
 	return tm.rateLimiter.Rate()
 }
 
-func (tm *TaskMatcher) poll(ctx context.Context, queryOnly bool) (*internalTask, error) {
-	taskC, queryTaskC := tm.taskC, tm.queryTaskC
-	if queryOnly {
-		taskC = nil
+func (tm *TaskMatcher) poll(ctx context.Context, pollMetadata *pollMetadata, queryOnly bool) (*internalTask, error) {
+	buildID := pollMetadata.workerVersioningBuildID
+	if buildID == "" {
+		buildID = primitives.UnversionedBuildID
+	}
+	queryTaskC := getTaskChannel(&tm.queryTaskCs, buildID)
+	var taskC chan *internalTask
+	if !queryOnly {
+		taskC = getTaskChannel(&tm.taskCs, buildID)
 	}
 
 	// We want to effectively do a prioritized select, but Go select is random
@@ -416,4 +485,14 @@ func (tm *TaskMatcher) fwdrAddReqTokenC() <-chan *ForwarderReqToken {
 
 func (tm *TaskMatcher) isForwardingAllowed() bool {
 	return tm.fwdr != nil
+}
+
+func getTaskChannel(m *sync.Map, buildID string) chan *internalTask {
+	// optimistic load to avoid allocation
+	if ch, ok := m.Load(buildID); ok {
+		return ch.(chan *internalTask)
+	}
+	// if not, try again
+	ch, _ := m.LoadOrStore(buildID, make(chan *internalTask))
+	return ch.(chan *internalTask)
 }

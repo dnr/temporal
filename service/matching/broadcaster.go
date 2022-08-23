@@ -52,6 +52,12 @@ func (b *broadcaster[T]) Send(value T) {
 	}
 }
 
+func (b *broadcaster[T]) Peek() T {
+	b.lock.Lock()
+	defer b.lock.Unlock()
+	return b.latest
+}
+
 func (b *broadcaster[T]) Listen() (T, chan T, func()) {
 	b.lock.Lock()
 	defer b.lock.Unlock()

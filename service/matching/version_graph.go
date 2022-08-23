@@ -50,7 +50,8 @@ type (
 )
 
 var (
-	errUnknownBuildID = errors.New("unknown build id")
+	errNoVersioningData = errors.New("no versioning data loaded for versioned task")
+	errUnknownBuildID   = errors.New("unknown build id")
 )
 
 func newVersioningData(data *persistencespb.VersioningData) *versioningData {
@@ -82,8 +83,10 @@ func (v *versioningData) GetData() *persistencespb.VersioningData {
 
 func (v *versioningData) GetTarget(buildID string) (string, error) {
 	if v == nil {
-		// FIXME: hmm.. dunno about this
-		return "", errors.New("versioned queue has no versioning data")
+		if buildID == "" {
+			return primitives.UnversionedBuildID, nil
+		}
+		return "", errNoVersioningData
 	}
 	if target, ok := v.index[buildID]; ok {
 		return target, nil
