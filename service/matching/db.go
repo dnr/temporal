@@ -50,14 +50,18 @@ const (
 type (
 	taskQueueDB struct {
 		sync.Mutex
-		namespaceID    namespace.ID
-		taskQueue      *taskQueueID
-		taskQueueKind  enumspb.TaskQueueKind
-		rangeID        int64
-		ackLevel       int64
-		versioningData *versioningData
-		store          persistence.TaskManager
-		logger         log.Logger
+		namespaceID   namespace.ID
+		taskQueue     *taskQueueID
+		taskQueueKind enumspb.TaskQueueKind
+		rangeID       int64
+		ackLevel      int64
+		store         persistence.TaskManager
+		logger        log.Logger
+
+		// only publishVersioningDataLocked should write to this field directly, other methods
+		// should call publishVersioningDataLocked
+		versioningData         *versioningData
+		versioningDataCallback func(*versioningData)
 	}
 	taskQueueState struct {
 		rangeID  int64
@@ -80,13 +84,22 @@ var (
 //   - To provide the guarantee that there is only writer who updates taskQueue in persistence at any given point in time
 //     This guarantee makes some of the other code simpler and there is no impact to perf because updates to taskqueue are
 //     spread out and happen in background routines
-func newTaskQueueDB(store persistence.TaskManager, namespaceID namespace.ID, taskQueue *taskQueueID, kind enumspb.TaskQueueKind, logger log.Logger) *taskQueueDB {
+func newTaskQueueDB(
+	store persistence.TaskManager,
+	namespaceID namespace.ID,
+	taskQueue *taskQueueID,
+	kind enumspb.TaskQueueKind,
+	logger log.Logger,
+	versioningDataCallback func(*versioningData),
+) *taskQueueDB {
 	return &taskQueueDB{
 		namespaceID:   namespaceID,
 		taskQueue:     taskQueue,
 		taskQueueKind: kind,
 		store:         store,
 		logger:        logger,
+
+		versioningDataCallback: versioningDataCallback,
 	}
 }
 
@@ -140,7 +153,7 @@ func (db *taskQueueDB) takeOverTaskQueueLocked(
 		}
 		db.ackLevel = response.TaskQueueInfo.AckLevel
 		db.rangeID = response.RangeID + 1
-		db.versioningData = newVersioningData(response.TaskQueueInfo.VersioningData)
+		db.publishVersioningDataLocked(newVersioningData(response.TaskQueueInfo.VersioningData))
 		return nil
 
 	case *serviceerror.NotFound:
@@ -309,9 +322,8 @@ func (db *taskQueueDB) getVersioningDataLocked(
 	if err != nil {
 		return nil, err
 	}
-	db.versioningData = newVersioningData(tqInfo.TaskQueueInfo.GetVersioningData())
-
-	return db.versioningData, nil
+	data := db.publishVersioningDataLocked(newVersioningData(tqInfo.TaskQueueInfo.GetVersioningData()))
+	return data, nil
 }
 
 // MutateVersioningData allows callers to update versioning data for this task queue. The pointer passed to the
@@ -346,15 +358,14 @@ func (db *taskQueueDB) MutateVersioningData(ctx context.Context, mutator func(*p
 	if err != nil {
 		return nil, err
 	}
-	db.versioningData = newData
+	db.publishVersioningDataLocked(newData)
 	return newData.GetData(), nil
 }
 
 func (db *taskQueueDB) setVersioningDataForNonRootPartition(data *persistencespb.VersioningData) *versioningData {
 	db.Lock()
 	defer db.Unlock()
-	db.versioningData = newVersioningData(data)
-	return db.versioningData
+	return db.publishVersioningDataLocked(newVersioningData(data))
 }
 
 // Use this rather than calling UpdateTaskQueue directly on the store
@@ -396,4 +407,10 @@ func (db *taskQueueDB) cachedQueueInfo() *persistencespb.TaskQueueInfo {
 		ExpiryTime:     db.expiryTime(),
 		LastUpdateTime: timestamp.TimeNowPtrUtc(),
 	}
+}
+
+func (db *taskQueueDB) publishVersioningDataLocked(data *versioningData) *versioningData {
+	db.versioningData = data
+	go db.versioningDataCallback(data)
+	return data
 }

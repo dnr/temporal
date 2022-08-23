@@ -201,7 +201,10 @@ func newTaskQueueManager(
 
 	taskQueueConfig := newTaskQueueConfig(taskQueue, config, nsName)
 
-	db := newTaskQueueDB(e.taskManager, taskQueue.namespaceID, taskQueue, taskQueueKind, e.logger)
+	// broadcasts versioning data changes to blocked goroutines
+	broadcaster := newBroadcaster[*versioningData]()
+
+	db := newTaskQueueDB(e.taskManager, taskQueue.namespaceID, taskQueue, taskQueueKind, e.logger, broadcaster.Send)
 	logger := log.With(e.logger,
 		tag.WorkflowTaskQueueName(taskQueue.name),
 		tag.WorkflowTaskQueueType(taskQueue.taskType),
@@ -254,7 +257,7 @@ func newTaskQueueManager(
 	}
 	// FIXME: need to make this more dynamic later
 	if taskQueue.isVersioned() {
-		tlMgr.matcher = newVersionedTaskMatcher(taskQueueConfig, fwdr, tlMgr.metricScope, tlMgr.GetVersioningData)
+		tlMgr.matcher = newVersionedTaskMatcher(taskQueueConfig, fwdr, tlMgr.metricScope, broadcaster.Listen)
 	} else {
 		tlMgr.matcher = newTaskMatcher(taskQueueConfig, fwdr, tlMgr.metricScope)
 	}
@@ -353,6 +356,16 @@ func (c *taskQueueManagerImpl) AddTask(
 	}
 
 	taskInfo := params.taskInfo
+
+	if taskInfo.LastWorkflowTaskBuildId != "" {
+		// The caller expects this task queue to use versioning. We need to ensure we have
+		// versioning info loaded here (it's automatic if we're the root, but if we're not the
+		// root then we have to get it from the root).
+		_, err := c.GetVersioningData(ctx)
+		if err != nil {
+			return false, err
+		}
+	}
 
 	namespaceEntry, err := c.namespaceRegistry.GetNamespaceByID(namespace.ID(taskInfo.GetNamespaceId()))
 	if err != nil {
