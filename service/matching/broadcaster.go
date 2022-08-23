@@ -35,7 +35,9 @@ type (
 )
 
 func newBroadcaster[T any]() *broadcaster[T] {
-	return &broadcaster[T]{}
+	return &broadcaster[T]{
+		chans: make(map[chan T]struct{}),
+	}
 }
 
 func (b *broadcaster[T]) Send(value T) {

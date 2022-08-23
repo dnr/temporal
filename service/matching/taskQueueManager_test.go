@@ -397,7 +397,7 @@ func TestDescribeTaskQueue(t *testing.T) {
 	require.Equal(t, tlm.config.RangeSize, taskIDBlock.GetEndId())
 
 	// Add a poller and complete all tasks
-	tlm.pollerHistory.updatePollerInfo(pollerIdentity(PollerIdentity), nil)
+	tlm.pollerHistory.updatePollerInfo(pollerIdentity(PollerIdentity), &pollMetadata{})
 	for i := int64(0); i < taskCount; i++ {
 		tlm.taskAckManager.completeTask(startTaskID + i)
 	}
@@ -438,7 +438,7 @@ func TestCheckIdleTaskQueue(t *testing.T) {
 	// Active poll-er
 	tlm = mustCreateTestTaskQueueManagerWithConfig(t, controller, tqCfg)
 	tlm.Start()
-	tlm.pollerHistory.updatePollerInfo(pollerIdentity("test-poll"), nil)
+	tlm.pollerHistory.updatePollerInfo(pollerIdentity("test-poll"), &pollMetadata{})
 	require.Equal(t, 1, len(tlm.GetAllPollerInfo()))
 	time.Sleep(1 * time.Second)
 	require.Equal(t, common.DaemonStatusStarted, atomic.LoadInt32(&tlm.status))
@@ -538,7 +538,7 @@ func TestTaskQueuePartitionFetchesVersioningInfoFromRootPartitionOnInit(t *testi
 	require.NoError(t, subTq.WaitUntilInitialized(ctx))
 	newData, err := subTq.GetVersioningData(ctx)
 	require.NoError(t, err)
-	require.Equal(t, data, newData)
+	require.Equal(t, data, newData.GetData())
 	subTq.Stop()
 }
 
@@ -755,7 +755,7 @@ func TestTaskQueueManagerWaitInitFailThenPass(t *testing.T) {
 	// Get the data and see it's set
 	newData, err := tq.GetVersioningData(ctx)
 	require.NoError(t, err)
-	require.Equal(t, data, newData)
+	require.Equal(t, data, newData.GetData())
 	tq.Stop()
 }
 
@@ -829,10 +829,10 @@ func TestActivityQueueGetsVersioningDataFromWorkflowQueue(t *testing.T) {
 
 	newData, err := actTq.GetVersioningData(ctx)
 	require.NoError(t, err)
-	require.Equal(t, data, newData)
+	require.Equal(t, data, newData.GetData())
 	newData, err = actTqPart.GetVersioningData(ctx)
 	require.NoError(t, err)
-	require.Equal(t, data, newData)
+	require.Equal(t, data, newData.GetData())
 
 	actTq.Stop()
 	actTqPart.Stop()

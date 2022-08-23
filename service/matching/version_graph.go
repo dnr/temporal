@@ -55,6 +55,10 @@ var (
 )
 
 func newVersioningData(data *persistencespb.VersioningData) *versioningData {
+	if data == nil {
+		// nil *versioningData means "this task queue is not versioned"
+		return nil
+	}
 	return &versioningData{
 		data:  *data,
 		index: makeIndex(data),
@@ -63,12 +67,12 @@ func newVersioningData(data *persistencespb.VersioningData) *versioningData {
 
 func makeIndex(data *persistencespb.VersioningData) map[string]string {
 	index := make(map[string]string)
-	index[primitives.LatestDefaultBuildID] = data.CurrentDefault.Version.WorkerBuildId
+	index[primitives.LatestDefaultBuildID] = data.CurrentDefault.GetVersion().GetWorkerBuildId()
 	for _, leaf := range data.CompatibleLeaves {
-		target := leaf.Version.WorkerBuildId
+		target := leaf.GetVersion().GetWorkerBuildId()
 		index[target] = target
 		for _ = 0; leaf != nil; leaf = leaf.PreviousCompatible {
-			index[leaf.Version.WorkerBuildId] = target
+			index[leaf.GetVersion().GetWorkerBuildId()] = target
 		}
 	}
 	return index
@@ -95,7 +99,8 @@ func (v *versioningData) GetTarget(buildID string) (string, error) {
 }
 
 func (v *versioningData) CloneAndApplyMutation(mutator func(*persistencespb.VersioningData) error) (*versioningData, error) {
-	data := common.CloneProto(v.GetData())
+	data := &persistencespb.VersioningData{}
+	proto.Merge(data, v.GetData())
 	err := mutator(data)
 	if err != nil {
 		return nil, err

@@ -155,9 +155,10 @@ func (task *internalTask) pollActivityTaskQueueResponse() *matchingservice.PollA
 func (task *internalTask) lastBuildID() string {
 	switch {
 	case task.event != nil:
-		return task.event.Data.LastWorkflowTaskBuildId
+		// FIXME: how can Data be nil here??
+		return task.event.Data.GetLastWorkflowTaskBuildId()
 	case task.query != nil:
-		return task.query.request.LastWorkflowTaskBuildId
+		return task.query.request.GetLastWorkflowTaskBuildId()
 	default:
 		// This case shouldn't happen: lastBuildID is only called from the Offer methods, so we
 		// should have an event or query task.
