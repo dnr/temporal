@@ -855,6 +855,12 @@ func (wh *WorkflowHandler) PollWorkflowTaskQueue(ctx context.Context, request *w
 	}
 	namespaceID := namespaceEntry.ID()
 
+	// Copy WorkerVersioningBuildId to BinaryChecksum if BinaryChecksum is missing (small
+	// optimization to save space in the poll request).
+	if len(request.WorkerVersioningBuildId) > 0 && len(request.BinaryChecksum) == 0 {
+		request.BinaryChecksum = request.WorkerVersioningBuildId
+	}
+
 	wh.logger.Debug("Poll workflow task queue.", tag.WorkflowNamespace(namespaceEntry.Name().String()), tag.WorkflowNamespaceID(namespaceID.String()))
 	if err := wh.checkBadBinary(namespaceEntry, request.GetBinaryChecksum()); err != nil {
 		return nil, err
