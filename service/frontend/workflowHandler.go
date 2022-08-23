@@ -2817,6 +2817,7 @@ func (wh *WorkflowHandler) GetSystemInfo(ctx context.Context, request *workflows
 			ActivityFailureIncludeHeartbeat: true,
 			SupportsSchedules:               true,
 			EncodedFailureAttributes:        true,
+			BuildIdBasedVersioning:          true,
 		},
 	}, nil
 }
