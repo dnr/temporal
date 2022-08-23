@@ -28,3 +28,8 @@ package primitives
 const (
 	PerNSWorkerTaskQueue = "temporal-sys-per-ns-tq"
 )
+
+// Reserved build ID values
+const (
+	LatestDefaultBuildID = "__default__"
+)

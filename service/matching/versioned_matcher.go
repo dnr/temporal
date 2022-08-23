@@ -37,11 +37,6 @@ import (
 	"go.temporal.io/server/common/quotas"
 )
 
-const (
-	// FIXME: move to shared package
-	LatestDefaultBuildID = "__latest_default__"
-)
-
 type versioningTaskMatcherImpl struct {
 	config *taskQueueConfig
 

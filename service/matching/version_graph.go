@@ -37,6 +37,7 @@ import (
 	"go.temporal.io/api/workflowservice/v1"
 	persistencespb "go.temporal.io/server/api/persistence/v1"
 	"go.temporal.io/server/common"
+	"go.temporal.io/server/common/primitives"
 )
 
 type (
@@ -57,7 +58,7 @@ func newVersioningData(data *persistencespb.VersioningData) *versioningData {
 
 func makeIndex(data *persistencespb.VersioningData) map[string]string {
 	index := make(map[string]string)
-	index[LatestDefaultBuildID] = data.CurrentDefault.Version.WorkerBuildId
+	index[primitives.LatestDefaultBuildID] = data.CurrentDefault.Version.WorkerBuildId
 	for _, leaf := range data.CompatibleLeaves {
 		target := leaf.Version.WorkerBuildId
 		index[target] = target
