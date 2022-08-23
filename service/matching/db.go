@@ -330,7 +330,7 @@ func (db *taskQueueDB) MutateVersioningData(ctx context.Context, mutator func(*p
 		return nil, err
 	}
 
-	newData, err := oldData.Mutate(mutator)
+	newData, err := oldData.CloneAndApplyMutation(mutator)
 	if err != nil {
 		return nil, err
 	}
@@ -343,10 +343,11 @@ func (db *taskQueueDB) MutateVersioningData(ctx context.Context, mutator func(*p
 		TaskQueueInfo: queueInfo,
 		PrevRangeID:   db.rangeID,
 	})
-	if err == nil {
-		db.versioningData = newData
+	if err != nil {
+		return nil, err
 	}
-	return newData.GetData(), err
+	db.versioningData = newData
+	return newData.GetData(), nil
 }
 
 func (db *taskQueueDB) setVersioningDataForNonRootPartition(verDat *persistencespb.VersioningData) *versioningData {

@@ -82,7 +82,7 @@ func (v *versioningData) GetTarget(buildID string) (string, error) {
 	return "", errors.New("unknown build id") // FIXME: to global var
 }
 
-func (v *versioningData) Mutate(mutator func(*persistencespb.VersioningData) error) (*versioningData, error) {
+func (v *versioningData) CloneAndApplyMutation(mutator func(*persistencespb.VersioningData) error) (*versioningData, error) {
 	data := v.GetData()
 	if data == nil {
 		data = &persistencespb.VersioningData{}
