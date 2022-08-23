@@ -159,7 +159,8 @@ func (task *internalTask) lastBuildID() string {
 	case task.query != nil:
 		return task.query.request.LastWorkflowTaskBuildId
 	default:
-		// FIXME: can this ever happen? what should we return?
+		// This case shouldn't happen: lastBuildID is only called from the Offer methods, so we
+		// should have an event or query task.
 		return ""
 	}
 }
