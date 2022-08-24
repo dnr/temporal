@@ -613,7 +613,7 @@ func (s *historyBuilderSuite) TestWorkflowTaskStarted() {
 		scheduledEventID,
 		testRequestID,
 		testIdentity,
-		"FIXME:buildid",
+		"build_id_8",
 		s.now,
 	)
 	s.Equal(event, s.flush())
@@ -625,9 +625,10 @@ func (s *historyBuilderSuite) TestWorkflowTaskStarted() {
 		Version:   s.version,
 		Attributes: &historypb.HistoryEvent_WorkflowTaskStartedEventAttributes{
 			WorkflowTaskStartedEventAttributes: &historypb.WorkflowTaskStartedEventAttributes{
-				ScheduledEventId: scheduledEventID,
-				Identity:         testIdentity,
-				RequestId:        testRequestID,
+				ScheduledEventId:        scheduledEventID,
+				Identity:                testIdentity,
+				RequestId:               testRequestID,
+				WorkerVersioningBuildId: "build_id_8",
 			},
 		},
 	}, event)

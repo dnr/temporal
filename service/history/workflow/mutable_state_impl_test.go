@@ -417,7 +417,7 @@ func (s *mutableStateSuite) TestTransientWorkflowTaskStart_CurrentVersionChanged
 		uuid.New(),
 		&taskqueuepb.TaskQueue{},
 		"random identity",
-		"FIXME:buildid",
+		"build_id_7", // FIXME: test this?
 	)
 	s.NoError(err)
 	s.Equal(0, s.mutableState.hBuilder.BufferEventSize())
@@ -509,7 +509,7 @@ func (s *mutableStateSuite) prepareTransientWorkflowTaskCompletionFirstBatchRepl
 		Attributes: &historypb.HistoryEvent_WorkflowTaskStartedEventAttributes{WorkflowTaskStartedEventAttributes: &historypb.WorkflowTaskStartedEventAttributes{
 			ScheduledEventId:        workflowTaskScheduleEvent.GetEventId(),
 			RequestId:               uuid.New(),
-			WorkerVersioningBuildId: "build_id_5",
+			WorkerVersioningBuildId: "build_id_5", // FIXME: add tests that look for this
 		}},
 	}
 	eventID++

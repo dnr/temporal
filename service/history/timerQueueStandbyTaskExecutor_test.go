@@ -1515,7 +1515,7 @@ func (s *timerQueueStandbyTaskExecutorSuite) TestProcessActivityRetryTimer_Pendi
 			ScheduledEventId:        scheduledEvent.EventId,
 			ScheduleToStartTimeout:  &timerTimeout,
 			Clock:                   vclock.NewVectorClock(s.mockClusterMetadata.GetClusterID(), s.mockShard.GetShardID(), timerTask.TaskID),
-			WorkerVersioningBuildId: "build_id_3",
+			WorkerVersioningBuildId: "",
 		},
 		gomock.Any(),
 	).Return(&matchingservice.AddActivityTaskResponse{}, nil)
