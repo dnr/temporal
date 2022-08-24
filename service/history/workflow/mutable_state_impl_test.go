@@ -509,7 +509,7 @@ func (s *mutableStateSuite) prepareTransientWorkflowTaskCompletionFirstBatchRepl
 		Attributes: &historypb.HistoryEvent_WorkflowTaskStartedEventAttributes{WorkflowTaskStartedEventAttributes: &historypb.WorkflowTaskStartedEventAttributes{
 			ScheduledEventId:        workflowTaskScheduleEvent.GetEventId(),
 			RequestId:               uuid.New(),
-			WorkerVersioningBuildId: "buildid",
+			WorkerVersioningBuildId: "build_id_5",
 		}},
 	}
 	eventID++
@@ -593,7 +593,7 @@ func (s *mutableStateSuite) prepareTransientWorkflowTaskCompletionFirstBatchRepl
 		Attributes: &historypb.HistoryEvent_WorkflowTaskStartedEventAttributes{WorkflowTaskStartedEventAttributes: &historypb.WorkflowTaskStartedEventAttributes{
 			ScheduledEventId:        workflowTaskScheduleEvent.GetEventId(),
 			RequestId:               uuid.New(),
-			WorkerVersioningBuildId: "buildid",
+			WorkerVersioningBuildId: "build_id_6",
 		}},
 	}
 	eventID++

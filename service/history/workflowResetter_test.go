@@ -376,12 +376,13 @@ func (s *workflowResetterSuite) TestFailWorkflowTask_WorkflowTaskScheduled() {
 		TaskQueue:        workflowTaskSchedule.TaskQueue,
 	}
 	mutableState.EXPECT().GetPendingWorkflowTask().Return(workflowTaskSchedule, true).AnyTimes()
+	mutableState.EXPECT().GetWorkerVersioningBuildID().Return("prev_build_id").AnyTimes()
 	mutableState.EXPECT().AddWorkflowTaskStartedEvent(
 		workflowTaskSchedule.ScheduledEventID,
 		workflowTaskSchedule.RequestID,
 		workflowTaskSchedule.TaskQueue,
 		consts.IdentityHistoryService,
-		"FIXME:buildid",
+		"prev_build_id",
 	).Return(&historypb.HistoryEvent{}, workflowTaskStart, nil)
 	mutableState.EXPECT().AddWorkflowTaskFailedEvent(
 		workflowTaskStart.ScheduledEventID,
