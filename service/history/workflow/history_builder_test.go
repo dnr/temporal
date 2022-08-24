@@ -613,6 +613,7 @@ func (s *historyBuilderSuite) TestWorkflowTaskStarted() {
 		scheduledEventID,
 		testRequestID,
 		testIdentity,
+		"FIXME:buildid",
 		s.now,
 	)
 	s.Equal(event, s.flush())

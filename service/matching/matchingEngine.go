@@ -287,7 +287,7 @@ func (e *matchingEngineImpl) AddWorkflowTask(
 		Clock:                   addRequest.GetClock(),
 		ExpiryTime:              expirationTime,
 		CreateTime:              now,
-		LastWorkflowTaskBuildId: addRequest.LastWorkflowTaskBuildId,
+		WorkerVersioningBuildId: addRequest.WorkerVersioningBuildId,
 	}
 
 	return tqm.AddTask(hCtx.Context, addTaskParams{
@@ -333,7 +333,7 @@ func (e *matchingEngineImpl) AddActivityTask(
 		Clock:                   addRequest.GetClock(),
 		CreateTime:              now,
 		ExpiryTime:              expirationTime,
-		LastWorkflowTaskBuildId: addRequest.LastWorkflowTaskBuildId,
+		WorkerVersioningBuildId: addRequest.WorkerVersioningBuildId,
 	}
 
 	return tlMgr.AddTask(hCtx.Context, addTaskParams{

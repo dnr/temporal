@@ -156,9 +156,9 @@ func (task *internalTask) lastBuildID() string {
 	switch {
 	case task.event != nil:
 		// FIXME: how can Data be nil here??
-		return task.event.Data.GetLastWorkflowTaskBuildId()
+		return task.event.Data.GetWorkerVersioningBuildId()
 	case task.query != nil:
-		return task.query.request.GetLastWorkflowTaskBuildId()
+		return task.query.request.GetWorkerVersioningBuildId()
 	default:
 		// This case shouldn't happen: lastBuildID is only called from the Offer methods, so we
 		// should have an event or query task.

@@ -359,7 +359,7 @@ func (c *taskQueueManagerImpl) AddTask(
 
 	taskInfo := params.taskInfo
 
-	if taskInfo.LastWorkflowTaskBuildId != "" {
+	if taskInfo.WorkerVersioningBuildId != "" {
 		// The caller expects this task queue to use versioning. We need to ensure we have
 		// versioning info loaded here (it's automatic if we're the root, but if we're not the
 		// root then we have to get it from the root).

@@ -430,6 +430,7 @@ func (t *timerQueueActiveTaskExecutor) executeActivityRetryTimerTask(
 		Kind: enumspb.TASK_QUEUE_KIND_NORMAL,
 	}
 	scheduleToStartTimeout := timestamp.DurationValue(activityInfo.ScheduleToStartTimeout)
+	workerVersioningBuildID := mutableState.GetWorkerVersioningBuildID()
 
 	// NOTE: do not access anything related mutable state after this lock release
 	release(nil) // release earlier as we don't need the lock anymore
@@ -441,10 +442,11 @@ func (t *timerQueueActiveTaskExecutor) executeActivityRetryTimerTask(
 			WorkflowId: task.GetWorkflowID(),
 			RunId:      task.GetRunID(),
 		},
-		TaskQueue:              taskQueue,
-		ScheduledEventId:       task.EventID,
-		ScheduleToStartTimeout: timestamp.DurationPtr(scheduleToStartTimeout),
-		Clock:                  vclock.NewVectorClock(t.shard.GetClusterMetadata().GetClusterID(), t.shard.GetShardID(), task.TaskID),
+		TaskQueue:               taskQueue,
+		ScheduledEventId:        task.EventID,
+		ScheduleToStartTimeout:  timestamp.DurationPtr(scheduleToStartTimeout),
+		Clock:                   vclock.NewVectorClock(t.shard.GetClusterMetadata().GetClusterID(), t.shard.GetShardID(), task.TaskID),
+		WorkerVersioningBuildId: workerVersioningBuildID,
 	})
 
 	return retError

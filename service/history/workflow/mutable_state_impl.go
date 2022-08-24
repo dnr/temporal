@@ -1305,6 +1305,10 @@ func (e *MutableStateImpl) ClearTransientWorkflowTask() error {
 	return nil
 }
 
+func (e *MutableStateImpl) GetWorkerVersioningBuildID() string {
+	return e.executionInfo.WorkerVersioningBuildId
+}
+
 func (e *MutableStateImpl) HasBufferedEvents() bool {
 	return e.hBuilder.HasBufferEvents()
 }
@@ -1717,12 +1721,13 @@ func (e *MutableStateImpl) AddWorkflowTaskStartedEvent(
 	requestID string,
 	taskQueue *taskqueuepb.TaskQueue,
 	identity string,
+	workerBuildID string,
 ) (*historypb.HistoryEvent, *WorkflowTaskInfo, error) {
 	opTag := tag.WorkflowActionWorkflowTaskStarted
 	if err := e.checkMutability(opTag); err != nil {
 		return nil, nil, err
 	}
-	return e.workflowTaskManager.AddWorkflowTaskStartedEvent(scheduledEventID, requestID, taskQueue, identity)
+	return e.workflowTaskManager.AddWorkflowTaskStartedEvent(scheduledEventID, requestID, taskQueue, identity, workerBuildID)
 }
 
 func (e *MutableStateImpl) ReplicateWorkflowTaskStartedEvent(
@@ -1731,10 +1736,12 @@ func (e *MutableStateImpl) ReplicateWorkflowTaskStartedEvent(
 	scheduledEventID int64,
 	startedEventID int64,
 	requestID string,
+	workerBuildID string,
 	timestamp time.Time,
 ) (*WorkflowTaskInfo, error) {
 
-	return e.workflowTaskManager.ReplicateWorkflowTaskStartedEvent(workflowTask, version, scheduledEventID, startedEventID, requestID, timestamp)
+	return e.workflowTaskManager.ReplicateWorkflowTaskStartedEvent(
+		workflowTask, version, scheduledEventID, startedEventID, requestID, workerBuildID, timestamp)
 }
 
 func (e *MutableStateImpl) CreateTransientWorkflowTask(

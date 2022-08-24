@@ -493,6 +493,7 @@ func (r *workflowResetterImpl) failWorkflowTask(
 			workflowTask.RequestID,
 			workflowTask.TaskQueue,
 			consts.IdentityHistoryService,
+			resetMutableState.GetWorkerVersioningBuildID(),
 		)
 		if err != nil {
 			return err

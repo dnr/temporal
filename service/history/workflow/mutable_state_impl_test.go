@@ -417,6 +417,7 @@ func (s *mutableStateSuite) TestTransientWorkflowTaskStart_CurrentVersionChanged
 		uuid.New(),
 		&taskqueuepb.TaskQueue{},
 		"random identity",
+		"FIXME:buildid",
 	)
 	s.NoError(err)
 	s.Equal(0, s.mutableState.hBuilder.BufferEventSize())
@@ -506,8 +507,9 @@ func (s *mutableStateSuite) prepareTransientWorkflowTaskCompletionFirstBatchRepl
 		EventTime: &now,
 		EventType: enumspb.EVENT_TYPE_WORKFLOW_TASK_STARTED,
 		Attributes: &historypb.HistoryEvent_WorkflowTaskStartedEventAttributes{WorkflowTaskStartedEventAttributes: &historypb.WorkflowTaskStartedEventAttributes{
-			ScheduledEventId: workflowTaskScheduleEvent.GetEventId(),
-			RequestId:        uuid.New(),
+			ScheduledEventId:        workflowTaskScheduleEvent.GetEventId(),
+			RequestId:               uuid.New(),
+			WorkerVersioningBuildId: "buildid",
 		}},
 	}
 	eventID++
@@ -560,6 +562,7 @@ func (s *mutableStateSuite) prepareTransientWorkflowTaskCompletionFirstBatchRepl
 		workflowTaskScheduleEvent.GetEventId(),
 		workflowTaskStartedEvent.GetEventId(),
 		workflowTaskStartedEvent.GetWorkflowTaskStartedEventAttributes().GetRequestId(),
+		workflowTaskStartedEvent.GetWorkflowTaskStartedEventAttributes().GetWorkerVersioningBuildId(),
 		timestamp.TimeValue(workflowTaskStartedEvent.GetEventTime()),
 	)
 	s.Nil(err)
@@ -588,8 +591,9 @@ func (s *mutableStateSuite) prepareTransientWorkflowTaskCompletionFirstBatchRepl
 		EventTime: &now,
 		EventType: enumspb.EVENT_TYPE_WORKFLOW_TASK_STARTED,
 		Attributes: &historypb.HistoryEvent_WorkflowTaskStartedEventAttributes{WorkflowTaskStartedEventAttributes: &historypb.WorkflowTaskStartedEventAttributes{
-			ScheduledEventId: workflowTaskScheduleEvent.GetEventId(),
-			RequestId:        uuid.New(),
+			ScheduledEventId:        workflowTaskScheduleEvent.GetEventId(),
+			RequestId:               uuid.New(),
+			WorkerVersioningBuildId: "buildid",
 		}},
 	}
 	eventID++
@@ -611,6 +615,7 @@ func (s *mutableStateSuite) prepareTransientWorkflowTaskCompletionFirstBatchRepl
 		newWorkflowTaskScheduleEvent.GetEventId(),
 		newWorkflowTaskStartedEvent.GetEventId(),
 		newWorkflowTaskStartedEvent.GetWorkflowTaskStartedEventAttributes().GetRequestId(),
+		newWorkflowTaskStartedEvent.GetWorkflowTaskStartedEventAttributes().GetWorkerVersioningBuildId(),
 		timestamp.TimeValue(newWorkflowTaskStartedEvent.GetEventTime()),
 	)
 	s.Nil(err)

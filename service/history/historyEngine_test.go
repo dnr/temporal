@@ -5183,6 +5183,7 @@ func addWorkflowTaskStartedEventWithRequestID(builder workflow.MutableState, sch
 		requestID,
 		&taskqueuepb.TaskQueue{Name: taskQueue},
 		identity,
+		"buildid",
 	)
 
 	return event

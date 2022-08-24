@@ -120,9 +120,10 @@ func (t *transferQueueTaskExecutorBase) pushActivity(
 			Name: task.TaskQueue,
 			Kind: enumspb.TASK_QUEUE_KIND_NORMAL,
 		},
-		ScheduledEventId:       task.ScheduledEventID,
-		ScheduleToStartTimeout: activityScheduleToStartTimeout,
-		Clock:                  vclock.NewVectorClock(t.shard.GetClusterMetadata().GetClusterID(), t.shard.GetShardID(), task.TaskID),
+		ScheduledEventId:        task.ScheduledEventID,
+		ScheduleToStartTimeout:  activityScheduleToStartTimeout,
+		Clock:                   vclock.NewVectorClock(t.shard.GetClusterMetadata().GetClusterID(), t.shard.GetShardID(), task.TaskID),
+		WorkerVersioningBuildId: "FIXME",
 	})
 	if _, isNotFound := err.(*serviceerror.NotFound); isNotFound {
 		// NotFound error is not expected for AddTasks calls
@@ -145,10 +146,11 @@ func (t *transferQueueTaskExecutorBase) pushWorkflowTask(
 			WorkflowId: task.WorkflowID,
 			RunId:      task.RunID,
 		},
-		TaskQueue:              taskqueue,
-		ScheduledEventId:       task.ScheduledEventID,
-		ScheduleToStartTimeout: workflowTaskScheduleToStartTimeout,
-		Clock:                  vclock.NewVectorClock(t.shard.GetClusterMetadata().GetClusterID(), t.shard.GetShardID(), task.TaskID),
+		TaskQueue:               taskqueue,
+		ScheduledEventId:        task.ScheduledEventID,
+		ScheduleToStartTimeout:  workflowTaskScheduleToStartTimeout,
+		Clock:                   vclock.NewVectorClock(t.shard.GetClusterMetadata().GetClusterID(), t.shard.GetShardID(), task.TaskID),
+		WorkerVersioningBuildId: "FIXME",
 	})
 	if _, isNotFound := err.(*serviceerror.NotFound); isNotFound {
 		// NotFound error is not expected for AddTasks calls

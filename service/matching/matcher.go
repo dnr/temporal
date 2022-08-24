@@ -33,7 +33,6 @@ import (
 	enumsspb "go.temporal.io/server/api/enums/v1"
 	"go.temporal.io/server/api/matchingservice/v1"
 	"go.temporal.io/server/common/metrics"
-	"go.temporal.io/server/common/primitives"
 	"go.temporal.io/server/common/quotas"
 )
 
@@ -385,9 +384,6 @@ func (tm *TaskMatcher) Rate() float64 {
 
 func (tm *TaskMatcher) poll(ctx context.Context, pollMetadata *pollMetadata, queryOnly bool) (*internalTask, error) {
 	buildID := pollMetadata.workerVersioningBuildID
-	if buildID == "" {
-		buildID = primitives.UnversionedBuildID
-	}
 	queryTaskC := getTaskChannel(&tm.queryTaskCs, buildID)
 	var taskC chan *internalTask
 	if !queryOnly {

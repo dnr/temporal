@@ -2382,9 +2382,10 @@ func (s *transferQueueActiveTaskExecutorSuite) createAddActivityTaskRequest(
 			Name: task.TaskQueue,
 			Kind: enumspb.TASK_QUEUE_KIND_NORMAL,
 		},
-		ScheduledEventId:       task.ScheduledEventID,
-		ScheduleToStartTimeout: ai.ScheduleToStartTimeout,
-		Clock:                  vclock.NewVectorClock(s.mockClusterMetadata.GetClusterID(), s.mockShard.GetShardID(), task.TaskID),
+		ScheduledEventId:        task.ScheduledEventID,
+		ScheduleToStartTimeout:  ai.ScheduleToStartTimeout,
+		Clock:                   vclock.NewVectorClock(s.mockClusterMetadata.GetClusterID(), s.mockShard.GetShardID(), task.TaskID),
+		WorkerVersioningBuildId: "buildid",
 	}
 }
 
@@ -2409,10 +2410,11 @@ func (s *transferQueueActiveTaskExecutorSuite) createAddWorkflowTaskRequest(
 			WorkflowId: task.WorkflowID,
 			RunId:      task.RunID,
 		},
-		TaskQueue:              taskQueue,
-		ScheduledEventId:       task.ScheduledEventID,
-		ScheduleToStartTimeout: &timeout,
-		Clock:                  vclock.NewVectorClock(s.mockClusterMetadata.GetClusterID(), s.mockShard.GetShardID(), task.TaskID),
+		TaskQueue:               taskQueue,
+		ScheduledEventId:        task.ScheduledEventID,
+		ScheduleToStartTimeout:  &timeout,
+		Clock:                   vclock.NewVectorClock(s.mockClusterMetadata.GetClusterID(), s.mockShard.GetShardID(), task.TaskID),
+		WorkerVersioningBuildId: "buildid",
 	}
 }
 

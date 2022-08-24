@@ -108,9 +108,8 @@ message AddWorkflowTaskRequest {
     string forwarded_source = 6;
     temporal.server.api.enums.v1.TaskSource source = 7;
     temporal.server.api.clock.v1.VectorClock clock = 9;
-    // For task queue versioning. Build id of previous workflow task, or special value for
-    // first workflow task.
-    string last_workflow_task_build_id = 10;
+    // For build-id based versioning. Build id of previous workflow task, or empty string if not versioned.
+    string worker_versioning_build_id = 10;
 }
 
 message AddWorkflowTaskResponse {
@@ -130,7 +129,7 @@ message AddActivityTaskRequest {
     temporal.server.api.enums.v1.TaskSource source = 8;
     temporal.server.api.clock.v1.VectorClock clock = 9;
     // For task queue versioning. Build id of most recent workflow task.
-    string last_workflow_task_build_id = 10;
+    string worker_versioning_build_id = 10;
 }
 
 message AddActivityTaskResponse {
@@ -141,9 +140,8 @@ message QueryWorkflowRequest {
     temporal.api.taskqueue.v1.TaskQueue task_queue = 2;
     temporal.api.workflowservice.v1.QueryWorkflowRequest query_request = 3;
     string forwarded_source = 4;
-    // For task queue versioning. Build id of previous workflow task, or special value for
-    // first workflow task.
-    string last_workflow_task_build_id = 5;
+    // For build-id based versioning. Build id of previous workflow task, or empty string if not versioned.
+    string worker_versioning_build_id = 5;
 }
 
 message QueryWorkflowResponse {

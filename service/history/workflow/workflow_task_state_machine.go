@@ -146,6 +146,7 @@ func (m *workflowTaskStateMachine) ReplicateWorkflowTaskStartedEvent(
 	scheduledEventID int64,
 	startedEventID int64,
 	requestID string,
+	workerBuildID string,
 	timestamp time.Time,
 ) (*WorkflowTaskInfo, error) {
 	// Replicator calls it with a nil workflow task info, and it is safe to always lookup the workflow task in this case as it
@@ -182,6 +183,9 @@ func (m *workflowTaskStateMachine) ReplicateWorkflowTaskStartedEvent(
 	}
 
 	m.UpdateWorkflowTask(workflowTask)
+
+	m.ms.executionInfo.WorkerVersioningBuildId = workerBuildID
+
 	return workflowTask, nil
 }
 
@@ -372,6 +376,7 @@ func (m *workflowTaskStateMachine) AddWorkflowTaskStartedEvent(
 	requestID string,
 	taskQueue *taskqueuepb.TaskQueue,
 	identity string,
+	workerBuildID string,
 ) (*historypb.HistoryEvent, *WorkflowTaskInfo, error) {
 	opTag := tag.WorkflowActionWorkflowTaskStarted
 	workflowTask, ok := m.GetWorkflowTaskInfo(scheduledEventID)
@@ -407,6 +412,7 @@ func (m *workflowTaskStateMachine) AddWorkflowTaskStartedEvent(
 			scheduledEventID,
 			requestID,
 			identity,
+			workerBuildID,
 			m.ms.timeSource.Now(),
 		)
 		m.ms.hBuilder.FlushAndCreateNewBatch()
@@ -414,7 +420,8 @@ func (m *workflowTaskStateMachine) AddWorkflowTaskStartedEvent(
 		startTime = timestamp.TimeValue(event.GetEventTime())
 	}
 
-	workflowTask, err := m.ReplicateWorkflowTaskStartedEvent(workflowTask, m.ms.GetCurrentVersion(), scheduledEventID, startedEventID, requestID, startTime)
+	workflowTask, err := m.ReplicateWorkflowTaskStartedEvent(
+		workflowTask, m.ms.GetCurrentVersion(), scheduledEventID, startedEventID, requestID, workerBuildID, startTime)
 
 	m.emitWorkflowTaskAttemptStats(workflowTask.Attempt)
 
@@ -463,6 +470,10 @@ func (m *workflowTaskStateMachine) AddWorkflowTaskCompletedEvent(
 			scheduledEvent.GetEventId(),
 			workflowTask.RequestID,
 			request.GetIdentity(),
+			// Note that AddWorkflowTaskStartedEvent always updates mutable state with the build
+			// id from the corresponding poll request, even if it doesn't add an event to history.
+			// So when adding the actual event here, we can get that value from mutable state.
+			m.ms.GetWorkerVersioningBuildID(),
 			timestamp.TimeValue(workflowTask.StartedTime),
 		)
 		m.ms.hBuilder.FlushAndCreateNewBatch()

@@ -381,6 +381,7 @@ func (s *workflowResetterSuite) TestFailWorkflowTask_WorkflowTaskScheduled() {
 		workflowTaskSchedule.RequestID,
 		workflowTaskSchedule.TaskQueue,
 		consts.IdentityHistoryService,
+		"FIXME:buildid",
 	).Return(&historypb.HistoryEvent{}, workflowTaskStart, nil)
 	mutableState.EXPECT().AddWorkflowTaskFailedEvent(
 		workflowTaskStart.ScheduledEventID,

@@ -214,6 +214,7 @@ func (b *MutableStateRebuilderImpl) ApplyEvents(
 				attributes.GetScheduledEventId(),
 				event.GetEventId(),
 				attributes.GetRequestId(),
+				attributes.GetWorkerVersioningBuildId(),
 				timestamp.TimeValue(event.GetEventTime()),
 			)
 			if err != nil {

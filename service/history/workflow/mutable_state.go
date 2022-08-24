@@ -109,7 +109,7 @@ type (
 		AddFirstWorkflowTaskScheduled(*historypb.HistoryEvent) error
 		AddWorkflowTaskScheduledEvent(bypassTaskGeneration bool) (*WorkflowTaskInfo, error)
 		AddWorkflowTaskScheduledEventAsHeartbeat(bypassTaskGeneration bool, originalScheduledTimestamp *time.Time) (*WorkflowTaskInfo, error)
-		AddWorkflowTaskStartedEvent(int64, string, *taskqueuepb.TaskQueue, string) (*historypb.HistoryEvent, *WorkflowTaskInfo, error)
+		AddWorkflowTaskStartedEvent(int64, string, *taskqueuepb.TaskQueue, string, string) (*historypb.HistoryEvent, *WorkflowTaskInfo, error)
 		AddWorkflowTaskTimedOutEvent(int64, int64) (*historypb.HistoryEvent, error)
 		AddExternalWorkflowExecutionCancelRequested(int64, namespace.Name, namespace.ID, string, string) (*historypb.HistoryEvent, error)
 		AddExternalWorkflowExecutionSignaled(int64, namespace.Name, namespace.ID, string, string, string) (*historypb.HistoryEvent, error)
@@ -181,6 +181,7 @@ type (
 		GetWorkflowType() *commonpb.WorkflowType
 		GetWorkflowStateStatus() (enumsspb.WorkflowExecutionState, enumspb.WorkflowExecutionStatus)
 		GetQueryRegistry() QueryRegistry
+		GetWorkerVersioningBuildID() string
 		HasTransientWorkflowTask() bool
 		ClearTransientWorkflowTask() error
 		HasBufferedEvents() bool
@@ -213,7 +214,7 @@ type (
 		ReplicateWorkflowTaskCompletedEvent(*historypb.HistoryEvent) error
 		ReplicateWorkflowTaskFailedEvent() error
 		ReplicateWorkflowTaskScheduledEvent(int64, int64, *taskqueuepb.TaskQueue, *time.Duration, int32, *time.Time, *time.Time) (*WorkflowTaskInfo, error)
-		ReplicateWorkflowTaskStartedEvent(*WorkflowTaskInfo, int64, int64, int64, string, time.Time) (*WorkflowTaskInfo, error)
+		ReplicateWorkflowTaskStartedEvent(*WorkflowTaskInfo, int64, int64, int64, string, string, time.Time) (*WorkflowTaskInfo, error)
 		ReplicateWorkflowTaskTimedOutEvent(enumspb.TimeoutType) error
 		ReplicateExternalWorkflowExecutionCancelRequested(*historypb.HistoryEvent) error
 		ReplicateExternalWorkflowExecutionSignaled(*historypb.HistoryEvent) error

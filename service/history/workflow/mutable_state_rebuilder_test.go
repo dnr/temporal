@@ -779,8 +779,9 @@ func (s *stateBuilderSuite) TestApplyEvents_EventTypeWorkflowTaskStarted() {
 		EventTime: &now,
 		EventType: evenType,
 		Attributes: &historypb.HistoryEvent_WorkflowTaskStartedEventAttributes{WorkflowTaskStartedEventAttributes: &historypb.WorkflowTaskStartedEventAttributes{
-			ScheduledEventId: scheduledEventID,
-			RequestId:        workflowTaskRequestID,
+			ScheduledEventId:        scheduledEventID,
+			RequestId:               workflowTaskRequestID,
+			WorkerVersioningBuildId: "buildid",
 		}},
 	}
 	wt := &WorkflowTaskInfo{
@@ -793,7 +794,7 @@ func (s *stateBuilderSuite) TestApplyEvents_EventTypeWorkflowTaskStarted() {
 		Attempt:             1,
 	}
 	s.mockMutableState.EXPECT().ReplicateWorkflowTaskStartedEvent(
-		(*WorkflowTaskInfo)(nil), event.GetVersion(), scheduledEventID, event.GetEventId(), workflowTaskRequestID, timestamp.TimeValue(event.GetEventTime()),
+		(*WorkflowTaskInfo)(nil), event.GetVersion(), scheduledEventID, event.GetEventId(), workflowTaskRequestID, "buildid", timestamp.TimeValue(event.GetEventTime()),
 	).Return(wt, nil)
 	s.mockUpdateVersion(event)
 	s.mockTaskGenerator.EXPECT().GenerateStartWorkflowTaskTasks(

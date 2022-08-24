@@ -37,7 +37,6 @@ import (
 	"go.temporal.io/api/workflowservice/v1"
 	persistencespb "go.temporal.io/server/api/persistence/v1"
 	"go.temporal.io/server/common"
-	"go.temporal.io/server/common/primitives"
 )
 
 type (
@@ -50,7 +49,7 @@ type (
 )
 
 var (
-	errNoVersioningData = errors.New("no versioning data loaded for versioned task")
+	errNoVersioningData = errors.New("no versioning data but got versioned task")
 	errUnknownBuildID   = errors.New("unknown build id")
 )
 
@@ -67,7 +66,8 @@ func newVersioningData(data *persistencespb.VersioningData) *versioningData {
 
 func makeIndex(data *persistencespb.VersioningData) map[string]string {
 	index := make(map[string]string)
-	index[primitives.LatestDefaultBuildID] = data.CurrentDefault.GetVersion().GetWorkerBuildId()
+	// Empty string means we don't have a version yet. Map it to the current default.
+	index[""] = data.CurrentDefault.GetVersion().GetWorkerBuildId()
 	for _, leaf := range data.CompatibleLeaves {
 		target := leaf.GetVersion().GetWorkerBuildId()
 		index[target] = target
@@ -87,14 +87,20 @@ func (v *versioningData) GetData() *persistencespb.VersioningData {
 
 func (v *versioningData) GetTarget(buildID string) (string, error) {
 	if v == nil {
+		// If the task queue is unversioned (v == nil) and a task comes in with no previous
+		// build id (buildID == ""), that's not an error, we just keep everything unversioned
+		// and use the empty string as the "build id" to locate a channel.
 		if buildID == "" {
-			return primitives.UnversionedBuildID, nil
+			return "", nil
 		}
+		// But if the task does have a version, that's an error: we should have versioning data.
 		return "", errNoVersioningData
 	}
 	if target, ok := v.index[buildID]; ok {
 		return target, nil
 	}
+	// We have versioning data but it doesn't mention this build ID, so we can't figure out
+	// what it's compatible with.
 	return "", errUnknownBuildID
 }
 

@@ -224,6 +224,7 @@ func (handler *workflowTaskHandlerCallbacksImpl) handleWorkflowTaskStarted(
 				requestID,
 				req.PollRequest.TaskQueue,
 				req.PollRequest.Identity,
+				req.PollRequest.WorkerVersioningBuildId,
 			)
 			if err != nil {
 				// Unable to add WorkflowTaskStarted event to history
@@ -516,6 +517,9 @@ func (handler *workflowTaskHandlerCallbacksImpl) handleWorkflowTaskCompleted(
 				"request-from-RespondWorkflowTaskCompleted",
 				newWorkflowTask.TaskQueue,
 				request.Identity,
+				// By definition, the worker that this new task is going to is the same one who
+				// just completed the previous task, so we can use the value from mutable state.
+				msBuilder.GetWorkerVersioningBuildID(),
 			)
 			if err != nil {
 				return nil, err
