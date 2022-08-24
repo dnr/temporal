@@ -2178,6 +2178,7 @@ func (s *historyBuilderSuite) TestBufferEvent() {
 		enumspb.EVENT_TYPE_UPSERT_WORKFLOW_SEARCH_ATTRIBUTES:                    true,
 		enumspb.EVENT_TYPE_WORKFLOW_UPDATE_ACCEPTED:                             true,
 		enumspb.EVENT_TYPE_WORKFLOW_UPDATE_COMPLETED:                            true,
+		enumspb.EVENT_TYPE_WORKFLOW_PROPERTIES_MODIFIED:                         true,
 	}
 
 	// other events will not be assign event ID immediately
