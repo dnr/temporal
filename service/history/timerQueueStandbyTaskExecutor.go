@@ -608,9 +608,10 @@ func (t *timerQueueStandbyTaskExecutor) pushActivity(
 			Name: pushActivityInfo.taskQueue,
 			Kind: enumspb.TASK_QUEUE_KIND_NORMAL,
 		},
-		ScheduledEventId:       activityTask.EventID,
-		ScheduleToStartTimeout: activityScheduleToStartTimeout,
-		Clock:                  vclock.NewVectorClock(t.shard.GetClusterMetadata().GetClusterID(), t.shard.GetShardID(), activityTask.TaskID),
+		ScheduledEventId:        activityTask.EventID,
+		ScheduleToStartTimeout:  activityScheduleToStartTimeout,
+		Clock:                   vclock.NewVectorClock(t.shard.GetClusterMetadata().GetClusterID(), t.shard.GetShardID(), activityTask.TaskID),
+		WorkerVersioningBuildId: pushActivityInfo.workerVersioningBuildID,
 	})
 	return err
 }
