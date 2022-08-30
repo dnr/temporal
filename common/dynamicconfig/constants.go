@@ -239,6 +239,8 @@ const (
 	KeepAliveTimeout = "frontend.keepAliveTimeout"
 	// FrontendEnableSchedules enables schedule-related RPCs in the frontend
 	FrontendEnableSchedules = "frontend.enableSchedules"
+	// FrontendMaxConcurrentBatchOperationPerNamespace is the max concurrent batch operation job count per namespace
+	FrontendMaxConcurrentBatchOperationPerNamespace = "frontend.MaxConcurrentBatchOperationPerNamespace"
 
 	// DeleteNamespaceDeleteActivityRPS is RPS per every parallel delete executions activity.
 	// Total RPS is equal to DeleteNamespaceDeleteActivityRPS * DeleteNamespaceConcurrentDeleteExecutionsActivities.
@@ -340,6 +342,12 @@ const (
 	// StandbyTaskMissingEventsDiscardDelay is the amount of time standby cluster's will wait (if events are missing)
 	// before discarding the task
 	StandbyTaskMissingEventsDiscardDelay = "history.standbyTaskMissingEventsDiscardDelay"
+	// QueueReaderStuckCriticalAttempts is the max number of task loading attempts for a certain task range
+	// before that task range is split into a separate slice to unblock loading for later range.
+	// currently only work for scheduled queues and the task range is 1s.
+	QueueReaderStuckCriticalAttempts = "history.queueReaderStuckCriticalAttempts"
+	// QueueMaxReaderCount is the max number of readers in one multi-cursor queue
+	QueueMaxReaderCount = "history.queueMaxReaderCount"
 	// TimerTaskBatchSize is batch size for timer processor to process tasks
 	TimerTaskBatchSize = "history.timerTaskBatchSize"
 	// TimerTaskWorkerCount is number of task workers for timer processor
