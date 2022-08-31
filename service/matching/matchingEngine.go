@@ -89,7 +89,7 @@ type (
 
 	pollMetadata struct {
 		maxDispatchPerSecond *float64
-		workerVersioningID   taskqueuepb.VersionId // for task queue versioning
+		workerVersioningID   *taskqueuepb.VersionId // for task queue versioning; zero value means "unversioned"
 	}
 
 	matchingEngineImpl struct {
@@ -374,9 +374,8 @@ pollLoop:
 			return nil, err
 		}
 		taskQueueKind := request.TaskQueue.GetKind()
-		pollMetadata := &pollMetadata{}
-		if request.WorkerVersioningId != nil {
-			pollMetadata.workerVersioningID = *request.WorkerVersioningId
+		pollMetadata := &pollMetadata{
+			workerVersioningID: request.WorkerVersioningId,
 		}
 		task, err := e.getTask(pollerCtx, taskQueue, pollMetadata, taskQueueKind)
 		if err != nil {
@@ -485,9 +484,8 @@ pollLoop:
 		pollerCtx := context.WithValue(hCtx.Context, pollerIDKey, pollerID)
 		pollerCtx = context.WithValue(pollerCtx, identityKey, request.GetIdentity())
 		taskQueueKind := request.TaskQueue.GetKind()
-		pollMetadata := &pollMetadata{}
-		if request.WorkerVersioningId != nil {
-			pollMetadata.workerVersioningID = *request.WorkerVersioningId
+		pollMetadata := &pollMetadata{
+			workerVersioningID: request.WorkerVersioningId,
 		}
 		if request.TaskQueueMetadata != nil && request.TaskQueueMetadata.MaxTasksPerSecond != nil {
 			pollMetadata.maxDispatchPerSecond = &request.TaskQueueMetadata.MaxTasksPerSecond.Value

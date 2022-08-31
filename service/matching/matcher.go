@@ -484,12 +484,16 @@ func (tm *TaskMatcher) isForwardingAllowed() bool {
 	return tm.fwdr != nil
 }
 
-func getTaskChannel(m *sync.Map, versionID taskqueuepb.VersionId) chan *internalTask {
+func getTaskChannel(m *sync.Map, versionID *taskqueuepb.VersionId) chan *internalTask {
+	var key taskqueuepb.VersionId // zero value means "unversioned"
+	if versionID != nil {
+		key = *versionID
+	}
 	// optimistic load to avoid allocation
-	if ch, ok := m.Load(versionID); ok {
+	if ch, ok := m.Load(key); ok {
 		return ch.(chan *internalTask)
 	}
 	// if not, try again
-	ch, _ := m.LoadOrStore(versionID, make(chan *internalTask))
+	ch, _ := m.LoadOrStore(key, make(chan *internalTask))
 	return ch.(chan *internalTask)
 }

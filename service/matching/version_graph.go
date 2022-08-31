@@ -89,30 +89,28 @@ func (v *versioningData) GetData() *persistencespb.VersioningData {
 	return &v.data
 }
 
-func (v *versioningData) GetTarget(versionID *taskqueuepb.VersionId) (taskqueuepb.VersionId, error) {
-	var emptyVersionID taskqueuepb.VersionId
-
+func (v *versioningData) GetTarget(versionID *taskqueuepb.VersionId) (*taskqueuepb.VersionId, error) {
 	if v == nil {
 		// If the task queue is unversioned (v == nil) and a task comes in with no previous
 		// version id (versionID == nil), that's not an error, we just keep everything
-		// unversioned and use the empty string as the "build id" to locate a channel.
+		// unversioned and use the zero value as the "build id" to locate a channel.
 		if versionID == nil {
-			return emptyVersionID, nil
+			return nil, nil
 		}
 		// But if the task does have a version, that's an error: we should have versioning data.
-		return emptyVersionID, errNoVersioningData
+		return nil, errNoVersioningData
 	}
 
 	if versionID == nil {
-		// We have versioning data but task came in without it. Use the empty value for "default"
-		versionID = &emptyVersionID
+		// We have versioning data but task came in without it. Use the zero value for "default"
+		versionID = &taskqueuepb.VersionId{}
 	}
 	if target, ok := v.index[*versionID]; ok {
-		return target, nil
+		return &target, nil
 	}
 	// We have versioning data but it doesn't mention this version ID, so we can't figure out
 	// what it's compatible with.
-	return emptyVersionID, errUnknownBuildID
+	return nil, errUnknownBuildID
 }
 
 func (v *versioningData) CloneAndApplyMutation(mutator func(*persistencespb.VersioningData) error) (*versioningData, error) {

@@ -43,7 +43,7 @@ type (
 
 	pollerInfo struct {
 		ratePerSecond      float64
-		workerVersioningID taskqueuepb.VersionId
+		workerVersioningID *taskqueuepb.VersionId
 	}
 )
 
@@ -88,12 +88,11 @@ func (pollers *pollerHistory) getPollerInfo(earliestAccessTime time.Time) []*tas
 		// TODO add IP, T1396795
 		lastAccessTime := entry.CreateTime()
 		if earliestAccessTime.Before(lastAccessTime) {
-			versioningID := value.workerVersioningID
 			result = append(result, &taskqueuepb.PollerInfo{
 				Identity:           string(key),
 				LastAccessTime:     &lastAccessTime,
 				RatePerSecond:      value.ratePerSecond,
-				WorkerVersioningId: &versioningID,
+				WorkerVersioningId: value.workerVersioningID,
 			})
 		}
 	}
