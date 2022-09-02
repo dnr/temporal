@@ -88,6 +88,10 @@ type (
 		RangeID() int64
 	}
 
+	targetter interface {
+		GetTarget(*taskqueuepb.VersionId) (*taskqueuepb.VersionId, error)
+	}
+
 	addTaskParams struct {
 		execution     *commonpb.WorkflowExecution
 		taskInfo      *persistencespb.TaskInfo
@@ -173,6 +177,9 @@ type (
 		stopChan          chan struct{}
 		tqMgr             *taskQueueManagerImpl
 	}
+
+	noVersioningData struct{}
+	nilTargetter     struct{}
 )
 
 var _ taskQueueManager = (*taskQueueManagerImpl)(nil)
@@ -183,6 +190,21 @@ func withIDBlockAllocator(ibl idBlockAllocator) taskQueueManagerOpt {
 	return func(tqm *taskQueueManagerImpl) {
 		tqm.taskWriter.idAlloc = ibl
 	}
+}
+
+func (_ *noVersioningData) Send(targetter) {
+}
+
+func (_ *noVersioningData) Peek() targetter {
+	return (*nilTargetter)(nil)
+}
+
+func (_ *noVersioningData) Listen() (targetter, chan targetter, func()) {
+	return (*nilTargetter)(nil), nil, func() {}
+}
+
+func (_ *nilTargetter) GetTarget(*taskqueuepb.VersionId) (*taskqueuepb.VersionId, error) {
+	return nil, nil
 }
 
 func newTaskQueueManager(
@@ -202,7 +224,17 @@ func newTaskQueueManager(
 	taskQueueConfig := newTaskQueueConfig(taskQueue, config, nsName)
 
 	// broadcasts versioning data changes to blocked goroutines in TaskMatcher
-	versioningDataBroadcaster := newBroadcaster[*versioningData]()
+	var versioningDataSink versioningDataSink
+	var versioningDataSource versioningDataSource
+	switch taskQueueKind {
+	case enumspb.TASK_QUEUE_KIND_NORMAL:
+		b := newBroadcaster[targetter]()
+		versioningDataSink = b
+		versioningDataSource = b
+	case enumspb.TASK_QUEUE_KIND_STICKY:
+		versioningDataSink = (*noVersioningData)(nil)
+		versioningDataSource = (*noVersioningData)(nil)
+	}
 
 	db := newTaskQueueDB(
 		e.taskManager,
@@ -210,7 +242,7 @@ func newTaskQueueManager(
 		taskQueue,
 		taskQueueKind,
 		e.logger,
-		versioningDataBroadcaster.Send,
+		versioningDataSink,
 	)
 	logger := log.With(e.logger,
 		tag.WorkflowTaskQueueName(taskQueue.name),
@@ -262,7 +294,7 @@ func newTaskQueueManager(
 	if tlMgr.isFowardingAllowed(taskQueue, taskQueueKind) {
 		fwdr = newForwarder(&taskQueueConfig.forwarderConfig, taskQueue, taskQueueKind, e.matchingClient)
 	}
-	tlMgr.matcher = newTaskMatcher(taskQueueConfig, fwdr, tlMgr.metricScope, versioningDataBroadcaster)
+	tlMgr.matcher = newTaskMatcher(taskQueueConfig, fwdr, tlMgr.metricScope, versioningDataSource)
 	for _, opt := range opts {
 		opt(tlMgr)
 	}
@@ -485,6 +517,11 @@ func (c *taskQueueManagerImpl) DispatchQueryTask(
 // GetVersioningData returns the versioning data for the task queue if any. If this task queue is a non-root-partition
 // and has no cached data, it will explicitly attempt a fetch from the root partition.
 func (c *taskQueueManagerImpl) GetVersioningData(ctx context.Context) (*versioningData, error) {
+	// sticky task queues are not versioned
+	if c.taskQueueKind == enumspb.TASK_QUEUE_KIND_STICKY {
+		return nil, nil
+	}
+
 	data, err := c.db.GetVersioningData(ctx)
 	if errors.Is(err, errVersioningDataNotPresentOnPartition) {
 		// If this is a non-root-partition with no versioning data, this call is indicating we might expect to find
@@ -496,6 +533,11 @@ func (c *taskQueueManagerImpl) GetVersioningData(ctx context.Context) (*versioni
 }
 
 func (c *taskQueueManagerImpl) MutateVersioningData(ctx context.Context, mutator func(*persistencespb.VersioningData) error) error {
+	// sticky task queues are not versioned
+	if c.taskQueueKind == enumspb.TASK_QUEUE_KIND_STICKY {
+		return errors.New("sticky task queues are not versioned")
+	}
+
 	newData, err := c.db.MutateVersioningData(ctx, mutator)
 	c.signalIfFatal(err)
 	if err != nil {
@@ -534,6 +576,11 @@ func (c *taskQueueManagerImpl) MutateVersioningData(ctx context.Context, mutator
 
 func (c *taskQueueManagerImpl) InvalidateMetadata(request *matchingservice.InvalidateTaskQueueMetadataRequest) error {
 	if request.GetVersioningData() != nil {
+		// sticky task queues are not versioned
+		if c.taskQueueKind == enumspb.TASK_QUEUE_KIND_STICKY {
+			return errors.New("sticky task queues are not versioned")
+		}
+
 		if c.taskQueueID.OwnsVersioningData() {
 			// Should never happen. Root partitions do not get their versioning data invalidated.
 			c.logger.Warn("A root workflow partition was told to invalidate its versioning data, this should not happen")

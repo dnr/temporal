@@ -51,6 +51,8 @@ type (
 var (
 	errNoVersioningData = errors.New("no versioning data but got versioned task")
 	errUnknownBuildID   = errors.New("unknown build id")
+
+	_ targetter = (*versioningData)(nil)
 )
 
 func newVersioningData(data *persistencespb.VersioningData) *versioningData {

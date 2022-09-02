@@ -60,12 +60,17 @@ type (
 
 		// only publishVersioningDataLocked should write to this field directly, other methods
 		// should call publishVersioningDataLocked
-		versioningData         *versioningData
-		versioningDataCallback func(*versioningData)
+		versioningData     *versioningData
+		versioningDataSink versioningDataSink
 	}
+
 	taskQueueState struct {
 		rangeID  int64
 		ackLevel int64
+	}
+
+	versioningDataSink interface {
+		Send(targetter)
 	}
 )
 
@@ -90,7 +95,7 @@ func newTaskQueueDB(
 	taskQueue *taskQueueID,
 	kind enumspb.TaskQueueKind,
 	logger log.Logger,
-	versioningDataCallback func(*versioningData),
+	versioningDataSink versioningDataSink,
 ) *taskQueueDB {
 	return &taskQueueDB{
 		namespaceID:   namespaceID,
@@ -99,7 +104,7 @@ func newTaskQueueDB(
 		store:         store,
 		logger:        logger,
 
-		versioningDataCallback: versioningDataCallback,
+		versioningDataSink: versioningDataSink,
 	}
 }
 
@@ -411,6 +416,6 @@ func (db *taskQueueDB) cachedQueueInfo() *persistencespb.TaskQueueInfo {
 
 func (db *taskQueueDB) publishVersioningDataLocked(data *versioningData) *versioningData {
 	db.versioningData = data
-	db.versioningDataCallback(data)
+	db.versioningDataSink.Send(data)
 	return data
 }

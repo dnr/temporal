@@ -66,8 +66,8 @@ type (
 	}
 
 	versioningDataSource interface {
-		Peek() *versioningData
-		Listen() (*versioningData, chan *versioningData, func())
+		Peek() targetter
+		Listen() (targetter, chan targetter, func())
 	}
 )
 
