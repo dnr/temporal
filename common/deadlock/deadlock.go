@@ -48,7 +48,7 @@ type (
 		fx.In
 
 		Logger       log.Logger
-		Collection   dynamicconfig.Collection
+		Collection   *dynamicconfig.Collection
 		HealthServer *health.Server
 
 		// pingables:
