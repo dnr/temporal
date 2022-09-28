@@ -53,6 +53,7 @@ const (
 type (
 	Metadata interface {
 		common.Daemon
+		common.Pingable
 
 		// IsGlobalNamespaceEnabled whether the global namespace is enabled,
 		// this attr should be discarded when cross DC is made public

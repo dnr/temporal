@@ -22,23 +22,22 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-package shard
+package deadlock
 
 import (
-	"go.temporal.io/server/common"
-	"go.temporal.io/server/common/namespace"
+	"context"
+
+	"go.uber.org/fx"
 )
 
-//go:generate mockgen -copyright_file ../../../LICENSE -package $GOPACKAGE -source $GOFILE -destination controller_mock.go
-
-type (
-	Controller interface {
-		common.Daemon
-		common.Pingable
-
-		GetShardByID(shardID int32) (Context, error)
-		GetShardByNamespaceWorkflow(namespaceID namespace.ID, workflowID string) (Context, error)
-		CloseShardByID(shardID int32)
-		ShardIDs() []int32
-	}
+var Module = fx.Options(
+	fx.Annotate(
+		NewDeadlockDetector,
+		fx.OnStart(func(ctx context.Context, dd *deadlockDetector) error {
+			return dd.Start()
+		}),
+		fx.OnStop(func(ctx context.Context, dd *deadlockDetector) error {
+			return dd.Stop()
+		}),
+	),
 )

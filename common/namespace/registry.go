@@ -130,6 +130,7 @@ type (
 	// Registry provides access to Namespace objects by name or by ID.
 	Registry interface {
 		common.Daemon
+		common.Pingable
 		RegisterNamespaceChangeCallback(listenerID any, initialNotificationVersion int64, prepareCallback PrepareCallbackFn, callback CallbackFn)
 		UnregisterNamespaceChangeCallback(listenerID any)
 		GetNamespace(name Name) (*Namespace, error)

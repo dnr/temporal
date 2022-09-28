@@ -87,7 +87,6 @@ var Module = fx.Options(
 	fx.Provide(PersistenceRateLimitingParamsProvider),
 	fx.Provide(FEReplicatorNamespaceReplicationQueueProvider),
 	fx.Provide(func(so []grpc.ServerOption) *grpc.Server { return grpc.NewServer(so...) }),
-	fx.Provide(healthServerProvider),
 	fx.Provide(HandlerProvider),
 	fx.Provide(AdminHandlerProvider),
 	fx.Provide(OperatorHandlerProvider),
@@ -385,10 +384,6 @@ func FEReplicatorNamespaceReplicationQueueProvider(
 
 func ServiceResolverProvider(membershipMonitor membership.Monitor) (membership.ServiceResolver, error) {
 	return membershipMonitor.GetResolver(common.FrontendServiceName)
-}
-
-func healthServerProvider() *health.Server {
-	return health.NewServer()
 }
 
 func AdminHandlerProvider(

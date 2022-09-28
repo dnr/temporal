@@ -33,6 +33,7 @@ import (
 
 	"go.uber.org/fx"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/health"
 
 	"go.temporal.io/api/workflowservice/v1"
 
@@ -48,6 +49,7 @@ import (
 	"go.temporal.io/server/common/clock"
 	"go.temporal.io/server/common/cluster"
 	"go.temporal.io/server/common/config"
+	"go.temporal.io/server/common/deadlock"
 	"go.temporal.io/server/common/dynamicconfig"
 	"go.temporal.io/server/common/log"
 	"go.temporal.io/server/common/log/tag"
@@ -118,6 +120,8 @@ var Module = fx.Options(
 	fx.Invoke(RegisterBootstrapContainer),
 	fx.Provide(PersistenceConfigProvider),
 	fx.Provide(MetricsClientProvider),
+	fx.Provide(health.NewServer),
+	deadlock.Module,
 )
 
 var DefaultOptions = fx.Options(
