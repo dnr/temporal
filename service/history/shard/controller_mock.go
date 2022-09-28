@@ -30,6 +30,7 @@ package shard
 
 import (
 	reflect "reflect"
+	time "time"
 
 	gomock "github.com/golang/mock/gomock"
 	namespace "go.temporal.io/server/common/namespace"
@@ -110,6 +111,20 @@ func (m *MockController) PingLock() {
 func (mr *MockControllerMockRecorder) PingLock() *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "PingLock", reflect.TypeOf((*MockController)(nil).PingLock))
+}
+
+// PingLockTimeout mocks base method.
+func (m *MockController) PingLockTimeout() time.Duration {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "PingLockTimeout")
+	ret0, _ := ret[0].(time.Duration)
+	return ret0
+}
+
+// PingLockTimeout indicates an expected call of PingLockTimeout.
+func (mr *MockControllerMockRecorder) PingLockTimeout() *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "PingLockTimeout", reflect.TypeOf((*MockController)(nil).PingLockTimeout))
 }
 
 // ShardIDs mocks base method.

@@ -256,6 +256,12 @@ func (m *metadataImpl) PingLock() {
 	m.clusterCallbackLock.Unlock()
 }
 
+func (m *metadataImpl) PingLockTimeout() time.Duration {
+	// we don't do any persistence ops under clusterLock, but the listeners get called under
+	// clusterCallbackLock, and they may do some more work (not persistence ops though).
+	return 10 * time.Second
+}
+
 func (m *metadataImpl) IsGlobalNamespaceEnabled() bool {
 	return m.enableGlobalNamespace
 }

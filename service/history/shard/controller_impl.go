@@ -154,6 +154,11 @@ func (c *ControllerImpl) PingLock() {
 	c.Unlock()
 }
 
+func (c *ControllerImpl) PingLockTimeout() time.Duration {
+	// we don't do any persistence ops with this lock, so use a short timeout
+	return 10 * time.Second
+}
+
 func (c *ControllerImpl) Status() int32 {
 	return atomic.LoadInt32(&c.status)
 }

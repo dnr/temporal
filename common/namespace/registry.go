@@ -250,6 +250,11 @@ func (r *registry) PingLock() {
 	r.callbackLock.Unlock()
 }
 
+func (r *registry) PingLockTimeout() time.Duration {
+	// we don't do any persistence ops with this lock, so use a short timeout
+	return 10 * time.Second
+}
+
 func (r *registry) getAllNamespace() map[ID]*Namespace {
 	r.cacheLock.RLock()
 	defer r.cacheLock.RUnlock()

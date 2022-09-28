@@ -58,11 +58,6 @@ type (
 		ShardController   shard.Controller `optional:"true"`
 	}
 
-	pingable struct {
-		target  common.Pingable
-		timeout time.Duration
-	}
-
 	config struct {
 		DumpGoroutines  dynamicconfig.BoolPropertyFn
 		FailHealthCheck dynamicconfig.BoolPropertyFn
@@ -73,27 +68,18 @@ type (
 		logger       log.Logger
 		healthServer *health.Server
 		config       config
-		pingables    map[string]pingable
+		pingables    map[string]common.Pingable
 		loopGoro     *goro.Handle
 	}
 )
 
 func NewDeadlockDetector(params params) *deadlockDetector {
-	pingables := map[string]pingable{
-		"NamespaceRegistry": pingable{
-			target:  params.NamespaceRegistry,
-			timeout: 15 * time.Second, // FIXME: check and document
-		},
-		"ClusterMetadata": pingable{
-			target:  params.ClusterMetadata,
-			timeout: 15 * time.Second, // FIXME: check and document
-		},
+	pingables := map[string]common.Pingable{
+		"NamespaceRegistry": params.NamespaceRegistry,
+		"ClusterMetadata":   params.ClusterMetadata,
 	}
 	if params.ShardController != nil {
-		pingables["ShardController"] = pingable{
-			target:  params.ShardController,
-			timeout: 15 * time.Second, // FIXME: check and document
-		}
+		pingables["ShardController"] = params.ShardController
 	}
 	return &deadlockDetector{
 		logger:       params.Logger,
@@ -118,43 +104,41 @@ func (dd *deadlockDetector) Stop() error {
 	return nil
 }
 
-func (dd *deadlockDetector) getMaxTimeout() time.Duration {
-	d := 10 * time.Second
-	for _, p := range dd.pingables {
-		d = util.Max(d, p.timeout)
-	}
-	return d
-}
-
 func (dd *deadlockDetector) loop(ctx context.Context) error {
 	dd.logger.Info("deadlock detector starting")
-	t := time.NewTicker(dd.getMaxTimeout() + 10*time.Second)
-	defer t.Stop()
 	for {
+		maxTimeout := dd.ping()
 		select {
-		case <-t.C:
-			dd.ping()
+		case <-time.After(maxTimeout + 10*time.Second):
 		case <-ctx.Done():
 			return ctx.Err()
 		}
 	}
-	return nil
 }
 
-func (dd *deadlockDetector) ping() {
+func (dd *deadlockDetector) ping() time.Duration {
+	maxTimeout := 10 * time.Second
 	for name, p := range dd.pingables {
-		go func(name string, p pingable) {
+		timeout := p.PingLockTimeout()
+		maxTimeout = util.Max(maxTimeout, timeout)
+		go func(name string, p common.Pingable, timeout time.Duration) {
 			// Using AfterFunc is (hopefully?) cheaper than creating another goroutine to be
 			// the waiter, since we expect to always cancel it. If the go runtime is so messed
 			// up that it can't create a goroutine, that's a bigger problem than we can handle.
-			t := time.AfterFunc(p.timeout, func() { dd.detected(name) })
-			p.target.PingLock()
+			t := time.AfterFunc(timeout, func() { dd.detected(name) })
+			p.PingLock()
 			t.Stop()
-		}(name, p)
+		}(name, p, timeout)
 	}
+	return maxTimeout
 }
 
 func (dd *deadlockDetector) detected(name string) {
+	if dd.loopGoro.Err() != nil {
+		// we shut down already, ignore any detected deadlocks
+		return
+	}
+
 	dd.logger.Error("deadlock detected", tag.Name(name))
 
 	if dd.config.DumpGoroutines() {

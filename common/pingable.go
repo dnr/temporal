@@ -24,8 +24,11 @@
 
 package common
 
+import "time"
+
 type (
 	Pingable interface {
 		PingLock()
+		PingLockTimeout() time.Duration
 	}
 )

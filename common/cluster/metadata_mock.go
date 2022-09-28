@@ -30,6 +30,7 @@ package cluster
 
 import (
 	reflect "reflect"
+	time "time"
 
 	gomock "github.com/golang/mock/gomock"
 )
@@ -207,6 +208,20 @@ func (m *MockMetadata) PingLock() {
 func (mr *MockMetadataMockRecorder) PingLock() *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "PingLock", reflect.TypeOf((*MockMetadata)(nil).PingLock))
+}
+
+// PingLockTimeout mocks base method.
+func (m *MockMetadata) PingLockTimeout() time.Duration {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "PingLockTimeout")
+	ret0, _ := ret[0].(time.Duration)
+	return ret0
+}
+
+// PingLockTimeout indicates an expected call of PingLockTimeout.
+func (mr *MockMetadataMockRecorder) PingLockTimeout() *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "PingLockTimeout", reflect.TypeOf((*MockMetadata)(nil).PingLockTimeout))
 }
 
 // RegisterMetadataChangeCallback mocks base method.

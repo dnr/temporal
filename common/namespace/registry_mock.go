@@ -252,6 +252,20 @@ func (mr *MockRegistryMockRecorder) PingLock() *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "PingLock", reflect.TypeOf((*MockRegistry)(nil).PingLock))
 }
 
+// PingLockTimeout mocks base method.
+func (m *MockRegistry) PingLockTimeout() time.Duration {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "PingLockTimeout")
+	ret0, _ := ret[0].(time.Duration)
+	return ret0
+}
+
+// PingLockTimeout indicates an expected call of PingLockTimeout.
+func (mr *MockRegistryMockRecorder) PingLockTimeout() *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "PingLockTimeout", reflect.TypeOf((*MockRegistry)(nil).PingLockTimeout))
+}
+
 // Refresh mocks base method.
 func (m *MockRegistry) Refresh() {
 	m.ctrl.T.Helper()
