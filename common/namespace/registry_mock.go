@@ -240,6 +240,18 @@ func (mr *MockRegistryMockRecorder) GetNamespaceName(id interface{}) *gomock.Cal
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetNamespaceName", reflect.TypeOf((*MockRegistry)(nil).GetNamespaceName), id)
 }
 
+// PingLock mocks base method.
+func (m *MockRegistry) PingLock() {
+	m.ctrl.T.Helper()
+	m.ctrl.Call(m, "PingLock")
+}
+
+// PingLock indicates an expected call of PingLock.
+func (mr *MockRegistryMockRecorder) PingLock() *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "PingLock", reflect.TypeOf((*MockRegistry)(nil).PingLock))
+}
+
 // Refresh mocks base method.
 func (m *MockRegistry) Refresh() {
 	m.ctrl.T.Helper()

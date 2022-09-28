@@ -59,7 +59,6 @@ import (
 	"go.temporal.io/server/common/persistence/visibility/manager"
 	"go.temporal.io/server/common/persistence/visibility/store/standard/cassandra"
 	"go.temporal.io/server/common/primitives/timestamp"
-	"go.temporal.io/server/common/resource"
 	"go.temporal.io/server/common/searchattribute"
 	serviceerrors "go.temporal.io/server/common/serviceerror"
 	"go.temporal.io/server/service/history/api"
@@ -104,8 +103,8 @@ type (
 		fx.In
 
 		Config                        *configs.Config
-		Logger                        resource.SnTaggedLogger
-		ThrottledLogger               resource.ThrottledLogger
+		Logger                        log.SnTaggedLogger
+		ThrottledLogger               log.ThrottledLogger
 		PersistenceExecutionManager   persistence.ExecutionManager
 		PersistenceShardManager       persistence.ShardManager
 		PersistenceVisibilityManager  manager.VisibilityManager

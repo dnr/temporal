@@ -149,6 +149,11 @@ func (c *ControllerImpl) Stop() {
 	c.contextTaggedLogger.Info("", tag.LifeCycleStopped)
 }
 
+func (c *ControllerImpl) PingLock() {
+	c.Lock()
+	c.Unlock()
+}
+
 func (c *ControllerImpl) Status() int32 {
 	return atomic.LoadInt32(&c.status)
 }

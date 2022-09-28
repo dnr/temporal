@@ -197,6 +197,18 @@ func (mr *MockMetadataMockRecorder) IsVersionFromSameCluster(version1, version2 
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "IsVersionFromSameCluster", reflect.TypeOf((*MockMetadata)(nil).IsVersionFromSameCluster), version1, version2)
 }
 
+// PingLock mocks base method.
+func (m *MockMetadata) PingLock() {
+	m.ctrl.T.Helper()
+	m.ctrl.Call(m, "PingLock")
+}
+
+// PingLock indicates an expected call of PingLock.
+func (mr *MockMetadataMockRecorder) PingLock() *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "PingLock", reflect.TypeOf((*MockMetadata)(nil).PingLock))
+}
+
 // RegisterMetadataChangeCallback mocks base method.
 func (m *MockMetadata) RegisterMetadataChangeCallback(callbackId any, cb CallbackFn) {
 	m.ctrl.T.Helper()

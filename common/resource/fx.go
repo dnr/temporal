@@ -69,8 +69,6 @@ import (
 )
 
 type (
-	SnTaggedLogger       log.Logger
-	ThrottledLogger      log.Logger
 	ThrottledLoggerRpsFn quotas.RateFn
 	NamespaceLogger      log.Logger
 	ServiceName          string
@@ -85,7 +83,7 @@ type (
 		fx.In
 
 		Provider   metrics.MetricsHandler
-		Logger     SnTaggedLogger
+		Logger     log.SnTaggedLogger
 		InstanceID InstanceID `optional:"true"`
 	}
 )
@@ -135,14 +133,14 @@ var DefaultOptions = fx.Options(
 	fx.Provide(DCRedirectionPolicyProvider),
 )
 
-func SnTaggedLoggerProvider(logger log.Logger, sn ServiceName) SnTaggedLogger {
+func SnTaggedLoggerProvider(logger log.Logger, sn ServiceName) log.SnTaggedLogger {
 	return log.With(logger, tag.Service(string(sn)))
 }
 
 func ThrottledLoggerProvider(
-	logger SnTaggedLogger,
+	logger log.SnTaggedLogger,
 	fn ThrottledLoggerRpsFn,
-) ThrottledLogger {
+) log.ThrottledLogger {
 	return log.NewThrottledLogger(
 		logger,
 		quotas.RateFn(fn),
@@ -185,7 +183,7 @@ func SearchAttributeManagerProvider(
 }
 
 func NamespaceRegistryProvider(
-	logger SnTaggedLogger,
+	logger log.SnTaggedLogger,
 	metricsClient metrics.Client,
 	clusterMetadata cluster.Metadata,
 	metadataManager persistence.MetadataManager,
@@ -207,8 +205,8 @@ func ClientFactoryProvider(
 	metricsClient metrics.Client,
 	dynamicCollection *dynamicconfig.Collection,
 	persistenceConfig *config.Persistence,
-	logger SnTaggedLogger,
-	throttledLogger ThrottledLogger,
+	logger log.SnTaggedLogger,
+	throttledLogger log.ThrottledLogger,
 ) client.Factory {
 	return factoryProvider.NewFactory(
 		rpcFactory,
@@ -234,7 +232,7 @@ func ClientBeanProvider(
 func MembershipMonitorProvider(
 	lc fx.Lifecycle,
 	clusterMetadataManager persistence.ClusterMetadataManager,
-	logger SnTaggedLogger,
+	logger log.SnTaggedLogger,
 	cfg *config.Config,
 	svcName ServiceName,
 	tlsConfigProvider encryption.TLSConfigProvider,
@@ -304,7 +302,7 @@ func RuntimeMetricsReporterProvider(
 }
 
 func VisibilityBootstrapContainerProvider(
-	logger SnTaggedLogger,
+	logger log.SnTaggedLogger,
 	metricsClient metrics.Client,
 	clusterMetadata cluster.Metadata,
 ) *archiver.VisibilityBootstrapContainer {
@@ -316,7 +314,7 @@ func VisibilityBootstrapContainerProvider(
 }
 
 func HistoryBootstrapContainerProvider(
-	logger SnTaggedLogger,
+	logger log.SnTaggedLogger,
 	metricsClient metrics.Client,
 	clusterMetadata cluster.Metadata,
 	executionManager persistence.ExecutionManager,
@@ -397,7 +395,7 @@ func SdkClientFactoryProvider(
 	cfg *config.Config,
 	tlsConfigProvider encryption.TLSConfigProvider,
 	metricsHandler metrics.MetricsHandler,
-	logger SnTaggedLogger,
+	logger log.SnTaggedLogger,
 	resolver membership.GRPCResolver,
 ) (sdk.ClientFactory, error) {
 	tlsFrontendConfig, err := tlsConfigProvider.GetFrontendClientConfig()

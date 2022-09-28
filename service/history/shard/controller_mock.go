@@ -100,6 +100,18 @@ func (mr *MockControllerMockRecorder) GetShardByNamespaceWorkflow(namespaceID, w
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetShardByNamespaceWorkflow", reflect.TypeOf((*MockController)(nil).GetShardByNamespaceWorkflow), namespaceID, workflowID)
 }
 
+// PingLock mocks base method.
+func (m *MockController) PingLock() {
+	m.ctrl.T.Helper()
+	m.ctrl.Call(m, "PingLock")
+}
+
+// PingLock indicates an expected call of PingLock.
+func (mr *MockControllerMockRecorder) PingLock() *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "PingLock", reflect.TypeOf((*MockController)(nil).PingLock))
+}
+
 // ShardIDs mocks base method.
 func (m *MockController) ShardIDs() []int32 {
 	m.ctrl.T.Helper()

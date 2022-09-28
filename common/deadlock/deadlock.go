@@ -63,6 +63,9 @@ type (
 	}
 
 	config struct {
+		DumpGoroutines  dynamicconfig.BoolPropertyFn
+		FailHealthCheck dynamicconfig.BoolPropertyFn
+		AbortProcess    dynamicconfig.BoolPropertyFn
 	}
 
 	deadlockDetector struct {
@@ -75,7 +78,7 @@ type (
 )
 
 func NewDeadlockDetector(params params) *deadlockDetector {
-	pingables := map[string]common.Pingable{
+	pingables := map[string]pingable{
 		"NamespaceRegistry": pingable{
 			target:  params.NamespaceRegistry,
 			timeout: 15 * time.Second, // FIXME: check and document
@@ -110,7 +113,7 @@ func (dd *deadlockDetector) Stop() error {
 	return nil
 }
 
-func (dd *deadlockDetector) loop(ctx context.Context) {
+func (dd *deadlockDetector) loop(ctx context.Context) error {
 	t := time.NewTicker(30 * time.Second) // FIXME: max of all timeouts
 	defer t.Stop()
 	for {
@@ -118,9 +121,10 @@ func (dd *deadlockDetector) loop(ctx context.Context) {
 		case <-t.C:
 			dd.ping()
 		case <-ctx.Done():
-			return
+			return ctx.Err()
 		}
 	}
+	return nil
 }
 
 func (dd *deadlockDetector) ping() {
@@ -155,12 +159,12 @@ func (dd *deadlockDetector) detected(name string) {
 		}
 	}
 
-	if dd.config.FailHeathCheck() {
+	if dd.config.FailHealthCheck() {
 		dd.logger.Error("marking unhealthy")
 		dd.healthServer.Shutdown()
 	}
 
-	if dd.config.Abort() {
+	if dd.config.AbortProcess() {
 		dd.logger.Fatal("deadlock detected", tag.Name(name))
 	}
 }

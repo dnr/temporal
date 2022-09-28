@@ -249,6 +249,13 @@ func (m *metadataImpl) Stop() {
 	<-m.refresher.Done()
 }
 
+func (m *metadataImpl) PingLock() {
+	m.clusterLock.Lock()
+	m.clusterLock.Unlock()
+	m.clusterCallbackLock.Lock()
+	m.clusterCallbackLock.Unlock()
+}
+
 func (m *metadataImpl) IsGlobalNamespaceEnabled() bool {
 	return m.enableGlobalNamespace
 }

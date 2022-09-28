@@ -36,11 +36,11 @@ import (
 
 	"go.temporal.io/server/api/matchingservice/v1"
 	"go.temporal.io/server/common"
+	"go.temporal.io/server/common/log"
 	"go.temporal.io/server/common/log/tag"
 	"go.temporal.io/server/common/membership"
 	"go.temporal.io/server/common/metrics"
 	"go.temporal.io/server/common/persistence/client"
-	"go.temporal.io/server/common/resource"
 )
 
 // Service represents the matching service
@@ -50,7 +50,7 @@ type Service struct {
 	config  *Config
 
 	server                         *grpc.Server
-	logger                         resource.SnTaggedLogger
+	logger                         log.SnTaggedLogger
 	membershipMonitor              membership.Monitor
 	grpcListener                   net.Listener
 	runtimeMetricsReporter         *metrics.RuntimeMetricsReporter
@@ -62,7 +62,7 @@ type Service struct {
 func NewService(
 	grpcServerOptions []grpc.ServerOption,
 	serviceConfig *Config,
-	logger resource.SnTaggedLogger,
+	logger log.SnTaggedLogger,
 	membershipMonitor membership.Monitor,
 	grpcListener net.Listener,
 	runtimeMetricsReporter *metrics.RuntimeMetricsReporter,

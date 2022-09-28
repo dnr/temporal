@@ -243,6 +243,13 @@ func (r *registry) Stop() {
 	<-r.refresher.Done()
 }
 
+func (r *registry) PingLock() {
+	r.cacheLock.Lock()
+	r.cacheLock.Unlock()
+	r.callbackLock.Lock()
+	r.callbackLock.Unlock()
+}
+
 func (r *registry) getAllNamespace() map[ID]*Namespace {
 	r.cacheLock.RLock()
 	defer r.cacheLock.RUnlock()

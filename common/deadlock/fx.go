@@ -31,7 +31,7 @@ import (
 )
 
 var Module = fx.Options(
-	fx.Annotate(
+	fx.Provide(fx.Annotate(
 		NewDeadlockDetector,
 		fx.OnStart(func(ctx context.Context, dd *deadlockDetector) error {
 			return dd.Start()
@@ -39,5 +39,5 @@ var Module = fx.Options(
 		fx.OnStop(func(ctx context.Context, dd *deadlockDetector) error {
 			return dd.Stop()
 		}),
-	),
+	)),
 )
