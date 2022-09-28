@@ -39,6 +39,7 @@ import (
 	"go.temporal.io/server/common/log"
 	"go.temporal.io/server/common/log/tag"
 	"go.temporal.io/server/common/namespace"
+	"go.temporal.io/server/common/util"
 	"go.temporal.io/server/internal/goro"
 	"go.temporal.io/server/service/history/shard"
 )
@@ -97,8 +98,12 @@ func NewDeadlockDetector(params params) *deadlockDetector {
 	return &deadlockDetector{
 		logger:       params.Logger,
 		healthServer: params.HealthServer,
-		config:       config{},
-		pingables:    pingables,
+		config: config{
+			DumpGoroutines:  params.Collection.GetBoolProperty(dynamicconfig.DeadlockDumpGoroutines, true),
+			FailHealthCheck: params.Collection.GetBoolProperty(dynamicconfig.DeadlockFailHealthCheck, true),
+			AbortProcess:    params.Collection.GetBoolProperty(dynamicconfig.DeadlockAbortProcess, false),
+		},
+		pingables: pingables,
 	}
 }
 
@@ -113,8 +118,17 @@ func (dd *deadlockDetector) Stop() error {
 	return nil
 }
 
+func (dd *deadlockDetector) getMaxTimeout() time.Duration {
+	d := 10 * time.Second
+	for _, p := range dd.pingables {
+		d = util.Max(d, p.timeout)
+	}
+	return d
+}
+
 func (dd *deadlockDetector) loop(ctx context.Context) error {
-	t := time.NewTicker(30 * time.Second) // FIXME: max of all timeouts
+	dd.logger.Info("deadlock detector starting")
+	t := time.NewTicker(dd.getMaxTimeout() + 10*time.Second)
 	defer t.Stop()
 	for {
 		select {
@@ -160,7 +174,7 @@ func (dd *deadlockDetector) detected(name string) {
 	}
 
 	if dd.config.FailHealthCheck() {
-		dd.logger.Error("marking unhealthy")
+		dd.logger.Info("marking unhealthy")
 		dd.healthServer.Shutdown()
 	}
 
