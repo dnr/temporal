@@ -34,6 +34,7 @@ import (
 	time "time"
 
 	gomock "github.com/golang/mock/gomock"
+	common "go.temporal.io/server/common"
 	persistence "go.temporal.io/server/common/persistence"
 )
 
@@ -240,30 +241,18 @@ func (mr *MockRegistryMockRecorder) GetNamespaceName(id interface{}) *gomock.Cal
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetNamespaceName", reflect.TypeOf((*MockRegistry)(nil).GetNamespaceName), id)
 }
 
-// PingLock mocks base method.
-func (m *MockRegistry) PingLock() {
+// GetPingChecks mocks base method.
+func (m *MockRegistry) GetPingChecks() []common.PingCheck {
 	m.ctrl.T.Helper()
-	m.ctrl.Call(m, "PingLock")
-}
-
-// PingLock indicates an expected call of PingLock.
-func (mr *MockRegistryMockRecorder) PingLock() *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "PingLock", reflect.TypeOf((*MockRegistry)(nil).PingLock))
-}
-
-// PingLockTimeout mocks base method.
-func (m *MockRegistry) PingLockTimeout() time.Duration {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "PingLockTimeout")
-	ret0, _ := ret[0].(time.Duration)
+	ret := m.ctrl.Call(m, "GetPingChecks")
+	ret0, _ := ret[0].([]common.PingCheck)
 	return ret0
 }
 
-// PingLockTimeout indicates an expected call of PingLockTimeout.
-func (mr *MockRegistryMockRecorder) PingLockTimeout() *gomock.Call {
+// GetPingChecks indicates an expected call of GetPingChecks.
+func (mr *MockRegistryMockRecorder) GetPingChecks() *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "PingLockTimeout", reflect.TypeOf((*MockRegistry)(nil).PingLockTimeout))
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetPingChecks", reflect.TypeOf((*MockRegistry)(nil).GetPingChecks))
 }
 
 // Refresh mocks base method.

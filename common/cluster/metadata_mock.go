@@ -30,9 +30,9 @@ package cluster
 
 import (
 	reflect "reflect"
-	time "time"
 
 	gomock "github.com/golang/mock/gomock"
+	common "go.temporal.io/server/common"
 )
 
 // MockMetadata is a mock of Metadata interface.
@@ -156,6 +156,20 @@ func (mr *MockMetadataMockRecorder) GetNextFailoverVersion(arg0, arg1 interface{
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetNextFailoverVersion", reflect.TypeOf((*MockMetadata)(nil).GetNextFailoverVersion), arg0, arg1)
 }
 
+// GetPingChecks mocks base method.
+func (m *MockMetadata) GetPingChecks() []common.PingCheck {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetPingChecks")
+	ret0, _ := ret[0].([]common.PingCheck)
+	return ret0
+}
+
+// GetPingChecks indicates an expected call of GetPingChecks.
+func (mr *MockMetadataMockRecorder) GetPingChecks() *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetPingChecks", reflect.TypeOf((*MockMetadata)(nil).GetPingChecks))
+}
+
 // IsGlobalNamespaceEnabled mocks base method.
 func (m *MockMetadata) IsGlobalNamespaceEnabled() bool {
 	m.ctrl.T.Helper()
@@ -196,32 +210,6 @@ func (m *MockMetadata) IsVersionFromSameCluster(version1, version2 int64) bool {
 func (mr *MockMetadataMockRecorder) IsVersionFromSameCluster(version1, version2 interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "IsVersionFromSameCluster", reflect.TypeOf((*MockMetadata)(nil).IsVersionFromSameCluster), version1, version2)
-}
-
-// PingLock mocks base method.
-func (m *MockMetadata) PingLock() {
-	m.ctrl.T.Helper()
-	m.ctrl.Call(m, "PingLock")
-}
-
-// PingLock indicates an expected call of PingLock.
-func (mr *MockMetadataMockRecorder) PingLock() *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "PingLock", reflect.TypeOf((*MockMetadata)(nil).PingLock))
-}
-
-// PingLockTimeout mocks base method.
-func (m *MockMetadata) PingLockTimeout() time.Duration {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "PingLockTimeout")
-	ret0, _ := ret[0].(time.Duration)
-	return ret0
-}
-
-// PingLockTimeout indicates an expected call of PingLockTimeout.
-func (mr *MockMetadataMockRecorder) PingLockTimeout() *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "PingLockTimeout", reflect.TypeOf((*MockMetadata)(nil).PingLockTimeout))
 }
 
 // RegisterMetadataChangeCallback mocks base method.

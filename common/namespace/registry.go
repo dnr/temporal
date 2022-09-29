@@ -243,16 +243,29 @@ func (r *registry) Stop() {
 	<-r.refresher.Done()
 }
 
-func (r *registry) PingLock() {
-	r.cacheLock.Lock()
-	r.cacheLock.Unlock()
-	r.callbackLock.Lock()
-	r.callbackLock.Unlock()
-}
-
-func (r *registry) PingLockTimeout() time.Duration {
-	// we don't do any persistence ops with this lock, so use a short timeout
-	return 10 * time.Second
+func (r *registry) GetPingChecks() []common.PingCheck {
+	return []common.PingCheck{
+		{
+			Name: "namespace registry lock",
+			// we don't do any persistence ops, this shouldn't be blocked
+			Timeout: 10 * time.Second,
+			Ping: func() []common.Pingable {
+				r.cacheLock.Lock()
+				r.cacheLock.Unlock()
+				return nil
+			},
+		},
+		{
+			Name: "namespace registry callback lock",
+			// we don't do any persistence ops, this shouldn't be blocked
+			Timeout: 10 * time.Second,
+			Ping: func() []common.Pingable {
+				r.callbackLock.Lock()
+				r.callbackLock.Unlock()
+				return nil
+			},
+		},
+	}
 }
 
 func (r *registry) getAllNamespace() map[ID]*Namespace {

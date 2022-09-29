@@ -30,9 +30,9 @@ package shard
 
 import (
 	reflect "reflect"
-	time "time"
 
 	gomock "github.com/golang/mock/gomock"
+	common "go.temporal.io/server/common"
 	namespace "go.temporal.io/server/common/namespace"
 )
 
@@ -71,6 +71,20 @@ func (mr *MockControllerMockRecorder) CloseShardByID(shardID interface{}) *gomoc
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CloseShardByID", reflect.TypeOf((*MockController)(nil).CloseShardByID), shardID)
 }
 
+// GetPingChecks mocks base method.
+func (m *MockController) GetPingChecks() []common.PingCheck {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetPingChecks")
+	ret0, _ := ret[0].([]common.PingCheck)
+	return ret0
+}
+
+// GetPingChecks indicates an expected call of GetPingChecks.
+func (mr *MockControllerMockRecorder) GetPingChecks() *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetPingChecks", reflect.TypeOf((*MockController)(nil).GetPingChecks))
+}
+
 // GetShardByID mocks base method.
 func (m *MockController) GetShardByID(shardID int32) (Context, error) {
 	m.ctrl.T.Helper()
@@ -99,32 +113,6 @@ func (m *MockController) GetShardByNamespaceWorkflow(namespaceID namespace.ID, w
 func (mr *MockControllerMockRecorder) GetShardByNamespaceWorkflow(namespaceID, workflowID interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetShardByNamespaceWorkflow", reflect.TypeOf((*MockController)(nil).GetShardByNamespaceWorkflow), namespaceID, workflowID)
-}
-
-// PingLock mocks base method.
-func (m *MockController) PingLock() {
-	m.ctrl.T.Helper()
-	m.ctrl.Call(m, "PingLock")
-}
-
-// PingLock indicates an expected call of PingLock.
-func (mr *MockControllerMockRecorder) PingLock() *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "PingLock", reflect.TypeOf((*MockController)(nil).PingLock))
-}
-
-// PingLockTimeout mocks base method.
-func (m *MockController) PingLockTimeout() time.Duration {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "PingLockTimeout")
-	ret0, _ := ret[0].(time.Duration)
-	return ret0
-}
-
-// PingLockTimeout indicates an expected call of PingLockTimeout.
-func (mr *MockControllerMockRecorder) PingLockTimeout() *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "PingLockTimeout", reflect.TypeOf((*MockController)(nil).PingLockTimeout))
 }
 
 // ShardIDs mocks base method.

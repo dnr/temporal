@@ -249,17 +249,30 @@ func (m *metadataImpl) Stop() {
 	<-m.refresher.Done()
 }
 
-func (m *metadataImpl) PingLock() {
-	m.clusterLock.Lock()
-	m.clusterLock.Unlock()
-	m.clusterCallbackLock.Lock()
-	m.clusterCallbackLock.Unlock()
-}
-
-func (m *metadataImpl) PingLockTimeout() time.Duration {
-	// we don't do any persistence ops under clusterLock, but the listeners get called under
-	// clusterCallbackLock, and they may do some more work (not persistence ops though).
-	return 10 * time.Second
+func (m *metadataImpl) GetPingChecks() []common.PingCheck {
+	return []common.PingCheck{
+		{
+			Name: "cluster metadata lock",
+			// we don't do any persistence ops under clusterLock, use a short timeout
+			Timeout: 10 * time.Second,
+			Ping: func() []common.Pingable {
+				m.clusterLock.Lock()
+				m.clusterLock.Unlock()
+				return nil
+			},
+		},
+		{
+			Name: "cluster metadata callback lock",
+			// listeners get called under clusterCallbackLock, they may do some more work, but
+			// not persistence ops.
+			Timeout: 10 * time.Second,
+			Ping: func() []common.Pingable {
+				m.clusterCallbackLock.Lock()
+				m.clusterCallbackLock.Unlock()
+				return nil
+			},
+		},
+	}
 }
 
 func (m *metadataImpl) IsGlobalNamespaceEnabled() bool {

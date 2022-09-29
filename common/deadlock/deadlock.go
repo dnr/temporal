@@ -124,8 +124,10 @@ func (dd *deadlockDetector) loop(ctx context.Context) error {
 }
 
 func (dd *deadlockDetector) ping(pingables []common.Pingable) {
-	for _, check := range pingable.GetPingChecks() {
-		dd.checkCh <- check
+	for _, pingable := range pingables {
+		for _, check := range pingable.GetPingChecks() {
+			dd.checkCh <- check
+		}
 	}
 }
 
@@ -138,9 +140,9 @@ func (dd *deadlockDetector) pingWorker() {
 		newPingables := check.Ping()
 		t.Stop()
 
-		for _, newPingable := range newPingables {
-			dd.ping(newPingable)
-		}
+		dd.logger.Debug("ping check succeeded", tag.Name(check.Name))
+
+		dd.ping(newPingables)
 	}
 }
 

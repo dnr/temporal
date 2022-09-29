@@ -187,6 +187,21 @@ func (s *ContextImpl) GetExecutionManager() persistence.ExecutionManager {
 	return s.executionManager
 }
 
+func (s *ContextImpl) GetPingChecks() []common.PingCheck {
+	return []common.PingCheck{{
+		Name: "shard context",
+		// rwLock may be held for the duration of a persistence op, which are called with a
+		// timeout of shardIOTimeout. add a few more seconds for reliability.
+		Timeout: shardIOTimeout + 5*time.Second,
+		Ping: func() []common.Pingable {
+			// call rwLock.Lock directly to bypass metrics since this isn't a real request
+			s.rwLock.Lock()
+			s.rwLock.Unlock()
+			return nil
+		},
+	}}
+}
+
 func (s *ContextImpl) GetEngine(
 	ctx context.Context,
 ) (Engine, error) {
