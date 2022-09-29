@@ -90,7 +90,7 @@ func NewDeadlockDetector(params params) *deadlockDetector {
 			AbortProcess:    params.Collection.GetBoolProperty(dynamicconfig.DeadlockAbortProcess, false),
 		},
 		roots:   roots,
-		checkCh: make(chan common.PingCheck, 10),
+		checkCh: make(chan common.PingCheck),
 	}
 }
 
@@ -114,6 +114,8 @@ func (dd *deadlockDetector) Stop() error {
 func (dd *deadlockDetector) loop(ctx context.Context) error {
 	dd.logger.Info("deadlock detector starting")
 	for {
+		// ping blocks until it has passed all checks to a worker goroutine (using an
+		// unbuffered channel).
 		dd.ping(dd.roots)
 		select {
 		case <-time.After(30 * time.Second): // FIXME: dynconfig or something
