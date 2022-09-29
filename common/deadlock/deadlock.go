@@ -39,7 +39,6 @@ import (
 	"go.temporal.io/server/common/log"
 	"go.temporal.io/server/common/log/tag"
 	"go.temporal.io/server/common/namespace"
-	"go.temporal.io/server/common/util"
 	"go.temporal.io/server/internal/goro"
 	"go.temporal.io/server/service/history/shard"
 )
@@ -52,7 +51,7 @@ type (
 		Collection   *dynamicconfig.Collection
 		HealthServer *health.Server
 
-		// pingables:
+		// root pingables:
 		NamespaceRegistry namespace.Registry
 		ClusterMetadata   cluster.Metadata
 		ShardController   shard.Controller `optional:"true"`
@@ -68,18 +67,19 @@ type (
 		logger       log.Logger
 		healthServer *health.Server
 		config       config
-		pingables    map[string]common.Pingable
+		roots        []common.Pingable
 		loopGoro     *goro.Handle
+		checkCh      chan common.PingCheck
 	}
 )
 
 func NewDeadlockDetector(params params) *deadlockDetector {
-	pingables := map[string]common.Pingable{
-		"NamespaceRegistry": params.NamespaceRegistry,
-		"ClusterMetadata":   params.ClusterMetadata,
+	roots := []common.Pingable{
+		params.NamespaceRegistry,
+		params.ClusterMetadata,
 	}
 	if params.ShardController != nil {
-		pingables["ShardController"] = params.ShardController
+		roots = append(roots, params.ShardController)
 	}
 	return &deadlockDetector{
 		logger:       params.Logger,
@@ -89,48 +89,59 @@ func NewDeadlockDetector(params params) *deadlockDetector {
 			FailHealthCheck: params.Collection.GetBoolProperty(dynamicconfig.DeadlockFailHealthCheck, true),
 			AbortProcess:    params.Collection.GetBoolProperty(dynamicconfig.DeadlockAbortProcess, false),
 		},
-		pingables: pingables,
+		roots:   roots,
+		checkCh: make(chan common.PingCheck, 10),
 	}
 }
 
 func (dd *deadlockDetector) Start() error {
 	dd.loopGoro = goro.NewHandle(context.Background())
 	dd.loopGoro.Go(dd.loop)
+	for i := 0; i < 10; i++ { //FIXME: dynconfig or something
+		go dd.pingWorker()
+	}
 	return nil
 }
 
 func (dd *deadlockDetector) Stop() error {
 	dd.loopGoro.Cancel()
+	<-dd.loopGoro.Done()
+	close(dd.checkCh)
+	// don't wait for workers to exit, they may be blocked
 	return nil
 }
 
 func (dd *deadlockDetector) loop(ctx context.Context) error {
 	dd.logger.Info("deadlock detector starting")
 	for {
-		maxTimeout := dd.ping()
+		dd.ping(dd.roots)
 		select {
-		case <-time.After(maxTimeout + 10*time.Second):
+		case <-time.After(30 * time.Second): // FIXME: dynconfig or something
 		case <-ctx.Done():
 			return ctx.Err()
 		}
 	}
 }
 
-func (dd *deadlockDetector) ping() time.Duration {
-	maxTimeout := 10 * time.Second
-	for name, p := range dd.pingables {
-		timeout := p.PingLockTimeout()
-		maxTimeout = util.Max(maxTimeout, timeout)
-		go func(name string, p common.Pingable, timeout time.Duration) {
-			// Using AfterFunc is (hopefully?) cheaper than creating another goroutine to be
-			// the waiter, since we expect to always cancel it. If the go runtime is so messed
-			// up that it can't create a goroutine, that's a bigger problem than we can handle.
-			t := time.AfterFunc(timeout, func() { dd.detected(name) })
-			p.PingLock()
-			t.Stop()
-		}(name, p, timeout)
+func (dd *deadlockDetector) ping(pingables []common.Pingable) {
+	for _, check := range pingable.GetPingChecks() {
+		dd.checkCh <- check
 	}
-	return maxTimeout
+}
+
+func (dd *deadlockDetector) pingWorker() {
+	for check := range dd.checkCh {
+		// Using AfterFunc is (hopefully?) cheaper than creating another goroutine to be
+		// the waiter, since we expect to always cancel it. If the go runtime is so messed
+		// up that it can't create a goroutine, that's a bigger problem than we can handle.
+		t := time.AfterFunc(check.Timeout, func() { dd.detected(check.Name) })
+		newPingables := check.Ping()
+		t.Stop()
+
+		for _, newPingable := range newPingables {
+			dd.ping(newPingable)
+		}
+	}
 }
 
 func (dd *deadlockDetector) detected(name string) {
@@ -141,28 +152,33 @@ func (dd *deadlockDetector) detected(name string) {
 
 	dd.logger.Error("deadlock detected", tag.Name(name))
 
-	if dd.config.DumpGoroutines() {
-		if profile := pprof.Lookup("goroutine"); profile != nil {
-			var b strings.Builder
-			err := profile.WriteTo(&b, 1) // 1 is magic value that means "text format"
-			if err == nil {
-				// write it as a single log line with embedded newlines.
-				// the value starts with "goroutine profile: total ...\n" so it should be clear
-				dd.logger.Info(b.String())
-			} else {
-				dd.logger.Error("failed to get goroutine profile", tag.Error(err))
-			}
-		} else {
-			dd.logger.Error("could not find goroutine profile")
-		}
+	if dd.config.FailHealthCheck() {
+		dd.logger.Info("marking grpc services unhealthy")
+		dd.healthServer.Shutdown()
 	}
 
-	if dd.config.FailHealthCheck() {
-		dd.logger.Info("marking unhealthy")
-		dd.healthServer.Shutdown()
+	if dd.config.DumpGoroutines() {
+		dd.dumpGoroutines()
 	}
 
 	if dd.config.AbortProcess() {
 		dd.logger.Fatal("deadlock detected", tag.Name(name))
 	}
+}
+
+func (dd *deadlockDetector) dumpGoroutines() {
+	profile := pprof.Lookup("goroutine")
+	if profile == nil {
+		dd.logger.Error("could not find goroutine profile")
+		return
+	}
+	var b strings.Builder
+	err := profile.WriteTo(&b, 1) // 1 is magic value that means "text format"
+	if err != nil {
+		dd.logger.Error("failed to get goroutine profile", tag.Error(err))
+		return
+	}
+	// write it as a single log line with embedded newlines.
+	// the value starts with "goroutine profile: total ...\n" so it should be clear
+	dd.logger.Info(b.String())
 }
