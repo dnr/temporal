@@ -28,6 +28,7 @@ import (
 	"context"
 	"runtime/pprof"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"go.uber.org/fx"
@@ -68,8 +69,15 @@ type (
 		healthServer *health.Server
 		config       config
 		roots        []common.Pingable
-		loopGoro     *goro.Handle
-		checkCh      chan common.PingCheck
+		loops        goro.Group
+	}
+
+	loopContext struct {
+		dd      *deadlockDetector
+		root    common.Pingable
+		ch      chan common.PingCheck
+		workers int32
+		ctx     context.Context // cancelled when loop should exit
 	}
 )
 
@@ -89,71 +97,29 @@ func NewDeadlockDetector(params params) *deadlockDetector {
 			FailHealthCheck: params.Collection.GetBoolProperty(dynamicconfig.DeadlockFailHealthCheck, true),
 			AbortProcess:    params.Collection.GetBoolProperty(dynamicconfig.DeadlockAbortProcess, false),
 		},
-		roots:   roots,
-		checkCh: make(chan common.PingCheck),
+		roots: roots,
 	}
 }
 
 func (dd *deadlockDetector) Start() error {
-	dd.loopGoro = goro.NewHandle(context.Background())
-	dd.loopGoro.Go(dd.loop)
-	for i := 0; i < 10; i++ { //FIXME: dynconfig or something
-		go dd.pingWorker()
+	for _, root := range dd.roots {
+		loopCtx := &loopContext{
+			dd:   dd,
+			root: root,
+			ch:   make(chan common.PingCheck),
+		}
+		dd.loops.Go(loopCtx.run)
 	}
 	return nil
 }
 
 func (dd *deadlockDetector) Stop() error {
-	dd.loopGoro.Cancel()
-	<-dd.loopGoro.Done()
-	close(dd.checkCh)
+	dd.loops.Cancel()
 	// don't wait for workers to exit, they may be blocked
 	return nil
 }
 
-func (dd *deadlockDetector) loop(ctx context.Context) error {
-	dd.logger.Info("deadlock detector starting")
-	for {
-		// ping blocks until it has passed all checks to a worker goroutine (using an
-		// unbuffered channel).
-		dd.ping(dd.roots)
-		select {
-		case <-time.After(30 * time.Second): // FIXME: dynconfig or something
-		case <-ctx.Done():
-			return ctx.Err()
-		}
-	}
-}
-
-func (dd *deadlockDetector) ping(pingables []common.Pingable) {
-	for _, pingable := range pingables {
-		for _, check := range pingable.GetPingChecks() {
-			dd.checkCh <- check
-		}
-	}
-}
-
-func (dd *deadlockDetector) pingWorker() {
-	for check := range dd.checkCh {
-		// Using AfterFunc is (hopefully?) cheaper than creating another goroutine to be
-		// the waiter, since we expect to always cancel it. If the go runtime is so messed
-		// up that it can't create a goroutine, that's a bigger problem than we can handle.
-		t := time.AfterFunc(check.Timeout, func() { dd.detected(check.Name) })
-		newPingables := check.Ping()
-		t.Stop()
-
-		dd.logger.Debug("ping check succeeded", tag.Name(check.Name))
-
-		dd.ping(newPingables)
-	}
-}
-
 func (dd *deadlockDetector) detected(name string) {
-	if dd.loopGoro.Err() != nil {
-		// we shut down already, ignore any detected deadlocks
-		return
-	}
-
 	dd.logger.Error("deadlock detected", tag.Name(name))
 
 	if dd.config.FailHealthCheck() {
@@ -185,4 +151,63 @@ func (dd *deadlockDetector) dumpGoroutines() {
 	// write it as a single log line with embedded newlines.
 	// the value starts with "goroutine profile: total ...\n" so it should be clear
 	dd.logger.Info(b.String())
+}
+
+func (lc *loopContext) run(ctx context.Context) error {
+	lc.ctx = ctx
+	// start with one worker
+	go lc.worker()
+	atomic.StoreInt32(&lc.workers, 1)
+
+	for {
+		// ping blocks until it has passed all checks to a worker goroutine (using an
+		// unbuffered channel).
+		lc.ping([]common.Pingable{lc.root})
+
+		select {
+		case <-time.After(30 * time.Second): // FIXME: dynconfig or something
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+}
+
+func (lc *loopContext) ping(pingables []common.Pingable) {
+	for _, pingable := range pingables {
+		for _, check := range pingable.GetPingChecks() {
+			select {
+			case lc.ch <- check:
+			default:
+				// maybe add another worker if blocked
+				w := atomic.LoadInt32(&lc.workers)
+				// FIXME: dynconfig
+				if w < 10 && atomic.CompareAndSwapInt32(&lc.workers, w, w+1) {
+					go lc.worker()
+				}
+				// blocking send
+				lc.ch <- check
+			}
+		}
+	}
+}
+
+func (lc *loopContext) worker() {
+	for check := range lc.ch {
+		// Using AfterFunc is (hopefully?) cheaper than creating another goroutine to be
+		// the waiter, since we expect to always cancel it. If the go runtime is so messed
+		// up that it can't create a goroutine, that's a bigger problem than we can handle.
+		t := time.AfterFunc(check.Timeout, func() {
+			if lc.ctx.Err() != nil {
+				// deadlock detector was stopped
+				return
+			}
+			lc.dd.detected(check.Name)
+		})
+		newPingables := check.Ping()
+		t.Stop()
+
+		lc.dd.logger.Debug("ping check succeeded", tag.Name(check.Name))
+
+		lc.ping(newPingables)
+	}
 }

@@ -28,6 +28,7 @@ import "time"
 
 type (
 	// Pingable is interface to check for liveness of a component, to detect deadlocks.
+	// This call should not block.
 	Pingable interface {
 		GetPingChecks() []PingCheck
 	}
