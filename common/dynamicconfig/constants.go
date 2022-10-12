@@ -98,6 +98,10 @@ const (
 	DeadlockFailHealthCheck = "system.deadlock.FailHealthCheck"
 	// Whether the deadlock detector should abort the process
 	DeadlockAbortProcess = "system.deadlock.AbortProcess"
+	// How often the detector checks each root.
+	DeadlockInterval = "system.deadlock.Interval"
+	// How many extra goroutines can be created per root.
+	DeadlockMaxWorkersPerRoot = "system.deadlock.MaxWorkersPerRoot"
 
 	// keys for size limit
 

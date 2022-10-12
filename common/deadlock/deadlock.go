@@ -48,7 +48,7 @@ type (
 	params struct {
 		fx.In
 
-		Logger       log.Logger
+		Logger       log.SnTaggedLogger
 		Collection   *dynamicconfig.Collection
 		HealthServer *health.Server
 
@@ -59,9 +59,11 @@ type (
 	}
 
 	config struct {
-		DumpGoroutines  dynamicconfig.BoolPropertyFn
-		FailHealthCheck dynamicconfig.BoolPropertyFn
-		AbortProcess    dynamicconfig.BoolPropertyFn
+		DumpGoroutines    dynamicconfig.BoolPropertyFn
+		FailHealthCheck   dynamicconfig.BoolPropertyFn
+		AbortProcess      dynamicconfig.BoolPropertyFn
+		Interval          dynamicconfig.DurationPropertyFn
+		MaxWorkersPerRoot dynamicconfig.IntPropertyFn
 	}
 
 	deadlockDetector struct {
@@ -93,9 +95,11 @@ func NewDeadlockDetector(params params) *deadlockDetector {
 		logger:       params.Logger,
 		healthServer: params.HealthServer,
 		config: config{
-			DumpGoroutines:  params.Collection.GetBoolProperty(dynamicconfig.DeadlockDumpGoroutines, true),
-			FailHealthCheck: params.Collection.GetBoolProperty(dynamicconfig.DeadlockFailHealthCheck, true),
-			AbortProcess:    params.Collection.GetBoolProperty(dynamicconfig.DeadlockAbortProcess, false),
+			DumpGoroutines:    params.Collection.GetBoolProperty(dynamicconfig.DeadlockDumpGoroutines, true),
+			FailHealthCheck:   params.Collection.GetBoolProperty(dynamicconfig.DeadlockFailHealthCheck, true),
+			AbortProcess:      params.Collection.GetBoolProperty(dynamicconfig.DeadlockAbortProcess, false),
+			Interval:          params.Collection.GetDurationProperty(dynamicconfig.DeadlockInterval, 30*time.Second),
+			MaxWorkersPerRoot: params.Collection.GetIntProperty(dynamicconfig.DeadlockMaxWorkersPerRoot, 10),
 		},
 		roots: roots,
 	}
@@ -165,7 +169,7 @@ func (lc *loopContext) run(ctx context.Context) error {
 		lc.ping([]common.Pingable{lc.root})
 
 		select {
-		case <-time.After(30 * time.Second): // FIXME: dynconfig or something
+		case <-time.After(lc.dd.config.Interval()):
 		case <-ctx.Done():
 			return ctx.Err()
 		}
@@ -180,8 +184,7 @@ func (lc *loopContext) ping(pingables []common.Pingable) {
 			default:
 				// maybe add another worker if blocked
 				w := atomic.LoadInt32(&lc.workers)
-				// FIXME: dynconfig
-				if w < 10 && atomic.CompareAndSwapInt32(&lc.workers, w, w+1) {
+				if w < int32(lc.dd.config.MaxWorkersPerRoot()) && atomic.CompareAndSwapInt32(&lc.workers, w, w+1) {
 					go lc.worker()
 				}
 				// blocking send
@@ -193,6 +196,8 @@ func (lc *loopContext) ping(pingables []common.Pingable) {
 
 func (lc *loopContext) worker() {
 	for check := range lc.ch {
+		lc.dd.logger.Debug("starting ping check", tag.Name(check.Name))
+
 		// Using AfterFunc is (hopefully?) cheaper than creating another goroutine to be
 		// the waiter, since we expect to always cancel it. If the go runtime is so messed
 		// up that it can't create a goroutine, that's a bigger problem than we can handle.
