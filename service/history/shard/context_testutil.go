@@ -26,6 +26,7 @@ package shard
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/golang/mock/gomock"
@@ -81,6 +82,7 @@ func NewTestContext(
 	}
 	shard := &ContextImpl{
 		shardID:             shardInfo.GetShardId(),
+		stringRepr:          fmt.Sprintf("Shard(%d)", shardInfo.GetShardId()),
 		executionManager:    resourceTest.ExecutionMgr,
 		metricsClient:       resourceTest.MetricsClient,
 		eventsCache:         eventsCache,
