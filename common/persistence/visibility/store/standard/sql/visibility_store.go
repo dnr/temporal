@@ -347,14 +347,15 @@ func (s *visibilityStore) rowToInfo(
 		row.ExecutionTime = row.StartTime
 	}
 	info := &store.InternalWorkflowExecutionInfo{
-		WorkflowID:    row.WorkflowID,
-		RunID:         row.RunID,
-		TypeName:      row.WorkflowTypeName,
-		StartTime:     row.StartTime,
-		ExecutionTime: row.ExecutionTime,
-		Memo:          persistence.NewDataBlob(row.Memo, row.Encoding),
-		Status:        enumspb.WorkflowExecutionStatus(row.Status),
-		TaskQueue:     row.TaskQueue,
+		WorkflowID:         row.WorkflowID,
+		RunID:              row.RunID,
+		TypeName:           row.WorkflowTypeName,
+		StartTime:          row.StartTime,
+		ExecutionTime:      row.ExecutionTime,
+		Memo:               persistence.NewDataBlob(row.Memo, row.Encoding),
+		Status:             enumspb.WorkflowExecutionStatus(row.Status),
+		TaskQueue:          row.TaskQueue,
+		WorkerVersionStamp: nil, // FIXME: do this later
 	}
 	if row.CloseTime != nil {
 		info.CloseTime = *row.CloseTime

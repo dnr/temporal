@@ -973,6 +973,7 @@ func (s *visibilityStore) parseESDoc(docID string, docSource json.RawMessage, sa
 			record.StateTransitionCount = fieldValueParsed.(int64)
 		case searchattribute.HistorySizeBytes:
 			record.HistorySizeBytes = fieldValueParsed.(int64)
+		// FIXME: do record.WorkerVersionStamp later
 		default:
 			// All custom and predefined search attributes are handled here.
 			if customSearchAttributes == nil {

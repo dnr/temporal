@@ -586,14 +586,15 @@ func readOpenWorkflowExecutionRecord(iter gocql.Iter) (*store.InternalWorkflowEx
 	var taskQueue string
 	if iter.Scan(&workflowID, &runID, &startTime, &executionTime, &typeName, &memo, &encoding, &taskQueue) {
 		record := &store.InternalWorkflowExecutionInfo{
-			WorkflowID:    workflowID,
-			RunID:         runID,
-			TypeName:      typeName,
-			StartTime:     startTime,
-			ExecutionTime: executionTime,
-			Memo:          persistence.NewDataBlob(memo, encoding),
-			TaskQueue:     taskQueue,
-			Status:        enumspb.WORKFLOW_EXECUTION_STATUS_RUNNING,
+			WorkflowID:         workflowID,
+			RunID:              runID,
+			TypeName:           typeName,
+			StartTime:          startTime,
+			ExecutionTime:      executionTime,
+			Memo:               persistence.NewDataBlob(memo, encoding),
+			TaskQueue:          taskQueue,
+			Status:             enumspb.WORKFLOW_EXECUTION_STATUS_RUNNING,
+			WorkerVersionStamp: nil, // FIXME: do this later
 		}
 		return record, true
 	}
@@ -614,16 +615,17 @@ func readClosedWorkflowExecutionRecord(iter gocql.Iter) (*store.InternalWorkflow
 	var taskQueue string
 	if iter.Scan(&workflowID, &runID, &startTime, &executionTime, &closeTime, &typeName, &status, &historyLength, &memo, &encoding, &taskQueue) {
 		record := &store.InternalWorkflowExecutionInfo{
-			WorkflowID:    workflowID,
-			RunID:         runID,
-			TypeName:      typeName,
-			StartTime:     startTime,
-			ExecutionTime: executionTime,
-			CloseTime:     closeTime,
-			Status:        status,
-			HistoryLength: historyLength,
-			Memo:          persistence.NewDataBlob(memo, encoding),
-			TaskQueue:     taskQueue,
+			WorkflowID:         workflowID,
+			RunID:              runID,
+			TypeName:           typeName,
+			StartTime:          startTime,
+			ExecutionTime:      executionTime,
+			CloseTime:          closeTime,
+			Status:             status,
+			HistoryLength:      historyLength,
+			Memo:               persistence.NewDataBlob(memo, encoding),
+			TaskQueue:          taskQueue,
+			WorkerVersionStamp: nil, // FIXME: do this later
 		}
 		return record, true
 	}

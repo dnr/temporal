@@ -79,6 +79,7 @@ type (
 		TaskQueue            string
 		SearchAttributes     *commonpb.SearchAttributes
 		HistorySizeBytes     int64
+		WorkerVersionStamp   *commonpb.WorkerVersionStamp
 	}
 
 	// InternalListWorkflowExecutionsResponse is response from ListWorkflowExecutions

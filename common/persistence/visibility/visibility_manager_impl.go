@@ -331,6 +331,7 @@ func (p *visibilityManagerImpl) convertInternalWorkflowExecutionInfo(internalExe
 		TaskQueue:            internalExecution.TaskQueue,
 		Status:               internalExecution.Status,
 		StateTransitionCount: internalExecution.StateTransitionCount,
+		WorkerVersionStamp:   internalExecution.WorkerVersionStamp,
 	}
 
 	// for close records
