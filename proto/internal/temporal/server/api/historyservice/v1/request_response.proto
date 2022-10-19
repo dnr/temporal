@@ -97,6 +97,8 @@ message GetMutableStateResponse {
     bool is_sticky_task_queue_enabled = 18;
     int64 last_first_event_txn_id = 19;
     string first_execution_run_id = 20;
+    // FIXME comment
+    string worker_version_set_id = 21;
 }
 
 message PollMutableStateRequest {

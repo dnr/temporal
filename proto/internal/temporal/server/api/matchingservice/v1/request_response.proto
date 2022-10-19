@@ -108,6 +108,8 @@ message AddWorkflowTaskRequest {
     string forwarded_source = 6;
     temporal.server.api.enums.v1.TaskSource source = 7;
     temporal.server.api.clock.v1.VectorClock clock = 9;
+    // FIXME comment
+    string worker_version_set_id = 10;
 }
 
 message AddWorkflowTaskResponse {
@@ -125,6 +127,8 @@ message AddActivityTaskRequest {
     string forwarded_source = 7;
     temporal.server.api.enums.v1.TaskSource source = 8;
     temporal.server.api.clock.v1.VectorClock clock = 9;
+    // FIXME comment
+    string worker_version_set_id = 10;
 }
 
 message AddActivityTaskResponse {
@@ -135,6 +139,8 @@ message QueryWorkflowRequest {
     temporal.api.taskqueue.v1.TaskQueue task_queue = 2;
     temporal.api.workflowservice.v1.QueryWorkflowRequest query_request = 3;
     string forwarded_source = 4;
+    // FIXME comment
+    string worker_version_set_id = 5;
 }
 
 message QueryWorkflowResponse {
