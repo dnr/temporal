@@ -1465,6 +1465,20 @@ func (mr *MockMutableStateMockRecorder) GetUserTimerInfoByEventID(arg0 interface
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetUserTimerInfoByEventID", reflect.TypeOf((*MockMutableState)(nil).GetUserTimerInfoByEventID), arg0)
 }
 
+// GetWorkerVersionSetID mocks base method.
+func (m *MockMutableState) GetWorkerVersionSetID() *v14.VersionId {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetWorkerVersionSetID")
+	ret0, _ := ret[0].(*v14.VersionId)
+	return ret0
+}
+
+// GetWorkerVersionSetID indicates an expected call of GetWorkerVersionSetID.
+func (mr *MockMutableStateMockRecorder) GetWorkerVersionSetID() *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetWorkerVersionSetID", reflect.TypeOf((*MockMutableState)(nil).GetWorkerVersionSetID))
+}
+
 // GetWorkflowCloseTime mocks base method.
 func (m *MockMutableState) GetWorkflowCloseTime(ctx context.Context) (*time.Time, error) {
 	m.ctrl.T.Helper()

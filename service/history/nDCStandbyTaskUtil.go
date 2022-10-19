@@ -107,6 +107,7 @@ type (
 
 		taskQueue                          string
 		activityTaskScheduleToStartTimeout time.Duration
+		workerVersionSetID                 string
 	}
 
 	workflowTaskPostActionInfo struct {
@@ -114,6 +115,7 @@ type (
 
 		workflowTaskScheduleToStartTimeout int64
 		taskqueue                          taskqueuepb.TaskQueue
+		workerVersionSetID                 string
 	}
 
 	startChildExecutionPostActionInfo struct {
@@ -151,6 +153,7 @@ func newActivityTaskPostActionInfo(
 	return &activityTaskPostActionInfo{
 		historyResendInfo:                  resendInfo,
 		activityTaskScheduleToStartTimeout: activityScheduleToStartTimeout,
+		workerVersionSetID:                 mutableState.GetWorkerVersionSetID(),
 	}, nil
 }
 
@@ -168,6 +171,7 @@ func newActivityRetryTimePostActionInfo(
 		historyResendInfo:                  resendInfo,
 		taskQueue:                          taskQueue,
 		activityTaskScheduleToStartTimeout: activityScheduleToStartTimeout,
+		workerVersionSetID:                 mutableState.GetWorkerVersionSetID(),
 	}, nil
 }
 
@@ -185,6 +189,7 @@ func newWorkflowTaskPostActionInfo(
 		historyResendInfo:                  resendInfo,
 		workflowTaskScheduleToStartTimeout: workflowTaskScheduleToStartTimeout,
 		taskqueue:                          taskqueue,
+		workerVersionSetID:                 mutableState.GetWorkerVersionSetID(),
 	}, nil
 }
 

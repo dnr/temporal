@@ -182,6 +182,7 @@ type (
 		GetWorkflowType() *commonpb.WorkflowType
 		GetWorkflowStateStatus() (enumsspb.WorkflowExecutionState, enumspb.WorkflowExecutionStatus)
 		GetQueryRegistry() QueryRegistry
+		GetWorkerVersionSetID() string
 		HasTransientWorkflowTask() bool
 		ClearTransientWorkflowTask() error
 		HasBufferedEvents() bool

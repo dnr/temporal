@@ -1317,6 +1317,10 @@ func (e *MutableStateImpl) ClearTransientWorkflowTask() error {
 	return nil
 }
 
+func (e *MutableStateImpl) GetWorkerVersionSetID() *taskqueuepb.VersionId {
+	return e.executionInfo.WorkerVersionSetId
+}
+
 func (e *MutableStateImpl) HasBufferedEvents() bool {
 	return e.hBuilder.HasBufferEvents()
 }

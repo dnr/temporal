@@ -862,6 +862,13 @@ func (wh *WorkflowHandler) PollWorkflowTaskQueue(ctx context.Context, request *w
 	}
 	namespaceID := namespaceEntry.ID()
 
+	// Copy WorkerVersioningId to BinaryChecksum if BinaryChecksum is missing (small
+	// optimization to save space in the poll request).
+	// FIXME: redo this with new api
+	//if len(request.WorkerVersioningId.GetWorkerBuildId()) > 0 && len(request.BinaryChecksum) == 0 {
+	//	request.BinaryChecksum = request.WorkerVersioningId.WorkerBuildId
+	//}
+
 	wh.logger.Debug("Poll workflow task queue.", tag.WorkflowNamespace(namespaceEntry.Name().String()), tag.WorkflowNamespaceID(namespaceID.String()))
 	if err := wh.checkBadBinary(namespaceEntry, request.GetBinaryChecksum()); err != nil {
 		return nil, err
@@ -2857,6 +2864,7 @@ func (wh *WorkflowHandler) GetSystemInfo(ctx context.Context, request *workflows
 			SupportsSchedules:               true,
 			EncodedFailureAttributes:        true,
 			UpsertMemo:                      true,
+			BuildIdBasedVersioning:          true,
 		},
 	}, nil
 }
@@ -4269,6 +4277,7 @@ func (wh *WorkflowHandler) validateTaskQueue(t *taskqueuepb.TaskQueue) error {
 func (wh *WorkflowHandler) validateBuildIdOrderingUpdate(
 	req *workflowservice.UpdateWorkerBuildIdOrderingRequest,
 ) error {
+	/* FIXME
 	errstr := "request to update worker build id ordering requires:"
 	hadErr := false
 	if req.GetNamespace() == "" {
@@ -4290,6 +4299,7 @@ func (wh *WorkflowHandler) validateBuildIdOrderingUpdate(
 	if hadErr {
 		return serviceerror.NewInvalidArgument(errstr)
 	}
+	*/
 	return nil
 }
 

@@ -128,6 +128,9 @@ func GetOrPollMutableState(
 				response.PreviousStartedEventId = event.PreviousStartedEventID
 				response.WorkflowState = event.WorkflowState
 				response.WorkflowStatus = event.WorkflowStatus
+				// Note: Later events could modify response.FIXME:NewName:WorkerVersioningId and we won't
+				// update it here. That's okay since this return value isn't used for task dispatch.
+				// For correctness we could pass it in the event.
 				if !bytes.Equal(request.CurrentBranchToken, event.CurrentBranchToken) {
 					return nil, serviceerrors.NewCurrentBranchChanged(event.CurrentBranchToken, request.CurrentBranchToken)
 				}
@@ -213,5 +216,6 @@ func MutableStateToGetResponse(
 			mutableState.GetExecutionInfo().GetVersionHistories(),
 		),
 		FirstExecutionRunId: executionInfo.FirstExecutionRunId,
+		WorkerVersionSetId:  executionInfo.WorkerVersionSetId,
 	}, nil
 }

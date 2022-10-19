@@ -1149,6 +1149,7 @@ func (s *timerQueueActiveTaskExecutorSuite) TestActivityRetryTimer_Fire() {
 			ScheduledEventId:       activityInfo.ScheduledEventId,
 			ScheduleToStartTimeout: activityInfo.ScheduleToStartTimeout,
 			Clock:                  vclock.NewVectorClock(s.mockClusterMetadata.GetClusterID(), s.mockShard.GetShardID(), timerTask.TaskID),
+			WorkerVersionSetId:     nil,
 		},
 		gomock.Any(),
 	).Return(&matchingservice.AddActivityTaskResponse{}, nil)
