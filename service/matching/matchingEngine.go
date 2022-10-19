@@ -711,7 +711,8 @@ func (e *matchingEngineImpl) UpdateWorkerBuildIdOrdering(
 		return nil, err
 	}
 	err = tqMgr.MutateVersioningData(hCtx.Context, func(data *persistencespb.VersioningData) error {
-		return UpdateVersionsGraph(data, req.GetRequest(), e.config.MaxVersionGraphSize())
+		panic("FIXME")
+		// return UpdateVersionsGraph(data, req.GetRequest(), e.config.MaxVersionGraphSize())
 	})
 	if err != nil {
 		return nil, err
@@ -737,6 +738,7 @@ func (e *matchingEngineImpl) GetWorkerBuildIdOrdering(
 		return nil, err
 	}
 	verDat, err := tqMgr.GetVersioningData(hCtx.Context)
+	verDat = verDat
 	if err != nil {
 		if _, ok := err.(*serviceerror.NotFound); ok {
 			return &matchingservice.GetWorkerBuildIdOrderingResponse{}, nil
@@ -744,7 +746,7 @@ func (e *matchingEngineImpl) GetWorkerBuildIdOrdering(
 		return nil, err
 	}
 	return &matchingservice.GetWorkerBuildIdOrderingResponse{
-		Response: ToBuildIdOrderingResponse(verDat, int(req.GetRequest().GetMaxDepth())),
+		// FIXME: Response: ToBuildIdOrderingResponse(verDat, int(req.GetRequest().GetMaxDepth())),
 	}, nil
 }
 
@@ -794,7 +796,7 @@ func (e *matchingEngineImpl) GetTaskQueueMetadata(
 		if err != nil {
 			return nil, err
 		}
-		if !bytes.Equal(HashVersioningData(vDat), verDatHash) {
+		if !bytes.Equal( /*FIXME HashVersioningData(vDat)*/ nil, verDatHash) {
 			resp.VersioningDataResp = &matchingservice.GetTaskQueueMetadataResponse_VersioningData{
 				VersioningData: vDat,
 			}

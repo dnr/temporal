@@ -740,10 +740,11 @@ func (c *taskQueueManagerImpl) fetchMetadataFromRootPartition(ctx context.Contex
 	}
 
 	curDat, err := c.db.GetVersioningData(ctx)
+	curDat = curDat
 	if err != nil && !errors.Is(err, errVersioningDataNotPresentOnPartition) {
 		return nil, err
 	}
-	curHash := HashVersioningData(curDat)
+	curHash := /*FIXME HashVersioningData(curDat)*/ []byte(nil)
 
 	rootTqName := c.taskQueueID.GetRoot()
 	if len(curHash) == 0 {

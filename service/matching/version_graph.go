@@ -24,18 +24,7 @@
 
 package matching
 
-import (
-	"encoding/binary"
-	"fmt"
-
-	"github.com/dgryski/go-farm"
-
-	"github.com/gogo/protobuf/proto"
-	"go.temporal.io/api/serviceerror"
-	taskqueuepb "go.temporal.io/api/taskqueue/v1"
-	"go.temporal.io/api/workflowservice/v1"
-	"go.temporal.io/server/api/persistence/v1"
-)
+/*
 
 func ToBuildIdOrderingResponse(g *persistence.VersioningData, maxDepth int) *workflowservice.GetWorkerBuildIdOrderingResponse {
 	return depthLimiter(g, maxDepth, true)
@@ -272,3 +261,5 @@ func findInNode(
 	}
 	return nil
 }
+
+*/
