@@ -35,6 +35,7 @@ import (
 	"time"
 
 	"github.com/pborman/uuid"
+	commonpb "go.temporal.io/api/common/v1"
 	enumspb "go.temporal.io/api/enums/v1"
 	"go.temporal.io/api/serviceerror"
 	taskqueuepb "go.temporal.io/api/taskqueue/v1"
@@ -261,6 +262,11 @@ func (e *matchingEngineImpl) AddWorkflowTask(
 		return false, err
 	}
 
+	taskQueue, err = e.redirectToVersionedQueueForAdd(hCtx, taskQueue, addRequest.WorkerVersionStamp, taskQueueKind)
+	if err != nil {
+		return false, err
+	}
+
 	sticky := taskQueueKind == enumspb.TASK_QUEUE_KIND_STICKY
 	// do not load sticky task queue if it is not already loaded, which means it has no poller.
 	tqm, err := e.getTaskQueueManager(hCtx, taskQueue, taskQueueKind, !sticky)
@@ -308,6 +314,11 @@ func (e *matchingEngineImpl) AddActivityTask(
 	taskQueueKind := addRequest.TaskQueue.GetKind()
 
 	taskQueue, err := newTaskQueueID(namespaceID, taskQueueName, enumspb.TASK_QUEUE_TYPE_ACTIVITY)
+	if err != nil {
+		return false, err
+	}
+
+	taskQueue, err = e.redirectToVersionedQueueForAdd(hCtx, taskQueue, addRequest.WorkerVersionStamp, taskQueueKind)
 	if err != nil {
 		return false, err
 	}
@@ -368,7 +379,7 @@ pollLoop:
 			return nil, err
 		}
 		taskQueueKind := request.TaskQueue.GetKind()
-		task, err := e.getTask(pollerCtx, taskQueue, nil, taskQueueKind)
+		task, err := e.getTask(pollerCtx, taskQueue, nil, taskQueueKind, request.WorkerVersionCapabilities)
 		if err != nil {
 			// TODO: Is empty poll the best reply for errPumpClosed?
 			if err == ErrNoTasks || err == errPumpClosed {
@@ -479,7 +490,7 @@ pollLoop:
 		pollerCtx := context.WithValue(hCtx.Context, pollerIDKey, pollerID)
 		pollerCtx = context.WithValue(pollerCtx, identityKey, request.GetIdentity())
 		taskQueueKind := request.TaskQueue.GetKind()
-		task, err := e.getTask(pollerCtx, taskQueue, maxDispatch, taskQueueKind)
+		task, err := e.getTask(pollerCtx, taskQueue, maxDispatch, taskQueueKind, request.WorkerVersionCapabilities)
 		if err != nil {
 			// TODO: Is empty poll the best reply for errPumpClosed?
 			if err == ErrNoTasks || err == errPumpClosed {
@@ -538,7 +549,13 @@ func (e *matchingEngineImpl) QueryWorkflow(
 	namespaceID := namespace.ID(queryRequest.GetNamespaceId())
 	taskQueueName := queryRequest.TaskQueue.GetName()
 	taskQueueKind := queryRequest.TaskQueue.GetKind()
+
 	taskQueue, err := newTaskQueueID(namespaceID, taskQueueName, enumspb.TASK_QUEUE_TYPE_WORKFLOW)
+	if err != nil {
+		return nil, err
+	}
+
+	taskQueue, err = e.redirectToVersionedQueueForAdd(hCtx, taskQueue, queryRequest.WorkerVersionStamp, taskQueueKind)
 	if err != nil {
 		return nil, err
 	}
@@ -844,13 +861,18 @@ func (e *matchingEngineImpl) getAllPartitions(
 	return partitionKeys, nil
 }
 
-// Loads a task from persistence and wraps it in a task context
 func (e *matchingEngineImpl) getTask(
 	ctx context.Context,
 	taskQueue *taskQueueID,
 	maxDispatchPerSecond *float64,
 	taskQueueKind enumspb.TaskQueueKind,
+	workerVersionCapabilities *commonpb.WorkerVersionCapabilities,
 ) (*internalTask, error) {
+	var err error
+	taskQueue, err = e.redirectToVersionedQueueForPoll(ctx, taskQueue, workerVersionCapabilities, taskQueueKind)
+	if err != nil {
+		return nil, err
+	}
 	tlMgr, err := e.getTaskQueueManager(ctx, taskQueue, taskQueueKind, true)
 	if err != nil {
 		return nil, err
@@ -1043,6 +1065,48 @@ func (e *matchingEngineImpl) emitForwardedSourceStats(
 	default:
 		scope.IncCounter(metrics.LocalToLocalMatchPerTaskQueueCounter)
 	}
+}
+
+func (e *matchingEngineImpl) redirectToVersionedQueueForPoll(ctx context.Context, taskQueue *taskQueueID, workerVersionCapabilities *commonpb.WorkerVersionCapabilities, kind enumspb.TaskQueueKind) (*taskQueueID, error) {
+	// sticky queues are unversioned
+	if kind == enumspb.TASK_QUEUE_KIND_STICKY || workerVersionCapabilities == nil {
+		return taskQueue, nil
+	}
+	// TODO optimization: need not create full tqm here since we know it must be versioned
+	unversionedTQM, err := e.getTaskQueueManager(ctx, taskQueue, kind, true)
+	if err != nil {
+		return nil, err
+	}
+	data, err := unversionedTQM.GetVersioningData(ctx)
+	if err != nil {
+		return nil, err
+	}
+	versionSetId, err := lookupVersionSetForPoll(data, workerVersionCapabilities)
+	if err != nil {
+		return nil, err
+	}
+	return newTaskQueueIDWithVersion(taskQueue, versionSetId)
+}
+
+func (e *matchingEngineImpl) redirectToVersionedQueueForAdd(ctx context.Context, taskQueue *taskQueueID, stamp *commonpb.WorkerVersionStamp, kind enumspb.TaskQueueKind) (*taskQueueID, error) {
+	// sticky queues are unversioned
+	if kind == enumspb.TASK_QUEUE_KIND_STICKY || stamp == nil {
+		return taskQueue, nil
+	}
+	// TODO optimization: need not create full tqm here since we know it must be versioned
+	unversionedTQM, err := e.getTaskQueueManager(ctx, taskQueue, kind, true)
+	if err != nil {
+		return nil, err
+	}
+	data, err := unversionedTQM.GetVersioningData(ctx)
+	if err != nil {
+		return nil, err
+	}
+	versionSetId, err := lookupVersionSetForAdd(data, stamp)
+	if err != nil {
+		return nil, err
+	}
+	return newTaskQueueIDWithVersion(taskQueue, versionSetId)
 }
 
 func (m *lockableQueryTaskMap) put(key string, value chan *queryResult) {

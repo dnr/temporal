@@ -492,7 +492,9 @@ func (c *taskQueueManagerImpl) MutateVersioningData(ctx context.Context, mutator
 			}
 			wg.Add(1)
 			go func(i int, tqt enumspb.TaskQueueType) {
-				tq := c.taskQueueID.mkName(i)
+				// the ones we want to invalidate are the "unversioned" queues
+				versionSetId := ""
+				tq := mkName(c.taskQueueID.baseName, i, versionSetId)
 				_, err := c.matchingClient.InvalidateTaskQueueMetadata(ctx,
 					&matchingservice.InvalidateTaskQueueMetadataRequest{
 						NamespaceId:    c.taskQueueID.namespaceID.String(),

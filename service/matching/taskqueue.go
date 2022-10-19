@@ -47,9 +47,10 @@ type (
 	}
 	// QualifiedTaskQueueName refers to the fully qualified task queue name
 	QualifiedTaskQueueName struct {
-		name      string // internal name of the tasks list
-		baseName  string // original name of the task queue as specified by user
-		partition int    // partitionID of task queue
+		name       string // internal name of the tasks list
+		baseName   string // original name of the task queue as specified by user
+		partition  int    // partitionID of task queue
+		versionSet string // version set id
 	}
 )
 
@@ -88,14 +89,19 @@ func newTaskQueueName(name string) (QualifiedTaskQueueName, error) {
 
 // NewTaskQueueNameWithPartition can be used to create root and non-root taskqueue names easily without needing to
 // manually craft the correct string. See newTaskQueueName for more details.
-func NewTaskQueueNameWithPartition(baseName string, partition int) (QualifiedTaskQueueName, error) {
-	tqName, err := newTaskQueueName(baseName)
-	if partition == 0 {
-		return tqName, err
-	}
-	partName := tqName.mkName(partition)
+// Note that name can be a base name or an prefixed name.
+func NewTaskQueueNameWithPartition(name string, partition int) (QualifiedTaskQueueName, error) {
+	tqName, err := newTaskQueueName(name)
 	tqName.partition = partition
-	tqName.name = partName
+	tqName.name = mkName(tqName.baseName, partition, "")
+	return tqName, err
+}
+
+func newTaskQueueNameWithPartitionAndVersion(name string, partition int, versionSetId string) (QualifiedTaskQueueName, error) {
+	tqName, err := newTaskQueueName(name)
+	tqName.partition = partition
+	tqName.versionSet = versionSetId
+	tqName.name = mkName(tqName.baseName, partition, versionSetId)
 	return tqName, err
 }
 
@@ -118,17 +124,23 @@ func (tn *QualifiedTaskQueueName) Parent(degree int) string {
 		return ""
 	}
 	pid := (tn.partition+degree-1)/degree - 1
-	return tn.mkName(pid)
+	return mkName(tn.baseName, pid, tn.versionSet)
 }
 
-func (tn *QualifiedTaskQueueName) mkName(partition int) string {
-	if partition == 0 {
-		return tn.baseName
+func mkName(baseName string, partition int, versionSetId string) string {
+	if len(versionSetId) == 0 {
+		if partition == 0 {
+			return baseName
+		}
+		return fmt.Sprintf("%s%s/%s", taskQueuePartitionPrefix, baseName, partition)
 	}
-	return fmt.Sprintf("%v%v/%v", taskQueuePartitionPrefix, tn.baseName, partition)
+	// versioned always use prefix for simplicity
+	return fmt.Sprintf("%s%s/%s:%s", taskQueuePartitionPrefix, baseName, versionSetId, partition)
 }
 
 func (tn *QualifiedTaskQueueName) init() error {
+	// FIXME: move into constructor
+
 	if !strings.HasPrefix(tn.name, taskQueuePartitionPrefix) {
 		return nil
 	}
@@ -138,7 +150,17 @@ func (tn *QualifiedTaskQueueName) init() error {
 		return fmt.Errorf("invalid partitioned task queue name %v", tn.name)
 	}
 
-	p, err := strconv.Atoi(tn.name[suffixOff+1:])
+	suffix := tn.name[suffixOff+1:]
+	if partitionOff := strings.LastIndex(suffix, ":"); partitionOff >= 0 {
+		// we have a version set id id and partition
+		tn.versionSet = suffix[:partitionOff]
+		if len(tn.versionSet) == 0 {
+			return fmt.Errorf("invalid version set id in name %v", tn.name)
+		}
+		suffix = suffix[partitionOff+1:]
+	}
+
+	p, err := strconv.Atoi(suffix)
 	if err != nil || p <= 0 {
 		return fmt.Errorf("invalid partitioned task queue name %v", tn.name)
 	}
@@ -149,7 +171,7 @@ func (tn *QualifiedTaskQueueName) init() error {
 }
 
 func (tn *QualifiedTaskQueueName) String() string {
-	return tn.mkName(tn.partition)
+	return mkName(tn.baseName, tn.partition, tn.versionSet)
 }
 
 // newTaskQueueID returns taskQueueID which uniquely identfies as task queue
@@ -168,6 +190,18 @@ func newTaskQueueIDWithPartition(
 		QualifiedTaskQueueName: name,
 		namespaceID:            namespaceID,
 		taskType:               taskType,
+	}, nil
+}
+
+func newTaskQueueIDWithVersion(id *taskQueueID, versionSetID string) (*taskQueueID, error) {
+	name, err := newTaskQueueNameWithPartitionAndVersion(id.baseName, id.partition, versionSetID)
+	if err != nil {
+		return nil, err
+	}
+	return &taskQueueID{
+		QualifiedTaskQueueName: name,
+		namespaceID:            id.namespaceID,
+		taskType:               id.taskType,
 	}, nil
 }
 

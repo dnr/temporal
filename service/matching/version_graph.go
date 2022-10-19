@@ -24,6 +24,19 @@
 
 package matching
 
+import (
+	commonpb "go.temporal.io/api/common/v1"
+	persistencespb "go.temporal.io/server/api/persistence/v1"
+)
+
+func lookupVersionSetForPoll(data *persistencespb.VersioningData, caps *commonpb.WorkerVersionCapabilities) (string, error) {
+	return "FIXME", nil
+}
+
+func lookupVersionSetForAdd(data *persistencespb.VersioningData, stamp *commonpb.WorkerVersionStamp) (string, error) {
+	return "FIXME", nil
+}
+
 /*
 
 func ToBuildIdOrderingResponse(g *persistence.VersioningData, maxDepth int) *workflowservice.GetWorkerBuildIdOrderingResponse {
