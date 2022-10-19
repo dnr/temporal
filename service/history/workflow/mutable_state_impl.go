@@ -1317,8 +1317,8 @@ func (e *MutableStateImpl) ClearTransientWorkflowTask() error {
 	return nil
 }
 
-func (e *MutableStateImpl) GetWorkerVersionSetID() *taskqueuepb.VersionId {
-	return e.executionInfo.WorkerVersionSetId
+func (e *MutableStateImpl) GetWorkerVersionStamp() *commonpb.WorkerVersionStamp {
+	return e.executionInfo.WorkerVersionStamp
 }
 
 func (e *MutableStateImpl) HasBufferedEvents() bool {

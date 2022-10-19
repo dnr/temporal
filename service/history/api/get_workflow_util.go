@@ -216,6 +216,6 @@ func MutableStateToGetResponse(
 			mutableState.GetExecutionInfo().GetVersionHistories(),
 		),
 		FirstExecutionRunId: executionInfo.FirstExecutionRunId,
-		WorkerVersionSetId:  executionInfo.WorkerVersionSetId,
+		WorkerVersionStamp:  executionInfo.WorkerVersionStamp,
 	}, nil
 }

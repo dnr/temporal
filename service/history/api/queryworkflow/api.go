@@ -238,7 +238,7 @@ func queryDirectlyThroughMatching(
 			NamespaceId:        namespaceID,
 			QueryRequest:       queryRequest,
 			TaskQueue:          msResp.GetStickyTaskQueue(),
-			WorkerVersionSetId: msResp.WorkerVersionSetId,
+			WorkerVersionStamp: msResp.WorkerVersionStamp,
 		}
 
 		// using a clean new context in case customer provide a context which has
@@ -284,7 +284,7 @@ func queryDirectlyThroughMatching(
 		NamespaceId:        namespaceID,
 		QueryRequest:       queryRequest,
 		TaskQueue:          msResp.TaskQueue,
-		WorkerVersionSetId: msResp.WorkerVersionSetId,
+		WorkerVersionStamp: msResp.WorkerVersionStamp,
 	}
 
 	nonStickyStopWatch := scope.StartTimer(metrics.DirectQueryDispatchNonStickyLatency)

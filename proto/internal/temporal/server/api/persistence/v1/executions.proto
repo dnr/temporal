@@ -140,7 +140,10 @@ message WorkflowExecutionInfo {
     int64 close_visibility_task_id = 65;
     google.protobuf.Timestamp close_time = 66 [(gogoproto.stdtime) = true];
     // FIXME comment
-    string worker_version_set_id = 67;
+    temporal.api.common.v1.WorkerVersionStamp worker_version_stamp = 67;
+
+    // FIXME do we need both???
+    // string worker_version_set_id = 68;
 }
 
 message ExecutionStats {

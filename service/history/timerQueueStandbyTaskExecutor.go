@@ -604,7 +604,7 @@ func (t *timerQueueStandbyTaskExecutor) pushActivity(
 		ScheduledEventId:       activityTask.EventID,
 		ScheduleToStartTimeout: activityScheduleToStartTimeout,
 		Clock:                  vclock.NewVectorClock(t.shard.GetClusterMetadata().GetClusterID(), t.shard.GetShardID(), activityTask.TaskID),
-		WorkerVersionSetId:     pushActivityInfo.workerVersionSetID,
+		WorkerVersionStamp:     pushActivityInfo.workerVersionStamp,
 	})
 	return err
 }
