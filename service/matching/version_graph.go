@@ -52,8 +52,13 @@ func lookupVersionSetForPoll(data *persistencespb.VersioningData, caps *commonpb
 }
 
 func lookupVersionSetForAdd(data *persistencespb.VersioningData, stamp *commonpb.WorkerVersionStamp) (string, error) {
+	if stamp == nil {
+		// pick default
+		// FIXME: add error checking here
+		// FIXME: first or last?
+		return data.Sets[0].Versions[0]
+	}
 	// for add, any version in the compatible set maps to the set
-	// FIXME: handle default?
 	set := lookupVersionSet(data, stamp.BuildId)
 	if set == nil {
 		return "", errBuildNotFound
@@ -62,6 +67,7 @@ func lookupVersionSetForAdd(data *persistencespb.VersioningData, stamp *commonpb
 }
 
 func lookupVersionSet(data *persistencespb.VersioningData, version string) *taskqueuepb.CompatibleVersionSet {
+	// FIXME: do this with an index
 	for _, set := range data.Sets {
 		if slices.Contains(set.Versions, version) {
 			return set

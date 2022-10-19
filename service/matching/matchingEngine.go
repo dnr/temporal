@@ -1069,7 +1069,7 @@ func (e *matchingEngineImpl) emitForwardedSourceStats(
 
 func (e *matchingEngineImpl) redirectToVersionedQueueForPoll(ctx context.Context, taskQueue *taskQueueID, workerVersionCapabilities *commonpb.WorkerVersionCapabilities, kind enumspb.TaskQueueKind) (*taskQueueID, error) {
 	// sticky queues are unversioned
-	if kind == enumspb.TASK_QUEUE_KIND_STICKY || workerVersionCapabilities == nil {
+	if kind == enumspb.TASK_QUEUE_KIND_STICKY {
 		return taskQueue, nil
 	}
 	// TODO optimization: need not create full tqm here since we know it must be versioned
@@ -1080,6 +1080,16 @@ func (e *matchingEngineImpl) redirectToVersionedQueueForPoll(ctx context.Context
 	data, err := unversionedTQM.GetVersioningData(ctx)
 	if err != nil {
 		return nil, err
+	}
+	if data == nil {
+		if workerVersionCapabilities == nil {
+			// all good, queue is not versioned and neither is worker
+			return taskQueue
+		}
+		return errNoVersioningDataFIXME
+	}
+	if workerVersionCapabilities == nil {
+		return errVersionedQueueButNotWorker
 	}
 	versionSet, err := lookupVersionSetForPoll(data, workerVersionCapabilities)
 	if err != nil {
@@ -1090,7 +1100,7 @@ func (e *matchingEngineImpl) redirectToVersionedQueueForPoll(ctx context.Context
 
 func (e *matchingEngineImpl) redirectToVersionedQueueForAdd(ctx context.Context, taskQueue *taskQueueID, stamp *commonpb.WorkerVersionStamp, kind enumspb.TaskQueueKind) (*taskQueueID, error) {
 	// sticky queues are unversioned
-	if kind == enumspb.TASK_QUEUE_KIND_STICKY || stamp == nil {
+	if kind == enumspb.TASK_QUEUE_KIND_STICKY {
 		return taskQueue, nil
 	}
 	// TODO optimization: need not create full tqm here since we know it must be versioned
@@ -1101,6 +1111,13 @@ func (e *matchingEngineImpl) redirectToVersionedQueueForAdd(ctx context.Context,
 	data, err := unversionedTQM.GetVersioningData(ctx)
 	if err != nil {
 		return nil, err
+	}
+	if data == nil {
+		if stamp == nil {
+			// all good, queue is not versioned and neither is workflow
+			return taskQueue, nil
+		}
+		return errNoVersioningDataFIXME
 	}
 	versionSet, err := lookupVersionSetForAdd(data, stamp)
 	if err != nil {
