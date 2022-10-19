@@ -855,7 +855,7 @@ func (e *matchingEngineImpl) getAllPartitions(
 	}
 
 	for i := 1; i < n; i++ {
-		partitionKeys = append(partitionKeys, fmt.Sprintf("%v%v/%v", taskQueuePartitionPrefix, rootPartition, i))
+		partitionKeys = append(partitionKeys, taskQueueID.WithPartition(i).FullName())
 	}
 
 	return partitionKeys, nil
@@ -1081,11 +1081,11 @@ func (e *matchingEngineImpl) redirectToVersionedQueueForPoll(ctx context.Context
 	if err != nil {
 		return nil, err
 	}
-	versionSetId, err := lookupVersionSetForPoll(data, workerVersionCapabilities)
+	versionSet, err := lookupVersionSetForPoll(data, workerVersionCapabilities)
 	if err != nil {
 		return nil, err
 	}
-	return newTaskQueueIDWithVersion(taskQueue, versionSetId)
+	return newTaskQueueIDWithVersionSet(taskQueue, versionSet), nil
 }
 
 func (e *matchingEngineImpl) redirectToVersionedQueueForAdd(ctx context.Context, taskQueue *taskQueueID, stamp *commonpb.WorkerVersionStamp, kind enumspb.TaskQueueKind) (*taskQueueID, error) {
@@ -1102,11 +1102,11 @@ func (e *matchingEngineImpl) redirectToVersionedQueueForAdd(ctx context.Context,
 	if err != nil {
 		return nil, err
 	}
-	versionSetId, err := lookupVersionSetForAdd(data, stamp)
+	versionSet, err := lookupVersionSetForAdd(data, stamp)
 	if err != nil {
 		return nil, err
 	}
-	return newTaskQueueIDWithVersion(taskQueue, versionSetId)
+	return newTaskQueueIDWithVersionSet(taskQueue, versionSet), nil
 }
 
 func (m *lockableQueryTaskMap) put(key string, value chan *queryResult) {

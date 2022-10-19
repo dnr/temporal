@@ -341,6 +341,6 @@ func (t *ForwarderTestSuite) TestMaxOutstandingConfigUpdate() {
 }
 
 func (t *ForwarderTestSuite) usingTaskqueuePartition(taskType enumspb.TaskQueueType) {
-	t.taskQueue = newTestTaskQueueID("fwdr", taskQueuePartitionPrefix+"tl0/1", taskType)
+	t.taskQueue = newTestTaskQueueID("fwdr", mkName("tl0", 1, ""), taskType)
 	t.fwdr.taskQueueID = t.taskQueue
 }

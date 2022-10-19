@@ -51,7 +51,7 @@ func TestValidTaskQueueNames(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.input, func(t *testing.T) {
-			tn, err := newTaskQueueName(tc.input)
+			tn, err := ParseTaskQueueName(tc.input)
 			require.NoError(t, err)
 			require.Equal(t, tc.partition, tn.partition)
 			require.Equal(t, tc.partition == 0, tn.IsRoot())
@@ -95,7 +95,7 @@ func TestTaskQueueParentName(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name+"#"+strconv.Itoa(tc.degree), func(t *testing.T) {
-			tn, err := newTaskQueueName(tc.name)
+			tn, err := ParseTaskQueueName(tc.name)
 			require.NoError(t, err)
 			require.Equal(t, tc.output, tn.Parent(tc.degree))
 		})
@@ -114,7 +114,7 @@ func TestInvalidTaskqueueNames(t *testing.T) {
 	}
 	for _, name := range inputs {
 		t.Run(name, func(t *testing.T) {
-			_, err := newTaskQueueName(name)
+			_, err := ParseTaskQueueName(name)
 			require.Error(t, err)
 		})
 	}

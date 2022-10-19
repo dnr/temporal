@@ -70,7 +70,7 @@ func (t *MatcherTestSuite) SetupTest() {
 	t.controller = gomock.NewController(t.T())
 	t.client = matchingservicemock.NewMockMatchingServiceClient(t.controller)
 	cfg := NewConfig(dynamicconfig.NewNoopCollection())
-	t.taskQueue = newTestTaskQueueID(namespace.ID(uuid.New()), taskQueuePartitionPrefix+"tl0/1", enumspb.TASK_QUEUE_TYPE_WORKFLOW)
+	t.taskQueue = newTestTaskQueueID(namespace.ID(uuid.New()), mkName("tl0", 1, ""), enumspb.TASK_QUEUE_TYPE_WORKFLOW)
 	tlCfg := newTaskQueueConfig(t.taskQueue, cfg, "test-namespace")
 	tlCfg.forwarderConfig = forwarderConfig{
 		ForwarderMaxOutstandingPolls: func() int { return 1 },
