@@ -139,6 +139,8 @@ message WorkflowExecutionInfo {
     // Used to check if visibility close task is processed before deleting the workflow execution.
     int64 close_visibility_task_id = 65;
     google.protobuf.Timestamp close_time = 66 [(gogoproto.stdtime) = true];
+    // FIXME comment
+    string worker_version_set_id = 67;
 }
 
 message ExecutionStats {
