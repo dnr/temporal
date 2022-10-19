@@ -25,16 +25,49 @@
 package matching
 
 import (
+	"errors"
+
 	commonpb "go.temporal.io/api/common/v1"
+	taskqueuepb "go.temporal.io/api/taskqueue/v1"
 	persistencespb "go.temporal.io/server/api/persistence/v1"
+	"golang.org/x/exp/slices"
+)
+
+var (
+	errBuildNotFound   = errors.New("build id not found")
+	errNewerBuildFound = errors.New("newer compatible build exists")
 )
 
 func lookupVersionSetForPoll(data *persistencespb.VersioningData, caps *commonpb.WorkerVersionCapabilities) (string, error) {
-	return "FIXME", nil
+	// for poll, only the latest version in the compatible set can get tasks
+	// find the version set that this worker is in
+	set := lookupVersionSet(data, caps.BuildId)
+	if set == nil {
+		return "", errBuildNotFound
+	}
+	if caps.BuildId != set.Versions[0] {
+		return "", errNewerBuildFound
+	}
+	return set.Id, nil
 }
 
 func lookupVersionSetForAdd(data *persistencespb.VersioningData, stamp *commonpb.WorkerVersionStamp) (string, error) {
-	return "FIXME", nil
+	// for add, any version in the compatible set maps to the set
+	// FIXME: handle default?
+	set := lookupVersionSet(data, stamp.BuildId)
+	if set == nil {
+		return "", errBuildNotFound
+	}
+	return set.Id, nil
+}
+
+func lookupVersionSet(data *persistencespb.VersioningData, version string) *taskqueuepb.CompatibleVersionSet {
+	for _, set := range data.Sets {
+		if slices.Contains(set.Versions, version) {
+			return set
+		}
+	}
+	return nil
 }
 
 /*
