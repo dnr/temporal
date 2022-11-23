@@ -35,7 +35,7 @@ import (
 // GetMetricsServiceIdx returns service id corresponding to serviceName
 func GetMetricsServiceIdx(serviceName string, logger log.Logger) ServiceIdx {
 	switch serviceName {
-	case primitives.FrontendService:
+	case primitives.FrontendService, primitives.EmbeddedFrontendService:
 		return Frontend
 	case primitives.HistoryService:
 		return History
@@ -53,12 +53,15 @@ func GetMetricsServiceIdx(serviceName string, logger log.Logger) ServiceIdx {
 	}
 }
 
-// GetMetricsServiceIdx returns service id corresponding to serviceName
+// MetricsServiceIdxToServiceName returns service name corresponding to service index.
+// This should only be used by tests!
 func MetricsServiceIdxToServiceName(serviceIdx ServiceIdx) (string, error) {
 	switch serviceIdx {
 	case Server:
 		return primitives.ServerService, nil
 	case Frontend:
+		// return FrontendService even for EmbeddedFrontendService. it's just for tests so it
+		// doesn't matter.
 		return primitives.FrontendService, nil
 	case History:
 		return primitives.HistoryService, nil

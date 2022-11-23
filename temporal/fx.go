@@ -27,6 +27,7 @@ package temporal
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -80,7 +81,7 @@ type (
 	ServicesGroupOut struct {
 		fx.Out
 
-		Services *ServicesMetadata `group:"services"`
+		Service *ServicesMetadata `group:"services"`
 	}
 
 	ServicesGroupIn struct {
@@ -131,6 +132,13 @@ type (
 	}
 )
 
+var (
+	// initial @ means abstract unix socket
+	// TODO: this is a linux-only feature, do something different on other OSes
+	frontendSocketPath   = resource.EmbeddedFrontendSocketPath(fmt.Sprintf("@temporal-frontend-%d-%d", os.Getpid(), time.Now().UnixMilli()))
+	noFrontendSocketPath = resource.EmbeddedFrontendSocketPath("")
+)
+
 func NewServerFx(opts ...ServerOption) *ServerFx {
 	app := fx.New(
 		pprof.Module,
@@ -143,6 +151,7 @@ func NewServerFx(opts ...ServerOption) *ServerFx {
 		fx.Provide(HistoryServiceProvider),
 		fx.Provide(MatchingServiceProvider),
 		fx.Provide(FrontendServiceProvider),
+		fx.Provide(EmbeddedFrontendServiceProvider),
 		fx.Provide(WorkerServiceProvider),
 
 		fx.Provide(ApplyClusterMetadataConfigProvider),
@@ -336,7 +345,7 @@ func HistoryServiceProvider(
 	if _, ok := params.ServiceNames[serviceName]; !ok {
 		params.Logger.Info("Service is not requested, skipping initialization.", tag.Service(serviceName))
 		return ServicesGroupOut{
-			Services: &ServicesMetadata{
+			Service: &ServicesMetadata{
 				App:           fx.New(fx.NopLogger),
 				ServiceName:   serviceName,
 				ServiceStopFn: func() {},
@@ -353,6 +362,7 @@ func HistoryServiceProvider(
 			params.PersistenceConfig,
 			params.ClusterMetadata,
 			params.Cfg,
+			fx.Annotated{Target: noFrontendSocketPath},
 		),
 		fx.Provide(func() persistenceClient.AbstractDataStoreFactory { return params.DataStoreFactory }),
 		fx.Provide(func() client.FactoryProvider { return params.ClientFactoryProvider }),
@@ -383,7 +393,7 @@ func HistoryServiceProvider(
 
 	stopFn := func() { StopService(params.Logger, app, serviceName, stopChan) }
 	return ServicesGroupOut{
-		Services: &ServicesMetadata{
+		Service: &ServicesMetadata{
 			App:           app,
 			ServiceName:   serviceName,
 			ServiceStopFn: stopFn,
@@ -399,7 +409,7 @@ func MatchingServiceProvider(
 	if _, ok := params.ServiceNames[serviceName]; !ok {
 		params.Logger.Info("Service is not requested, skipping initialization.", tag.Service(serviceName))
 		return ServicesGroupOut{
-			Services: &ServicesMetadata{
+			Service: &ServicesMetadata{
 				App:           fx.New(fx.NopLogger),
 				ServiceName:   serviceName,
 				ServiceStopFn: func() {},
@@ -415,6 +425,7 @@ func MatchingServiceProvider(
 			params.PersistenceConfig,
 			params.ClusterMetadata,
 			params.Cfg,
+			fx.Annotated{Target: noFrontendSocketPath},
 		),
 		fx.Provide(func() persistenceClient.AbstractDataStoreFactory { return params.DataStoreFactory }),
 		fx.Provide(func() client.FactoryProvider { return params.ClientFactoryProvider }),
@@ -442,7 +453,7 @@ func MatchingServiceProvider(
 
 	stopFn := func() { StopService(params.Logger, app, serviceName, stopChan) }
 	return ServicesGroupOut{
-		Services: &ServicesMetadata{
+		Service: &ServicesMetadata{
 			App:           app,
 			ServiceName:   serviceName,
 			ServiceStopFn: stopFn,
@@ -458,7 +469,7 @@ func FrontendServiceProvider(
 	if _, ok := params.ServiceNames[serviceName]; !ok {
 		params.Logger.Info("Service is not requested, skipping initialization.", tag.Service(serviceName))
 		return ServicesGroupOut{
-			Services: &ServicesMetadata{
+			Service: &ServicesMetadata{
 				App:           fx.New(fx.NopLogger),
 				ServiceName:   serviceName,
 				ServiceStopFn: func() {},
@@ -474,6 +485,7 @@ func FrontendServiceProvider(
 			params.PersistenceConfig,
 			params.ClusterMetadata,
 			params.Cfg,
+			fx.Annotated{Target: noFrontendSocketPath},
 		),
 		fx.Provide(func() persistenceClient.AbstractDataStoreFactory { return params.DataStoreFactory }),
 		fx.Provide(func() client.FactoryProvider { return params.ClientFactoryProvider }),
@@ -502,7 +514,7 @@ func FrontendServiceProvider(
 
 	stopFn := func() { StopService(params.Logger, app, serviceName, stopChan) }
 	return ServicesGroupOut{
-		Services: &ServicesMetadata{
+		Service: &ServicesMetadata{
 			App:           app,
 			ServiceName:   serviceName,
 			ServiceStopFn: stopFn,
@@ -510,15 +522,16 @@ func FrontendServiceProvider(
 	}, app.Err()
 }
 
-func WorkerServiceProvider(
+func EmbeddedFrontendServiceProvider(
 	params ServiceProviderParamsCommon,
 ) (ServicesGroupOut, error) {
-	serviceName := primitives.WorkerService
+	serviceName := primitives.EmbeddedFrontendService
 
-	if _, ok := params.ServiceNames[serviceName]; !ok {
+	// Embedded frontend is started when worker is started
+	if _, ok := params.ServiceNames[primitives.WorkerService]; !ok {
 		params.Logger.Info("Service is not requested, skipping initialization.", tag.Service(serviceName))
 		return ServicesGroupOut{
-			Services: &ServicesMetadata{
+			Service: &ServicesMetadata{
 				App:           fx.New(fx.NopLogger),
 				ServiceName:   serviceName,
 				ServiceStopFn: func() {},
@@ -534,6 +547,68 @@ func WorkerServiceProvider(
 			params.PersistenceConfig,
 			params.ClusterMetadata,
 			params.Cfg,
+			fx.Annotated{Target: frontendSocketPath}, // <-- different from frontend
+		),
+		fx.Provide(func() persistenceClient.AbstractDataStoreFactory { return params.DataStoreFactory }),
+		fx.Provide(func() client.FactoryProvider { return params.ClientFactoryProvider }),
+		fx.Provide(func() authorization.JWTAudienceMapper { return params.AudienceGetter }),
+		fx.Provide(func() resolver.ServiceResolver { return params.PersistenceServiceResolver }),
+		fx.Provide(func() searchattribute.Mapper { return params.SearchAttributesMapper }),
+		fx.Provide(func() []grpc.UnaryServerInterceptor { return params.CustomInterceptors }),
+		fx.Provide(func() authorization.Authorizer { return nil }),  // <-- different from frontend
+		fx.Provide(func() authorization.ClaimMapper { return nil }), // <-- different from frontend
+		fx.Provide(func() encryption.TLSConfigProvider { return params.TlsConfigProvider }),
+		fx.Provide(func() dynamicconfig.Client { return params.DynamicConfigClient }),
+		fx.Provide(func() resource.ServiceName { return resource.ServiceName(serviceName) }),
+		fx.Provide(func() log.Logger { return params.Logger }),
+		fx.Provide(func() metrics.MetricsHandler {
+			return params.MetricsHandler.WithTags(metrics.ServiceNameTag(serviceName))
+		}),
+		fx.Provide(func() resource.NamespaceLogger { return params.NamespaceLogger }),
+		fx.Provide(func() esclient.Client { return params.EsClient }),
+		fx.Provide(params.PersistenceFactoryProvider),
+		fx.Supply(params.SpanExporters),
+		ServiceTracingModule,
+		resource.DefaultOptions,
+		frontend.Module,
+		FxLogAdapter,
+	)
+
+	stopFn := func() { StopService(params.Logger, app, serviceName, stopChan) }
+	return ServicesGroupOut{
+		Service: &ServicesMetadata{
+			App:           app,
+			ServiceName:   serviceName,
+			ServiceStopFn: stopFn,
+		},
+	}, app.Err()
+}
+
+func WorkerServiceProvider(
+	params ServiceProviderParamsCommon,
+) (ServicesGroupOut, error) {
+	serviceName := primitives.WorkerService
+
+	if _, ok := params.ServiceNames[serviceName]; !ok {
+		params.Logger.Info("Service is not requested, skipping initialization.", tag.Service(serviceName))
+		return ServicesGroupOut{
+			Service: &ServicesMetadata{
+				App:           fx.New(fx.NopLogger),
+				ServiceName:   serviceName,
+				ServiceStopFn: func() {},
+			},
+		}, nil
+	}
+
+	stopChan := make(chan struct{})
+	app := fx.New(
+		fx.Supply(
+			stopChan,
+			params.EsConfig,
+			params.PersistenceConfig,
+			params.ClusterMetadata,
+			params.Cfg,
+			fx.Annotated{Target: frontendSocketPath},
 		),
 		fx.Provide(func() persistenceClient.AbstractDataStoreFactory { return params.DataStoreFactory }),
 		fx.Provide(func() client.FactoryProvider { return params.ClientFactoryProvider }),
@@ -561,7 +636,7 @@ func WorkerServiceProvider(
 
 	stopFn := func() { StopService(params.Logger, app, serviceName, stopChan) }
 	return ServicesGroupOut{
-		Services: &ServicesMetadata{
+		Service: &ServicesMetadata{
 			App:           app,
 			ServiceName:   serviceName,
 			ServiceStopFn: stopFn,

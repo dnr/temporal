@@ -26,6 +26,7 @@ package resource
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
 	"net"
 	"os"
@@ -76,6 +77,8 @@ type (
 	HostName             string
 	InstanceID           string
 	ServiceNames         map[string]struct{}
+
+	EmbeddedFrontendSocketPath string
 
 	MatchingRawClient matchingservice.MatchingServiceClient
 	MatchingClient    matchingservice.MatchingServiceClient
@@ -395,15 +398,26 @@ func SdkClientFactoryProvider(
 	metricsHandler metrics.MetricsHandler,
 	logger log.SnTaggedLogger,
 	resolver membership.GRPCResolver,
+	frontendSocketPath EmbeddedFrontendSocketPath,
 ) (sdk.ClientFactory, error) {
-	tlsFrontendConfig, err := tlsConfigProvider.GetFrontendClientConfig()
-	if err != nil {
-		return nil, fmt.Errorf("unable to load frontend TLS configuration: %w", err)
-	}
-
 	hostPort := cfg.PublicClient.HostPort
 	if hostPort == "" {
 		hostPort = resolver.MakeURL(primitives.FrontendService)
+	} else if hostPort == "embedded" {
+		if frontendSocketPath == "" {
+			panic("frontendSocketPath must be set") // FIXME
+		}
+		hostPort = "unix-abstract:///" + string(frontendSocketPath[1:])
+		tlsConfigProvider = nil
+	}
+
+	var tlsFrontendConfig *tls.Config
+	var err error
+	if tlsConfigProvider != nil {
+		tlsFrontendConfig, err = tlsConfigProvider.GetFrontendClientConfig()
+		if err != nil {
+			return nil, fmt.Errorf("unable to load frontend TLS configuration: %w", err)
+		}
 	}
 
 	return sdk.NewClientFactory(
@@ -429,12 +443,19 @@ func RPCFactoryProvider(
 	tlsConfigProvider encryption.TLSConfigProvider,
 	dc *dynamicconfig.Collection,
 	resolver membership.GRPCResolver,
+	frontendSocketPath EmbeddedFrontendSocketPath,
 	traceInterceptor telemetry.ClientTraceInterceptor,
 ) common.RPCFactory {
 	svcCfg := cfg.Services[string(svcName)]
 	hostPort := cfg.PublicClient.HostPort
 	if hostPort == "" {
 		hostPort = resolver.MakeURL(primitives.FrontendService)
+	} else if hostPort == "embedded" {
+		if frontendSocketPath == "" {
+			panic("frontendSocketPath must be set") // FIXME
+		}
+		hostPort = "unix-abstract:///" + string(frontendSocketPath[1:])
+		tlsConfigProvider = nil
 	}
 	return rpc.NewFactory(
 		&svcCfg.RPC,
@@ -443,6 +464,7 @@ func RPCFactoryProvider(
 		tlsConfigProvider,
 		dc,
 		hostPort,
+		string(frontendSocketPath),
 		[]grpc.UnaryClientInterceptor{
 			grpc.UnaryClientInterceptor(traceInterceptor),
 		},

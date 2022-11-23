@@ -26,11 +26,12 @@ package primitives
 
 // These const represent role strings
 const (
-	AllServices     = "all"
-	FrontendService = "frontend"
-	HistoryService  = "history"
-	MatchingService = "matching"
-	WorkerService   = "worker"
-	ServerService   = "server"
-	UnitTestService = "unittest"
+	AllServices             = "all"
+	FrontendService         = "frontend"
+	EmbeddedFrontendService = "embedded-frontend"
+	HistoryService          = "history"
+	MatchingService         = "matching"
+	WorkerService           = "worker"
+	ServerService           = "server"
+	UnitTestService         = "unittest"
 )

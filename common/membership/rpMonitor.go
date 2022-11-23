@@ -160,6 +160,8 @@ func ServiceNameToServiceTypeEnum(name string) (persistence.ServiceType, error) 
 		return persistence.All, nil
 	case primitives.FrontendService:
 		return persistence.Frontend, nil
+	case primitives.EmbeddedFrontendService:
+		return persistence.EmbeddedFrontend, nil
 	case primitives.HistoryService:
 		return persistence.History, nil
 	case primitives.MatchingService:
