@@ -113,7 +113,7 @@ namespaceDefaults:
       URI: "file:///tmp/temporal_vis_archival/development"
 
 publicClient:
-  hostPort: "localhost:7233"
+  hostPort: "embedded"
 
 dynamicConfigClient:
   filepath: "config/dynamicconfig/development-sql.yaml"
