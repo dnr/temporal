@@ -135,8 +135,7 @@ type (
 var (
 	// initial @ means abstract unix socket
 	// TODO: this is a linux-only feature, do something different on other OSes
-	frontendSocketPath   = resource.EmbeddedFrontendSocketPath(fmt.Sprintf("@temporal-frontend-%d-%d", os.Getpid(), time.Now().UnixMilli()))
-	noFrontendSocketPath = resource.EmbeddedFrontendSocketPath("")
+	frontendSocketPath = fmt.Sprintf("@temporal-frontend-%d-%d", os.Getpid(), time.Now().UnixMilli())
 )
 
 func NewServerFx(opts ...ServerOption) *ServerFx {
@@ -362,7 +361,8 @@ func HistoryServiceProvider(
 			params.PersistenceConfig,
 			params.ClusterMetadata,
 			params.Cfg,
-			fx.Annotated{Target: noFrontendSocketPath},
+			fx.Annotated{Target: resource.ListenSocketPath("")},
+			fx.Annotated{Target: resource.EmbeddedFrontendSocketPath("")},
 		),
 		fx.Provide(func() persistenceClient.AbstractDataStoreFactory { return params.DataStoreFactory }),
 		fx.Provide(func() client.FactoryProvider { return params.ClientFactoryProvider }),
@@ -425,7 +425,8 @@ func MatchingServiceProvider(
 			params.PersistenceConfig,
 			params.ClusterMetadata,
 			params.Cfg,
-			fx.Annotated{Target: noFrontendSocketPath},
+			fx.Annotated{Target: resource.ListenSocketPath("")},
+			fx.Annotated{Target: resource.EmbeddedFrontendSocketPath("")},
 		),
 		fx.Provide(func() persistenceClient.AbstractDataStoreFactory { return params.DataStoreFactory }),
 		fx.Provide(func() client.FactoryProvider { return params.ClientFactoryProvider }),
@@ -485,7 +486,8 @@ func FrontendServiceProvider(
 			params.PersistenceConfig,
 			params.ClusterMetadata,
 			params.Cfg,
-			fx.Annotated{Target: noFrontendSocketPath},
+			fx.Annotated{Target: resource.ListenSocketPath("")},
+			fx.Annotated{Target: resource.EmbeddedFrontendSocketPath("")},
 		),
 		fx.Provide(func() persistenceClient.AbstractDataStoreFactory { return params.DataStoreFactory }),
 		fx.Provide(func() client.FactoryProvider { return params.ClientFactoryProvider }),
@@ -547,7 +549,8 @@ func EmbeddedFrontendServiceProvider(
 			params.PersistenceConfig,
 			params.ClusterMetadata,
 			params.Cfg,
-			fx.Annotated{Target: frontendSocketPath}, // <-- different from frontend
+			fx.Annotated{Target: resource.ListenSocketPath(frontendSocketPath)}, // <-- different from frontend
+			fx.Annotated{Target: resource.EmbeddedFrontendSocketPath("")},
 		),
 		fx.Provide(func() persistenceClient.AbstractDataStoreFactory { return params.DataStoreFactory }),
 		fx.Provide(func() client.FactoryProvider { return params.ClientFactoryProvider }),
@@ -608,7 +611,8 @@ func WorkerServiceProvider(
 			params.PersistenceConfig,
 			params.ClusterMetadata,
 			params.Cfg,
-			fx.Annotated{Target: frontendSocketPath},
+			fx.Annotated{Target: resource.ListenSocketPath("")},
+			fx.Annotated{Target: resource.EmbeddedFrontendSocketPath(frontendSocketPath)},
 		),
 		fx.Provide(func() persistenceClient.AbstractDataStoreFactory { return params.DataStoreFactory }),
 		fx.Provide(func() client.FactoryProvider { return params.ClientFactoryProvider }),

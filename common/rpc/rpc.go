@@ -51,7 +51,9 @@ type RPCFactory struct {
 	dc          *dynamicconfig.Collection
 	frontendURL string
 
-	listenUnixSocket string
+	// If set, listen on this unix socket instead of tcp. This is provided out of band from
+	// config because we need need to instantiate the frontend service twice.
+	listenSocketPath string
 
 	initListener       sync.Once
 	grpcListener       net.Listener
@@ -68,7 +70,7 @@ func NewFactory(
 	tlsProvider encryption.TLSConfigProvider,
 	dc *dynamicconfig.Collection,
 	frontendURL string,
-	listenUnixSocket string,
+	listenSocketPath string,
 	clientInterceptors []grpc.UnaryClientInterceptor,
 ) *RPCFactory {
 	return &RPCFactory{
@@ -77,7 +79,7 @@ func NewFactory(
 		logger:             logger,
 		dc:                 dc,
 		frontendURL:        frontendURL,
-		listenUnixSocket:   listenUnixSocket,
+		listenSocketPath:   listenSocketPath,
 		tlsFactory:         tlsProvider,
 		clientInterceptors: clientInterceptors,
 	}
@@ -86,7 +88,8 @@ func NewFactory(
 func (d *RPCFactory) GetFrontendGRPCServerOptions() ([]grpc.ServerOption, error) {
 	var opts []grpc.ServerOption
 
-	if d.tlsFactory != nil {
+	// no TLS for local unix socket
+	if d.tlsFactory != nil && d.listenSocketPath == "" {
 		serverConfig, err := d.tlsFactory.GetFrontendServerConfig()
 		if err != nil {
 			return nil, err
@@ -146,15 +149,15 @@ func (d *RPCFactory) GetGRPCListener() net.Listener {
 	d.initListener.Do(func() {
 		var address string
 		var err error
-		if d.listenUnixSocket != "" {
-			address = d.listenUnixSocket
+		if d.listenSocketPath != "" {
+			address = d.listenSocketPath
 			d.grpcListener, err = net.Listen("unix", address)
 		} else {
 			address = net.JoinHostPort(getListenIP(d.config, d.logger).String(), convert.IntToString(d.config.GRPCPort))
 			d.grpcListener, err = net.Listen("tcp", address)
 		}
 		if err != nil {
-			d.logger.Fatal("Failed to start gRPC listener", tag.Error(err), tag.Service(d.serviceName), tag.Address(d.listenUnixSocket))
+			d.logger.Fatal("Failed to start gRPC listener", tag.Error(err), tag.Service(d.serviceName), tag.Address(d.listenSocketPath))
 		}
 
 		d.logger.Info("Created gRPC listener", tag.Service(d.serviceName), tag.Address(address))

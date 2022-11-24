@@ -28,6 +28,7 @@ package sdk
 
 import (
 	"crypto/tls"
+	"strings"
 	"sync"
 
 	sdkclient "go.temporal.io/sdk/client"
@@ -118,7 +119,10 @@ func (f *clientFactory) GetSystemClient() sdkclient.Client {
 			}
 			f.systemSdkClient = sdkClient
 			return nil
-		}, common.CreateSdkClientFactoryRetryPolicy(), common.IsContextDeadlineExceededErr)
+		}, common.CreateSdkClientFactoryRetryPolicy(), func(err error) bool {
+			return common.IsContextDeadlineExceededErr(err) ||
+				strings.Contains(err.Error(), "connection refused") //FIXME: uugh
+		})
 		if err != nil {
 			f.logger.Fatal("error creating sdk client", tag.Error(err))
 		}

@@ -78,6 +78,7 @@ type (
 	InstanceID           string
 	ServiceNames         map[string]struct{}
 
+	ListenSocketPath           string
 	EmbeddedFrontendSocketPath string
 
 	MatchingRawClient matchingservice.MatchingServiceClient
@@ -249,6 +250,8 @@ func MembershipMonitorProvider(
 	for sn, sc := range cfg.Services {
 		servicePortMap[sn] = sc.RPC.GRPCPort
 	}
+	// embedded frontend doesn't listen on a tcp port. FIXME: is this enough?
+	servicePortMap[primitives.EmbeddedFrontendService] = 99999
 
 	rpcConfig := cfg.Services[string(svcName)].RPC
 
@@ -392,6 +395,34 @@ func ArchiverProviderProvider(cfg *config.Config) provider.ArchiverProvider {
 	return provider.NewArchiverProvider(cfg.Archival.History.Provider, cfg.Archival.Visibility.Provider)
 }
 
+func getFrontendURL(
+	cfg *config.Config,
+	resolver membership.GRPCResolver,
+	frontendSocketPath EmbeddedFrontendSocketPath,
+) (string, bool) {
+	frontendURL := "INVALID"
+	disableTLS := false
+	// only worker service can make frontend connections
+	frontendURL = cfg.PublicClient.HostPort
+	if frontendURL == "" {
+		frontendURL = resolver.MakeURL(common.FrontendServiceName)
+	} else if frontendURL == "embedded" {
+		// on non-worker roles, frontendSocketPath will be "", and we'll leave frontendURL as
+		// INVALID. non-worker roles should not connect to frontend. FIXME: validate this
+		if frontendSocketPath != "" {
+			// the "unix" grpc resolver will undo this transformation but it's necessary to
+			// pass both types through URL parsing.
+			if frontendSocketPath[0] == '@' {
+				frontendURL = "unix-abstract:///" + string(frontendSocketPath[1:])
+			} else {
+				frontendURL = "unix:///" + string(frontendSocketPath)
+			}
+			disableTLS = true
+		}
+	}
+	return frontendURL, disableTLS
+}
+
 func SdkClientFactoryProvider(
 	cfg *config.Config,
 	tlsConfigProvider encryption.TLSConfigProvider,
@@ -400,20 +431,11 @@ func SdkClientFactoryProvider(
 	resolver membership.GRPCResolver,
 	frontendSocketPath EmbeddedFrontendSocketPath,
 ) (sdk.ClientFactory, error) {
-	hostPort := cfg.PublicClient.HostPort
-	if hostPort == "" {
-		hostPort = resolver.MakeURL(primitives.FrontendService)
-	} else if hostPort == "embedded" {
-		if frontendSocketPath == "" {
-			panic("frontendSocketPath must be set") // FIXME
-		}
-		hostPort = "unix-abstract:///" + string(frontendSocketPath[1:])
-		tlsConfigProvider = nil
-	}
+	frontendURL, disableTLS := getFrontendURL(cfg, resolver, frontendSocketPath)
 
 	var tlsFrontendConfig *tls.Config
 	var err error
-	if tlsConfigProvider != nil {
+	if tlsConfigProvider != nil && !disableTLS {
 		tlsFrontendConfig, err = tlsConfigProvider.GetFrontendClientConfig()
 		if err != nil {
 			return nil, fmt.Errorf("unable to load frontend TLS configuration: %w", err)
@@ -421,7 +443,7 @@ func SdkClientFactoryProvider(
 	}
 
 	return sdk.NewClientFactory(
-		hostPort,
+		frontendURL,
 		tlsFrontendConfig,
 		metricsHandler,
 		logger,
@@ -443,18 +465,13 @@ func RPCFactoryProvider(
 	tlsConfigProvider encryption.TLSConfigProvider,
 	dc *dynamicconfig.Collection,
 	resolver membership.GRPCResolver,
+	listenSocketPath ListenSocketPath,
 	frontendSocketPath EmbeddedFrontendSocketPath,
 	traceInterceptor telemetry.ClientTraceInterceptor,
 ) common.RPCFactory {
 	svcCfg := cfg.Services[string(svcName)]
-	hostPort := cfg.PublicClient.HostPort
-	if hostPort == "" {
-		hostPort = resolver.MakeURL(primitives.FrontendService)
-	} else if hostPort == "embedded" {
-		if frontendSocketPath == "" {
-			panic("frontendSocketPath must be set") // FIXME
-		}
-		hostPort = "unix-abstract:///" + string(frontendSocketPath[1:])
+	frontendURL, disableTLS := getFrontendURL(cfg, resolver, frontendSocketPath)
+	if disableTLS {
 		tlsConfigProvider = nil
 	}
 	return rpc.NewFactory(
@@ -463,8 +480,8 @@ func RPCFactoryProvider(
 		logger,
 		tlsConfigProvider,
 		dc,
-		hostPort,
-		string(frontendSocketPath),
+		frontendURL,
+		string(listenSocketPath),
 		[]grpc.UnaryClientInterceptor{
 			grpc.UnaryClientInterceptor(traceInterceptor),
 		},
