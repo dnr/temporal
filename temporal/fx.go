@@ -503,7 +503,7 @@ func frontendServiceProvider(
 			case primitives.FrontendService:
 				return params.ClaimMapper
 			case primitives.InternalFrontendService:
-				return authorization.NewInternalWorkerClaimMapper()
+				return authorization.NewNoopClaimMapper()
 			default:
 				panic("Unexpected frontend service name")
 			}
