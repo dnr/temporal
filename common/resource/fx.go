@@ -402,7 +402,7 @@ func SdkClientFactoryProvider(
 
 	hostPort := cfg.PublicClient.HostPort
 	if hostPort == "" {
-		hostPort = resolver.MakeURL(primitives.FrontendService)
+		hostPort = resolver.MakeURL(primitives.InternalFrontendService)
 	}
 
 	return sdk.NewClientFactory(
@@ -433,7 +433,7 @@ func RPCFactoryProvider(
 	svcCfg := cfg.Services[string(svcName)]
 	hostPort := cfg.PublicClient.HostPort
 	if hostPort == "" {
-		hostPort = resolver.MakeURL(primitives.FrontendService)
+		hostPort = resolver.MakeURL(primitives.InternalFrontendService)
 	}
 	return rpc.NewFactory(
 		&svcCfg.RPC,

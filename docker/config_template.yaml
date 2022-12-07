@@ -298,6 +298,12 @@ services:
             membershipPort: {{ default .Env.FRONTEND_MEMBERSHIP_PORT "6933" }}
             bindOnIP: {{ default .Env.BIND_ON_IP "127.0.0.1" }}
 
+    internal-frontend:
+        rpc:
+            grpcPort: {{ default .Env.INTERNAL_FRONTEND_GRPC_PORT "7236" }}
+            membershipPort: {{ default .Env.INTERNAL_FRONTEND_MEMBERSHIP_PORT "6936" }}
+            bindOnIP: {{ default .Env.BIND_ON_IP "127.0.0.1" }}
+
     matching:
         rpc:
             grpcPort: {{ default .Env.MATCHING_GRPC_PORT "7235" }}

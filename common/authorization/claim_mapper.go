@@ -70,6 +70,19 @@ func (*noopClaimMapper) GetClaims(_ *AuthInfo) (*Claims, error) {
 	return &Claims{System: RoleAdmin}, nil
 }
 
+// No-op claim mapper that provides worker level permission. Used by internal frontend.
+type internalWorkerClaimMapper struct{}
+
+var _ ClaimMapper = (*internalWorkerClaimMapper)(nil)
+
+func NewInternalWorkerClaimMapper() ClaimMapper {
+	return &internalWorkerClaimMapper{}
+}
+
+func (*internalWorkerClaimMapper) GetClaims(_ *AuthInfo) (*Claims, error) {
+	return &Claims{System: RoleWorker}, nil
+}
+
 func GetClaimMapperFromConfig(config *config.Authorization, logger log.Logger) (ClaimMapper, error) {
 
 	switch strings.ToLower(config.ClaimMapper) {
