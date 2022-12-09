@@ -514,7 +514,12 @@ func frontendServiceProvider(
 		fx.Provide(func() dynamicconfig.Client { return params.DynamicConfigClient }),
 		fx.Provide(func() log.Logger { return params.Logger }),
 		fx.Provide(func() log.SnTaggedLogger {
-			return log.With(params.Logger, tag.Service(displayServiceName))
+			tags := []tag.Tag{tag.Service(displayServiceName)}
+			if serviceName == primitives.InternalFrontendService {
+				// add an extra tag so these can be differentiated
+				tags = append(tags, tag.NewBoolTag("internal-frontend", true))
+			}
+			return log.With(params.Logger, tags...)
 		}),
 		fx.Provide(func() metrics.MetricsHandler {
 			return params.MetricsHandler.WithTags(metrics.ServiceNameTag(displayServiceName))
