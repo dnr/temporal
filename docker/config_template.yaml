@@ -199,7 +199,8 @@ global:
             checkInterval: {{ default .Env.TEMPORAL_TLS_EXPIRATION_CHECKS_CHECK_INTERVAL "0s" }}
         internode:
             # This server section configures the TLS certificate that internal temporal
-            # cluster nodes (history or matching) present to other clients within the Temporal Cluster.
+            # cluster nodes (history, matching, and internal-frontend) present to other
+            # clients within the Temporal Cluster.
             server:
                 requireClientAuth: {{ default .Env.TEMPORAL_TLS_REQUIRE_CLIENT_AUTH "false" }}
 
@@ -218,7 +219,8 @@ global:
                 {{- end }}
 
             # This client section is used to configure the TLS clients within
-            # the Temporal Cluster that connect to an Internode (history or matching)
+            # the Temporal Cluster that connect to an Internode (history, matching, or
+            # internal-frontend)
             client:
                 serverName: {{ default .Env.TEMPORAL_TLS_INTERNODE_SERVER_NAME "" }}
                 disableHostVerification: {{ default .Env.TEMPORAL_TLS_INTERNODE_DISABLE_HOST_VERIFICATION "false"}}
@@ -232,8 +234,7 @@ global:
                 {{- end }}
         frontend:
             # This server section configures the TLS certificate that the Frontend
-            # server presents to all clients (specifically the Worker role within
-            # the Temporal Cluster and all External SDKs connecting to the Cluster)
+            # server presents to external clients.
             server:
                 requireClientAuth: {{ default .Env.TEMPORAL_TLS_REQUIRE_CLIENT_AUTH "false" }}
                 certFile: {{ default .Env.TEMPORAL_TLS_FRONTEND_CERT "" }}
