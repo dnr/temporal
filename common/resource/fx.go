@@ -93,7 +93,6 @@ type (
 // See LifetimeHooksModule for detail
 var Module = fx.Options(
 	persistenceClient.Module,
-	fx.Provide(SnTaggedLoggerProvider),
 	fx.Provide(HostNameProvider),
 	fx.Provide(TimeSourceProvider),
 	cluster.MetadataLifetimeHooksModule,
@@ -136,7 +135,7 @@ var DefaultOptions = fx.Options(
 	fx.Provide(DCRedirectionPolicyProvider),
 )
 
-func SnTaggedLoggerProvider(logger log.Logger, sn primitives.ServiceName) log.SnTaggedLogger {
+func DefaultSnTaggedLoggerProvider(logger log.Logger, sn primitives.ServiceName) log.SnTaggedLogger {
 	return log.With(logger, tag.Service(sn))
 }
 

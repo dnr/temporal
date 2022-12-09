@@ -367,6 +367,7 @@ func HistoryServiceProvider(
 		fx.Provide(func() encryption.TLSConfigProvider { return params.TlsConfigProvider }),
 		fx.Provide(func() dynamicconfig.Client { return params.DynamicConfigClient }),
 		fx.Provide(func() log.Logger { return params.Logger }),
+		fx.Provide(resource.DefaultSnTaggedLoggerProvider),
 		fx.Provide(func() metrics.MetricsHandler {
 			return params.MetricsHandler.WithTags(metrics.ServiceNameTag(serviceName))
 		}),
@@ -429,6 +430,7 @@ func MatchingServiceProvider(
 		fx.Provide(func() encryption.TLSConfigProvider { return params.TlsConfigProvider }),
 		fx.Provide(func() dynamicconfig.Client { return params.DynamicConfigClient }),
 		fx.Provide(func() log.Logger { return params.Logger }),
+		fx.Provide(resource.DefaultSnTaggedLoggerProvider),
 		fx.Provide(func() metrics.MetricsHandler {
 			return params.MetricsHandler.WithTags(metrics.ServiceNameTag(serviceName))
 		}),
@@ -467,8 +469,8 @@ func frontendServiceProvider(
 	params ServiceProviderParamsCommon,
 	serviceName primitives.ServiceName,
 ) (ServicesGroupOut, error) {
-	// Use this name for metrics, even if serviceName is internal-frontend
-	metricsServiceName := primitives.FrontendService
+	// Use this name for metrics and logs, even if serviceName is internal-frontend
+	displayServiceName := primitives.FrontendService
 
 	if _, ok := params.ServiceNames[serviceName]; !ok {
 		params.Logger.Info("Service is not requested, skipping initialization.", tag.Service(serviceName))
@@ -511,8 +513,11 @@ func frontendServiceProvider(
 		fx.Provide(func() encryption.TLSConfigProvider { return params.TlsConfigProvider }),
 		fx.Provide(func() dynamicconfig.Client { return params.DynamicConfigClient }),
 		fx.Provide(func() log.Logger { return params.Logger }),
+		fx.Provide(func() log.SnTaggedLogger {
+			return log.With(params.Logger, tag.Service(displayServiceName))
+		}),
 		fx.Provide(func() metrics.MetricsHandler {
-			return params.MetricsHandler.WithTags(metrics.ServiceNameTag(metricsServiceName))
+			return params.MetricsHandler.WithTags(metrics.ServiceNameTag(displayServiceName))
 		}),
 		fx.Provide(func() resource.NamespaceLogger { return params.NamespaceLogger }),
 		fx.Provide(func() esclient.Client { return params.EsClient }),
@@ -571,6 +576,7 @@ func WorkerServiceProvider(
 		fx.Provide(func() encryption.TLSConfigProvider { return params.TlsConfigProvider }),
 		fx.Provide(func() dynamicconfig.Client { return params.DynamicConfigClient }),
 		fx.Provide(func() log.Logger { return params.Logger }),
+		fx.Provide(resource.DefaultSnTaggedLoggerProvider),
 		fx.Provide(func() metrics.MetricsHandler {
 			return params.MetricsHandler.WithTags(metrics.ServiceNameTag(serviceName))
 		}),
