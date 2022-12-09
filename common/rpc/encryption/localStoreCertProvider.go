@@ -46,23 +46,18 @@ var _ CertProvider = (*localStoreCertProvider)(nil)
 var _ CertExpirationChecker = (*localStoreCertProvider)(nil)
 
 type certCache struct {
-	serverCert   *tls.Certificate
-	workerCert   *tls.Certificate
-	clientCAPool *x509.CertPool
-	serverCAPool *x509.CertPool
-	// serverCAsWorkerPool *x509.CertPool
+	serverCert    *tls.Certificate
+	workerCert    *tls.Certificate
+	clientCAPool  *x509.CertPool
+	serverCAPool  *x509.CertPool
 	clientCACerts []*x509.Certificate // copies of certs in the clientCAPool CertPool for expiration checks
 	serverCACerts []*x509.Certificate // copies of certs in the serverCAPool CertPool for expiration checks
-	// serverCACertsWorker []*x509.Certificate // copies of certs in the serverCAsWorkerPool CertPool for expiration checks
 }
 
 type localStoreCertProvider struct {
 	sync.RWMutex
 
 	tlsSettings *config.GroupTLS
-	// workerTLSSettings    *config.WorkerTLS
-	// isLegacyWorkerConfig bool
-	// legacyWorkerSettings *config.ClientTLS
 
 	certs           *certCache
 	refreshInterval time.Duration
@@ -87,16 +82,11 @@ func (s *localStoreCertProvider) initialize() {
 
 func NewLocalStoreCertProvider(
 	tlsSettings *config.GroupTLS,
-	// workerTlsSettings *config.WorkerTLS,
-	// legacyWorkerSettings *config.ClientTLS,
 	refreshInterval time.Duration,
 	logger log.Logger) CertProvider {
 
 	provider := &localStoreCertProvider{
-		tlsSettings: tlsSettings,
-		// workerTLSSettings:    workerTlsSettings,
-		// legacyWorkerSettings: legacyWorkerSettings,
-		// isLegacyWorkerConfig: legacyWorkerSettings != nil,
+		tlsSettings:     tlsSettings,
 		logger:          logger,
 		refreshInterval: refreshInterval,
 	}
@@ -150,10 +140,6 @@ func (s *localStoreCertProvider) FetchServerRootCAsForClient() (*x509.CertPool, 
 		return nil, err
 	}
 
-	// if isWorker {
-	// 	return certs.serverCAsWorkerPool, nil
-	// }
-
 	return certs.serverCAPool, nil
 }
 
@@ -166,9 +152,6 @@ func (s *localStoreCertProvider) FetchClientCertificate() (*tls.Certificate, err
 	if err != nil {
 		return nil, err
 	}
-	// if isWorker {
-	// 	return certs.workerCert, nil
-	// }
 	return certs.serverCert, nil
 }
 
@@ -191,7 +174,6 @@ func (s *localStoreCertProvider) GetExpiringCerts(timeWindow time.Duration,
 
 	checkCertsForExpiration(certs.clientCACerts, when, expiring, expired)
 	checkCertsForExpiration(certs.serverCACerts, when, expiring, expired)
-	// checkCertsForExpiration(certs.serverCACertsWorker, when, expiring, expired)
 
 	return expiring, expired, err
 }
@@ -249,31 +231,12 @@ func (s *localStoreCertProvider) loadCerts() (*certCache, error) {
 		newCerts.clientCACerts = certs
 	}
 
-	// if s.isLegacyWorkerConfig {
-	// 	newCerts.workerCert = newCerts.serverCert
-	// } else {
-	// 	if s.workerTLSSettings != nil {
-	// 		newCerts.workerCert, err = s.fetchCertificate(s.workerTLSSettings.CertFile, s.workerTLSSettings.CertData,
-	// 			s.workerTLSSettings.KeyFile, s.workerTLSSettings.KeyData)
-	// 		if err != nil {
-	// 			return nil, err
-	// 		}
-	// 	}
-	// }
-
-	nonWorkerPool, nonWorkerCerts, err := s.loadServerCACerts()
+	pool, certs, err := s.loadServerCACerts()
 	if err != nil {
 		return nil, err
 	}
-	newCerts.serverCAPool = nonWorkerPool
-	newCerts.serverCACerts = nonWorkerCerts
-
-	// workerPool, workerCerts, err := s.loadServerCACerts(true)
-	// if err != nil {
-	// 	return nil, err
-	// }
-	// newCerts.serverCAsWorkerPool = workerPool
-	// newCerts.serverCACertsWorker = workerCerts
+	newCerts.serverCAPool = pool
+	newCerts.serverCACerts = certs
 
 	return &newCerts, nil
 }
@@ -328,16 +291,10 @@ func (s *localStoreCertProvider) fetchCertificate(
 }
 
 func (s *localStoreCertProvider) getClientTLSSettings() *config.ClientTLS {
-	// if isWorker && s.workerTLSSettings != nil {
-	// 	return &s.workerTLSSettings.Client // explicit system worker case
-	// } else if isWorker {
-	// 	return s.legacyWorkerSettings // legacy config case when we use Frontend.Client settings
-	// } else {
 	if s.tlsSettings == nil {
 		return nil
 	}
 	return &s.tlsSettings.Client // internode client case
-	// }
 }
 
 func (s *localStoreCertProvider) loadServerCACerts() (*x509.CertPool, []*x509.Certificate, error) {
@@ -550,7 +507,7 @@ func (s *localStoreCertProvider) refreshCerts() {
 }
 
 func (s *localStoreCertProvider) isTLSEnabled() bool {
-	return s.tlsSettings != nil //|| s.workerTLSSettings != nil
+	return s.tlsSettings != nil
 }
 
 func (c *certCache) isEqual(other *certCache) bool {
@@ -563,10 +520,8 @@ func (c *certCache) isEqual(other *certCache) bool {
 	}
 
 	if !equalTLSCerts(c.serverCert, other.serverCert) ||
-		/*!equalTLSCerts(c.workerCert, other.workerCert) ||*/
 		!equalX509(c.clientCACerts, other.clientCACerts) ||
-		!equalX509(c.serverCACerts, other.serverCACerts) { /*||
-		!equalX509(c.serverCACertsWorker, other.serverCACertsWorker) { */
+		!equalX509(c.serverCACerts, other.serverCACerts) {
 		return false
 	}
 	return true

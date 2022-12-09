@@ -41,8 +41,6 @@ import (
 
 type CertProviderFactory func(
 	tlsSettings *config.GroupTLS,
-	// workerTlsSettings *config.WorkerTLS,
-	// legacyWorkerSettings *config.ClientTLS,
 	refreshInterval time.Duration,
 	logger log.Logger) CertProvider
 
@@ -51,17 +49,15 @@ type localStoreTlsProvider struct {
 
 	settings *config.RootTLS
 
-	internodeCertProvider       CertProvider
-	internodeClientCertProvider CertProvider
-	frontendCertProvider        CertProvider
-	// workerCertProvider              CertProvider
+	internodeCertProvider           CertProvider
+	internodeClientCertProvider     CertProvider
+	frontendCertProvider            CertProvider
 	remoteClusterClientCertProvider map[string]CertProvider
 	frontendPerHostCertProviderMap  *localStorePerHostCertProviderMap
 
-	cachedInternodeServerConfig *tls.Config
-	cachedInternodeClientConfig *tls.Config
-	cachedFrontendServerConfig  *tls.Config
-	// cachedFrontendClientConfig      *tls.Config
+	cachedInternodeServerConfig     *tls.Config
+	cachedInternodeClientConfig     *tls.Config
+	cachedFrontendServerConfig      *tls.Config
 	cachedRemoteClusterClientConfig map[string]*tls.Config
 
 	ticker         *time.Ticker
@@ -77,13 +73,6 @@ func NewLocalStoreTlsProvider(tlsConfig *config.RootTLS, metricsHandler metrics.
 ) (TLSConfigProvider, error) {
 
 	internodeProvider := certProviderFactory(&tlsConfig.Internode, tlsConfig.RefreshInterval, logger)
-	// var workerProvider CertProvider
-	// if isSystemWorker(tlsConfig) { // explicit system worker config
-	// 	workerProvider = certProviderFactory(nil, &tlsConfig.SystemWorker, nil, tlsConfig.RefreshInterval, logger)
-	// } else { // legacy implicit system worker config case
-	// 	internodeWorkerProvider := certProviderFactory(&tlsConfig.Internode, nil, &tlsConfig.Frontend.Client, tlsConfig.RefreshInterval, logger)
-	// 	workerProvider = internodeWorkerProvider
-	// }
 
 	remoteClusterClientCertProvider := make(map[string]CertProvider)
 	for hostname, groupTLS := range tlsConfig.RemoteClusters {
@@ -94,7 +83,6 @@ func NewLocalStoreTlsProvider(tlsConfig *config.RootTLS, metricsHandler metrics.
 		internodeCertProvider:       internodeProvider,
 		internodeClientCertProvider: internodeProvider,
 		frontendCertProvider:        certProviderFactory(&tlsConfig.Frontend, tlsConfig.RefreshInterval, logger),
-		// workerCertProvider:          workerProvider,
 		frontendPerHostCertProviderMap: newLocalStorePerHostCertProviderMap(
 			tlsConfig.Frontend.PerHostOverrides, certProviderFactory, tlsConfig.RefreshInterval, logger),
 		remoteClusterClientCertProvider: remoteClusterClientCertProvider,
@@ -136,32 +124,11 @@ func (s *localStoreTlsProvider) GetInternodeClientConfig() (*tls.Config, error) 
 		&s.cachedInternodeClientConfig,
 		func() (*tls.Config, error) {
 			return newClientTLSConfig(s.internodeClientCertProvider, client.ServerName,
-				s.settings.Internode.Server.RequireClientAuth /*false,*/, !client.DisableHostVerification)
+				s.settings.Internode.Server.RequireClientAuth, !client.DisableHostVerification)
 		},
 		s.settings.Internode.IsClientEnabled(),
 	)
 }
-
-// func (s *localStoreTlsProvider) GetFrontendClientConfig() (*tls.Config, error) {
-
-// 	var client *config.ClientTLS
-// 	var useTLS bool
-// 	if isSystemWorker(s.settings) {
-// 		client = &s.settings.SystemWorker.Client
-// 		useTLS = true
-// 	} else {
-// 		client = &s.settings.Frontend.Client
-// 		useTLS = s.settings.Frontend.IsClientEnabled()
-// 	}
-// 	return s.getOrCreateConfig(
-// 		&s.cachedFrontendClientConfig,
-// 		func() (*tls.Config, error) {
-// 			return newClientTLSConfig(s.workerCertProvider, client.ServerName,
-// 				useTLS, true, !client.DisableHostVerification)
-// 		},
-// 		useTLS,
-// 	)
-// }
 
 func (s *localStoreTlsProvider) GetRemoteClusterClientConfig(hostname string) (*tls.Config, error) {
 	groupTLS, ok := s.settings.RemoteClusters[hostname]
@@ -176,7 +143,6 @@ func (s *localStoreTlsProvider) GetRemoteClusterClientConfig(hostname string) (*
 				s.remoteClusterClientCertProvider[hostname],
 				groupTLS.Client.ServerName,
 				groupTLS.Server.RequireClientAuth,
-				// false,
 				!groupTLS.Client.DisableHostVerification)
 		},
 		groupTLS.IsClientEnabled(),
@@ -211,8 +177,6 @@ func (s *localStoreTlsProvider) GetExpiringCerts(timeWindow time.Duration,
 	err = appendError(err, checkError)
 	checkError = checkExpiration(s.frontendCertProvider, timeWindow, expiring, expired)
 	err = appendError(err, checkError)
-	// checkError = checkExpiration(s.workerCertProvider, timeWindow, expiring, expired)
-	// err = appendError(err, checkError)
 	checkError = checkExpiration(s.frontendPerHostCertProviderMap, timeWindow, expiring, expired)
 	err = appendError(err, checkError)
 
@@ -388,7 +352,6 @@ func newClientTLSConfig(
 	clientProvider CertProvider,
 	serverName string,
 	isAuthRequired bool,
-	// isWorker bool,
 	enableHostVerification bool,
 ) (*tls.Config, error) {
 	// Optional ServerCA for client if not already trusted by host
@@ -496,9 +459,3 @@ func mergeMaps(to CertExpirationMap, from CertExpirationMap) {
 		to[k] = v
 	}
 }
-
-// func isSystemWorker(tls *config.RootTLS) bool {
-// 	return tls.SystemWorker.CertData != "" || tls.SystemWorker.CertFile != "" ||
-// 		len(tls.SystemWorker.Client.RootCAData) > 0 || len(tls.SystemWorker.Client.RootCAFiles) > 0 ||
-// 		tls.SystemWorker.Client.ForceTLS
-// }

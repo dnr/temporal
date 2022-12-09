@@ -114,9 +114,8 @@ type (
 		// Internode controls backend service communication TLS settings.
 		Internode GroupTLS `yaml:"internode"`
 		// Frontend controls SDK Client to Frontend communication TLS settings.
+		// Frontend.Client is not used.
 		Frontend GroupTLS `yaml:"frontend"`
-		// // SystemWorker controls TLS setting for System Workers connecting to Frontend.
-		// SystemWorker WorkerTLS `yaml:"systemWorker"`
 		// RemoteFrontendClients controls TLS setting for talking to remote cluster.
 		RemoteClusters map[string]GroupTLS `yaml:"remoteClusters"`
 		// ExpirationChecks defines settings for periodic checks for expiration of certificates
@@ -183,21 +182,6 @@ type (
 		// This is for non-mTLS cases when client validates serve against a set of trusted CA certificates configured in the environment
 		ForceTLS bool `yaml:"forceTLS"`
 	}
-
-	// // WorkerTLS contains TLS configuration for system workers within the Temporal Cluster to connect to Temporal frontend.
-	// WorkerTLS struct {
-	// 	// The path to the file containing the PEM-encoded public key of the client certificate to use by system workers.
-	// 	CertFile string `yaml:"certFile"`
-	// 	// The path to the file containing the PEM-encoded private key of the client certificate to use by system workers.
-	// 	KeyFile string `yaml:"keyFile"`
-	// 	// Base64 equivalents of the above artifacts.
-	// 	// You cannot specify both a Data and a File for the same artifact (e.g. setting CertFile and CertData)
-	// 	CertData string `yaml:"certData"`
-	// 	KeyData  string `yaml:"keyData"`
-
-	// 	// Client TLS settings for system workers
-	// 	Client ClientTLS `yaml:"client"`
-	// }
 
 	// CertExpirationValidation contains settings for periodic checks of TLS certificate expiration
 	CertExpirationValidation struct {

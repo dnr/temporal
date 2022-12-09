@@ -43,7 +43,6 @@ type (
 		GetInternodeServerConfig() (*tls.Config, error)
 		GetInternodeClientConfig() (*tls.Config, error)
 		GetFrontendServerConfig() (*tls.Config, error)
-		// GetFrontendClientConfig() (*tls.Config, error)
 		GetRemoteClusterClientConfig(hostname string) (*tls.Config, error)
 		GetExpiringCerts(timeWindow time.Duration) (expiring CertExpirationMap, expired CertExpirationMap, err error)
 	}
@@ -107,9 +106,6 @@ func validateRootTLS(cfg *config.RootTLS) error {
 	if err := validateGroupTLS(&cfg.Frontend); err != nil {
 		return err
 	}
-	// if err := validateWorkerTLS(&cfg.SystemWorker); err != nil {
-	// 	return err
-	// }
 	return nil
 }
 
@@ -131,19 +127,6 @@ func validateGroupTLS(cfg *config.GroupTLS) error {
 	}
 	return nil
 }
-
-// func validateWorkerTLS(cfg *config.WorkerTLS) error {
-// 	if cfg.CertFile != "" && cfg.CertData != "" {
-// 		return fmt.Errorf("cannot specify CertFile and CertData at the same time")
-// 	}
-// 	if cfg.KeyFile != "" && cfg.KeyData != "" {
-// 		return fmt.Errorf("cannot specify KeyFile and KeyData at the same time")
-// 	}
-// 	if err := validateClientTLS(&cfg.Client); err != nil {
-// 		return err
-// 	}
-// 	return nil
-// }
 
 func validateServerTLS(cfg *config.ServerTLS) error {
 	if cfg.CertFile != "" && cfg.CertData != "" {
