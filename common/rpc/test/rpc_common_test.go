@@ -51,8 +51,7 @@ type HelloServer struct {
 type ServerUsageType int32
 
 const (
-	Frontend ServerUsageType = iota
-	Internode
+	Internode ServerUsageType = iota
 	RemoteCluster
 )
 
@@ -158,9 +157,6 @@ func dialHelloAndGetTLSInfo(
 	switch serverType {
 	case Internode:
 		cfg, err = clientFactory.GetInternodeClientTlsConfig()
-		s.NoError(err)
-	case Frontend:
-		cfg, err = clientFactory.GetFrontendClientTlsConfig()
 		s.NoError(err)
 	case RemoteCluster:
 		host, _, err := net.SplitHostPort(hostport)

@@ -75,23 +75,23 @@ func (s *tlsConfigTest) TestIsEnabled() {
 
 }
 
-func (s *tlsConfigTest) TestIsSystemWorker() {
+// func (s *tlsConfigTest) TestIsSystemWorker() {
 
-	cfg := &config.RootTLS{}
-	s.False(isSystemWorker(cfg))
-	cfg = &config.RootTLS{SystemWorker: config.WorkerTLS{CertFile: "foo"}}
-	s.True(isSystemWorker(cfg))
-	cfg = &config.RootTLS{SystemWorker: config.WorkerTLS{CertData: "foo"}}
-	s.True(isSystemWorker(cfg))
-	cfg = &config.RootTLS{SystemWorker: config.WorkerTLS{Client: config.ClientTLS{RootCAData: []string{"bar"}}}}
-	s.True(isSystemWorker(cfg))
-	cfg = &config.RootTLS{SystemWorker: config.WorkerTLS{Client: config.ClientTLS{RootCAFiles: []string{"bar"}}}}
-	s.True(isSystemWorker(cfg))
-	cfg = &config.RootTLS{SystemWorker: config.WorkerTLS{Client: config.ClientTLS{ForceTLS: true}}}
-	s.True(isSystemWorker(cfg))
-	cfg = &config.RootTLS{SystemWorker: config.WorkerTLS{Client: config.ClientTLS{ForceTLS: false}}}
-	s.False(isSystemWorker(cfg))
-}
+// 	cfg := &config.RootTLS{}
+// 	s.False(isSystemWorker(cfg))
+// 	cfg = &config.RootTLS{SystemWorker: config.WorkerTLS{CertFile: "foo"}}
+// 	s.True(isSystemWorker(cfg))
+// 	cfg = &config.RootTLS{SystemWorker: config.WorkerTLS{CertData: "foo"}}
+// 	s.True(isSystemWorker(cfg))
+// 	cfg = &config.RootTLS{SystemWorker: config.WorkerTLS{Client: config.ClientTLS{RootCAData: []string{"bar"}}}}
+// 	s.True(isSystemWorker(cfg))
+// 	cfg = &config.RootTLS{SystemWorker: config.WorkerTLS{Client: config.ClientTLS{RootCAFiles: []string{"bar"}}}}
+// 	s.True(isSystemWorker(cfg))
+// 	cfg = &config.RootTLS{SystemWorker: config.WorkerTLS{Client: config.ClientTLS{ForceTLS: true}}}
+// 	s.True(isSystemWorker(cfg))
+// 	cfg = &config.RootTLS{SystemWorker: config.WorkerTLS{Client: config.ClientTLS{ForceTLS: false}}}
+// 	s.False(isSystemWorker(cfg))
+// }
 
 func (s *tlsConfigTest) TestCertFileAndData() {
 	s.testGroupTLS(s.testCertFileAndData)
@@ -213,33 +213,33 @@ func (s *tlsConfigTest) testRootCAFiles(cfg *config.RootTLS, group *config.Group
 	s.Error(validateRootTLS(cfg))
 }
 
-func (s *tlsConfigTest) TestSystemWorkerTLSConfig() {
-	cfg := &config.RootTLS{}
-	cfg.SystemWorker = config.WorkerTLS{}
-	s.Nil(validateRootTLS(cfg))
-	cfg.SystemWorker = config.WorkerTLS{CertFile: "foo"}
-	s.Nil(validateRootTLS(cfg))
-	cfg.SystemWorker = config.WorkerTLS{CertData: "bar"}
-	s.Nil(validateRootTLS(cfg))
-	cfg.SystemWorker = config.WorkerTLS{CertFile: "foo", CertData: "bar"}
-	s.Error(validateRootTLS(cfg))
-	cfg.SystemWorker = config.WorkerTLS{KeyFile: "foo"}
-	s.Nil(validateRootTLS(cfg))
-	cfg.SystemWorker = config.WorkerTLS{KeyData: "bar"}
-	s.Nil(validateRootTLS(cfg))
-	cfg.SystemWorker = config.WorkerTLS{KeyFile: "foo", KeyData: "bar"}
-	s.Error(validateRootTLS(cfg))
+// func (s *tlsConfigTest) TestSystemWorkerTLSConfig() {
+// 	cfg := &config.RootTLS{}
+// 	cfg.SystemWorker = config.WorkerTLS{}
+// 	s.Nil(validateRootTLS(cfg))
+// 	cfg.SystemWorker = config.WorkerTLS{CertFile: "foo"}
+// 	s.Nil(validateRootTLS(cfg))
+// 	cfg.SystemWorker = config.WorkerTLS{CertData: "bar"}
+// 	s.Nil(validateRootTLS(cfg))
+// 	cfg.SystemWorker = config.WorkerTLS{CertFile: "foo", CertData: "bar"}
+// 	s.Error(validateRootTLS(cfg))
+// 	cfg.SystemWorker = config.WorkerTLS{KeyFile: "foo"}
+// 	s.Nil(validateRootTLS(cfg))
+// 	cfg.SystemWorker = config.WorkerTLS{KeyData: "bar"}
+// 	s.Nil(validateRootTLS(cfg))
+// 	cfg.SystemWorker = config.WorkerTLS{KeyFile: "foo", KeyData: "bar"}
+// 	s.Error(validateRootTLS(cfg))
 
-	cfg.SystemWorker = config.WorkerTLS{Client: config.ClientTLS{}}
-	client := &cfg.SystemWorker.Client
-	client.RootCAData = []string{}
-	s.Nil(validateRootTLS(cfg))
-	client.RootCAData = []string{"foo"}
-	s.Nil(validateRootTLS(cfg))
-	client.RootCAData = []string{"foo", "bar"}
-	s.Nil(validateRootTLS(cfg))
-	client.RootCAData = []string{"foo", " "}
-	s.Error(validateRootTLS(cfg))
-	client.RootCAData = []string{""}
-	s.Error(validateRootTLS(cfg))
-}
+// 	cfg.SystemWorker = config.WorkerTLS{Client: config.ClientTLS{}}
+// 	client := &cfg.SystemWorker.Client
+// 	client.RootCAData = []string{}
+// 	s.Nil(validateRootTLS(cfg))
+// 	client.RootCAData = []string{"foo"}
+// 	s.Nil(validateRootTLS(cfg))
+// 	client.RootCAData = []string{"foo", "bar"}
+// 	s.Nil(validateRootTLS(cfg))
+// 	client.RootCAData = []string{"foo", " "}
+// 	s.Error(validateRootTLS(cfg))
+// 	client.RootCAData = []string{""}
+// 	s.Error(validateRootTLS(cfg))
+// }

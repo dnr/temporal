@@ -73,11 +73,11 @@ func (t *TestDynamicCertProvider) GetSettings() *config.GroupTLS {
 	return t.config
 }
 
-func (t *TestDynamicCertProvider) FetchClientCertificate(_ bool) (*tls.Certificate, error) {
+func (t *TestDynamicCertProvider) FetchClientCertificate() (*tls.Certificate, error) {
 	panic("not implemented")
 }
 
-func (t *TestDynamicCertProvider) FetchServerRootCAsForClient(_ bool) (*x509.CertPool, error) {
+func (t *TestDynamicCertProvider) FetchServerRootCAsForClient() (*x509.CertPool, error) {
 	return t.caCerts, nil
 }
 

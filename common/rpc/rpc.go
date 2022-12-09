@@ -97,14 +97,6 @@ func (d *RPCFactory) GetFrontendGRPCServerOptions() ([]grpc.ServerOption, error)
 	return opts, nil
 }
 
-func (d *RPCFactory) GetFrontendClientTlsConfig() (*tls.Config, error) {
-	if d.tlsFactory != nil {
-		return d.tlsFactory.GetFrontendClientConfig()
-	}
-
-	return nil, nil
-}
-
 func (d *RPCFactory) GetRemoteClusterClientConfig(hostname string) (*tls.Config, error) {
 	if d.tlsFactory != nil {
 		return d.tlsFactory.GetRemoteClusterClientConfig(hostname)

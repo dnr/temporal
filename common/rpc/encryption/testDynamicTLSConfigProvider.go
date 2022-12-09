@@ -52,16 +52,16 @@ func (t *TestDynamicTLSConfigProvider) GetInternodeServerConfig() (*tls.Config, 
 }
 
 func (t *TestDynamicTLSConfigProvider) GetInternodeClientConfig() (*tls.Config, error) {
-	return newClientTLSConfig(t.InternodeClientCertProvider, t.settings.Internode.Client.ServerName, true, false, true)
+	return newClientTLSConfig(t.InternodeClientCertProvider, t.settings.Internode.Client.ServerName, true /*false,*/, true)
 }
 
 func (t *TestDynamicTLSConfigProvider) GetFrontendServerConfig() (*tls.Config, error) {
 	return newServerTLSConfig(t.FrontendCertProvider, t.FrontendPerHostCertProviderMap, &t.settings.Frontend, t.logger)
 }
 
-func (t *TestDynamicTLSConfigProvider) GetFrontendClientConfig() (*tls.Config, error) {
-	return newClientTLSConfig(t.WorkerCertProvider, t.settings.Frontend.Client.ServerName, true, false, true)
-}
+// func (t *TestDynamicTLSConfigProvider) GetFrontendClientConfig() (*tls.Config, error) {
+// 	return newClientTLSConfig(t.WorkerCertProvider, t.settings.Frontend.Client.ServerName, true, false, true)
+// }
 
 func (t *TestDynamicTLSConfigProvider) GetExpiringCerts(timeWindow time.Duration) (expiring CertExpirationMap, expired CertExpirationMap, err error) {
 	panic("implement me")
