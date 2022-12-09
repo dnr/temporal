@@ -206,7 +206,7 @@ func (d *RPCFactory) CreateLocalFrontendGRPCConnection() *grpc.ClientConn {
 	var tlsClientConfig *tls.Config
 	var err error
 	if d.tlsFactory != nil {
-		tlsClientConfig, err = d.tlsFactory.GetFrontendClientConfig()
+		tlsClientConfig, err = d.tlsFactory.GetInternodeClientConfig()
 		if err != nil {
 			d.logger.Fatal("Failed to create tls config for gRPC connection", tag.Error(err))
 			return nil

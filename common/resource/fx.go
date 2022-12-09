@@ -394,7 +394,7 @@ func SdkClientFactoryProvider(
 	logger log.SnTaggedLogger,
 	resolver membership.GRPCResolver,
 ) (sdk.ClientFactory, error) {
-	tlsFrontendConfig, err := tlsConfigProvider.GetFrontendClientConfig()
+	tlsFrontendConfig, err := tlsConfigProvider.GetInternodeClientConfig()
 	if err != nil {
 		return nil, fmt.Errorf("unable to load frontend TLS configuration: %w", err)
 	}
