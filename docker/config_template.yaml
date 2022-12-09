@@ -253,19 +253,6 @@ global:
                     - {{ default .Env.TEMPORAL_TLS_CLIENT2_CA_CERT_DATA "" }}
                 {{- end }}
 
-            # This client section is used to configure the TLS clients within
-            # the Temporal Cluster (specifically the Worker role) that connect to the Frontend service
-            client:
-                serverName: {{ default .Env.TEMPORAL_TLS_FRONTEND_SERVER_NAME "" }}
-                disableHostVerification: {{ default .Env.TEMPORAL_TLS_FRONTEND_DISABLE_HOST_VERIFICATION "false"}}
-                {{- if .Env.TEMPORAL_TLS_SERVER_CA_CERT }}
-                rootCaFiles:
-                    - {{ default .Env.TEMPORAL_TLS_SERVER_CA_CERT "" }}
-                {{- end }}
-                {{- if .Env.TEMPORAL_TLS_SERVER_CA_CERT_DATA }}
-                rootCaData:
-                    - {{ default .Env.TEMPORAL_TLS_SERVER_CA_CERT_DATA "" }}
-                {{- end }}
     {{- if .Env.STATSD_ENDPOINT }}
     metrics:
         statsd:
@@ -363,11 +350,6 @@ namespaceDefaults:
     visibility:
       state: "disabled"
       URI: "file:///tmp/temporal_vis_archival/development"
-
-{{ $publicIp := default .Env.BIND_ON_IP "127.0.0.1" -}}
-{{- $defaultPublicHostPost := (print $publicIp ":" $temporalGrpcPort) -}}
-publicClient:
-    hostPort: "{{ default .Env.PUBLIC_FRONTEND_ADDRESS $defaultPublicHostPost }}"
 
 dynamicConfigClient:
     filepath: "{{ default .Env.DYNAMIC_CONFIG_FILE_PATH "/etc/temporal/config/dynamicconfig/docker.yaml" }}"
