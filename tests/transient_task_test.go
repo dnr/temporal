@@ -161,6 +161,9 @@ func (s *integrationSuite) TestTransientWorkflowTaskHistorySize() {
 		RunId:      we.RunId,
 	}
 
+	// start with 2mb limit
+	s.testCluster.host.dcClient.OverrideValue(dynamicconfig.HistorySizeSuggestContinueAsNew, 2*1024*1024)
+
 	// workflow logic
 	stage := 0
 	workflowComplete := false
