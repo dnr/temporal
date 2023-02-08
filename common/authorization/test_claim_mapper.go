@@ -40,5 +40,12 @@ var _ ClaimMapper = (*testClaimMapper)(nil)
 
 func (a *testClaimMapper) GetClaims(authInfo *AuthInfo) (*Claims, error) {
 	claims := Claims{}
+	switch authInfo.AuthToken {
+	case "password":
+		claims.Namespaces = map[string]Role{
+			"default": RoleWriter,
+		}
+		claims.System = RoleReader
+	}
 	return &claims, nil
 }

@@ -26,6 +26,7 @@ package authorization
 
 import (
 	"context"
+	"fmt"
 	"strings"
 )
 
@@ -44,7 +45,11 @@ func NewDefaultAuthorizer() Authorizer {
 var resultAllow = Result{Decision: DecisionAllow}
 var resultDeny = Result{Decision: DecisionDeny}
 
-func (a *defaultAuthorizer) Authorize(_ context.Context, claims *Claims, target *CallTarget) (Result, error) {
+func (a *defaultAuthorizer) Authorize(_ context.Context, claims *Claims, target *CallTarget) (retr Result, rete error) {
+	fmt.Printf("@@@ AUTH claims %#v target %q %q\n", claims, target.APIName, target.Namespace)
+	defer func() {
+		fmt.Printf("@@@ AUTH ret %v %v\n", retr, rete)
+	}()
 	// APIs that are essentially read-only health checks with no sensitive information are
 	// always allowed
 	if IsHealthCheckAPI(target.APIName) {
