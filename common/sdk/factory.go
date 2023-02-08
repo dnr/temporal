@@ -27,6 +27,7 @@
 package sdk
 
 import (
+	"context"
 	"crypto/tls"
 	"sync"
 
@@ -85,6 +86,12 @@ func NewClientFactory(
 	}
 }
 
+type authhp struct{}
+
+func (a *authhp) GetHeaders(ctx context.Context) (map[string]string, error) {
+	return map[string]string{"authorization": "dummy"}, nil
+}
+
 func (f *clientFactory) options(options sdkclient.Options) sdkclient.Options {
 	options.HostPort = f.hostPort
 	options.MetricsHandler = f.metricsHandler
@@ -92,6 +99,7 @@ func (f *clientFactory) options(options sdkclient.Options) sdkclient.Options {
 	options.ConnectionOptions = sdkclient.ConnectionOptions{
 		TLS: f.tlsConfig,
 	}
+	options.HeadersProvider = &authhp{}
 	return options
 }
 

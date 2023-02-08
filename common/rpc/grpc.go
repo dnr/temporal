@@ -35,6 +35,7 @@ import (
 	"google.golang.org/grpc/backoff"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/metadata"
 
 	"go.temporal.io/server/common/headers"
 	"go.temporal.io/server/common/log"
@@ -125,6 +126,7 @@ func headersInterceptor(
 	opts ...grpc.CallOption,
 ) error {
 	ctx = headers.Propagate(ctx)
+	ctx = metadata.AppendToOutgoingContext(ctx, "authorization", "dummy")
 	return invoker(ctx, method, req, reply, cc, opts...)
 }
 
