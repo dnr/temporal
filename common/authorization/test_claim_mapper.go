@@ -25,6 +25,8 @@
 package authorization
 
 import (
+	"fmt"
+
 	"go.temporal.io/server/common/log"
 )
 
@@ -40,12 +42,12 @@ var _ ClaimMapper = (*testClaimMapper)(nil)
 
 func (a *testClaimMapper) GetClaims(authInfo *AuthInfo) (*Claims, error) {
 	claims := Claims{}
+	fmt.Printf("@@@ GETCLAIMS token %#v tls %#v\n", authInfo.AuthToken, authInfo.TLSSubject)
 	switch authInfo.AuthToken {
 	case "password":
 		claims.Namespaces = map[string]Role{
 			"default": RoleWriter,
 		}
-		claims.System = RoleReader
 	}
 	return &claims, nil
 }
