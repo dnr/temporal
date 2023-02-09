@@ -77,6 +77,8 @@ func GetClaimMapperFromConfig(config *config.Authorization, logger log.Logger) (
 		return NewNoopClaimMapper(), nil
 	case "test":
 		return NewTestClaimMapper(logger), nil
+	case "simpletls":
+		return NewSimpleTLSClaimMapper(logger), nil
 	case "default":
 		return NewDefaultJWTClaimMapper(NewDefaultTokenKeyProvider(config, logger), config, logger), nil
 	}
