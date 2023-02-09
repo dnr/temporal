@@ -548,8 +548,12 @@ type (
 		PermissionsClaimName string         `yaml:"permissionsClaimName"`
 		// Empty string for noopAuthorizer or "default" for defaultAuthorizer
 		Authorizer string `yaml:"authorizer"`
+		// Extra config for authorizer (implementation-dependent)
+		AuthorizerConfig yaml.Node `yaml:"authorizerConfig"`
 		// Empty string for noopClaimMapper or "default" for defaultJWTClaimMapper
 		ClaimMapper string `yaml:"claimMapper"`
+		// Extra config for claimMapper (implementation-dependent)
+		ClaimMapperConfig yaml.Node `yaml:"claimMapperConfig"`
 	}
 
 	// @@@SNIPSTART temporal-common-service-config-jwtkeyprovider
