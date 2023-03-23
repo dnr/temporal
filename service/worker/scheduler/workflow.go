@@ -204,6 +204,7 @@ func (s *scheduler) run() error {
 			s.logger.Warn("Time went backwards", "from", t1, "to", t2)
 			t2 = t1
 		}
+		fmt.Printf("&&& wf ptr replay %v\n", workflow.IsReplaying(s.ctx))
 		nextWakeup := s.processTimeRange(
 			t1, t2,
 			// resolve this to the schedule's policy as late as possible
@@ -212,6 +213,7 @@ func (s *scheduler) run() error {
 		)
 		s.State.LastProcessedTime = timestamp.TimePtr(t2)
 		// handle signals after processing time range that just elapsed
+		fmt.Printf("&&& wf procsign replay %v\n", workflow.IsReplaying(s.ctx))
 		scheduleChanged := s.processSignals()
 		if scheduleChanged {
 			// need to calculate sleep again
@@ -219,14 +221,18 @@ func (s *scheduler) run() error {
 		}
 		// try starting workflows in the buffer
 		//nolint:revive
+		fmt.Printf("&&& wf processbuffer replay %v\n", workflow.IsReplaying(s.ctx))
 		for s.processBuffer() {
 		}
+		fmt.Printf("&&& wf upmemo replay %v\n", workflow.IsReplaying(s.ctx))
 		s.updateMemoAndSearchAttributes()
 		// sleep returns on any of:
 		// 1. requested time elapsed
 		// 2. we got a signal (update, request, refresh)
 		// 3. a workflow that we were watching finished
+		fmt.Printf("&&& wf sleep replay %v\n", workflow.IsReplaying(s.ctx))
 		s.sleep(nextWakeup)
+		fmt.Printf("&&& wf updtw replay %v\n", workflow.IsReplaying(s.ctx))
 		s.updateTweakables()
 	}
 
@@ -448,6 +454,7 @@ func (s *scheduler) wfWatcherReturned(f workflow.Future) {
 func (s *scheduler) processWatcherResult(id string, f workflow.Future) {
 	var res schedspb.WatchWorkflowResponse
 	err := f.Get(s.ctx, &res)
+	fmt.Printf("&&& wf processWatcherResult %v %v replay %v\n", res, err, workflow.IsReplaying(s.ctx))
 	if err != nil {
 		s.logger.Error("error from workflow watcher future", "workflow", id, "error", err)
 		return
@@ -907,6 +914,7 @@ func (s *scheduler) refreshWorkflows(executions []*commonpb.WorkflowExecution) {
 			FirstExecutionRunId: ex.RunId,
 			LongPoll:            false,
 		}
+		fmt.Printf("&&& wf calling WatchWorkflowRequest %v replay %v\n", req, workflow.IsReplaying(s.ctx))
 		futures[i] = workflow.ExecuteLocalActivity(ctx, s.a.WatchWorkflow, req)
 	}
 	for i, ex := range executions {

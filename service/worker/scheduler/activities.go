@@ -132,7 +132,9 @@ func (a *activities) tryWatchWorkflow(ctx context.Context, req *schedspb.WatchWo
 	}
 	// if long-polling, this will block up for workflow completion to 20s (default) and return
 	// the current mutable state at that point. otherwise it should return immediately.
+	fmt.Printf("@@@ PollMutableState req %#v\n", pollReq)
 	pollRes, err := a.HistoryClient.PollMutableState(ctx, pollReq)
+	fmt.Printf("@@@ PollMutableState res %#v %#v\n", pollRes, err)
 	if err != nil {
 		switch err.(type) {
 		case *serviceerror.NotFound, *serviceerror.NamespaceNotFound:
@@ -179,7 +181,9 @@ func (a *activities) tryWatchWorkflow(ctx context.Context, req *schedspb.WatchWo
 		HistoryEventFilterType: enumspb.HISTORY_EVENT_FILTER_TYPE_CLOSE_EVENT,
 		SkipArchival:           true, // should be recently closed, no need for archival
 	}
+	fmt.Printf("@@@ GetWorkflowExecutionHistory req %#v\n", histReq)
 	histRes, err := a.FrontendClient.GetWorkflowExecutionHistory(ctx, histReq)
+	fmt.Printf("@@@ GetWorkflowExecutionHistory res %#v %#v\n", histRes, err)
 
 	if err != nil {
 		a.Logger.Error("error from GetWorkflowExecutionHistory", tag.Error(err), tag.WorkflowID(req.Execution.WorkflowId))
@@ -233,6 +237,7 @@ func (a *activities) tryWatchWorkflow(ctx context.Context, req *schedspb.WatchWo
 }
 
 func (a *activities) WatchWorkflow(ctx context.Context, req *schedspb.WatchWorkflowRequest) (*schedspb.WatchWorkflowResponse, error) {
+	fmt.Printf("@@@ WatchWorkflow %v\n", req)
 	if !req.LongPoll {
 		// Go SDK currently doesn't set context timeout based on local activity
 		// StartToCloseTimeout if ScheduleToCloseTimeout is set, so add a timeout here.
