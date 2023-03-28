@@ -42,9 +42,11 @@ import (
 	"go.temporal.io/server/common/headers"
 	"go.temporal.io/server/common/log"
 	"go.temporal.io/server/common/log/tag"
+	"go.temporal.io/server/common/metrics"
 	_ "go.temporal.io/server/common/persistence/sql/sqlplugin/mysql"      // needed to load mysql plugin
 	_ "go.temporal.io/server/common/persistence/sql/sqlplugin/postgresql" // needed to load postgresql plugin
 	_ "go.temporal.io/server/common/persistence/sql/sqlplugin/sqlite"     // needed to load sqlite plugin
+	"go.temporal.io/server/common/rpc/encryption"
 	"go.temporal.io/server/temporal"
 )
 
@@ -181,6 +183,14 @@ func buildCLI() *cli.App {
 				if err != nil {
 					return cli.Exit(fmt.Sprintf("Unable to instantiate claim mapper: %v.", err), 1)
 				}
+
+				metricHandler := metrics.MetricsHandlerFromConfig(logger, cfg.Global.Metrics)
+				baseTLS, err := encryption.NewTLSConfigProviderFromConfig(cfg.Global.TLS, metricHandler, logger, nil)
+				if err != nil {
+					return cli.Exit(fmt.Sprintf("Unable to instantiate tls config provider: %v", err), 1)
+				}
+				myTLS := NewClientOnlyTLS(logger, baseTLS)
+
 				s, err := temporal.NewServer(
 					temporal.ForServices(services),
 					temporal.WithConfig(cfg),
@@ -191,6 +201,8 @@ func buildCLI() *cli.App {
 					temporal.WithClaimMapper(func(cfg *config.Config) authorization.ClaimMapper {
 						return claimMapper
 					}),
+					temporal.WithCustomMetricsHandler(metricHandler),
+					temporal.WithTLSConfigFactory(myTLS),
 				)
 				if err != nil {
 					return cli.Exit(fmt.Sprintf("Unable to create server. Error: %v.", err), 1)
