@@ -35,11 +35,12 @@ steps:
           run: db-integration-test
           config: ./develop/buildkite/docker-compose.yml
 
-  - label: ":golang: functional test with cassandra"
+  - label: ":golang: functional test with cassandra [%N/%t]"
     agents:
       queue: "default"
       docker: "*"
-    command: "make functional-test-coverage"
+    command: "make functional-test-coverage TEST_TOTAL_SHARDS=$BUILDKITE_PARALLEL_JOB_COUNT TEST_SHARD_INDEX=$BUILDKITE_PARALLEL_JOB"
+    parallelism: 4
     artifact_paths:
       - ".coverage/*.out"
     retry:
@@ -50,11 +51,12 @@ steps:
           run: integration-test-cassandra
           config: ./develop/buildkite/docker-compose.yml
 
-  - label: ":golang: functional test with cassandra (ES8)"
+  - label: ":golang: functional test with cassandra (ES8) [%N/%t]"
     agents:
       queue: "default"
       docker: "*"
-    command: "make functional-test-coverage"
+    command: "make functional-test-coverage TEST_TOTAL_SHARDS=$BUILDKITE_PARALLEL_JOB_COUNT TEST_SHARD_INDEX=$BUILDKITE_PARALLEL_JOB"
+    parallelism: 4
     artifact_paths:
       - ".coverage/*.out"
     retry:
@@ -111,11 +113,12 @@ steps:
           run: integration-test-xdc-cassandra
           config: ./develop/buildkite/docker-compose.yml
 
-  - label: ":golang: functional test with mysql"
+  - label: ":golang: functional test with mysql [%N/%t]"
     agents:
       queue: "default"
       docker: "*"
-    command: "make functional-test-coverage"
+    command: "make functional-test-coverage TEST_TOTAL_SHARDS=$BUILDKITE_PARALLEL_JOB_COUNT TEST_SHARD_INDEX=$BUILDKITE_PARALLEL_JOB"
+    parallelism: 4
     artifact_paths:
       - ".coverage/*.out"
     retry:
@@ -156,11 +159,12 @@ steps:
           run: integration-test-xdc-mysql
           config: ./develop/buildkite/docker-compose.yml
 
-  - label: ":golang: functional test with mysql 8"
+  - label: ":golang: functional test with mysql 8 [%N/%t]"
     agents:
       queue: "default"
       docker: "*"
-    command: "make functional-test-coverage"
+    command: "make functional-test-coverage TEST_TOTAL_SHARDS=$BUILDKITE_PARALLEL_JOB_COUNT TEST_SHARD_INDEX=$BUILDKITE_PARALLEL_JOB"
+    parallelism: 4
     artifact_paths:
       - ".coverage/*.out"
     retry:
@@ -201,11 +205,12 @@ steps:
           run: integration-test-xdc-mysql8
           config: ./develop/buildkite/docker-compose.yml
 
-  - label: ":golang: functional test with postgresql"
+  - label: ":golang: functional test with postgresql [%N/%t]"
     agents:
       queue: "default"
       docker: "*"
-    command: "make functional-test-coverage"
+    command: "make functional-test-coverage TEST_TOTAL_SHARDS=$BUILDKITE_PARALLEL_JOB_COUNT TEST_SHARD_INDEX=$BUILDKITE_PARALLEL_JOB"
+    parallelism: 4
     artifact_paths:
       - ".coverage/*.out"
     retry:
@@ -246,11 +251,12 @@ steps:
           run: integration-test-xdc-postgresql
           config: ./develop/buildkite/docker-compose.yml
 
-  - label: ":golang: functional test with postgresql 12"
+  - label: ":golang: functional test with postgresql 12 [%N/%t]"
     agents:
       queue: "default"
       docker: "*"
-    command: "make functional-test-coverage"
+    command: "make functional-test-coverage TEST_TOTAL_SHARDS=$BUILDKITE_PARALLEL_JOB_COUNT TEST_SHARD_INDEX=$BUILDKITE_PARALLEL_JOB"
+    parallelism: 4
     artifact_paths:
       - ".coverage/*.out"
     retry:
@@ -291,11 +297,12 @@ steps:
           run: integration-test-xdc-postgresql12
           config: ./develop/buildkite/docker-compose.yml
 
-  - label: ":golang: functional test with sqlite"
+  - label: ":golang: functional test with sqlite [%N/%t]"
     agents:
       queue: "default"
       docker: "*"
-    command: "make functional-test-coverage"
+    command: "make functional-test-coverage TEST_TOTAL_SHARDS=$BUILDKITE_PARALLEL_JOB_COUNT TEST_SHARD_INDEX=$BUILDKITE_PARALLEL_JOB"
+    parallelism: 4
     artifact_paths:
       - ".coverage/*.out"
     retry:
