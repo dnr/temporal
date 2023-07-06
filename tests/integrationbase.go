@@ -36,6 +36,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/dgryski/go-farm"
 	"github.com/pborman/uuid"
 	"github.com/stretchr/testify/suite"
 	"go.temporal.io/api/operatorservice/v1"
@@ -78,6 +79,8 @@ type (
 )
 
 func (s *IntegrationBase) setupSuite(defaultClusterConfigFile string) {
+	s.checkTestShard()
+
 	s.setupLogger()
 
 	clusterConfig, err := GetTestClusterConfig(defaultClusterConfigFile)
@@ -129,6 +132,28 @@ func (s *IntegrationBase) setupLogger() {
 	if s.Logger == nil {
 		s.Logger = log.NewTestLogger()
 	}
+}
+
+// checkTestShard supports test sharding based on environment variables.
+func (s *IntegrationBase) checkTestShard() {
+	totalStr := os.Getenv("TEST_TOTAL_SHARDS")
+	indexStr := os.Getenv("TEST_SHARD_INDEX")
+	if totalStr == "" || indexStr == "" {
+		return
+	}
+	total, err := strconv.Atoi(totalStr)
+	s.NoError(err)
+	s.GreaterOrEqual(total, 1)
+	index, err := strconv.Atoi(indexStr)
+	s.NoError(err)
+	s.GreaterOrEqual(index, 0)
+	s.Less(index, total)
+
+	testIndex := int(farm.Fingerprint32([]byte(s.T().Name()))) % total
+	if testIndex != index {
+		s.T().Skipf("Skipping %s in test shard %d/%d (it runs in %d)", s.T().Name(), index, total, testIndex)
+	}
+	s.T().Logf("Running %s in test shard %d/%d", s.T().Name(), index, total)
 }
 
 // GetTestClusterConfig return test cluster config
