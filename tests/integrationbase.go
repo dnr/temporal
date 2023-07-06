@@ -149,7 +149,12 @@ func (s *IntegrationBase) checkTestShard() {
 	s.GreaterOrEqual(index, 0)
 	s.Less(index, total)
 
-	testIndex := int(farm.Fingerprint32([]byte(s.T().Name()))) % total
+	// This was determined empirically to distribute our existing test names + run times
+	// reasonably well. This can be adjusted from time to time.
+	const salt = "-salt-14"
+
+	nameToHash := s.T().Name() + salt
+	testIndex := int(farm.Fingerprint32([]byte(nameToHash))) % total
 	if testIndex != index {
 		s.T().Skipf("Skipping %s in test shard %d/%d (it runs in %d)", s.T().Name(), index, total, testIndex)
 	}
