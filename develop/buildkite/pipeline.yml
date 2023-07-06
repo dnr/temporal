@@ -39,7 +39,7 @@ steps:
     agents:
       queue: "default"
       docker: "*"
-    command: "make functional-test-coverage TEST_TOTAL_SHARDS=$BUILDKITE_PARALLEL_JOB_COUNT TEST_SHARD_INDEX=$BUILDKITE_PARALLEL_JOB"
+    command: "make functional-test-coverage"
     parallelism: 4
     artifact_paths:
       - ".coverage/*.out"
@@ -55,7 +55,7 @@ steps:
     agents:
       queue: "default"
       docker: "*"
-    command: "make functional-test-coverage TEST_TOTAL_SHARDS=$BUILDKITE_PARALLEL_JOB_COUNT TEST_SHARD_INDEX=$BUILDKITE_PARALLEL_JOB"
+    command: "make functional-test-coverage"
     parallelism: 4
     artifact_paths:
       - ".coverage/*.out"
@@ -117,7 +117,7 @@ steps:
     agents:
       queue: "default"
       docker: "*"
-    command: "make functional-test-coverage TEST_TOTAL_SHARDS=$BUILDKITE_PARALLEL_JOB_COUNT TEST_SHARD_INDEX=$BUILDKITE_PARALLEL_JOB"
+    command: "make functional-test-coverage"
     parallelism: 4
     artifact_paths:
       - ".coverage/*.out"
@@ -163,7 +163,7 @@ steps:
     agents:
       queue: "default"
       docker: "*"
-    command: "make functional-test-coverage TEST_TOTAL_SHARDS=$BUILDKITE_PARALLEL_JOB_COUNT TEST_SHARD_INDEX=$BUILDKITE_PARALLEL_JOB"
+    command: "make functional-test-coverage"
     parallelism: 4
     artifact_paths:
       - ".coverage/*.out"
@@ -209,7 +209,7 @@ steps:
     agents:
       queue: "default"
       docker: "*"
-    command: "make functional-test-coverage TEST_TOTAL_SHARDS=$BUILDKITE_PARALLEL_JOB_COUNT TEST_SHARD_INDEX=$BUILDKITE_PARALLEL_JOB"
+    command: "make functional-test-coverage"
     parallelism: 4
     artifact_paths:
       - ".coverage/*.out"
@@ -255,7 +255,7 @@ steps:
     agents:
       queue: "default"
       docker: "*"
-    command: "make functional-test-coverage TEST_TOTAL_SHARDS=$BUILDKITE_PARALLEL_JOB_COUNT TEST_SHARD_INDEX=$BUILDKITE_PARALLEL_JOB"
+    command: "make functional-test-coverage"
     parallelism: 4
     artifact_paths:
       - ".coverage/*.out"
@@ -301,7 +301,7 @@ steps:
     agents:
       queue: "default"
       docker: "*"
-    command: "make functional-test-coverage TEST_TOTAL_SHARDS=$BUILDKITE_PARALLEL_JOB_COUNT TEST_SHARD_INDEX=$BUILDKITE_PARALLEL_JOB"
+    command: "make functional-test-coverage"
     parallelism: 4
     artifact_paths:
       - ".coverage/*.out"

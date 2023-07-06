@@ -43,6 +43,9 @@ ifdef TEST_TAG
 override TEST_TAG := -tags $(TEST_TAG)
 endif
 
+export TEST_TOTAL_SHARDS ?= $(BUILDKITE_PARALLEL_JOB_COUNT)
+export TEST_SHARD_INDEX ?= $(BUILDKITE_PARALLEL_JOB)
+
 ##### Variables ######
 
 GOBIN := $(if $(shell go env GOBIN),$(shell go env GOBIN),$(GOPATH)/bin)
