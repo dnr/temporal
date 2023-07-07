@@ -319,7 +319,7 @@ steps:
     agents:
       queue: "default"
       docker: "*"
-    command: "./develop/buildkite/scripts/coverage-report.sh"
+    command: "buildkite-agent artifact download '.coverage/*.out' . && make ci-coverage-report"
     artifact_paths:
       - ".coverage/summary.out"
       - ".coverage/summary.out.html"
