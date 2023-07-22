@@ -138,7 +138,7 @@ dispatchLoop:
 				if err == nil {
 					continue dispatchLoop
 				}
-
+				// FIXME: This error could be stickyworkerunavailble here
 				// if task is still valid (truly valid or unable to verify if task is valid)
 				tr.taggedMetricsHandler().Counter(metrics.BufferThrottlePerTaskQueueCounter.GetMetricName()).Record(1)
 				if !errors.Is(err, errUserDataDisabled) && !errors.Is(err, context.DeadlineExceeded) && !errors.Is(err, context.Canceled) {

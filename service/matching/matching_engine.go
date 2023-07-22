@@ -324,19 +324,19 @@ func (e *matchingEngineImpl) AddWorkflowTask(
 		return false, err
 	}
 
-	// do not load sticky task queue if it is not already loaded, which means it has no poller.
 	sticky := stickyInfo.kind == enumspb.TASK_QUEUE_KIND_STICKY
-
+	// do not load sticky task queue if it is not already loaded, which means it has no poller.
 	baseTqm, err := e.getTaskQueueManager(ctx, origTaskQueue, stickyInfo, nil, !sticky)
 	if err != nil {
 		return false, err
-	} else if sticky && (baseTqm == nil || !tqm.HasPollerAfter(time.Now().Add(-stickyPollerUnavailableWindow))) {
+	} else if sticky && (baseTqm == nil || !baseTqm.HasPollerAfter(time.Now().Add(-stickyPollerUnavailableWindow))) {
 		return false, serviceerrors.NewStickyWorkerUnavailable()
 	}
+
 	// We don't need the userDataChanged channel here because:
 	// - if we sync match or sticky worker unavailable, we're done
 	// - if we spool to db, we'll re-resolve when it comes out of the db
-	taskQueue, _, err := baseTqm.RedirectToVersionedQueueForAdd(ctx, addRequest.VersionDirective)
+	tqm, _, err := baseTqm.RedirectToVersionedQueueForAdd(ctx, addRequest.VersionDirective)
 	if err != nil {
 		if errors.Is(err, errUserDataDisabled) {
 			// When user data loading is disabled, we intentionally drop tasks for versioned workflows
@@ -344,16 +344,6 @@ func (e *matchingEngineImpl) AddWorkflowTask(
 			err = nil
 		}
 		return false, err
-	}
-
-	tqm := baseTqm
-	if taskQueue != origTaskQueue {
-		tqm, err = e.getTaskQueueManager(ctx, taskQueue, stickyInfo, baseTqm, !sticky)
-	}
-	if err != nil {
-		return false, err
-	} else if sticky && (tqm == nil || !tqm.HasPollerAfter(time.Now().Add(-stickyPollerUnavailableWindow))) {
-		return false, serviceerrors.NewStickyWorkerUnavailable()
 	}
 
 	// This needs to move to history see - https://go.temporal.io/server/issues/181
@@ -379,7 +369,6 @@ func (e *matchingEngineImpl) AddWorkflowTask(
 		taskInfo:      taskInfo,
 		source:        addRequest.GetSource(),
 		forwardedFrom: addRequest.GetForwardedSource(),
-		baseTqm:       baseTqm,
 	})
 }
 
@@ -405,18 +394,13 @@ func (e *matchingEngineImpl) AddActivityTask(
 	// We don't need the userDataChanged channel here because:
 	// - if we sync match, we're done
 	// - if we spool to db, we'll re-resolve when it comes out of the db
-	taskQueue, _, err := baseTqm.RedirectToVersionedQueueForAdd(ctx, addRequest.VersionDirective)
+	tqm, _, err := baseTqm.RedirectToVersionedQueueForAdd(ctx, addRequest.VersionDirective)
 	if err != nil {
 		if errors.Is(err, errUserDataDisabled) {
 			// When user data loading is disabled, we intentionally drop tasks for versioned workflows
 			// to avoid breaking versioning semantics and dispatching tasks to the wrong workers.
 			err = nil
 		}
-		return false, err
-	}
-
-	tlMgr, err := e.getTaskQueueManager(ctx, taskQueue, stickyInfo, nil, true)
-	if err != nil {
 		return false, err
 	}
 
@@ -437,12 +421,11 @@ func (e *matchingEngineImpl) AddActivityTask(
 		VersionDirective: addRequest.VersionDirective,
 	}
 
-	return tlMgr.AddTask(ctx, addTaskParams{
+	return tqm.AddTask(ctx, addTaskParams{
 		execution:     addRequest.Execution,
 		taskInfo:      taskInfo,
 		source:        addRequest.GetSource(),
 		forwardedFrom: addRequest.GetForwardedSource(),
-		baseTqm:       baseTqm,
 	})
 }
 
@@ -460,16 +443,13 @@ func (e *matchingEngineImpl) DispatchSpooledTask(
 	unversionedOrigTaskQueue := newTaskQueueIDWithVersionSet(origTaskQueue, "")
 	// Redirect and re-resolve if we're blocked in matcher and user data changes.
 	for {
+		// FIXME: think through this if sticky..
+		// 1. always loading is okay, since if we're here at all, then the sticky q must be loaded
 		baseTqm, err := e.getTaskQueueManager(ctx, unversionedOrigTaskQueue, stickyInfo, nil, true)
 		if err != nil {
 			return err
 		}
-		taskQueue, userDataChanged, err := baseTqm.RedirectToVersionedQueueForAdd(ctx, directive)
-		if err != nil {
-			return err
-		}
-		sticky := stickyInfo.kind == enumspb.TASK_QUEUE_KIND_STICKY
-		tqm, err := e.getTaskQueueManager(ctx, taskQueue, stickyInfo, nil, !sticky)
+		tqm, userDataChanged, err := baseTqm.RedirectToVersionedQueueForAdd(ctx, directive)
 		if err != nil {
 			return err
 		}
@@ -698,28 +678,23 @@ func (e *matchingEngineImpl) QueryWorkflow(
 		return nil, err
 	}
 
-	baseTqm, err := e.getTaskQueueManager(ctx, origTaskQueue, stickyInfo, nil, true)
+	sticky := stickyInfo.kind == enumspb.TASK_QUEUE_KIND_STICKY
+	// do not load sticky task queue if it is not already loaded, which means it has no poller.
+	baseTqm, err := e.getTaskQueueManager(ctx, origTaskQueue, stickyInfo, nil, !sticky)
 	if err != nil {
 		return nil, err
+	} else if sticky && (baseTqm == nil || !baseTqm.HasPollerAfter(time.Now().Add(-stickyPollerUnavailableWindow))) {
+		return nil, serviceerrors.NewStickyWorkerUnavailable()
 	}
 	// We don't need the userDataChanged channel here because we either do this sync (local or remote)
 	// or fail with a relatively short timeout.
-	taskQueue, _, err := baseTqm.RedirectToVersionedQueueForAdd(ctx, queryRequest.VersionDirective)
+	tqm, _, err := baseTqm.RedirectToVersionedQueueForAdd(ctx, queryRequest.VersionDirective)
 	if err != nil {
 		if errors.Is(err, errUserDataDisabled) {
 			// Rewrite to nicer error message
 			err = serviceerror.NewFailedPrecondition("Operations on versioned workflows are disabled")
 		}
 		return nil, err
-	}
-
-	sticky := stickyInfo.kind == enumspb.TASK_QUEUE_KIND_STICKY
-	// do not load sticky task queue if it is not already loaded, which means it has no poller.
-	tqm, err := e.getTaskQueueManager(ctx, taskQueue, stickyInfo, nil, !sticky)
-	if err != nil {
-		return nil, err
-	} else if sticky && (tqm == nil || !tqm.HasPollerAfter(time.Now().Add(-stickyPollerUnavailableWindow))) {
-		return nil, serviceerrors.NewStickyWorkerUnavailable()
 	}
 
 	taskID := uuid.New()
@@ -1223,20 +1198,13 @@ func (e *matchingEngineImpl) getTask(
 		return nil, err
 	}
 
-	taskQueue, err := baseTqm.RedirectToVersionedQueueForPoll(pollMetadata.workerVersionCapabilities)
+	tqm, err := baseTqm.RedirectToVersionedQueueForPoll(ctx, pollMetadata.workerVersionCapabilities)
 	if err != nil {
 		if errors.Is(err, errUserDataDisabled) {
 			// Rewrite to nicer error message
 			err = serviceerror.NewFailedPrecondition("Operations on versioned workflows are disabled")
 		}
 		return nil, err
-	}
-	tqm := baseTqm
-	if taskQueue != origTaskQueue {
-		tqm, err = e.getTaskQueueManager(ctx, taskQueue, stickyInfo, baseTqm, true)
-		if err != nil {
-			return nil, err
-		}
 	}
 
 	// We need to set a shorter timeout than the original ctx; otherwise, by the time ctx deadline is

@@ -94,7 +94,6 @@ type (
 		taskInfo      *persistencespb.TaskInfo
 		source        enumsspb.TaskSource
 		forwardedFrom string
-		baseTqm       taskQueueManager
 	}
 
 	stickyInfo struct {
@@ -147,8 +146,8 @@ type (
 		QueueID() *taskQueueID
 		TaskQueueKind() enumspb.TaskQueueKind
 		LongPollExpirationInterval() time.Duration
-		RedirectToVersionedQueueForAdd(context.Context, *taskqueuespb.TaskVersionDirective) (*taskQueueID, chan struct{}, error)
-		RedirectToVersionedQueueForPoll(*commonpb.WorkerVersionCapabilities) (*taskQueueID, error)
+		RedirectToVersionedQueueForAdd(context.Context, *taskqueuespb.TaskVersionDirective) (taskQueueManager, chan struct{}, error)
+		RedirectToVersionedQueueForPoll(context.Context, *commonpb.WorkerVersionCapabilities) (taskQueueManager, error)
 	}
 
 	// Single task queue in memory state
@@ -157,6 +156,7 @@ type (
 		engine      *matchingEngineImpl
 		taskQueueID *taskQueueID
 		stickyInfo
+		versionBaseTqm       taskQueueManager
 		config               *taskQueueConfig
 		db                   *taskQueueDB
 		taskWriter           *taskWriter
@@ -243,6 +243,9 @@ func newTaskQueueManager(
 	tlMgr := &taskQueueManagerImpl{
 		status:               common.DaemonStatusInitialized,
 		engine:               e,
+		taskQueueID:          taskQueue,
+		stickyInfo:           stickyInfo,
+		versionBaseTqm:       versionBaseTqm,
 		namespaceRegistry:    e.namespaceRegistry,
 		matchingClient:       e.matchingClient,
 		metricsHandler:       e.metricsHandler,
@@ -265,6 +268,11 @@ func newTaskQueueManager(
 		tlMgr.pollerHistory = newPollerHistory()
 	}
 
+	// FIXME: link liveness
+	// idea: create a lifecycle context for the whole set and let liveness cancel it.
+	// create all other contexts from that.
+	// can we arrange for that to call unloadFromEngine or Stop without another goroutine?
+	// maybe designate one of them responsible?
 	tlMgr.liveness = newLiveness(
 		clock.NewRealTimeSource(),
 		taskQueueConfig.MaxTaskQueueIdleTime,
@@ -457,7 +465,8 @@ func (c *taskQueueManagerImpl) AddTask(
 	// specific queues could cause them to get stuck behind "compatible" tasks when they should be able to progress
 	// independently.
 	if taskInfo.VersionDirective.GetUseDefault() != nil {
-		err = params.baseTqm.SpoolTask(params)
+		// FIXME: is c.versionBaseTqm guaranteed to be set here? what if it's not?
+		err = c.versionBaseTqm.SpoolTask(params)
 	} else {
 		err = c.SpoolTask(params)
 	}
@@ -762,11 +771,11 @@ func (c *taskQueueManagerImpl) LongPollExpirationInterval() time.Duration {
 	return c.config.LongPollExpirationInterval()
 }
 
-func (c *taskQueueManagerImpl) RedirectToVersionedQueueForPoll(caps *commonpb.WorkerVersionCapabilities) (*taskQueueID, error) {
+func (c *taskQueueManagerImpl) RedirectToVersionedQueueForPoll(ctx context.Context, caps *commonpb.WorkerVersionCapabilities) (taskQueueManager, error) {
 	if !caps.GetUseVersioning() {
 		// Either this task queue is versioned, or there are still some workflows running on
 		// the "unversioned" set.
-		return c.taskQueueID, nil
+		return c, nil
 	}
 	// We don't need the userDataChanged channel here because polls have a timeout and the
 	// client will retry, so if we're blocked on the wrong matcher it'll just take one poll
@@ -786,7 +795,7 @@ func (c *taskQueueManagerImpl) RedirectToVersionedQueueForPoll(caps *commonpb.Wo
 		if unknownBuild {
 			c.recordUnknownBuildPoll(caps.BuildId)
 		}
-		return c.taskQueueID, nil
+		return c, nil
 	}
 
 	versionSet, unknownBuild, err := lookupVersionSetForPoll(data, caps)
@@ -796,10 +805,12 @@ func (c *taskQueueManagerImpl) RedirectToVersionedQueueForPoll(caps *commonpb.Wo
 	if unknownBuild {
 		c.recordUnknownBuildPoll(caps.BuildId)
 	}
-	return newTaskQueueIDWithVersionSet(c.taskQueueID, versionSet), nil
+
+	newId := newTaskQueueIDWithVersionSet(c.taskQueueID, versionSet)
+	return c.engine.getTaskQueueManager(ctx, newId, c.stickyInfo, c, true)
 }
 
-func (c *taskQueueManagerImpl) RedirectToVersionedQueueForAdd(ctx context.Context, directive *taskqueuespb.TaskVersionDirective) (*taskQueueID, chan struct{}, error) {
+func (c *taskQueueManagerImpl) RedirectToVersionedQueueForAdd(ctx context.Context, directive *taskqueuespb.TaskVersionDirective) (taskQueueManager, chan struct{}, error) {
 	var buildId string
 	switch dir := directive.GetValue().(type) {
 	case *taskqueuespb.TaskVersionDirective_UseDefault:
@@ -808,7 +819,7 @@ func (c *taskQueueManagerImpl) RedirectToVersionedQueueForAdd(ctx context.Contex
 		buildId = dir.BuildId
 	default:
 		// Unversioned task, leave on unversioned queue.
-		return c.taskQueueID, nil, nil
+		return c, nil, nil
 	}
 
 	// Have to look up versioning data.
@@ -816,7 +827,7 @@ func (c *taskQueueManagerImpl) RedirectToVersionedQueueForAdd(ctx context.Contex
 	if err != nil {
 		if errors.Is(err, errUserDataDisabled) && buildId == "" {
 			// When user data disabled, send "default" tasks to unversioned queue.
-			return c.taskQueueID, userDataChanged, nil
+			return c, userDataChanged, nil
 		}
 		return nil, nil, err
 	}
@@ -833,13 +844,13 @@ func (c *taskQueueManagerImpl) RedirectToVersionedQueueForAdd(ctx context.Contex
 			// Don't bother persisting the unknown build id in this case: sticky tasks have a
 			// short timeout, so it doesn't matter if they get lost.
 		}
-		return c.taskQueueID, userDataChanged, nil
+		return c, userDataChanged, nil
 	}
 
 	versionSet, unknownBuild, err := lookupVersionSetForAdd(data, buildId)
 	if err == errEmptyVersioningData { // nolint:goerr113
 		// default was requested for an unversioned queue
-		return c.taskQueueID, userDataChanged, nil
+		return c, userDataChanged, nil
 	} else if err != nil {
 		return nil, nil, err
 	}
@@ -857,7 +868,13 @@ func (c *taskQueueManagerImpl) RedirectToVersionedQueueForAdd(ctx context.Contex
 			return nil, nil, err
 		}
 	}
-	return newTaskQueueIDWithVersionSet(c.taskQueueID, versionSet), userDataChanged, nil
+
+	newId := newTaskQueueIDWithVersionSet(c.taskQueueID, versionSet)
+	tqm, err := c.engine.getTaskQueueManager(ctx, newId, c.stickyInfo, c, true)
+	if err != nil {
+		return nil, nil, err
+	}
+	return tqm, userDataChanged, nil
 }
 
 func (c *taskQueueManagerImpl) recordUnknownBuildPoll(buildId string) {
@@ -1044,7 +1061,8 @@ func (c *taskQueueManagerImpl) ensureVersionSetsLoaded(ctx context.Context) {
 	}
 	for _, set := range userData.GetData().GetVersioningData().GetVersionSets() {
 		for _, setId := range set.GetSetIds() {
-			_, _ = c.engine.getTaskQueueManager(ctx, c.taskQueueID.WithVersionSet(setId), c.stickyInfo, c, true)
+			newId := newTaskQueueIDWithVersionSet(c.taskQueueID, setId)
+			_, _ = c.engine.getTaskQueueManager(ctx, newId, c.stickyInfo, c, true)
 		}
 	}
 }
