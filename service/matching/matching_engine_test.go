@@ -289,6 +289,7 @@ func (s *matchingEngineSuite) TestOnlyUnloadMatchingInstance() {
 		context.Background(),
 		queueID,
 		normalStickyInfo,
+		nil,
 		true)
 	s.Require().NoError(err)
 
@@ -304,7 +305,7 @@ func (s *matchingEngineSuite) TestOnlyUnloadMatchingInstance() {
 	s.matchingEngine.unloadTaskQueue(tqm2)
 
 	got, err := s.matchingEngine.getTaskQueueManager(
-		context.Background(), queueID, normalStickyInfo, true)
+		context.Background(), queueID, normalStickyInfo, nil, true)
 	s.Require().NoError(err)
 	s.Require().Same(tqm, got,
 		"Unload call with non-matching taskQueueManager should not cause unload")
@@ -313,7 +314,7 @@ func (s *matchingEngineSuite) TestOnlyUnloadMatchingInstance() {
 	s.matchingEngine.unloadTaskQueue(tqm)
 
 	got, err = s.matchingEngine.getTaskQueueManager(
-		context.Background(), queueID, normalStickyInfo, true)
+		context.Background(), queueID, normalStickyInfo, nil, true)
 	s.Require().NoError(err)
 	s.Require().NotSame(tqm, got,
 		"Unload call with matching incarnation should have caused unload")
@@ -662,7 +663,7 @@ func (s *matchingEngineSuite) TestTaskWriterShutdown() {
 	execution := &commonpb.WorkflowExecution{RunId: runID, WorkflowId: workflowID}
 
 	tlID := newTestTaskQueueID(namespaceID, tl, enumspb.TASK_QUEUE_TYPE_ACTIVITY)
-	tlm, err := s.matchingEngine.getTaskQueueManager(context.Background(), tlID, normalStickyInfo, true)
+	tlm, err := s.matchingEngine.getTaskQueueManager(context.Background(), tlID, normalStickyInfo, nil, true)
 	s.Nil(err)
 
 	addRequest := matchingservice.AddActivityTaskRequest{

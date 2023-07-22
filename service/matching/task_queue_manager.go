@@ -214,6 +214,7 @@ func newTaskQueueManager(
 	taskQueue *taskQueueID,
 	stickyInfo stickyInfo,
 	config *Config,
+	versionBaseTqm taskQueueManager,
 	opts ...taskQueueManagerOpt,
 ) (taskQueueManager, error) {
 	namespaceEntry, err := e.namespaceRegistry.GetNamespaceByID(taskQueue.namespaceID)
@@ -898,6 +899,7 @@ func (c *taskQueueManagerImpl) loadUserData(ctx context.Context) error {
 			// if already loaded, set enabled
 			c.SetUserDataState(userDataEnabled, nil)
 		}
+		c.ensureVersionSetsLoaded(ctx)
 		common.InterruptibleSleep(ctx, c.config.GetUserDataLongPollTimeout())
 	}
 
@@ -935,7 +937,7 @@ func (c *taskQueueManagerImpl) fetchUserData(ctx context.Context) error {
 		return nil
 	}
 
-	// otherwise fetch from parent partition
+	// otherwise fetch from parent partition, or for sticky queue: root of normal queue
 
 	fetchSource, err := c.userDataFetchSource()
 	if err != nil {
@@ -1011,6 +1013,8 @@ func (c *taskQueueManagerImpl) fetchUserData(ctx context.Context) error {
 		_ = backoff.ThrottleRetryContext(ctx, op, c.config.GetUserDataRetryPolicy, nil)
 		elapsed := time.Since(start)
 
+		c.ensureVersionSetsLoaded(ctx)
+
 		// In general, we want to start a new call immediately on completion of the previous
 		// one. But if the remote is broken and returns success immediately, we might end up
 		// spinning. So enforce a minimum wait time that increases as long as we keep getting
@@ -1026,4 +1030,21 @@ func (c *taskQueueManagerImpl) fetchUserData(ctx context.Context) error {
 	}
 
 	return ctx.Err()
+}
+
+func (c *taskQueueManagerImpl) ensureVersionSetsLoaded(ctx context.Context) {
+	// only normal queues have version sets. for sticky we load user data from the parent but
+	// it's not really ours.
+	if c.kind != enumspb.TASK_QUEUE_KIND_NORMAL {
+		return
+	}
+	userData, _, err := c.GetUserData()
+	if err != nil {
+		return
+	}
+	for _, set := range userData.GetData().GetVersioningData().GetVersionSets() {
+		for _, setId := range set.GetSetIds() {
+			_, _ = c.engine.getTaskQueueManager(ctx, c.taskQueueID.WithVersionSet(setId), c.stickyInfo, c, true)
+		}
+	}
 }
