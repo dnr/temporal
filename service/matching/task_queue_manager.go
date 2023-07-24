@@ -29,10 +29,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 	"sync/atomic"
 	"time"
 
 	"go.temporal.io/server/common/clock"
+	"golang.org/x/exp/maps"
 
 	commonpb "go.temporal.io/api/common/v1"
 	enumspb "go.temporal.io/api/enums/v1"
@@ -156,12 +158,19 @@ type (
 		engine      *matchingEngineImpl
 		taskQueueID *taskQueueID
 		stickyInfo
-		versionBaseTqm       taskQueueManager
+
+		// for "base" tqm (unversioned): this will contain versioned tqms
+		versionedTqmsLock sync.Mutex
+		versionedTqms     map[string]taskQueueManager
+
+		// for "versioned" tqm: this will point to the base
+		versionBaseTqm taskQueueManager
+
 		config               *taskQueueConfig
 		db                   *taskQueueDB
 		taskWriter           *taskWriter
 		taskReader           *taskReader // reads tasks from db and async matches it with poller
-		liveness             *liveness
+		liveness             *liveness   // "base" tqm only
 		taskGC               *taskGC
 		taskAckManager       ackManager   // tracks ackLevel for delivered messages
 		matcher              *TaskMatcher // for matching a task producer with a poller
@@ -202,6 +211,12 @@ func withIDBlockAllocator(ibl idBlockAllocator) taskQueueManagerOpt {
 	}
 }
 
+func withVersionBaseTqm(versionBaseTqm taskQueueManager) taskQueueManagerOpt {
+	return func(tqm *taskQueueManagerImpl) {
+		tqm.versionBaseTqm = versionBaseTqm
+	}
+}
+
 func stickyInfoFromTaskQueue(tq *taskqueuepb.TaskQueue) stickyInfo {
 	return stickyInfo{
 		kind:       tq.GetKind(),
@@ -214,7 +229,6 @@ func newTaskQueueManager(
 	taskQueue *taskQueueID,
 	stickyInfo stickyInfo,
 	config *Config,
-	versionBaseTqm taskQueueManager,
 	opts ...taskQueueManagerOpt,
 ) (taskQueueManager, error) {
 	namespaceEntry, err := e.namespaceRegistry.GetNamespaceByID(taskQueue.namespaceID)
@@ -223,6 +237,7 @@ func newTaskQueueManager(
 	}
 	nsName := namespaceEntry.Name()
 
+	// FIXME: maybe move this up?
 	taskQueueConfig := newTaskQueueConfig(taskQueue, config, nsName)
 
 	db := newTaskQueueDB(e.taskManager, e.matchingClient, taskQueue.namespaceID, taskQueue, stickyInfo.kind, e.logger)
@@ -245,7 +260,6 @@ func newTaskQueueManager(
 		engine:               e,
 		taskQueueID:          taskQueue,
 		stickyInfo:           stickyInfo,
-		versionBaseTqm:       versionBaseTqm,
 		namespaceRegistry:    e.namespaceRegistry,
 		matchingClient:       e.matchingClient,
 		metricsHandler:       e.metricsHandler,
@@ -263,21 +277,23 @@ func newTaskQueueManager(
 		initializedError:     future.NewFuture[struct{}](),
 		userDataReady:        future.NewFuture[struct{}](),
 	}
-	// poller history is only kept for the base task queue manager
+
+	// poller history and liveness is only kept for the base task queue manager
 	if !tlMgr.managesSpecificVersionSet() {
 		tlMgr.pollerHistory = newPollerHistory()
+		// FIXME: link liveness
+		// idea: create a lifecycle context for the whole set and let liveness cancel it.
+		// create all other contexts from that.
+		// can we arrange for that to call unloadFromEngine or Stop without another goroutine?
+		// maybe designate one of them responsible?
+		tlMgr.liveness = newLiveness(
+			clock.NewRealTimeSource(),
+			taskQueueConfig.MaxTaskQueueIdleTime,
+			tlMgr.unloadFromEngine,
+		)
+		tlMgr.versionedTqms = make(map[string]taskQueueManager)
 	}
 
-	// FIXME: link liveness
-	// idea: create a lifecycle context for the whole set and let liveness cancel it.
-	// create all other contexts from that.
-	// can we arrange for that to call unloadFromEngine or Stop without another goroutine?
-	// maybe designate one of them responsible?
-	tlMgr.liveness = newLiveness(
-		clock.NewRealTimeSource(),
-		taskQueueConfig.MaxTaskQueueIdleTime,
-		tlMgr.unloadFromEngine,
-	)
 	tlMgr.taskWriter = newTaskWriter(tlMgr)
 	tlMgr.taskReader = newTaskReader(tlMgr)
 
@@ -288,10 +304,18 @@ func newTaskQueueManager(
 		forwardTaskQueue := newTaskQueueIDWithVersionSet(taskQueue, "")
 		fwdr = newForwarder(&taskQueueConfig.forwarderConfig, forwardTaskQueue, stickyInfo.kind, e.matchingClient)
 	}
+
 	tlMgr.matcher = newTaskMatcher(taskQueueConfig, fwdr, tlMgr.taggedMetricsHandler)
+
 	for _, opt := range opts {
 		opt(tlMgr)
 	}
+
+	// This is just to catch bugs, should never happen
+	if tlMgr.managesSpecificVersionSet() && tlMgr.versionBaseTqm == nil {
+		return nil, serviceerror.NewInternal("versioned tqm without base version")
+	}
+
 	return tlMgr, nil
 }
 
@@ -346,6 +370,15 @@ func (c *taskQueueManagerImpl) Stop() {
 	) {
 		return
 	}
+
+	// Stop all versioned tqms
+	c.versionedTqmsLock.Lock()
+	versionedTqms := maps.Values(c.versionedTqms)
+	c.versionedTqmsLock.Unlock()
+	for _, tqm := range versionedTqms {
+		tqm.Stop()
+	}
+
 	// Maybe try to write one final update of ack level and GC some tasks.
 	// Skip the update if we never initialized (ackLevel will be -1 in that case).
 	// Also skip if we're stopping due to lost ownership (the update will fail in that case).
@@ -439,13 +472,28 @@ func (c *taskQueueManagerImpl) AddTask(
 
 	taskInfo := params.taskInfo
 
+	// Try redirect to versioned tqm:
+
+	// We don't need the userDataChanged channel here because:
+	// - if we sync match or sticky worker unavailable, we're done
+	// - if we spool to db, we'll re-resolve when it comes out of the db
+	tqm, _, err := c.RedirectToVersionedQueueForAdd(ctx, taskInfo.VersionDirective)
+	if err != nil {
+		if errors.Is(err, errUserDataDisabled) {
+			// When user data loading is disabled, we intentionally drop tasks for versioned workflows
+			// to avoid breaking versioning semantics and dispatching tasks to the wrong workers.
+			err = nil
+		}
+		return false, err
+	}
+
 	namespaceEntry, err := c.namespaceRegistry.GetNamespaceByID(namespace.ID(taskInfo.GetNamespaceId()))
 	if err != nil {
 		return false, err
 	}
 
 	if namespaceEntry.ActiveInCluster(c.clusterMeta.GetCurrentClusterName()) {
-		syncMatch, err := c.trySyncMatch(ctx, params)
+		syncMatch, err := tqm.trySyncMatch(ctx, params)
 		if syncMatch {
 			return syncMatch, err
 		}
@@ -806,8 +854,7 @@ func (c *taskQueueManagerImpl) RedirectToVersionedQueueForPoll(ctx context.Conte
 		c.recordUnknownBuildPoll(caps.BuildId)
 	}
 
-	newId := newTaskQueueIDWithVersionSet(c.taskQueueID, versionSet)
-	return c.engine.getTaskQueueManager(ctx, newId, c.stickyInfo, c, true)
+	return c.getVersionedTaskQueueManager(ctx, versionSet)
 }
 
 func (c *taskQueueManagerImpl) RedirectToVersionedQueueForAdd(ctx context.Context, directive *taskqueuespb.TaskVersionDirective) (taskQueueManager, chan struct{}, error) {
@@ -869,8 +916,7 @@ func (c *taskQueueManagerImpl) RedirectToVersionedQueueForAdd(ctx context.Contex
 		}
 	}
 
-	newId := newTaskQueueIDWithVersionSet(c.taskQueueID, versionSet)
-	tqm, err := c.engine.getTaskQueueManager(ctx, newId, c.stickyInfo, c, true)
+	tqm, err := c.getVersionedTaskQueueManager(ctx, versionSet)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -1049,6 +1095,36 @@ func (c *taskQueueManagerImpl) fetchUserData(ctx context.Context) error {
 	return ctx.Err()
 }
 
+// This is like matchingEngineImpl.getTaskQueueManager but for versioned tqms within this tqm.
+func (c *taskQueueManagerImpl) getVersionedTaskQueueManager(ctx context.Context, versionSet string) (taskQueueManager, error) {
+	c.versionedTqmsLock.Lock()
+
+	tqm, ok := c.versionedTqms[versionSet]
+	if ok {
+		c.versionedTqmsLock.Unlock()
+		return tqm, nil
+	}
+	var err error
+	newId := newTaskQueueIDWithVersionSet(c.taskQueueID, versionSet)
+	// FIXME: maybe share config?
+	tqm, err = newTaskQueueManager(c.engine, newId, c.stickyInfo, c.engine.config, c.clusterMeta, withVersionBaseTqm(c))
+	if err != nil {
+		c.versionedTqmsLock.Unlock()
+		return nil, err
+	}
+	c.versionedTqms[versionSet] = tqm
+
+	c.versionedTqmsLock.Unlock()
+
+	tqm.Start()
+
+	if err := tqm.WaitUntilInitialized(ctx); err != nil {
+		return nil, err
+	}
+
+	return tqm, nil
+}
+
 func (c *taskQueueManagerImpl) ensureVersionSetsLoaded(ctx context.Context) {
 	// only normal queues have version sets. for sticky we load user data from the parent but
 	// it's not really ours.
@@ -1061,8 +1137,7 @@ func (c *taskQueueManagerImpl) ensureVersionSetsLoaded(ctx context.Context) {
 	}
 	for _, set := range userData.GetData().GetVersioningData().GetVersionSets() {
 		for _, setId := range set.GetSetIds() {
-			newId := newTaskQueueIDWithVersionSet(c.taskQueueID, setId)
-			_, _ = c.engine.getTaskQueueManager(ctx, newId, c.stickyInfo, c, true)
+			_, _ = c.getVersionedTaskQueueManager(ctx, setId)
 		}
 	}
 }

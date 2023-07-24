@@ -430,7 +430,7 @@ func createTestTaskQueueManagerWithConfig(
 	mockHistoryClient.EXPECT().IsWorkflowTaskValid(gomock.Any(), gomock.Any()).Return(&historyservice.IsWorkflowTaskValidResponse{IsValid: true}, nil).AnyTimes()
 	mockHistoryClient.EXPECT().IsActivityTaskValid(gomock.Any(), gomock.Any()).Return(&historyservice.IsActivityTaskValidResponse{IsValid: true}, nil).AnyTimes()
 	me := newMatchingEngine(testOpts.config, tm, mockHistoryClient, logger, mockNamespaceCache, testOpts.matchingClientMock, mockVisibilityManager)
-	tlMgr, err := newTaskQueueManager(me, testOpts.tqId, normalStickyInfo, testOpts.config, nil, opts...)
+	tlMgr, err := newTaskQueueManager(me, testOpts.tqId, normalStickyInfo, testOpts.config, opts...)
 	if err != nil {
 		return nil, err
 	}

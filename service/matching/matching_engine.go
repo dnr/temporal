@@ -264,7 +264,6 @@ func (e *matchingEngineImpl) getTaskQueueManager(
 	ctx context.Context,
 	taskQueue *taskQueueID,
 	stickyInfo stickyInfo,
-	versionBaseTqm taskQueueManager,
 	create bool,
 ) (taskQueueManager, error) {
 	e.taskQueuesLock.RLock()
@@ -281,7 +280,7 @@ func (e *matchingEngineImpl) getTaskQueueManager(
 		tqm, ok = e.taskQueues[*taskQueue]
 		if !ok {
 			var err error
-			tqm, err = newTaskQueueManager(e, taskQueue, stickyInfo, e.config, versionBaseTqm)
+			tqm, err = newTaskQueueManager(e, taskQueue, stickyInfo, e.config)
 			if err != nil {
 				e.taskQueuesLock.Unlock()
 				return nil, err
@@ -319,31 +318,18 @@ func (e *matchingEngineImpl) AddWorkflowTask(
 	taskQueueName := addRequest.TaskQueue.GetName()
 	stickyInfo := stickyInfoFromTaskQueue(addRequest.TaskQueue)
 
-	origTaskQueue, err := newTaskQueueID(namespaceID, taskQueueName, enumspb.TASK_QUEUE_TYPE_WORKFLOW)
+	taskQueue, err := newTaskQueueID(namespaceID, taskQueueName, enumspb.TASK_QUEUE_TYPE_WORKFLOW)
 	if err != nil {
 		return false, err
 	}
 
 	sticky := stickyInfo.kind == enumspb.TASK_QUEUE_KIND_STICKY
 	// do not load sticky task queue if it is not already loaded, which means it has no poller.
-	baseTqm, err := e.getTaskQueueManager(ctx, origTaskQueue, stickyInfo, nil, !sticky)
+	tqm, err := e.getTaskQueueManager(ctx, taskQueue, stickyInfo, !sticky)
 	if err != nil {
 		return false, err
-	} else if sticky && (baseTqm == nil || !baseTqm.HasPollerAfter(time.Now().Add(-stickyPollerUnavailableWindow))) {
+	} else if sticky && (tqm == nil || !tqm.HasPollerAfter(time.Now().Add(-stickyPollerUnavailableWindow))) {
 		return false, serviceerrors.NewStickyWorkerUnavailable()
-	}
-
-	// We don't need the userDataChanged channel here because:
-	// - if we sync match or sticky worker unavailable, we're done
-	// - if we spool to db, we'll re-resolve when it comes out of the db
-	tqm, _, err := baseTqm.RedirectToVersionedQueueForAdd(ctx, addRequest.VersionDirective)
-	if err != nil {
-		if errors.Is(err, errUserDataDisabled) {
-			// When user data loading is disabled, we intentionally drop tasks for versioned workflows
-			// to avoid breaking versioning semantics and dispatching tasks to the wrong workers.
-			err = nil
-		}
-		return false, err
 	}
 
 	// This needs to move to history see - https://go.temporal.io/server/issues/181
@@ -382,25 +368,13 @@ func (e *matchingEngineImpl) AddActivityTask(
 	taskQueueName := addRequest.TaskQueue.GetName()
 	stickyInfo := stickyInfoFromTaskQueue(addRequest.TaskQueue)
 
-	origTaskQueue, err := newTaskQueueID(namespaceID, taskQueueName, enumspb.TASK_QUEUE_TYPE_ACTIVITY)
+	taskQueue, err := newTaskQueueID(namespaceID, taskQueueName, enumspb.TASK_QUEUE_TYPE_ACTIVITY)
 	if err != nil {
 		return false, err
 	}
 
-	baseTqm, err := e.getTaskQueueManager(ctx, origTaskQueue, stickyInfo, nil, true)
+	tqm, err := e.getTaskQueueManager(ctx, taskQueue, stickyInfo, true)
 	if err != nil {
-		return false, err
-	}
-	// We don't need the userDataChanged channel here because:
-	// - if we sync match, we're done
-	// - if we spool to db, we'll re-resolve when it comes out of the db
-	tqm, _, err := baseTqm.RedirectToVersionedQueueForAdd(ctx, addRequest.VersionDirective)
-	if err != nil {
-		if errors.Is(err, errUserDataDisabled) {
-			// When user data loading is disabled, we intentionally drop tasks for versioned workflows
-			// to avoid breaking versioning semantics and dispatching tasks to the wrong workers.
-			err = nil
-		}
 		return false, err
 	}
 
@@ -445,7 +419,7 @@ func (e *matchingEngineImpl) DispatchSpooledTask(
 	for {
 		// FIXME: think through this if sticky..
 		// 1. always loading is okay, since if we're here at all, then the sticky q must be loaded
-		baseTqm, err := e.getTaskQueueManager(ctx, unversionedOrigTaskQueue, stickyInfo, nil, true)
+		baseTqm, err := e.getTaskQueueManager(ctx, unversionedOrigTaskQueue, stickyInfo, true)
 		if err != nil {
 			return err
 		}
@@ -680,7 +654,7 @@ func (e *matchingEngineImpl) QueryWorkflow(
 
 	sticky := stickyInfo.kind == enumspb.TASK_QUEUE_KIND_STICKY
 	// do not load sticky task queue if it is not already loaded, which means it has no poller.
-	baseTqm, err := e.getTaskQueueManager(ctx, origTaskQueue, stickyInfo, nil, !sticky)
+	baseTqm, err := e.getTaskQueueManager(ctx, origTaskQueue, stickyInfo, !sticky)
 	if err != nil {
 		return nil, err
 	} else if sticky && (baseTqm == nil || !baseTqm.HasPollerAfter(time.Now().Add(-stickyPollerUnavailableWindow))) {
@@ -774,7 +748,7 @@ func (e *matchingEngineImpl) DescribeTaskQueue(
 		return nil, err
 	}
 	// FIXME: should we check if this is versioned and try to get a base here?
-	tlMgr, err := e.getTaskQueueManager(ctx, taskQueue, stickyInfo, nil, true)
+	tlMgr, err := e.getTaskQueueManager(ctx, taskQueue, stickyInfo, true)
 	if err != nil {
 		return nil, err
 	}
@@ -838,7 +812,7 @@ func (e *matchingEngineImpl) UpdateWorkerBuildIdCompatibility(
 	if err != nil {
 		return nil, err
 	}
-	tqMgr, err := e.getTaskQueueManager(ctx, taskQueue, normalStickyInfo, nil, true)
+	tqMgr, err := e.getTaskQueueManager(ctx, taskQueue, normalStickyInfo, true)
 	if err != nil {
 		return nil, err
 	}
@@ -937,7 +911,7 @@ func (e *matchingEngineImpl) GetWorkerBuildIdCompatibility(
 	if err != nil {
 		return nil, err
 	}
-	tqMgr, err := e.getTaskQueueManager(ctx, taskQueue, normalStickyInfo, nil, true)
+	tqMgr, err := e.getTaskQueueManager(ctx, taskQueue, normalStickyInfo, true)
 	if err != nil {
 		if _, ok := err.(*serviceerror.NotFound); ok {
 			return &matchingservice.GetWorkerBuildIdCompatibilityResponse{}, nil
@@ -962,7 +936,7 @@ func (e *matchingEngineImpl) GetTaskQueueUserData(
 	if err != nil {
 		return nil, err
 	}
-	tqMgr, err := e.getTaskQueueManager(ctx, taskQueue, normalStickyInfo, nil, true)
+	tqMgr, err := e.getTaskQueueManager(ctx, taskQueue, normalStickyInfo, true)
 	if err != nil {
 		return nil, err
 	}
@@ -1022,7 +996,7 @@ func (e *matchingEngineImpl) ApplyTaskQueueUserDataReplicationEvent(
 	if err != nil {
 		return nil, err
 	}
-	tqMgr, err := e.getTaskQueueManager(ctx, taskQueue, normalStickyInfo, nil, true)
+	tqMgr, err := e.getTaskQueueManager(ctx, taskQueue, normalStickyInfo, true)
 	if err != nil {
 		return nil, err
 	}
@@ -1096,7 +1070,7 @@ func (e *matchingEngineImpl) ForceUnloadTaskQueue(
 	if err != nil {
 		return nil, err
 	}
-	tqm, err := e.getTaskQueueManager(ctx, taskQueue, normalStickyInfo, nil, false)
+	tqm, err := e.getTaskQueueManager(ctx, taskQueue, normalStickyInfo, false)
 	if err != nil {
 		return nil, err
 	}
@@ -1193,7 +1167,7 @@ func (e *matchingEngineImpl) getTask(
 	stickyInfo stickyInfo,
 	pollMetadata *pollMetadata,
 ) (*internalTask, error) {
-	baseTqm, err := e.getTaskQueueManager(ctx, origTaskQueue, stickyInfo, nil, true)
+	baseTqm, err := e.getTaskQueueManager(ctx, origTaskQueue, stickyInfo, true)
 	if err != nil {
 		return nil, err
 	}
