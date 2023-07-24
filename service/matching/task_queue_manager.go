@@ -130,7 +130,7 @@ type (
 		SpoolTask(params addTaskParams) error
 		// DispatchSpooledTask dispatches a task to a poller. When there are no pollers to pick
 		// up the task, this method will return error. Task will not be persisted to db
-		DispatchSpooledTask(ctx context.Context, task *internalTask, userDataChanged chan struct{}) error
+		DispatchSpooledTask(ctx context.Context, task *internalTask) error
 		// DispatchQueryTask will dispatch query to local or remote poller. If forwarded then result or error is returned,
 		// if dispatched to local poller then nil and nil is returned.
 		DispatchQueryTask(ctx context.Context, taskID string, request *matchingservice.QueryWorkflowRequest) (*matchingservice.QueryWorkflowResponse, error)
@@ -139,7 +139,6 @@ type (
 		// UpdateUserData updates user data for this task queue and replicates across clusters if necessary.
 		// Extra care should be taken to avoid mutating the existing data in the update function.
 		UpdateUserData(ctx context.Context, options UserDataUpdateOptions, updateFn UserDataUpdateFunc) error
-		UpdatePollerInfo(pollerIdentity, *pollMetadata)
 		GetAllPollerInfo() []*taskqueuepb.PollerInfo
 		HasPollerAfter(accessTime time.Time) bool
 		// DescribeTaskQueue returns information about the target task queue
@@ -148,8 +147,6 @@ type (
 		QueueID() *taskQueueID
 		TaskQueueKind() enumspb.TaskQueueKind
 		LongPollExpirationInterval() time.Duration
-		RedirectToVersionedQueueForAdd(context.Context, *taskqueuespb.TaskVersionDirective) (taskQueueManager, chan struct{}, error)
-		RedirectToVersionedQueueForPoll(context.Context, *commonpb.WorkerVersionCapabilities) (taskQueueManager, error)
 	}
 
 	// Single task queue in memory state
@@ -161,10 +158,7 @@ type (
 
 		// for "base" tqm (unversioned): this will contain versioned tqms
 		versionedTqmsLock sync.Mutex
-		versionedTqms     map[string]taskQueueManager
-
-		// for "versioned" tqm: this will point to the base
-		versionBaseTqm taskQueueManager
+		versionedTqms     map[string]*taskQueueManagerImpl
 
 		config               *taskQueueConfig
 		db                   *taskQueueDB
@@ -211,12 +205,6 @@ func withIDBlockAllocator(ibl idBlockAllocator) taskQueueManagerOpt {
 	}
 }
 
-func withVersionBaseTqm(versionBaseTqm taskQueueManager) taskQueueManagerOpt {
-	return func(tqm *taskQueueManagerImpl) {
-		tqm.versionBaseTqm = versionBaseTqm
-	}
-}
-
 func stickyInfoFromTaskQueue(tq *taskqueuepb.TaskQueue) stickyInfo {
 	return stickyInfo{
 		kind:       tq.GetKind(),
@@ -230,7 +218,7 @@ func newTaskQueueManager(
 	stickyInfo stickyInfo,
 	config *Config,
 	opts ...taskQueueManagerOpt,
-) (taskQueueManager, error) {
+) (*taskQueueManagerImpl, error) {
 	namespaceEntry, err := e.namespaceRegistry.GetNamespaceByID(taskQueue.namespaceID)
 	if err != nil {
 		return nil, err
@@ -291,7 +279,7 @@ func newTaskQueueManager(
 			taskQueueConfig.MaxTaskQueueIdleTime,
 			tlMgr.unloadFromEngine,
 		)
-		tlMgr.versionedTqms = make(map[string]taskQueueManager)
+		tlMgr.versionedTqms = make(map[string]*taskQueueManagerImpl)
 	}
 
 	tlMgr.taskWriter = newTaskWriter(tlMgr)
@@ -309,11 +297,6 @@ func newTaskQueueManager(
 
 	for _, opt := range opts {
 		opt(tlMgr)
-	}
-
-	// This is just to catch bugs, should never happen
-	if tlMgr.managesSpecificVersionSet() && tlMgr.versionBaseTqm == nil {
-		return nil, serviceerror.NewInternal("versioned tqm without base version")
 	}
 
 	return tlMgr, nil
@@ -455,19 +438,21 @@ func (c *taskQueueManagerImpl) WaitUntilInitialized(ctx context.Context) error {
 // AddTask adds a task to the task queue. This method will first attempt a synchronous
 // match with a poller. When there are no pollers or if ratelimit is exceeded, task will
 // be written to database and later asynchronously matched with a poller
-func (c *taskQueueManagerImpl) AddTask(
+// Note: the receiver is named "baseTqm" in this function to make it clear what's happening
+// on the base tqm and what's happening on the versioned one (if versioned).
+func (baseTqm *taskQueueManagerImpl) AddTask(
 	ctx context.Context,
 	params addTaskParams,
 ) (bool, error) {
 	if params.forwardedFrom == "" {
 		// request sent by history service
-		c.liveness.markAlive()
+		baseTqm.liveness.markAlive()
 	}
 
 	// TODO: make this work for versioned queues too
-	if c.QueueID().IsRoot() && c.QueueID().VersionSet() == "" && !c.HasPollerAfter(time.Now().Add(-noPollerThreshold)) {
+	if baseTqm.QueueID().IsRoot() && !baseTqm.HasPollerAfter(time.Now().Add(-noPollerThreshold)) {
 		// Only checks recent pollers in the root partition
-		c.taggedMetricsHandler.Counter(metrics.NoRecentPollerTasksPerTaskQueueCounter.GetMetricName()).Record(1)
+		baseTqm.taggedMetricsHandler.Counter(metrics.NoRecentPollerTasksPerTaskQueueCounter.GetMetricName()).Record(1)
 	}
 
 	taskInfo := params.taskInfo
@@ -477,7 +462,7 @@ func (c *taskQueueManagerImpl) AddTask(
 	// We don't need the userDataChanged channel here because:
 	// - if we sync match or sticky worker unavailable, we're done
 	// - if we spool to db, we'll re-resolve when it comes out of the db
-	tqm, _, err := c.RedirectToVersionedQueueForAdd(ctx, taskInfo.VersionDirective)
+	tqm, _, err := baseTqm.RedirectToVersionedQueueForAdd(ctx, taskInfo.VersionDirective)
 	if err != nil {
 		if errors.Is(err, errUserDataDisabled) {
 			// When user data loading is disabled, we intentionally drop tasks for versioned workflows
@@ -487,12 +472,14 @@ func (c *taskQueueManagerImpl) AddTask(
 		return false, err
 	}
 
-	namespaceEntry, err := c.namespaceRegistry.GetNamespaceByID(namespace.ID(taskInfo.GetNamespaceId()))
+	// below here almost everything should use tqm and not baseTqm
+
+	namespaceEntry, err := tqm.namespaceRegistry.GetNamespaceByID(namespace.ID(taskInfo.GetNamespaceId()))
 	if err != nil {
 		return false, err
 	}
 
-	if namespaceEntry.ActiveInCluster(c.clusterMeta.GetCurrentClusterName()) {
+	if namespaceEntry.ActiveInCluster(tqm.clusterMeta.GetCurrentClusterName()) {
 		syncMatch, err := tqm.trySyncMatch(ctx, params)
 		if syncMatch {
 			return syncMatch, err
@@ -513,10 +500,9 @@ func (c *taskQueueManagerImpl) AddTask(
 	// specific queues could cause them to get stuck behind "compatible" tasks when they should be able to progress
 	// independently.
 	if taskInfo.VersionDirective.GetUseDefault() != nil {
-		// FIXME: is c.versionBaseTqm guaranteed to be set here? what if it's not?
-		err = c.versionBaseTqm.SpoolTask(params)
+		err = baseTqm.SpoolTask(params)
 	} else {
-		err = c.SpoolTask(params)
+		err = tqm.SpoolTask(params)
 	}
 	return false, err
 }
@@ -534,38 +520,58 @@ func (c *taskQueueManagerImpl) SpoolTask(params addTaskParams) error {
 // Returns error when context deadline is exceeded
 // maxDispatchPerSecond is the max rate at which tasks are allowed
 // to be dispatched from this task queue to pollers
-func (c *taskQueueManagerImpl) GetTask(
+// Note: the receiver is named "baseTqm" in this function to make it clear what's happening
+// on the base tqm and what's happening on the versioned one (if versioned).
+func (baseTqm *taskQueueManagerImpl) GetTask(
 	ctx context.Context,
 	pollMetadata *pollMetadata,
 ) (*internalTask, error) {
-	c.liveness.markAlive()
+	// poller history + current poll count is on base
+	if identity, ok := ctx.Value(identityKey).(string); ok && identity != "" {
+		baseTqm.UpdatePollerInfo(pollerIdentity(identity), pollMetadata)
+		// update timestamp when long poll ends
+		defer baseTqm.UpdatePollerInfo(pollerIdentity(identity), pollMetadata)
+	}
+	baseTqm.currentPolls.Add(1)
+	defer baseTqm.currentPolls.Add(-1)
 
-	c.currentPolls.Add(1)
-	defer c.currentPolls.Add(-1)
-
-	namespaceEntry, err := c.namespaceRegistry.GetNamespaceByID(c.taskQueueID.namespaceID)
+	tqm, err := baseTqm.RedirectToVersionedQueueForPoll(ctx, pollMetadata.workerVersionCapabilities)
 	if err != nil {
+		if errors.Is(err, errUserDataDisabled) {
+			// Rewrite to nicer error message
+			err = serviceerror.NewFailedPrecondition("Operations on versioned workflows are disabled")
+		}
 		return nil, err
 	}
+
+	// liveness is on base
+	baseTqm.liveness.markAlive()
+
+	// below here everything should use tqm and not baseTqm
 
 	// the desired global rate limit for the task queue comes from the
 	// poller, which lives inside the client side worker. There is
 	// one rateLimiter for this entire task queue and as we get polls,
 	// we update the ratelimiter rps if it has changed from the last
 	// value. Last poller wins if different pollers provide different values
-	c.matcher.UpdateRatelimit(pollMetadata.ratePerSecond)
+	tqm.matcher.UpdateRatelimit(pollMetadata.ratePerSecond)
 
-	if !namespaceEntry.ActiveInCluster(c.clusterMeta.GetCurrentClusterName()) {
-		return c.matcher.PollForQuery(ctx, pollMetadata)
-	}
-
-	task, err := c.matcher.Poll(ctx, pollMetadata)
+	namespaceEntry, err := tqm.namespaceRegistry.GetNamespaceByID(baseTqm.taskQueueID.namespaceID)
 	if err != nil {
 		return nil, err
 	}
 
-	task.namespace = c.namespace
-	task.backlogCountHint = c.taskAckManager.getBacklogCountHint
+	if !namespaceEntry.ActiveInCluster(tqm.clusterMeta.GetCurrentClusterName()) {
+		return tqm.matcher.PollForQuery(ctx, pollMetadata)
+	}
+
+	task, err := tqm.matcher.Poll(ctx, pollMetadata)
+	if err != nil {
+		return nil, err
+	}
+
+	task.namespace = tqm.namespace
+	task.backlogCountHint = tqm.taskAckManager.getBacklogCountHint
 	return task, nil
 }
 
@@ -575,20 +581,47 @@ func (c *taskQueueManagerImpl) GetTask(
 func (c *taskQueueManagerImpl) DispatchSpooledTask(
 	ctx context.Context,
 	task *internalTask,
-	userDataChanged chan struct{},
 ) error {
-	return c.matcher.MustOffer(ctx, task, userDataChanged)
+	// This task came from taskReader so task.event is always set here.
+	directive := task.event.GetData().GetVersionDirective()
+
+	// Redirect and re-resolve if we're blocked in matcher and user data changes.
+	for {
+		// FIXME: think through this if sticky..
+		tqm, userDataChanged, err := c.RedirectToVersionedQueueForAdd(ctx, directive)
+		if err != nil {
+			return err
+		}
+		err = tqm.matcher.MustOffer(ctx, task, userDataChanged)
+		if err != errInterrupted { // nolint:goerr113
+			return err
+		}
+	}
 }
 
 // DispatchQueryTask will dispatch query to local or remote poller. If forwarded then result or error is returned,
 // if dispatched to local poller then nil and nil is returned.
-func (c *taskQueueManagerImpl) DispatchQueryTask(
+// Note: the receiver is named "baseTqm" in this function to make it clear what's happening
+// on the base tqm and what's happening on the versioned one (if versioned).
+func (baseTqm *taskQueueManagerImpl) DispatchQueryTask(
 	ctx context.Context,
 	taskID string,
 	request *matchingservice.QueryWorkflowRequest,
 ) (*matchingservice.QueryWorkflowResponse, error) {
+
+	// We don't need the userDataChanged channel here because we either do this sync (local or remote)
+	// or fail with a relatively short timeout.
+	tqm, _, err := baseTqm.RedirectToVersionedQueueForAdd(ctx, request.VersionDirective)
+	if err != nil {
+		if errors.Is(err, errUserDataDisabled) {
+			// Rewrite to nicer error message
+			err = serviceerror.NewFailedPrecondition("Operations on versioned workflows are disabled")
+		}
+		return nil, err
+	}
+
 	task := newInternalQueryTask(taskID, request)
-	return c.matcher.OfferQuery(ctx, task)
+	return tqm.matcher.OfferQuery(ctx, task)
 }
 
 // GetUserData returns the user data for the task queue if any.
@@ -819,7 +852,7 @@ func (c *taskQueueManagerImpl) LongPollExpirationInterval() time.Duration {
 	return c.config.LongPollExpirationInterval()
 }
 
-func (c *taskQueueManagerImpl) RedirectToVersionedQueueForPoll(ctx context.Context, caps *commonpb.WorkerVersionCapabilities) (taskQueueManager, error) {
+func (c *taskQueueManagerImpl) RedirectToVersionedQueueForPoll(ctx context.Context, caps *commonpb.WorkerVersionCapabilities) (*taskQueueManagerImpl, error) {
 	if !caps.GetUseVersioning() {
 		// Either this task queue is versioned, or there are still some workflows running on
 		// the "unversioned" set.
@@ -857,7 +890,7 @@ func (c *taskQueueManagerImpl) RedirectToVersionedQueueForPoll(ctx context.Conte
 	return c.getVersionedTaskQueueManager(ctx, versionSet)
 }
 
-func (c *taskQueueManagerImpl) RedirectToVersionedQueueForAdd(ctx context.Context, directive *taskqueuespb.TaskVersionDirective) (taskQueueManager, chan struct{}, error) {
+func (c *taskQueueManagerImpl) RedirectToVersionedQueueForAdd(ctx context.Context, directive *taskqueuespb.TaskVersionDirective) (*taskQueueManagerImpl, chan struct{}, error) {
 	var buildId string
 	switch dir := directive.GetValue().(type) {
 	case *taskqueuespb.TaskVersionDirective_UseDefault:
@@ -1096,7 +1129,7 @@ func (c *taskQueueManagerImpl) fetchUserData(ctx context.Context) error {
 }
 
 // This is like matchingEngineImpl.getTaskQueueManager but for versioned tqms within this tqm.
-func (c *taskQueueManagerImpl) getVersionedTaskQueueManager(ctx context.Context, versionSet string) (taskQueueManager, error) {
+func (c *taskQueueManagerImpl) getVersionedTaskQueueManager(ctx context.Context, versionSet string) (*taskQueueManagerImpl, error) {
 	c.versionedTqmsLock.Lock()
 
 	tqm, ok := c.versionedTqms[versionSet]
@@ -1106,8 +1139,8 @@ func (c *taskQueueManagerImpl) getVersionedTaskQueueManager(ctx context.Context,
 	}
 	var err error
 	newId := newTaskQueueIDWithVersionSet(c.taskQueueID, versionSet)
-	// FIXME: maybe share config?
-	tqm, err = newTaskQueueManager(c.engine, newId, c.stickyInfo, c.engine.config, c.clusterMeta, withVersionBaseTqm(c))
+	// FIXME: try to share config?
+	tqm, err = newTaskQueueManager(c.engine, newId, c.stickyInfo, c.engine.config, c.clusterMeta)
 	if err != nil {
 		c.versionedTqmsLock.Unlock()
 		return nil, err

@@ -409,29 +409,17 @@ func (e *matchingEngineImpl) DispatchSpooledTask(
 	origTaskQueue *taskQueueID,
 	stickyInfo stickyInfo,
 ) error {
-	taskInfo := task.event.GetData()
-	// This task came from taskReader so task.event is always set here.
-	directive := taskInfo.GetVersionDirective()
+	// FIXME: we can get rid of this entirely probably...
 	// If this came from a versioned queue, ignore the version and re-resolve, in case we're
 	// going to the default and the default changed.
 	unversionedOrigTaskQueue := newTaskQueueIDWithVersionSet(origTaskQueue, "")
-	// Redirect and re-resolve if we're blocked in matcher and user data changes.
-	for {
-		// FIXME: think through this if sticky..
-		// 1. always loading is okay, since if we're here at all, then the sticky q must be loaded
-		baseTqm, err := e.getTaskQueueManager(ctx, unversionedOrigTaskQueue, stickyInfo, true)
-		if err != nil {
-			return err
-		}
-		tqm, userDataChanged, err := baseTqm.RedirectToVersionedQueueForAdd(ctx, directive)
-		if err != nil {
-			return err
-		}
-		err = tqm.DispatchSpooledTask(ctx, task, userDataChanged)
-		if err != errInterrupted { // nolint:goerr113
-			return err
-		}
+	// FIXME: think through this if sticky..
+	// 1. always loading is okay, since if we're here at all, then the sticky q must be loaded
+	tqm, err := e.getTaskQueueManager(ctx, unversionedOrigTaskQueue, stickyInfo, true)
+	if err != nil {
+		return err
 	}
+	return tqm.DispatchSpooledTask(ctx, task)
 }
 
 // PollWorkflowTaskQueue tries to get the workflow task using exponential backoff.
@@ -654,21 +642,11 @@ func (e *matchingEngineImpl) QueryWorkflow(
 
 	sticky := stickyInfo.kind == enumspb.TASK_QUEUE_KIND_STICKY
 	// do not load sticky task queue if it is not already loaded, which means it has no poller.
-	baseTqm, err := e.getTaskQueueManager(ctx, origTaskQueue, stickyInfo, !sticky)
+	tqm, err := e.getTaskQueueManager(ctx, origTaskQueue, stickyInfo, !sticky)
 	if err != nil {
 		return nil, err
-	} else if sticky && (baseTqm == nil || !baseTqm.HasPollerAfter(time.Now().Add(-stickyPollerUnavailableWindow))) {
+	} else if sticky && (tqm == nil || !tqm.HasPollerAfter(time.Now().Add(-stickyPollerUnavailableWindow))) {
 		return nil, serviceerrors.NewStickyWorkerUnavailable()
-	}
-	// We don't need the userDataChanged channel here because we either do this sync (local or remote)
-	// or fail with a relatively short timeout.
-	tqm, _, err := baseTqm.RedirectToVersionedQueueForAdd(ctx, queryRequest.VersionDirective)
-	if err != nil {
-		if errors.Is(err, errUserDataDisabled) {
-			// Rewrite to nicer error message
-			err = serviceerror.NewFailedPrecondition("Operations on versioned workflows are disabled")
-		}
-		return nil, err
 	}
 
 	taskID := uuid.New()
@@ -1167,17 +1145,8 @@ func (e *matchingEngineImpl) getTask(
 	stickyInfo stickyInfo,
 	pollMetadata *pollMetadata,
 ) (*internalTask, error) {
-	baseTqm, err := e.getTaskQueueManager(ctx, origTaskQueue, stickyInfo, true)
+	tqm, err := e.getTaskQueueManager(ctx, origTaskQueue, stickyInfo, true)
 	if err != nil {
-		return nil, err
-	}
-
-	tqm, err := baseTqm.RedirectToVersionedQueueForPoll(ctx, pollMetadata.workerVersionCapabilities)
-	if err != nil {
-		if errors.Is(err, errUserDataDisabled) {
-			// Rewrite to nicer error message
-			err = serviceerror.NewFailedPrecondition("Operations on versioned workflows are disabled")
-		}
 		return nil, err
 	}
 
@@ -1185,18 +1154,12 @@ func (e *matchingEngineImpl) getTask(
 	// reached, instead of emptyTask, context timeout error is returned to the frontend by the rpc stack,
 	// which counts against our SLO. By shortening the timeout by a very small amount, the emptyTask can be
 	// returned to the handler before a context timeout error is generated.
-	ctx, cancel := newChildContext(ctx, baseTqm.LongPollExpirationInterval(), returnEmptyTaskTimeBudget)
+	ctx, cancel := newChildContext(ctx, tqm.LongPollExpirationInterval(), returnEmptyTaskTimeBudget)
 	defer cancel()
 
 	if pollerID, ok := ctx.Value(pollerIDKey).(string); ok && pollerID != "" {
 		e.pollMap.add(pollerID, cancel)
 		defer e.pollMap.remove(pollerID)
-	}
-
-	if identity, ok := ctx.Value(identityKey).(string); ok && identity != "" {
-		baseTqm.UpdatePollerInfo(pollerIdentity(identity), pollMetadata)
-		// update timestamp when long poll ends
-		defer baseTqm.UpdatePollerInfo(pollerIdentity(identity), pollMetadata)
 	}
 
 	return tqm.GetTask(ctx, pollMetadata)
