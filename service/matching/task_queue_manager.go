@@ -270,21 +270,17 @@ func newTaskQueueManager(
 		initializedError:     future.NewFuture[struct{}](),
 		userDataReady:        future.NewFuture[struct{}](),
 	}
+	tlMgr.goroGroup.BaseCtx = tlMgr.callerInfoContext(context.Background())
 
 	// poller history and liveness is only kept for the base task queue manager
 	if !tlMgr.managesSpecificVersionSet() {
+		tlMgr.versionedTqms = make(map[string]*taskQueueManagerImpl)
 		tlMgr.pollerHistory = newPollerHistory()
-		// FIXME: link liveness
-		// idea: create a lifecycle context for the whole set and let liveness cancel it.
-		// create all other contexts from that.
-		// can we arrange for that to call unloadFromEngine or Stop without another goroutine?
-		// maybe designate one of them responsible?
 		tlMgr.liveness = newLiveness(
 			clock.NewRealTimeSource(),
 			taskQueueConfig.MaxTaskQueueIdleTime,
 			tlMgr.unloadFromEngine,
 		)
-		tlMgr.versionedTqms = make(map[string]*taskQueueManagerImpl)
 	}
 
 	tlMgr.taskWriter = newTaskWriter(tlMgr)
@@ -294,6 +290,7 @@ func newTaskQueueManager(
 	if tlMgr.isFowardingAllowed(taskQueue, stickyInfo.kind) {
 		// Forward without version set, the target will resolve the correct version set from
 		// the build id itself. TODO: check if we still need this here after tqm refactoring
+		// FIXME: steal forwarder from base? no, want separate tokens?
 		forwardTaskQueue := newTaskQueueIDWithVersionSet(taskQueue, "")
 		fwdr = newForwarder(&taskQueueConfig.forwarderConfig, forwardTaskQueue, stickyInfo.kind, e.matchingClient)
 	}
@@ -304,8 +301,8 @@ func newTaskQueueManager(
 		opt(tlMgr)
 	}
 
-	if tlMgr.managesSpecificVersionSet() && tlMgr.unversionedTqm == nil {
-		return nil, serviceerror.NewInternal("versioned tqm without base")
+	if tlMgr.managesSpecificVersionSet() != (tlMgr.unversionedTqm != nil) {
+		return nil, serviceerror.NewInternal("inconsistent tqm configuration")
 	}
 
 	return tlMgr, nil
@@ -357,6 +354,11 @@ func (c *taskQueueManagerImpl) Start() {
 }
 
 func (c *taskQueueManagerImpl) Stop() {
+	// FIXME: create a lifecycle context for the whole set and let liveness cancel it.
+	// create all other contexts from that.
+	// can we arrange for that to call unloadFromEngine or Stop without another goroutine?
+	// maybe designate one of them responsible?
+
 	if !atomic.CompareAndSwapInt32(
 		&c.status,
 		common.DaemonStatusStarted,
@@ -390,8 +392,6 @@ func (c *taskQueueManagerImpl) Stop() {
 	if c.liveness != nil {
 		c.liveness.Stop()
 	}
-	c.taskWriter.Stop()
-	c.taskReader.Stop()
 	c.goroGroup.Cancel()
 	c.logger.Info("", tag.LifeCycleStopped)
 	c.taggedMetricsHandler.Counter(metrics.TaskQueueStoppedCounter.GetMetricName()).Record(1)
@@ -601,8 +601,7 @@ func (c *taskQueueManagerImpl) dispatchSpooledTask(
 	// This task came from taskReader so task.event is always set here.
 	directive := task.event.GetData().GetVersionDirective()
 
-	// If we're a versioned tqm, go back to the base to redirect, since versioning
-	// data may have changed.
+	// If we're a versioned tqm, go back to the base to redirect, since versioning data may have changed.
 	baseTqm := c.unversionedTqm
 	if baseTqm == nil {
 		baseTqm = c
@@ -989,8 +988,7 @@ func (c *taskQueueManagerImpl) recordUnknownBuildTask(buildId string) {
 }
 
 func (c *taskQueueManagerImpl) callerInfoContext(ctx context.Context) context.Context {
-	ns, _ := c.namespaceRegistry.GetNamespaceName(c.taskQueueID.namespaceID)
-	return headers.SetCallerInfo(ctx, headers.NewBackgroundCallerInfo(ns.String()))
+	return headers.SetCallerInfo(ctx, headers.NewBackgroundCallerInfo(c.namespace.String()))
 }
 
 func (c *taskQueueManagerImpl) newIOContext() (context.Context, context.CancelFunc) {

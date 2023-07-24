@@ -42,7 +42,6 @@ import (
 	"go.temporal.io/server/common/log/tag"
 	"go.temporal.io/server/common/metrics"
 	"go.temporal.io/server/common/persistence"
-	"go.temporal.io/server/internal/goro"
 )
 
 type (
@@ -72,7 +71,6 @@ type (
 		taskIDBlock  taskIDBlock
 		maxReadLevel int64
 		logger       log.Logger
-		writeLoop    *goro.Handle
 		idAlloc      idBlockAllocator
 	}
 )
@@ -102,28 +100,7 @@ func newTaskWriter(
 }
 
 func (w *taskWriter) Start() {
-	if !atomic.CompareAndSwapInt32(
-		&w.status,
-		common.DaemonStatusInitialized,
-		common.DaemonStatusStarted,
-	) {
-		return
-	}
-
-	w.writeLoop = goro.NewHandle(w.tlMgr.callerInfoContext(context.Background()))
-	w.writeLoop.Go(w.taskWriterLoop)
-}
-
-// Stop stops the taskWriter
-func (w *taskWriter) Stop() {
-	if !atomic.CompareAndSwapInt32(
-		&w.status,
-		common.DaemonStatusStarted,
-		common.DaemonStatusStopped,
-	) {
-		return
-	}
-	w.writeLoop.Cancel()
+	w.tlMgr.goroGroup.Go(w.taskWriterLoop)
 }
 
 func (w *taskWriter) initReadWriteState(ctx context.Context) error {
@@ -148,7 +125,7 @@ func (w *taskWriter) appendTask(
 ) (*persistence.CreateTasksResponse, error) {
 
 	select {
-	case <-w.writeLoop.Done():
+	case <-w.tlMgr.goroGroup.Done():
 		return nil, errShutdown
 	default:
 		// noop
@@ -168,7 +145,7 @@ func (w *taskWriter) appendTask(
 		case r := <-ch:
 			w.tlMgr.metricsHandler.Timer(metrics.TaskWriteLatencyPerTaskQueue.GetMetricName()).Record(time.Since(startTime))
 			return r.persistenceResponse, r.err
-		case <-w.writeLoop.Done():
+		case <-w.tlMgr.goroGroup.Done():
 			// if we are shutting down, this request will never make
 			// it to cassandra, just bail out and fail this request
 			return nil, errShutdown
@@ -258,9 +235,12 @@ writerLoop:
 			}
 
 		case <-ctx.Done():
-			return ctx.Err()
+			break writerLoop
 		}
 	}
+
+	w.tlMgr.doCleanup()
+	return nil
 }
 
 func (w *taskWriter) getWriteBatch(reqs []*writeTaskRequest) []*writeTaskRequest {

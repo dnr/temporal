@@ -28,7 +28,6 @@ import (
 	"context"
 	"errors"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	enumsspb "go.temporal.io/server/api/enums/v1"
@@ -38,7 +37,6 @@ import (
 	"go.temporal.io/server/common/log"
 	"go.temporal.io/server/common/log/tag"
 	"go.temporal.io/server/common/metrics"
-	"go.temporal.io/server/internal/goro"
 )
 
 const (
@@ -53,7 +51,6 @@ type (
 		notifyC       chan struct{}                          // Used as signal to notify pump of new tasks
 		tlMgr         *taskQueueManagerImpl
 		taskValidator taskValidator
-		gorogrp       goro.Group
 
 		backoffTimerLock sync.Mutex
 		backoffTimer     *time.Timer
@@ -80,29 +77,8 @@ func newTaskReader(tlMgr *taskQueueManagerImpl) *taskReader {
 // Start reading pump for the given task queue.
 // The pump fills up taskBuffer from persistence.
 func (tr *taskReader) Start() {
-	if !atomic.CompareAndSwapInt32(
-		&tr.status,
-		common.DaemonStatusInitialized,
-		common.DaemonStatusStarted,
-	) {
-		return
-	}
-
-	tr.gorogrp.Go(tr.dispatchBufferedTasks)
-	tr.gorogrp.Go(tr.getTasksPump)
-}
-
-// Stop pump that fills up taskBuffer from persistence.
-func (tr *taskReader) Stop() {
-	if !atomic.CompareAndSwapInt32(
-		&tr.status,
-		common.DaemonStatusStarted,
-		common.DaemonStatusStopped,
-	) {
-		return
-	}
-
-	tr.gorogrp.Cancel()
+	tr.tlMgr.goroGroup.Go(tr.dispatchBufferedTasks)
+	tr.tlMgr.goroGroup.Go(tr.getTasksPump)
 }
 
 func (tr *taskReader) Signal() {

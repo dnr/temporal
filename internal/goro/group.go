@@ -37,6 +37,7 @@ import (
 // The zero-value of this type is valid. A Group must not be copied after
 // first use.
 type Group struct {
+	BaseCtx  context.Context
 	initOnce sync.Once
 	ctx      context.Context
 	cancel   context.CancelFunc
@@ -73,6 +74,16 @@ func (g *Group) Wait() {
 	g.wg.Wait()
 }
 
+// Done returns a channel that will be closed when the group is canceled.
+func (g *Group) Done() <-chan struct{} {
+	g.initOnce.Do(g.init)
+	return g.ctx.Done()
+}
+
 func (g *Group) init() {
-	g.ctx, g.cancel = context.WithCancel(context.Background())
+	baseCtx := g.BaseCtx
+	if baseCtx == nil {
+		baseCtx = context.Background()
+	}
+	g.ctx, g.cancel = context.WithCancel(baseCtx)
 }

@@ -90,7 +90,7 @@ func TestDeliverBufferTasks(t *testing.T) {
 
 	tests := []func(tlm *taskQueueManagerImpl){
 		func(tlm *taskQueueManagerImpl) { close(tlm.taskReader.taskBuffer) },
-		func(tlm *taskQueueManagerImpl) { tlm.taskReader.gorogrp.Cancel() },
+		func(tlm *taskQueueManagerImpl) { tlm.goroGroup.Cancel() },
 		func(tlm *taskQueueManagerImpl) {
 			rps := 0.1
 			tlm.matcher.UpdateRatelimit(&rps)
@@ -99,15 +99,15 @@ func TestDeliverBufferTasks(t *testing.T) {
 			}
 			err := tlm.matcher.rateLimiter.Wait(context.Background()) // consume the token
 			assert.NoError(t, err)
-			tlm.taskReader.gorogrp.Cancel()
+			tlm.goroGroup.Cancel()
 		},
 	}
 	for _, test := range tests {
 		tlm := mustCreateTestTaskQueueManager(t, controller)
-		tlm.taskReader.gorogrp.Go(tlm.taskReader.dispatchBufferedTasks)
+		tlm.goroGroup.Go(tlm.taskReader.dispatchBufferedTasks)
 		test(tlm)
 		// dispatchBufferedTasks should stop after invocation of the test function
-		tlm.taskReader.gorogrp.Wait()
+		tlm.goroGroup.Wait()
 	}
 }
 
@@ -119,10 +119,10 @@ func TestDeliverBufferTasks_NoPollers(t *testing.T) {
 	tlm.taskReader.taskBuffer <- &persistencespb.AllocatedTaskInfo{
 		Data: &persistencespb.TaskInfo{},
 	}
-	tlm.taskReader.gorogrp.Go(tlm.taskReader.dispatchBufferedTasks)
+	tlm.goroGroup.Go(tlm.taskReader.dispatchBufferedTasks)
 	time.Sleep(100 * time.Millisecond) // let go routine run first and block on tasksForPoll
-	tlm.taskReader.gorogrp.Cancel()
-	tlm.taskReader.gorogrp.Wait()
+	tlm.goroGroup.Cancel()
+	tlm.goroGroup.Wait()
 }
 
 func TestDeliverBufferTasks_DisableUserData_SendsVersionedToUnversioned(t *testing.T) {
@@ -147,7 +147,7 @@ func TestDeliverBufferTasks_DisableUserData_SendsVersionedToUnversioned(t *testi
 
 	tlm.SetInitializedError(nil)
 	tlm.SetUserDataState(userDataDisabled, nil)
-	tlm.taskReader.gorogrp.Go(tlm.taskReader.dispatchBufferedTasks)
+	tlm.goroGroup.Go(tlm.taskReader.dispatchBufferedTasks)
 
 	time.Sleep(3 * taskReaderOfferThrottleWait)
 
@@ -156,8 +156,8 @@ func TestDeliverBufferTasks_DisableUserData_SendsVersionedToUnversioned(t *testi
 	require.NotNil(t, errCount, "nil counter probably means dispatch did not get error and blocked trying to load new tqm")
 	require.GreaterOrEqual(t, errCount.Value(), int64(2))
 
-	tlm.taskReader.gorogrp.Cancel()
-	tlm.taskReader.gorogrp.Wait()
+	tlm.goroGroup.Cancel()
+	tlm.goroGroup.Wait()
 }
 
 func TestDeliverBufferTasks_DisableUserData_SendsDefaultToUnversioned(t *testing.T) {
@@ -182,7 +182,7 @@ func TestDeliverBufferTasks_DisableUserData_SendsDefaultToUnversioned(t *testing
 
 	tlm.SetInitializedError(nil)
 	tlm.SetUserDataState(userDataDisabled, nil)
-	tlm.taskReader.gorogrp.Go(tlm.taskReader.dispatchBufferedTasks)
+	tlm.goroGroup.Go(tlm.taskReader.dispatchBufferedTasks)
 
 	time.Sleep(taskReaderOfferThrottleWait)
 
@@ -190,8 +190,8 @@ func TestDeliverBufferTasks_DisableUserData_SendsDefaultToUnversioned(t *testing
 	errCount := scope.Snapshot().Counters()["test.buffer_throttle_count+"]
 	require.Nil(t, errCount)
 
-	tlm.taskReader.gorogrp.Cancel()
-	tlm.taskReader.gorogrp.Wait()
+	tlm.goroGroup.Cancel()
+	tlm.goroGroup.Wait()
 }
 
 func TestReadLevelForAllExpiredTasksInBatch(t *testing.T) {
@@ -341,8 +341,8 @@ func TestReaderSignaling(t *testing.T) {
 	defer tqm.Stop()
 
 	// shut down the taskReader so it doesn't steal notifications from us
-	tqm.taskReader.gorogrp.Cancel()
-	tqm.taskReader.gorogrp.Wait()
+	tqm.goroGroup.Cancel()
+	tqm.goroGroup.Wait()
 
 	clearNotifications()
 
@@ -559,8 +559,8 @@ func TestAddTaskStandby(t *testing.T) {
 	tlm.Start()
 	// stop taskWriter so that we can check if there's any call to it
 	// otherwise the task persist process is async and hard to test
-	tlm.taskWriter.Stop()
-	<-tlm.taskWriter.writeLoop.Done()
+	tlm.goroGroup.Cancel()
+	<-tlm.goroGroup.Done()
 
 	addTaskParam := addTaskParams{
 		execution: &commonpb.WorkflowExecution{},

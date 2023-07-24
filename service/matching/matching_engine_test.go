@@ -674,7 +674,7 @@ func (s *matchingEngineSuite) TestTaskWriterShutdown() {
 
 	// stop the task writer explicitly
 	tlmImpl := tlm.(*taskQueueManagerImpl)
-	tlmImpl.taskWriter.Stop()
+	tlmImpl.goroGroup.Cancel()
 
 	// now attempt to add a task
 	scheduledEventID := int64(5)
