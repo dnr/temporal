@@ -131,9 +131,8 @@ dispatchLoop:
 					// Don't try to set read level here because it may have been advanced already.
 					continue dispatchLoop
 				}
-
 				taskCtx, cancel := context.WithTimeout(ctx, taskReaderOfferTimeout)
-				err := tr.tlMgr.engine.DispatchSpooledTask(taskCtx, task, tr.tlMgr.taskQueueID, tr.tlMgr.stickyInfo)
+				err := tr.tlMgr.dispatchSpooledTask(ctx, task)
 				cancel()
 				if err == nil {
 					continue dispatchLoop

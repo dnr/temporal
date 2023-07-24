@@ -128,9 +128,6 @@ type (
 		GetTask(ctx context.Context, pollMetadata *pollMetadata) (*internalTask, error)
 		// SpoolTask spools a task to persistence to be matched asynchronously when a poller is available.
 		SpoolTask(params addTaskParams) error
-		// DispatchSpooledTask dispatches a task to a poller. When there are no pollers to pick
-		// up the task, this method will return error. Task will not be persisted to db
-		DispatchSpooledTask(ctx context.Context, task *internalTask) error
 		// DispatchQueryTask will dispatch query to local or remote poller. If forwarded then result or error is returned,
 		// if dispatched to local poller then nil and nil is returned.
 		DispatchQueryTask(ctx context.Context, taskID string, request *matchingservice.QueryWorkflowRequest) (*matchingservice.QueryWorkflowResponse, error)
@@ -159,6 +156,8 @@ type (
 		// for "base" tqm (unversioned): this will contain versioned tqms
 		versionedTqmsLock sync.Mutex
 		versionedTqms     map[string]*taskQueueManagerImpl
+		// for "versioned" tqm: this will point to the base "unversioned" tqm
+		unversionedTqm *taskQueueManagerImpl
 
 		config               *taskQueueConfig
 		db                   *taskQueueDB
@@ -202,6 +201,12 @@ var (
 func withIDBlockAllocator(ibl idBlockAllocator) taskQueueManagerOpt {
 	return func(tqm *taskQueueManagerImpl) {
 		tqm.taskWriter.idAlloc = ibl
+	}
+}
+
+func withBaseTqm(base *taskQueueManagerImpl) taskQueueManagerOpt {
+	return func(tqm *taskQueueManagerImpl) {
+		tqm.unversionedTqm = base
 	}
 }
 
@@ -297,6 +302,10 @@ func newTaskQueueManager(
 
 	for _, opt := range opts {
 		opt(tlMgr)
+	}
+
+	if tlMgr.managesSpecificVersionSet() && tlMgr.unversionedTqm == nil {
+		return nil, serviceerror.NewInternal("versioned tqm without base")
 	}
 
 	return tlMgr, nil
@@ -575,20 +584,26 @@ func (baseTqm *taskQueueManagerImpl) GetTask(
 	return task, nil
 }
 
-// DispatchSpooledTask dispatches a task to a poller. When there are no pollers to pick
+// dispatchSpooledTask dispatches a task to a poller. When there are no pollers to pick
 // up the task or if rate limit is exceeded, this method will return error. Task
 // *will not* be persisted to db
-func (c *taskQueueManagerImpl) DispatchSpooledTask(
+func (c *taskQueueManagerImpl) dispatchSpooledTask(
 	ctx context.Context,
 	task *internalTask,
 ) error {
 	// This task came from taskReader so task.event is always set here.
 	directive := task.event.GetData().GetVersionDirective()
 
-	// Redirect and re-resolve if we're blocked in matcher and user data changes.
+	// If we're a versioned tqm, go back to the base to redirect, since versioning
+	// data may have changed.
+	baseTqm := c.unversionedTqm
+	if baseTqm == nil {
+		baseTqm = c
+	}
+
 	for {
 		// FIXME: think through this if sticky..
-		tqm, userDataChanged, err := c.RedirectToVersionedQueueForAdd(ctx, directive)
+		tqm, userDataChanged, err := baseTqm.RedirectToVersionedQueueForAdd(ctx, directive)
 		if err != nil {
 			return err
 		}
@@ -1140,7 +1155,7 @@ func (c *taskQueueManagerImpl) getVersionedTaskQueueManager(ctx context.Context,
 	var err error
 	newId := newTaskQueueIDWithVersionSet(c.taskQueueID, versionSet)
 	// FIXME: try to share config?
-	tqm, err = newTaskQueueManager(c.engine, newId, c.stickyInfo, c.engine.config, c.clusterMeta)
+	tqm, err = newTaskQueueManager(c.engine, newId, c.stickyInfo, c.engine.config, c.clusterMeta, withBaseTqm(c))
 	if err != nil {
 		c.versionedTqmsLock.Unlock()
 		return nil, err

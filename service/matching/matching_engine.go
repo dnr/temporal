@@ -403,25 +403,6 @@ func (e *matchingEngineImpl) AddActivityTask(
 	})
 }
 
-func (e *matchingEngineImpl) DispatchSpooledTask(
-	ctx context.Context,
-	task *internalTask,
-	origTaskQueue *taskQueueID,
-	stickyInfo stickyInfo,
-) error {
-	// FIXME: we can get rid of this entirely probably...
-	// If this came from a versioned queue, ignore the version and re-resolve, in case we're
-	// going to the default and the default changed.
-	unversionedOrigTaskQueue := newTaskQueueIDWithVersionSet(origTaskQueue, "")
-	// FIXME: think through this if sticky..
-	// 1. always loading is okay, since if we're here at all, then the sticky q must be loaded
-	tqm, err := e.getTaskQueueManager(ctx, unversionedOrigTaskQueue, stickyInfo, true)
-	if err != nil {
-		return err
-	}
-	return tqm.DispatchSpooledTask(ctx, task)
-}
-
 // PollWorkflowTaskQueue tries to get the workflow task using exponential backoff.
 func (e *matchingEngineImpl) PollWorkflowTaskQueue(
 	ctx context.Context,
