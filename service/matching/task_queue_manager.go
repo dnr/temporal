@@ -176,8 +176,8 @@ type (
 		namespace            namespace.Name
 		taggedMetricsHandler metrics.Handler // namespace/taskqueue tagged metric scope
 		// pollerHistory stores poller which poll from this taskqueue in last few minutes
-		pollerHistory    *pollerHistory
-		currentPolls     atomic.Int64
+		pollerHistory    *pollerHistory // "base" tqm only
+		currentPolls     atomic.Int64   // "base" tqm only
 		goroGroup        goro.Group
 		initializedError *future.FutureImpl[struct{}]
 		// userDataReady is fulfilled once versioning data is fetched from the root partition. If this TQ is
@@ -342,7 +342,9 @@ func (c *taskQueueManagerImpl) Start() {
 	) {
 		return
 	}
-	c.liveness.Start()
+	if c.liveness != nil {
+		c.liveness.Start()
+	}
 	c.taskWriter.Start()
 	c.taskReader.Start()
 	if c.db.DbStoresUserData() {
@@ -385,14 +387,18 @@ func (c *taskQueueManagerImpl) Stop() {
 		_ = c.db.UpdateState(ctx, ackLevel)
 		c.taskGC.RunNow(ctx, ackLevel)
 	}
-	c.liveness.Stop()
+	if c.liveness != nil {
+		c.liveness.Stop()
+	}
 	c.taskWriter.Stop()
 	c.taskReader.Stop()
 	c.goroGroup.Cancel()
 	c.logger.Info("", tag.LifeCycleStopped)
 	c.taggedMetricsHandler.Counter(metrics.TaskQueueStoppedCounter.GetMetricName()).Record(1)
-	// This may call Stop again, but the status check above makes that a no-op.
-	c.unloadFromEngine()
+	if !c.managesSpecificVersionSet() {
+		// This may call Stop again, but the status check above makes that a no-op.
+		c.unloadFromEngine()
+	}
 }
 
 // managesSpecificVersionSet returns true if this is a tqm for a specific version set in the build-id-based versioning
@@ -455,6 +461,7 @@ func (baseTqm *taskQueueManagerImpl) AddTask(
 ) (bool, error) {
 	if params.forwardedFrom == "" {
 		// request sent by history service
+		// liveness is on base
 		baseTqm.liveness.markAlive()
 	}
 
@@ -481,7 +488,7 @@ func (baseTqm *taskQueueManagerImpl) AddTask(
 		return false, err
 	}
 
-	// below here almost everything should use tqm and not baseTqm
+	// below here (almost) everything should use tqm and not baseTqm
 
 	namespaceEntry, err := tqm.namespaceRegistry.GetNamespaceByID(namespace.ID(taskInfo.GetNamespaceId()))
 	if err != nil {
@@ -1155,7 +1162,7 @@ func (c *taskQueueManagerImpl) getVersionedTaskQueueManager(ctx context.Context,
 	var err error
 	newId := newTaskQueueIDWithVersionSet(c.taskQueueID, versionSet)
 	// FIXME: try to share config?
-	tqm, err = newTaskQueueManager(c.engine, newId, c.stickyInfo, c.engine.config, c.clusterMeta, withBaseTqm(c))
+	tqm, err = newTaskQueueManager(c.engine, newId, c.stickyInfo, c.engine.config, withBaseTqm(c))
 	if err != nil {
 		c.versionedTqmsLock.Unlock()
 		return nil, err

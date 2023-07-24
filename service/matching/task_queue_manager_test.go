@@ -435,7 +435,7 @@ func createTestTaskQueueManagerWithConfig(
 		return nil, err
 	}
 	me.taskQueues[*testOpts.tqId] = tlMgr
-	return tlMgr.(*taskQueueManagerImpl), nil
+	return tlMgr, nil
 }
 
 func TestDescribeTaskQueue(t *testing.T) {
@@ -1310,9 +1310,8 @@ func TestUserData_FetchesStickyToNormal(t *testing.T) {
 		kind:       enumspb.TASK_QUEUE_KIND_STICKY,
 		normalName: normalName,
 	}
-	tlMgr, err := newTaskQueueManager(me, tqCfg.tqId, stickyInfo, tqCfg.config, nil)
+	tq, err := newTaskQueueManager(me, tqCfg.tqId, stickyInfo, tqCfg.config)
 	require.NoError(t, err)
-	tq := tlMgr.(*taskQueueManagerImpl)
 
 	tq.config.GetUserDataMinWaitTime = 10 * time.Second // wait on success
 	tq.Start()

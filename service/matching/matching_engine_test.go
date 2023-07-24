@@ -828,20 +828,17 @@ func (s *matchingEngineSuite) TestSyncMatchActivities() {
 	mgr, err := newTaskQueueManager(s.matchingEngine, tlID, normalStickyInfo, s.matchingEngine.config)
 	s.NoError(err)
 
-	mgrImpl, ok := mgr.(*taskQueueManagerImpl)
-	s.True(ok)
-
-	mgrImpl.matcher.config.MinTaskThrottlingBurstSize = func() int { return 0 }
-	mgrImpl.matcher.rateLimiter = quotas.NewRateLimiter(
+	mgr.matcher.config.MinTaskThrottlingBurstSize = func() int { return 0 }
+	mgr.matcher.rateLimiter = quotas.NewRateLimiter(
 		defaultTaskDispatchRPS,
 		defaultTaskDispatchRPS,
 	)
-	mgrImpl.matcher.dynamicRateBurst = &dynamicRateBurstWrapper{
+	mgr.matcher.dynamicRateBurst = &dynamicRateBurstWrapper{
 		MutableRateBurst: quotas.NewMutableRateBurst(
 			defaultTaskDispatchRPS,
 			defaultTaskDispatchRPS,
 		),
-		RateLimiterImpl: mgrImpl.matcher.rateLimiter.(*quotas.RateLimiterImpl),
+		RateLimiterImpl: mgr.matcher.rateLimiter.(*quotas.RateLimiterImpl),
 	}
 	s.matchingEngine.updateTaskQueue(tlID, mgr)
 
@@ -1046,18 +1043,17 @@ func (s *matchingEngineSuite) concurrentPublishConsumeActivities(
 	mgr, err := newTaskQueueManager(s.matchingEngine, tlID, normalStickyInfo, s.matchingEngine.config)
 	s.NoError(err)
 
-	mgrImpl := mgr.(*taskQueueManagerImpl)
-	mgrImpl.matcher.config.MinTaskThrottlingBurstSize = func() int { return 0 }
-	mgrImpl.matcher.rateLimiter = quotas.NewRateLimiter(
+	mgr.matcher.config.MinTaskThrottlingBurstSize = func() int { return 0 }
+	mgr.matcher.rateLimiter = quotas.NewRateLimiter(
 		defaultTaskDispatchRPS,
 		defaultTaskDispatchRPS,
 	)
-	mgrImpl.matcher.dynamicRateBurst = &dynamicRateBurstWrapper{
+	mgr.matcher.dynamicRateBurst = &dynamicRateBurstWrapper{
 		MutableRateBurst: quotas.NewMutableRateBurst(
 			defaultTaskDispatchRPS,
 			defaultTaskDispatchRPS,
 		),
-		RateLimiterImpl: mgrImpl.matcher.rateLimiter.(*quotas.RateLimiterImpl),
+		RateLimiterImpl: mgr.matcher.rateLimiter.(*quotas.RateLimiterImpl),
 	}
 	s.matchingEngine.updateTaskQueue(tlID, mgr)
 	mgr.Start()
@@ -1790,11 +1786,8 @@ func (s *matchingEngineSuite) TestTaskQueueManagerGetTaskBatch_ReadBatchDone() {
 	const maxReadLevel = int64(120)
 	config := defaultTestConfig()
 	config.RangeSize = rangeSize
-	tlMgr0, err := newTaskQueueManager(s.matchingEngine, tlID, normalStickyInfo, config)
+	tlMgr, err := newTaskQueueManager(s.matchingEngine, tlID, normalStickyInfo, config)
 	s.NoError(err)
-
-	tlMgr, ok := tlMgr0.(*taskQueueManagerImpl)
-	s.True(ok)
 
 	tlMgr.Start()
 
