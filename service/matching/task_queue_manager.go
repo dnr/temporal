@@ -34,7 +34,6 @@ import (
 	"time"
 
 	"go.temporal.io/server/common/clock"
-	"golang.org/x/exp/maps"
 
 	commonpb "go.temporal.io/api/common/v1"
 	enumspb "go.temporal.io/api/enums/v1"
@@ -270,7 +269,6 @@ func newTaskQueueManager(
 		initializedError:     future.NewFuture[struct{}](),
 		userDataReady:        future.NewFuture[struct{}](),
 	}
-	tlMgr.goroGroup.BaseCtx = tlMgr.callerInfoContext(context.Background())
 
 	// poller history and liveness is only kept for the base task queue manager
 	if !tlMgr.managesSpecificVersionSet() {
@@ -279,7 +277,7 @@ func newTaskQueueManager(
 		tlMgr.liveness = newLiveness(
 			clock.NewRealTimeSource(),
 			taskQueueConfig.MaxTaskQueueIdleTime,
-			tlMgr.unloadFromEngine,
+			tlMgr.unload,
 		)
 	}
 
@@ -305,15 +303,17 @@ func newTaskQueueManager(
 		return nil, serviceerror.NewInternal("inconsistent tqm configuration")
 	}
 
+	// if versioned, share context with base so they can all be canceled at once
+	if tlMgr.unversionedTqm == nil {
+		tlMgr.goroGroup.BaseCtx = tlMgr.callerInfoContext(context.Background())
+	} else {
+		tlMgr.goroGroup.BaseCtx = tlMgr.unversionedTqm.goroGroup.BaseCtx
+	}
+
 	return tlMgr, nil
 }
 
-// unloadFromEngine asks the MatchingEngine to unload this task queue. It will cause Stop to be called.
-func (c *taskQueueManagerImpl) unloadFromEngine() {
-	c.engine.unloadTaskQueue(c)
-}
-
-// signalIfFatal calls unloadFromEngine on this taskQueueManagerImpl instance
+// signalIfFatal calls unload on this taskQueueManagerImpl instance
 // if and only if the supplied error represents a fatal condition, e.g. the
 // existence of another taskQueueManager newer lease. Returns true if the signal
 // is emitted, false otherwise.
@@ -325,7 +325,7 @@ func (c *taskQueueManagerImpl) signalIfFatal(err error) bool {
 	if errors.As(err, &condfail) {
 		c.taggedMetricsHandler.Counter(metrics.ConditionFailedErrorPerTaskQueueCounter.GetMetricName()).Record(1)
 		c.skipFinalUpdate.Store(true)
-		c.unloadFromEngine()
+		c.unload()
 		return true
 	}
 	return false
@@ -353,27 +353,15 @@ func (c *taskQueueManagerImpl) Start() {
 	c.taggedMetricsHandler.Counter(metrics.TaskQueueStartedCounter.GetMetricName()).Record(1)
 }
 
-func (c *taskQueueManagerImpl) Stop() {
-	// FIXME: create a lifecycle context for the whole set and let liveness cancel it.
-	// create all other contexts from that.
-	// can we arrange for that to call unloadFromEngine or Stop without another goroutine?
-	// maybe designate one of them responsible?
+func (c *taskQueueManagerImpl) unload() {
+	// cancelling this context will cause FIXME
+	// FIXME: what if a specific version set gets ownership lost?? shouldn't happen but we
+	// should do something reasonable
+	c.goroGroup.Cancel()
+}
 
-	if !atomic.CompareAndSwapInt32(
-		&c.status,
-		common.DaemonStatusStarted,
-		common.DaemonStatusStopped,
-	) {
-		return
-	}
-
-	// Stop all versioned tqms
-	c.versionedTqmsLock.Lock()
-	versionedTqms := maps.Values(c.versionedTqms)
-	c.versionedTqmsLock.Unlock()
-	for _, tqm := range versionedTqms {
-		tqm.Stop()
-	}
+func (c *taskQueueManagerImpl) doCleanup() {
+	// FIXME: what about versioned tqms?
 
 	// Maybe try to write one final update of ack level and GC some tasks.
 	// Skip the update if we never initialized (ackLevel will be -1 in that case).
@@ -392,12 +380,11 @@ func (c *taskQueueManagerImpl) Stop() {
 	if c.liveness != nil {
 		c.liveness.Stop()
 	}
-	c.goroGroup.Cancel()
 	c.logger.Info("", tag.LifeCycleStopped)
 	c.taggedMetricsHandler.Counter(metrics.TaskQueueStoppedCounter.GetMetricName()).Record(1)
 	if !c.managesSpecificVersionSet() {
 		// This may call Stop again, but the status check above makes that a no-op.
-		c.unloadFromEngine()
+		c.unload()
 	}
 }
 
@@ -415,7 +402,7 @@ func (c *taskQueueManagerImpl) SetInitializedError(err error) {
 		// We can't recover from here without starting over, so unload the whole task queue.
 		// Skip final update since we never initialized.
 		c.skipFinalUpdate.Store(true)
-		c.unloadFromEngine()
+		c.unload()
 	}
 }
 
@@ -436,7 +423,7 @@ func (c *taskQueueManagerImpl) SetUserDataState(userDataState userDataState, fut
 			// We can't recover from here without starting over, so unload the whole task queue.
 			// Skip final update since we never initialized.
 			c.skipFinalUpdate.Store(true)
-			c.unloadFromEngine()
+			c.unload()
 		}
 	}
 }
@@ -778,7 +765,7 @@ func (c *taskQueueManagerImpl) completeTask(task *persistencespb.AllocatedTaskIn
 				tag.WorkflowTaskQueueType(c.taskQueueID.taskType))
 			// Skip final update since persistence is having problems.
 			c.skipFinalUpdate.Store(true)
-			c.unloadFromEngine()
+			c.unload()
 			return
 		}
 		c.taskReader.Signal()
