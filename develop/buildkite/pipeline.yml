@@ -71,7 +71,7 @@ steps:
       queue: "default"
       docker: "*"
     command: "make functional-test-coverage"
-    parallelism: 4
+    parallelism: 3
     artifact_paths:
       - ".coverage/*.out"
     retry:
@@ -88,7 +88,7 @@ steps:
       queue: "default"
       docker: "*"
     command: "make functional-test-coverage"
-    parallelism: 4
+    parallelism: 3
     artifact_paths:
       - ".coverage/*.out"
     retry:
@@ -154,7 +154,7 @@ steps:
       queue: "default"
       docker: "*"
     command: "make functional-test-coverage"
-    parallelism: 4
+    parallelism: 3
     artifact_paths:
       - ".coverage/*.out"
     retry:
@@ -203,7 +203,7 @@ steps:
       queue: "default"
       docker: "*"
     command: "make functional-test-coverage"
-    parallelism: 4
+    parallelism: 3
     artifact_paths:
       - ".coverage/*.out"
     retry:
@@ -252,7 +252,7 @@ steps:
       queue: "default"
       docker: "*"
     command: "make functional-test-coverage"
-    parallelism: 4
+    parallelism: 3
     artifact_paths:
       - ".coverage/*.out"
     retry:
@@ -301,7 +301,7 @@ steps:
       queue: "default"
       docker: "*"
     command: "make functional-test-coverage"
-    parallelism: 4
+    parallelism: 3
     artifact_paths:
       - ".coverage/*.out"
     retry:
@@ -350,7 +350,7 @@ steps:
       queue: "default"
       docker: "*"
     command: "make functional-test-coverage"
-    parallelism: 4
+    parallelism: 3
     artifact_paths:
       - ".coverage/*.out"
     retry:
