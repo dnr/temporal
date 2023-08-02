@@ -151,7 +151,7 @@ func (s *IntegrationBase) checkTestShard() {
 
 	// This was determined empirically to distribute our existing test names + run times
 	// reasonably well. This can be adjusted from time to time.
-	const salt = "-salt-14"
+	const salt = "-salt-10"
 
 	nameToHash := s.T().Name() + salt
 	testIndex := int(farm.Fingerprint32([]byte(nameToHash))) % total

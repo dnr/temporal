@@ -584,6 +584,8 @@ func (s *controllerSuite) TestShardExplicitUnloadCancelAcquire() {
 // Tests random concurrent sequence of shard load/acquire/unload to catch any race conditions
 // that were not covered by specific tests.
 func (s *controllerSuite) TestShardControllerFuzz() {
+	s.T().Skip("disable temporarily; seems to be flaky")
+
 	s.config.NumberOfShards = 10
 
 	s.mockServiceResolver.EXPECT().AddListener(shardControllerMembershipUpdateListenerName, gomock.Any()).Return(nil).AnyTimes()

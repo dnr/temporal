@@ -40,6 +40,31 @@ services:
     environment:
       - discovery.type=single-node
 
+  elasticsearch8:
+    image: elasticsearch:8.0.0
+    networks:
+      services-network:
+        aliases:
+          - elasticsearch8
+    environment:
+      - cluster.routing.allocation.disk.threshold_enabled=true
+      - cluster.routing.allocation.disk.watermark.low=512mb
+      - cluster.routing.allocation.disk.watermark.high=256mb
+      - cluster.routing.allocation.disk.watermark.flood_stage=128mb
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - ES_JAVA_OPTS=-Xms100m -Xmx100m
+
+  opensearch:
+    image: opensearchproject/opensearch:2.6.0
+    networks:
+      services-network:
+        aliases:
+          - opensearch
+    environment:
+      - discovery.type=single-node
+      - plugins.security.disabled=true
+
   build:
     build:
       context: ../..
@@ -106,6 +131,62 @@ services:
     depends_on:
       - cassandra
       - elasticsearch
+    volumes:
+      - ../..:/temporal
+      - /usr/bin/buildkite-agent:/usr/bin/buildkite-agent
+    networks:
+      services-network:
+        aliases:
+          - integration-test
+
+  integration-test-cassandra-es8:
+    build:
+      context: ../..
+      dockerfile: ./develop/buildkite/Dockerfile
+    environment:
+      - "CASSANDRA_SEEDS=cassandra"
+      - "ES_SEEDS=elasticsearch8"
+      - "ES_VERSION=v8"
+      - "PERSISTENCE_TYPE=nosql"
+      - "PERSISTENCE_DRIVER=cassandra"
+      - "TEMPORAL_VERSION_CHECK_DISABLED=1"
+      - BUILDKITE_AGENT_ACCESS_TOKEN
+      - BUILDKITE_JOB_ID
+      - BUILDKITE_BUILD_ID
+      - BUILDKITE_BUILD_NUMBER
+      - BUILDKITE_PARALLEL_JOB
+      - BUILDKITE_PARALLEL_JOB_COUNT
+    depends_on:
+      - cassandra
+      - elasticsearch8
+    volumes:
+      - ../..:/temporal
+      - /usr/bin/buildkite-agent:/usr/bin/buildkite-agent
+    networks:
+      services-network:
+        aliases:
+          - integration-test
+
+  integration-test-cassandra-opensearch:
+    build:
+      context: ../..
+      dockerfile: ./develop/buildkite/Dockerfile
+    environment:
+      - "CASSANDRA_SEEDS=cassandra"
+      - "ES_SEEDS=opensearch"
+      - "ES_VERSION=v8"
+      - "PERSISTENCE_TYPE=nosql"
+      - "PERSISTENCE_DRIVER=cassandra"
+      - "TEMPORAL_VERSION_CHECK_DISABLED=1"
+      - BUILDKITE_AGENT_ACCESS_TOKEN
+      - BUILDKITE_JOB_ID
+      - BUILDKITE_BUILD_ID
+      - BUILDKITE_BUILD_NUMBER
+      - BUILDKITE_PARALLEL_JOB
+      - BUILDKITE_PARALLEL_JOB_COUNT
+    depends_on:
+      - cassandra
+      - opensearch
     volumes:
       - ../..:/temporal
       - /usr/bin/buildkite-agent:/usr/bin/buildkite-agent

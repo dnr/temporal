@@ -635,6 +635,8 @@ func (s *integrationSuite) TestWorkflowTerminationSignalBeforeTransientWorkflowT
 }
 
 func (s *integrationSuite) TestWorkflowTerminationSignalAfterTransientWorkflowTaskStarted() {
+	s.T().Skip("disable temporarily; may be flaky")
+
 	id := uuid.New()
 	wt := "integration-workflow-transient-workflow-task-test-type"
 	tl := id

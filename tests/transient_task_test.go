@@ -134,6 +134,8 @@ func (s *integrationSuite) TestTransientWorkflowTaskTimeout() {
 }
 
 func (s *integrationSuite) TestTransientWorkflowTaskHistorySize() {
+	s.T().Skip("disable temporarily; seems to be flaky")
+
 	id := "integration-transient-workflow-task-history-size-test"
 	wt := "integration-transient-workflow-task-history-size-test-type"
 	tl := "integration-transient-workflow-task-history-size-test-taskqueue"

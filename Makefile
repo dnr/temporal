@@ -9,7 +9,7 @@ bins: temporal-server temporal-cassandra-tool temporal-sql-tool tdbg
 all: update-tools clean proto bins check test
 
 # Used by Buildkite.
-ci-build: bins build-tests ci-update-tools shell-check copyright-check proto go-generate gomodtidy ensure-no-changes
+ci-build-misc: bins ci-update-tools shell-check copyright-check proto go-generate gomodtidy ensure-no-changes
 
 # Delete all build artifacts
 clean: clean-bins clean-test-results
@@ -270,10 +270,6 @@ clean-test-results:
 	@rm -f test.log
 	@go clean -testcache
 
-build-tests:
-	@printf $(COLOR) "Build tests..."
-	@go test -exec="true" -count=0 $(TEST_DIRS)
-
 unit-test: clean-test-results
 	@printf $(COLOR) "Run unit tests..."
 	@go test $(UNIT_TEST_DIRS) -timeout=$(TEST_TIMEOUT) $(TEST_TAG) -race | tee -a test.log
@@ -313,6 +309,10 @@ unit-test-coverage: $(COVER_ROOT)
 integration-test-coverage: $(COVER_ROOT)
 	@printf $(COLOR) "Run integration tests with coverage..."
 	@go test $(INTEGRATION_TEST_DIRS) -timeout=$(TEST_TIMEOUT) $(TEST_TAG) $(INTEGRATION_TEST_COVERPKG) -coverprofile=$(NEW_COVER_PROFILE)
+
+# This should use the same build flags as functional-test-coverage for best build caching.
+pre-build-functional-test-coverage:
+	@go build -race $(TEST_TAG) $(FUNCTIONAL_TEST_COVERPKG) $(FUNCTIONAL_TEST_ROOT)
 
 functional-test-coverage: $(COVER_ROOT)
 	@printf $(COLOR) "Run functional tests with coverage with $(PERSISTENCE_DRIVER) driver..."
