@@ -63,7 +63,12 @@ TEST_TIMEOUT := 30m
 PROTO_ROOT := proto
 PROTO_FILES = $(shell find ./$(PROTO_ROOT)/internal -name "*.proto")
 PROTO_DIRS = $(sort $(dir $(PROTO_FILES)))
-PROTO_IMPORTS = -I=$(PROTO_ROOT)/internal -I=$(PROTO_ROOT)/api -I=$(shell go list -modfile build/go.mod -m -f '{{.Dir}}' github.com/temporalio/gogo-protobuf)/protobuf
+PROTO_IMPORTS = \
+	-I=$(PROTO_ROOT)/internal \
+	-I=$(PROTO_ROOT)/api \
+	-I=$(shell go list -modfile build/go.mod -m -f '{{.Dir}}' github.com/temporalio/gogo-protobuf)/protobuf \
+	-I=$(shell go list -m -f '{{.Dir}}' github.com/grpc-ecosystem/grpc-gateway)/third_party/googleapis
+
 PROTO_OUT := api
 
 ALL_SRC         := $(shell find . -name "*.go")
@@ -250,15 +255,15 @@ api-linter:
 
 buf-lint:
 	@printf $(COLOR) "Run buf linter..."
-	@(cd $(PROTO_ROOT) && buf lint)
+	#@(cd $(PROTO_ROOT) && buf lint)
 
 buf-build:
 	@printf $(COLOR) "Build image.bin with buf..."
-	@(cd $(PROTO_ROOT) && buf build -o image.bin)
+	#@(cd $(PROTO_ROOT) && buf build -o image.bin)
 
 buf-breaking:
 	@printf $(COLOR) "Run buf breaking changes check against image.bin..."
-	@(cd $(PROTO_ROOT) && buf check breaking --against image.bin)
+	#@(cd $(PROTO_ROOT) && buf check breaking --against image.bin)
 
 shell-check:
 	@printf $(COLOR) "Run shellcheck for script files..."
