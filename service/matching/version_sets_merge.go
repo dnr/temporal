@@ -27,34 +27,24 @@ package matching
 import (
 	"sort"
 
+	"golang.org/x/exp/slices"
+
 	persistencespb "go.temporal.io/server/api/persistence/v1"
 	hlc "go.temporal.io/server/common/clock/hybrid_logical_clock"
 )
 
 // Merge and sort two sets of set IDs
 func mergeSetIDs(a []string, b []string) []string {
-	var mergedSetIDs []string
-	seenSetIDs := make(map[string]struct{}, len(a))
-	mergedSetIDs = append(mergedSetIDs, a...)
-	for _, setID := range a {
-		seenSetIDs[setID] = struct{}{}
-	}
-	for _, setID := range b {
-		if _, found := seenSetIDs[setID]; !found {
-			mergedSetIDs = append(mergedSetIDs, setID)
-		}
-	}
-	sort.Strings(mergedSetIDs)
-	return mergedSetIDs
+	merged := append(slices.Clone(a), b...)
+	slices.Sort(merged)
+	return slices.Compact(merged)
 }
 
 // Check if a set contains any of the given set IDs.
 func setContainsSetIDs(set *persistencespb.CompatibleVersionSet, ids []string) bool {
 	for _, needle := range ids {
-		for _, id := range set.SetIds {
-			if needle == id {
-				return true
-			}
+		if slices.Contains(set.SetIds, needle) {
+			return true
 		}
 	}
 	return false
