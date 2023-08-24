@@ -802,7 +802,78 @@ func (s *versioningIntegSuite) dispatchActivityCompatible() {
 	s.Equal("v1.1", out)
 }
 
-func (s *versioningIntegSuite) TestDispatchActivityCrossTQFails() {
+func (s *versioningIntegSuite) TestDispatchActivityCrossTQRegistered() {
+	dc := s.testCluster.host.dcClient
+	defer dc.RemoveOverride(dynamicconfig.MatchingNumTaskqueueReadPartitions)
+	defer dc.RemoveOverride(dynamicconfig.MatchingNumTaskqueueWritePartitions)
+	dc.OverrideValue(dynamicconfig.MatchingNumTaskqueueReadPartitions, 1)
+	dc.OverrideValue(dynamicconfig.MatchingNumTaskqueueWritePartitions, 1)
+
+	tq := s.randomizeStr(s.T().Name())
+	crosstq := s.randomizeStr(s.T().Name())
+	v1 := s.prefixed("v1")
+	v2 := s.prefixed("v2")
+
+	act1 := func() (string, error) { return "v1", nil }
+	act2 := func() (string, error) { return "v2", nil }
+	wf := func(ctx workflow.Context) (string, error) {
+		futCompat := workflow.ExecuteActivity(workflow.WithActivityOptions(ctx, workflow.ActivityOptions{
+			StartToCloseTimeout: 1 * time.Second,
+			TaskQueue:           crosstq,
+			VersioningIntent:    temporal.VersioningIntentCompatible,
+		}), "act")
+		futDefault := workflow.ExecuteActivity(workflow.WithActivityOptions(ctx, workflow.ActivityOptions{
+			StartToCloseTimeout: 1 * time.Second,
+			TaskQueue:           crosstq,
+			VersioningIntent:    temporal.VersioningIntentDefault,
+		}), "act")
+		var valCompat, valDefault string
+		s.NoError(futCompat.Get(ctx, &valCompat))
+		s.NoError(futDefault.Get(ctx, &valDefault))
+		return valCompat + valDefault, nil
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	s.addNewDefaultBuildId(ctx, tq, v1)
+	s.addNewDefaultBuildId(ctx, crosstq, v1)
+	s.addNewDefaultBuildId(ctx, crosstq, v2)
+	s.waitForPropagation(ctx, tq, v1)
+	s.waitForPropagation(ctx, crosstq, v2)
+
+	w1 := worker.New(s.sdkClient, tq, worker.Options{
+		BuildID:                 v1,
+		UseBuildIDForVersioning: true,
+	})
+	w1.RegisterWorkflowWithOptions(wf, workflow.RegisterOptions{Name: "wf"})
+	s.NoError(w1.Start())
+	defer w1.Stop()
+
+	w1cross := worker.New(s.sdkClient, crosstq, worker.Options{
+		BuildID:                 v1,
+		UseBuildIDForVersioning: true,
+	})
+	w1cross.RegisterActivityWithOptions(act1, activity.RegisterOptions{Name: "act"})
+	s.NoError(w1cross.Start())
+	defer w1cross.Stop()
+
+	w2cross := worker.New(s.sdkClient, crosstq, worker.Options{
+		BuildID:                 v2,
+		UseBuildIDForVersioning: true,
+	})
+	w2cross.RegisterActivityWithOptions(act2, activity.RegisterOptions{Name: "act"})
+	s.NoError(w2cross.Start())
+	defer w2cross.Stop()
+
+	run, err := s.sdkClient.ExecuteWorkflow(ctx, sdkclient.StartWorkflowOptions{TaskQueue: tq}, "wf")
+	s.NoError(err)
+	var out string
+	s.NoError(run.Get(ctx, &out))
+	s.Equal("v1v2", out)
+}
+
+func (s *versioningIntegSuite) TestDispatchActivityCrossTQUnregistered() {
 	dc := s.testCluster.host.dcClient
 	defer dc.RemoveOverride(dynamicconfig.MatchingNumTaskqueueReadPartitions)
 	defer dc.RemoveOverride(dynamicconfig.MatchingNumTaskqueueWritePartitions)
@@ -825,38 +896,130 @@ func (s *versioningIntegSuite) TestDispatchActivityCrossTQFails() {
 		return val, nil
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
 	s.addNewDefaultBuildId(ctx, tq, v1)
-	s.addNewDefaultBuildId(ctx, crosstq, v1)
 	s.waitForPropagation(ctx, tq, v1)
-	s.waitForPropagation(ctx, crosstq, v1)
+	// note that v1 is not registered on crosstq
 
 	w1 := worker.New(s.sdkClient, tq, worker.Options{
-		BuildID:                          v1,
-		UseBuildIDForVersioning:          true,
-		MaxConcurrentWorkflowTaskPollers: numPollers,
+		BuildID:                 v1,
+		UseBuildIDForVersioning: true,
 	})
 	w1.RegisterWorkflowWithOptions(wf, workflow.RegisterOptions{Name: "wf"})
 	s.NoError(w1.Start())
 	defer w1.Stop()
 
 	w1cross := worker.New(s.sdkClient, crosstq, worker.Options{
-		BuildID:                          v1,
-		UseBuildIDForVersioning:          true,
-		MaxConcurrentWorkflowTaskPollers: numPollers,
+		BuildID:                 v1,
+		UseBuildIDForVersioning: true,
 	})
 	w1cross.RegisterActivityWithOptions(act, activity.RegisterOptions{Name: "act"})
 	s.NoError(w1cross.Start())
 	defer w1cross.Stop()
 
+	// note that w1cross is polling before we start the workflow so it will sync match
 	run, err := s.sdkClient.ExecuteWorkflow(ctx, sdkclient.StartWorkflowOptions{TaskQueue: tq}, "wf")
 	s.NoError(err)
-
-	// workflow should be terminated by invalid argument
 	var out string
-	s.Error(run.Get(ctx, &out))
+	s.NoError(run.Get(ctx, &out))
+	s.Equal("v1", out)
+}
+
+// Don't rename this test, it may make it less effective (see comments below about merging)
+func (s *versioningIntegSuite) TestDispatchActivityCrossTQUnregisteredPersist() {
+	dc := s.testCluster.host.dcClient
+	defer dc.RemoveOverride(dynamicconfig.MatchingNumTaskqueueReadPartitions)
+	defer dc.RemoveOverride(dynamicconfig.MatchingNumTaskqueueWritePartitions)
+	dc.OverrideValue(dynamicconfig.MatchingNumTaskqueueReadPartitions, 1)
+	dc.OverrideValue(dynamicconfig.MatchingNumTaskqueueWritePartitions, 1)
+
+	tq := s.randomizeStr(s.T().Name())
+	crosstq := s.randomizeStr(s.T().Name())
+	v0 := s.prefixed("v0")
+	v1 := s.prefixed("v1")
+
+	act := func() (string, error) { return "v1", nil }
+	wf := func(ctx workflow.Context) (string, error) {
+		fut := workflow.ExecuteActivity(workflow.WithActivityOptions(ctx, workflow.ActivityOptions{
+			StartToCloseTimeout: 1 * time.Second,
+			TaskQueue:           crosstq,
+			VersioningIntent:    temporal.VersioningIntentCompatible,
+		}), "act")
+		var val string
+		s.NoError(fut.Get(ctx, &val))
+		return val, nil
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	s.addNewDefaultBuildId(ctx, tq, v1)
+	s.addNewDefaultBuildId(ctx, crosstq, v0)
+	s.waitForPropagation(ctx, tq, v1)
+	s.waitForPropagation(ctx, crosstq, v0)
+	// note that v1 is not registered on crosstq yet
+
+	w1 := worker.New(s.sdkClient, tq, worker.Options{
+		BuildID:                 v1,
+		UseBuildIDForVersioning: true,
+	})
+	w1.RegisterWorkflowWithOptions(wf, workflow.RegisterOptions{Name: "wf"})
+	s.NoError(w1.Start())
+	defer w1.Stop()
+
+	// note that crosstq worker (for any version) is not running yet. activity task will get
+	// spooled to guessed version set id.
+	run, err := s.sdkClient.ExecuteWorkflow(ctx, sdkclient.StartWorkflowOptions{TaskQueue: tq}, "wf")
+	s.NoError(err)
+	time.Sleep(100 * time.Millisecond)
+
+	// unload it to make sure it can get reloaded again. first need to get set id.
+	res, err := s.testCluster.host.matchingClient.GetTaskQueueUserData(ctx, &matchingservice.GetTaskQueueUserDataRequest{
+		NamespaceId:   s.getNamespaceID(s.namespace),
+		TaskQueue:     crosstq,
+		TaskQueueType: enumspb.TASK_QUEUE_TYPE_WORKFLOW,
+	})
+	s.NoError(err)
+	v1SetId := res.UserData.Data.VersioningData.VersionSets[0].SetIds[0]
+	crosstqName, _ := tqname.Parse(crosstq)
+	s.unloadActivityTaskQueue(ctx, crosstqName.WithVersionSet(v1SetId).FullName())
+	time.Sleep(10 * time.Millisecond)
+	s.unloadActivityTaskQueue(ctx, crosstqName.FullName())
+	time.Sleep(10 * time.Millisecond)
+
+	// merge v1 to make it compatible with v0. unfortunately we can't control which set id
+	// becomes primary and which is demoted since they're sorted by set id, which is created
+	// from a hash of build id, which is created from a hash of the test name. with the current
+	// name of the test, v1 is the demoted one and v0 is primary, which more thoroughly tests
+	// the unknown build id path.
+	_, err = s.engine.UpdateWorkerBuildIdCompatibility(ctx, &workflowservice.UpdateWorkerBuildIdCompatibilityRequest{
+		Namespace: s.namespace,
+		TaskQueue: crosstq,
+		Operation: &workflowservice.UpdateWorkerBuildIdCompatibilityRequest_MergeSets_{
+			MergeSets: &workflowservice.UpdateWorkerBuildIdCompatibilityRequest_MergeSets{
+				PrimarySetBuildId:   v1,
+				SecondarySetBuildId: v0,
+			},
+		},
+	})
+	s.NoError(err)
+	s.waitForPropagation(ctx, crosstq, v1)
+
+	// now start worker to process task
+	w1cross := worker.New(s.sdkClient, crosstq, worker.Options{
+		BuildID:                 v1,
+		UseBuildIDForVersioning: true,
+	})
+	w1cross.RegisterActivityWithOptions(act, activity.RegisterOptions{Name: "act"})
+	s.NoError(w1cross.Start())
+	defer w1cross.Stop()
+
+	// workflow should proceed
+	var out string
+	s.NoError(run.Get(ctx, &out))
+	s.Equal("v1", out)
 }
 
 func (s *versioningIntegSuite) TestDispatchChildWorkflow() {
@@ -2044,6 +2207,15 @@ func (s *versioningIntegSuite) unloadTaskQueue(ctx context.Context, tq string) {
 		NamespaceId:   s.getNamespaceID(s.namespace),
 		TaskQueue:     tq,
 		TaskQueueType: enumspb.TASK_QUEUE_TYPE_WORKFLOW,
+	})
+	s.Require().NoError(err)
+}
+
+func (s *versioningIntegSuite) unloadActivityTaskQueue(ctx context.Context, tq string) {
+	_, err := s.testCluster.GetMatchingClient().ForceUnloadTaskQueue(ctx, &matchingservice.ForceUnloadTaskQueueRequest{
+		NamespaceId:   s.getNamespaceID(s.namespace),
+		TaskQueue:     tq,
+		TaskQueueType: enumspb.TASK_QUEUE_TYPE_ACTIVITY,
 	})
 	s.Require().NoError(err)
 }
