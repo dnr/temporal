@@ -2076,6 +2076,7 @@ func (ms *MutableStateImpl) addResetPointFromCompletion(
 		// Nothing to do here
 		return false
 	}
+	// FIXME: check for contains first to avoid silly allocation?
 	exeInfo := ms.executionInfo
 	var resetPoints []*workflowpb.ResetPointInfo
 	if exeInfo.AutoResetPoints != nil && exeInfo.AutoResetPoints.Points != nil {
@@ -3767,6 +3768,7 @@ func rolloverAutoResetPointsWithExpiringTime(
 	now time.Time,
 	namespaceRetention time.Duration,
 ) *workflowpb.ResetPoints {
+	// FIXME: should this expire points here?
 
 	if resetPoints == nil || resetPoints.Points == nil {
 		return resetPoints
