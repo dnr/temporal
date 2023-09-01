@@ -73,7 +73,7 @@ func (t *MatcherTestSuite) SetupTest() {
 
 	n := mustFromBaseName("tl0").WithPartition(1)
 	t.taskQueue = newTestTaskQueueID(namespace.ID(uuid.New()), n.FullName(), enumspb.TASK_QUEUE_TYPE_WORKFLOW)
-	tlCfg := newTaskQueueConfig(t.taskQueue, cfg, "test-namespace")
+	tlCfg := newTaskQueueConfig(t.taskQueue, normalStickyInfo, cfg, "test-namespace")
 	tlCfg.forwarderConfig = forwarderConfig{
 		ForwarderMaxOutstandingPolls: func() int { return 1 },
 		ForwarderMaxOutstandingTasks: func() int { return 1 },
@@ -85,7 +85,7 @@ func (t *MatcherTestSuite) SetupTest() {
 	t.matcher = newTaskMatcher(tlCfg, t.fwdr, metrics.NoopMetricsHandler)
 
 	rootTaskQueue := newTestTaskQueueID(t.taskQueue.namespaceID, mustParent(t.taskQueue.Name, 20).FullName(), enumspb.TASK_QUEUE_TYPE_WORKFLOW)
-	rootTaskqueueCfg := newTaskQueueConfig(rootTaskQueue, cfg, "test-namespace")
+	rootTaskqueueCfg := newTaskQueueConfig(rootTaskQueue, normalStickyInfo, cfg, "test-namespace")
 	t.rootMatcher = newTaskMatcher(rootTaskqueueCfg, nil, metrics.NoopMetricsHandler)
 }
 

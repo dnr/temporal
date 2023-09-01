@@ -428,6 +428,10 @@ const (
 	MatchingLongPollExpirationInterval = "matching.longPollExpirationInterval"
 	// MatchingSyncMatchWaitDuration is to wait time for sync match
 	MatchingSyncMatchWaitDuration = "matching.syncMatchWaitDuration"
+	// MatchingStickySyncMatchWaitDuration is to wait time for sync match for sticky queues (defaults to MatchingSyncMatchWaitDuration)
+	MatchingStickySyncMatchWaitDuration = "matching.stickySyncMatchWaitDuration"
+	// MatchingStickySyncMatchOnly disables async matching for sticky queues (will go to regular queue if sync match fails)
+	MatchingStickySyncMatchOnly = "matching.stickySyncMatchOnly"
 	// MatchingLoadUserData can be used to entirely disable loading user data from persistence (and the inter node RPCs
 	// that propoagate it). When turned off, features that rely on user data (e.g. worker versioning) will essentially
 	// be disabled. When disabled, matching will drop tasks for versioned workflows and activities to avoid breaking

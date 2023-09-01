@@ -225,7 +225,7 @@ func newTaskQueueManager(
 	}
 	nsName := namespaceEntry.Name()
 
-	taskQueueConfig := newTaskQueueConfig(taskQueue, config, nsName)
+	taskQueueConfig := newTaskQueueConfig(taskQueue, stickyInfo, config, nsName)
 
 	db := newTaskQueueDB(e.taskManager, e.matchingRawClient, taskQueue.namespaceID, taskQueue, stickyInfo.kind, e.logger)
 	logger := log.With(e.logger,
@@ -446,6 +446,8 @@ func (c *taskQueueManagerImpl) AddTask(
 		syncMatch, err := c.trySyncMatch(ctx, params)
 		if syncMatch {
 			return syncMatch, err
+		} else if c.kind == enumspb.TASK_QUEUE_KIND_STICKY && c.config.StickySyncMatchOnly() {
+			return false, serviceerrors.NewStickyWorkerUnavailable()
 		}
 	}
 
@@ -718,7 +720,16 @@ func (c *taskQueueManagerImpl) trySyncMatch(ctx context.Context, params addTaskP
 	if params.forwardedFrom == "" && c.config.TestDisableSyncMatch() {
 		return false, nil
 	}
-	childCtx, cancel := newChildContext(ctx, c.config.SyncMatchWaitDuration(), time.Second)
+
+	var waitTime time.Duration
+	if c.kind == enumspb.TASK_QUEUE_KIND_STICKY {
+		waitTime = c.config.StickySyncMatchWaitDuration()
+	}
+	if waitTime == 0 {
+		waitTime = c.config.SyncMatchWaitDuration()
+	}
+
+	childCtx, cancel := newChildContext(ctx, waitTime, time.Second)
 	defer cancel()
 
 	// Use fake TaskId for sync match as it hasn't been allocated yet

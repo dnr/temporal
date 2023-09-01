@@ -27,6 +27,7 @@ package matching
 import (
 	"time"
 
+	"go.temporal.io/api/enums/v1"
 	"go.temporal.io/server/common"
 	"go.temporal.io/server/common/backoff"
 	"go.temporal.io/server/common/dynamicconfig"
@@ -46,6 +47,8 @@ type (
 		EnablePersistencePriorityRateLimiting dynamicconfig.BoolPropertyFn
 		PersistenceDynamicRateLimitingParams  dynamicconfig.MapPropertyFn
 		SyncMatchWaitDuration                 dynamicconfig.DurationPropertyFnWithTaskQueueInfoFilters
+		StickySyncMatchWaitDuration           dynamicconfig.DurationPropertyFnWithTaskQueueInfoFilters
+		StickySyncMatchOnly                   dynamicconfig.BoolPropertyFnWithTaskQueueInfoFilters
 		TestDisableSyncMatch                  dynamicconfig.BoolPropertyFn
 		RPS                                   dynamicconfig.IntPropertyFn
 		OperatorRPSRatio                      dynamicconfig.FloatPropertyFn
@@ -100,8 +103,10 @@ type (
 
 	taskQueueConfig struct {
 		forwarderConfig
-		SyncMatchWaitDuration func() time.Duration
-		TestDisableSyncMatch  func() bool
+		SyncMatchWaitDuration       func() time.Duration
+		StickySyncMatchWaitDuration func() time.Duration
+		StickySyncMatchOnly         func() bool
+		TestDisableSyncMatch        func() bool
 		// Time to hold a poll request before returning an empty response if there are no tasks
 		LongPollExpirationInterval func() time.Duration
 		RangeSize                  int64
@@ -162,6 +167,8 @@ func NewConfig(
 		EnablePersistencePriorityRateLimiting: dc.GetBoolProperty(dynamicconfig.MatchingEnablePersistencePriorityRateLimiting, true),
 		PersistenceDynamicRateLimitingParams:  dc.GetMapProperty(dynamicconfig.MatchingPersistenceDynamicRateLimitingParams, dynamicconfig.DefaultDynamicRateLimitingParams),
 		SyncMatchWaitDuration:                 dc.GetDurationPropertyFilteredByTaskQueueInfo(dynamicconfig.MatchingSyncMatchWaitDuration, 200*time.Millisecond),
+		StickySyncMatchWaitDuration:           dc.GetDurationPropertyFilteredByTaskQueueInfo(dynamicconfig.MatchingStickySyncMatchWaitDuration, 0*time.Millisecond),
+		StickySyncMatchOnly:                   dc.GetBoolPropertyFilteredByTaskQueueInfo(dynamicconfig.MatchingStickySyncMatchOnly, false),
 		TestDisableSyncMatch:                  dc.GetBoolProperty(dynamicconfig.TestMatchingDisableSyncMatch, false),
 		LoadUserData:                          dc.GetBoolPropertyFilteredByTaskQueueInfo(dynamicconfig.MatchingLoadUserData, true),
 		RPS:                                   dc.GetIntProperty(dynamicconfig.MatchingRPS, 1200),
@@ -199,8 +206,18 @@ func NewConfig(
 	}
 }
 
-func newTaskQueueConfig(id *taskQueueID, config *Config, namespace namespace.Name) *taskQueueConfig {
-	taskQueueName := id.BaseNameString()
+func newTaskQueueConfig(id *taskQueueID, stickyInfo stickyInfo, config *Config, namespace namespace.Name) *taskQueueConfig {
+	var taskQueueName string
+
+	if stickyInfo.kind == enums.TASK_QUEUE_KIND_STICKY {
+		taskQueueName = stickyInfo.normalName
+		if taskQueueName == "" {
+			// normalName isn't set, just use actual sticky name that won't match anything
+			taskQueueName = id.BaseNameString()
+		}
+	} else {
+		taskQueueName = id.BaseNameString()
+	}
 	taskType := id.taskType
 
 	return &taskQueueConfig{
@@ -219,6 +236,12 @@ func newTaskQueueConfig(id *taskQueueID, config *Config, namespace namespace.Nam
 		},
 		SyncMatchWaitDuration: func() time.Duration {
 			return config.SyncMatchWaitDuration(namespace.String(), taskQueueName, taskType)
+		},
+		StickySyncMatchWaitDuration: func() time.Duration {
+			return config.StickySyncMatchWaitDuration(namespace.String(), taskQueueName, taskType)
+		},
+		StickySyncMatchOnly: func() bool {
+			return config.StickySyncMatchOnly(namespace.String(), taskQueueName, taskType)
 		},
 		TestDisableSyncMatch: config.TestDisableSyncMatch,
 		LoadUserData: func() bool {
