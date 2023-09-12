@@ -147,3 +147,7 @@ require (
 	modernc.org/strutil v1.1.3 // indirect
 	modernc.org/token v1.1.0 // indirect
 )
+
+replace go.temporal.io/api => /home/dnr/t/api-go
+
+replace go.temporal.io/sdk => /home/dnr/t/sdk-go
