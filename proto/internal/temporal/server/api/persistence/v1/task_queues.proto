@@ -31,6 +31,7 @@ message BuildId {
         STATE_UNSPECIFIED = 0;
         STATE_ACTIVE = 1;
         STATE_DELETED = 2;
+        STATE_BAD = 3;
     };
 
     string id = 1;

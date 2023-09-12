@@ -275,6 +275,8 @@ func updateImpl(timestamp hlc.Clock, data *persistencespb.VersioningData, req *w
 	} else if req.GetPromoteBuildIdWithinSet() != "" {
 		if targetSetIdx == -1 {
 			return nil, serviceerror.NewNotFound(fmt.Sprintf("targeted version %v not found", targetedVersion))
+		} else if data.VersionSets[targetSetIdx].BuildIds[versionInSetIdx].State != persistencespb.STATE_ACTIVE {
+			return nil, serviceerror.NewInvalidArgument("promoted version must be active and not marked bad")
 		}
 		if versionInSetIdx == len(data.GetVersionSets()[targetSetIdx].BuildIds)-1 {
 			// Make the request idempotent
@@ -304,6 +306,28 @@ func updateImpl(timestamp hlc.Clock, data *persistencespb.VersioningData, req *w
 		secondarySet := data.VersionSets[secondarySetIdx]
 		secondarySet.SetIds = mergeSetIDs(primarySet.SetIds, secondarySet.SetIds)
 		data = MergeVersioningData(justPrimaryData, data)
+	} else if markBad := req.GetMarkBadBuild(); markBad != nil {
+		if targetSetIdx == -1 {
+			return nil, serviceerror.NewNotFound(fmt.Sprintf("targeted version %v not found", targetedVersion))
+		}
+		// Mark bad
+		buildId := data.VersionSets[targetSetIdx].BuildIds[versionInSetIdx]
+		buildId.State = persistencespb.STATE_BAD
+		buildId.StateUpdateTimestamp = &timestamp
+		// Also promote another if requested
+		if markBad.PromoteBuildId != "" {
+			promoteSetIdx, promoteInSetIdx := worker_versioning.FindBuildId(data, markBad.PromoteBuildId)
+			if promoteSetIdx == -1 {
+				return nil, serviceerror.NewNotFound(fmt.Sprintf("targeted version %v not found", markBad.PromoteBuildId))
+			} else if promoteSetIdx != targetSetIdx {
+				return nil, serviceerror.NewInvalidArgument("promoted version must be in same set as bad version")
+			} else if promoteInSetIdx == versionInSetIdx {
+				return nil, serviceerror.NewInvalidArgument("promoted version must be different from bad version")
+			} else if data.VersionSets[targetSetIdx].BuildIds[promoteInSetIdx].State != persistencespb.STATE_ACTIVE {
+				return nil, serviceerror.NewInvalidArgument("promoted version must be active and not marked bad")
+			}
+			makeVersionInSetDefault(data, targetSetIdx, promoteInSetIdx, &timestamp)
+		}
 	}
 
 	return data, nil
@@ -318,6 +342,8 @@ func extractTargetedVersion(req *workflowservice.UpdateWorkerBuildIdCompatibilit
 		return req.GetPromoteBuildIdWithinSet()
 	} else if req.GetAddNewBuildIdInNewDefaultSet() != "" {
 		return req.GetAddNewBuildIdInNewDefaultSet()
+	} else if req.GetMarkBadBuild() != nil {
+		return req.GetMarkBadBuild().BadBuildId
 	}
 	return req.GetMergeSets().GetPrimarySetBuildId()
 }
