@@ -400,8 +400,9 @@ func lookupVersionSetForPoll(data *persistencespb.VersioningData, caps *commonpb
 	}
 	set := data.VersionSets[setIdx]
 	lastIndex := len(set.BuildIds) - 1
-	if indexInSet != lastIndex {
-		return "", nil, false, serviceerror.NewNewerBuildExists(set.BuildIds[lastIndex].Id)
+	isBadBuild := set.BuildIds[indexInSet].State != persistencespb.STATE_ACTIVE
+	if indexInSet != lastIndex || isBadBuild {
+		return "", nil, false, serviceerror.NewNewerBuildExists(set.BuildIds[lastIndex].Id, isBadBuild)
 	}
 	primarySetId, demotedSetIds := getSetIds(set)
 	return primarySetId, demotedSetIds, false, nil
@@ -427,8 +428,9 @@ func checkVersionForStickyPoll(data *persistencespb.VersioningData, caps *common
 	}
 	set := data.VersionSets[setIdx]
 	lastIndex := len(set.BuildIds) - 1
-	if indexInSet != lastIndex {
-		return false, serviceerror.NewNewerBuildExists(set.BuildIds[lastIndex].Id)
+	isBadBuild := set.BuildIds[indexInSet].State != persistencespb.STATE_ACTIVE
+	if indexInSet != lastIndex || isBadBuild {
+		return false, serviceerror.NewNewerBuildExists(set.BuildIds[lastIndex].Id, isBadBuild)
 	}
 	return false, nil
 }
