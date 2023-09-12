@@ -3193,36 +3193,53 @@ func (wh *WorkflowHandler) UpdateWorkerBuildIdCompatibility(ctx context.Context,
 		return nil, errWorkerVersioningNotAllowed
 	}
 
-	if err := wh.validateBuildIdCompatibilityUpdate(request); err != nil {
-		return nil, err
-	}
-
-	taskQueue := &taskqueuepb.TaskQueue{Name: request.GetTaskQueue(), Kind: enumspb.TASK_QUEUE_KIND_NORMAL}
-	namespaceName := namespace.Name(request.GetNamespace())
-	if err := wh.validateTaskQueue(taskQueue, namespaceName); err != nil {
-		return nil, err
-	}
-
 	namespaceID, err := wh.namespaceRegistry.GetNamespaceID(namespace.Name(request.GetNamespace()))
 	if err != nil {
 		return nil, err
 	}
 
-	matchingResponse, err := wh.matchingClient.UpdateWorkerBuildIdCompatibility(ctx, &matchingservice.UpdateWorkerBuildIdCompatibilityRequest{
-		NamespaceId: namespaceID.String(),
-		TaskQueue:   request.GetTaskQueue(),
-		Operation: &matchingservice.UpdateWorkerBuildIdCompatibilityRequest_ApplyPublicRequest_{
-			ApplyPublicRequest: &matchingservice.UpdateWorkerBuildIdCompatibilityRequest_ApplyPublicRequest{
-				Request: request,
-			},
-		},
-	})
-
-	if matchingResponse == nil {
+	if err := wh.validateBuildIdCompatibilityUpdate(request); err != nil {
 		return nil, err
 	}
 
-	return &workflowservice.UpdateWorkerBuildIdCompatibilityResponse{}, err
+	taskQueues := []string{request.TaskQueue}
+	if request.TaskQueue == "" {
+		// Looping over task queues is only allowed for certain operations.
+		var buildId string
+		if request.GetMarkBadBuild() != nil {
+			buildId = request.GetMarkBadBuild().BadBuildId
+		}
+		if buildId == "" {
+			// We shouldn't get here since validateBuildIdCompatibilityUpdate already check this,
+			// but if we do, just return a generic error.
+			return nil, serviceerror.NewInvalidArgument("request to update worker build id compatability requires: `task_queue` to be set")
+		}
+		res, err := wh.matchingClient.GetBuildIdTaskQueueMapping(ctx, &matchingservice.GetBuildIdTaskQueueMappingRequest{
+			NamespaceId: namespaceID.String(),
+			BuildId:     buildId,
+		})
+		if err != nil {
+			return nil, err
+		}
+		taskQueues = res.TaskQueues
+	}
+
+	// There shouldn't be more than TaskQueuesPerBuildIdLimit (default 20), so we can just do these all at once.
+	_, err = util.MapConcurrent(taskQueues, func(taskQueue string) (*matchingservice.UpdateWorkerBuildIdCompatibilityResponse, error) {
+		return wh.matchingClient.UpdateWorkerBuildIdCompatibility(ctx, &matchingservice.UpdateWorkerBuildIdCompatibilityRequest{
+			NamespaceId: namespaceID.String(),
+			TaskQueue:   taskQueue,
+			Operation: &matchingservice.UpdateWorkerBuildIdCompatibilityRequest_ApplyPublicRequest_{
+				ApplyPublicRequest: &matchingservice.UpdateWorkerBuildIdCompatibilityRequest_ApplyPublicRequest{
+					Request: request,
+				},
+			},
+		})
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &workflowservice.UpdateWorkerBuildIdCompatibilityResponse{}, nil
 }
 
 func (wh *WorkflowHandler) GetWorkerBuildIdCompatibility(ctx context.Context, request *workflowservice.GetWorkerBuildIdCompatibilityRequest) (_ *workflowservice.GetWorkerBuildIdCompatibilityResponse, retError error) {
@@ -3738,49 +3755,40 @@ func (wh *WorkflowHandler) validateBuildIdCompatibilityUpdate(
 ) error {
 	errDeets := []string{"request to update worker build id compatability requires: "}
 
-	checkIdLen := func(id string) {
-		if len(id) > wh.config.WorkerBuildIdSizeLimit() {
-			errDeets = append(errDeets, fmt.Sprintf(" Worker build IDs to be no larger than %v characters",
-				wh.config.WorkerBuildIdSizeLimit()))
+	limit := wh.config.WorkerBuildIdSizeLimit()
+	check := func(name string, required bool, id string) {
+		if required && id == "" {
+			errDeets = append(errDeets, fmt.Sprintf("`%s` to be set", name))
+		}
+		if len(id) > limit {
+			errDeets = append(errDeets, fmt.Sprintf("build ID for `%s` to be no larger than %v characters", name, limit))
 		}
 	}
 
 	if req.GetNamespace() == "" {
 		errDeets = append(errDeets, "`namespace` to be set")
 	}
-	if req.GetTaskQueue() == "" {
+	allowEmptyTaskQueue := req.GetMarkBadBuild() != nil
+	if req.GetTaskQueue() == "" && !allowEmptyTaskQueue {
 		errDeets = append(errDeets, "`task_queue` to be set")
+	}
+	if len(req.GetTaskQueue()) > wh.config.MaxIDLengthLimit() {
+		errDeets = append(errDeets, fmt.Sprintf("`task_queue` to be no longer than %v characters", wh.config.MaxIDLengthLimit()))
 	}
 	if req.GetOperation() == nil {
 		errDeets = append(errDeets, "an operation to be specified")
-	}
-	if op, ok := req.GetOperation().(*workflowservice.UpdateWorkerBuildIdCompatibilityRequest_AddNewCompatibleBuildId); ok {
-		if op.AddNewCompatibleBuildId.GetNewBuildId() == "" {
-			errDeets = append(errDeets, "`add_new_compatible_version` to be set")
-		} else {
-			checkIdLen(op.AddNewCompatibleBuildId.GetNewBuildId())
-		}
-		if op.AddNewCompatibleBuildId.GetExistingCompatibleBuildId() == "" {
-			errDeets = append(errDeets, "`existing_compatible_version` to be set")
-		}
+	} else if op, ok := req.GetOperation().(*workflowservice.UpdateWorkerBuildIdCompatibilityRequest_AddNewCompatibleBuildId); ok {
+		check("add_new_compatible_version", true, op.AddNewCompatibleBuildId.GetNewBuildId())
+		check("existing_compatible_version", true, op.AddNewCompatibleBuildId.GetNewBuildId())
 	} else if op, ok := req.GetOperation().(*workflowservice.UpdateWorkerBuildIdCompatibilityRequest_AddNewBuildIdInNewDefaultSet); ok {
-		if op.AddNewBuildIdInNewDefaultSet == "" {
-			errDeets = append(errDeets, "`add_new_version_id_in_new_default_set` to be set")
-		} else {
-			checkIdLen(op.AddNewBuildIdInNewDefaultSet)
-		}
+		check("add_new_version_id_in_new_default_set", true, op.AddNewBuildIdInNewDefaultSet)
 	} else if op, ok := req.GetOperation().(*workflowservice.UpdateWorkerBuildIdCompatibilityRequest_PromoteSetByBuildId); ok {
-		if op.PromoteSetByBuildId == "" {
-			errDeets = append(errDeets, "`promote_set_by_version_id` to be set")
-		} else {
-			checkIdLen(op.PromoteSetByBuildId)
-		}
+		check("promote_set_by_version_id", true, op.PromoteSetByBuildId)
 	} else if op, ok := req.GetOperation().(*workflowservice.UpdateWorkerBuildIdCompatibilityRequest_PromoteBuildIdWithinSet); ok {
-		if op.PromoteBuildIdWithinSet == "" {
-			errDeets = append(errDeets, "`promote_version_id_within_set` to be set")
-		} else {
-			checkIdLen(op.PromoteBuildIdWithinSet)
-		}
+		check("promote_version_id_within_set", true, op.PromoteBuildIdWithinSet)
+	} else if op, ok := req.GetOperation().(*workflowservice.UpdateWorkerBuildIdCompatibilityRequest_MarkBadBuild_); ok {
+		check("bad_build_id", true, op.MarkBadBuild.GetBadBuildId())
+		check("promote_build_id", false, op.MarkBadBuild.GetPromoteBuildId())
 	}
 	if len(errDeets) > 1 {
 		return serviceerror.NewInvalidArgument(strings.Join(errDeets, ", "))
