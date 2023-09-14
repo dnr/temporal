@@ -28,6 +28,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/pborman/uuid"
 	commonpb "go.temporal.io/api/common/v1"
@@ -38,6 +39,7 @@ import (
 	sdkclient "go.temporal.io/sdk/client"
 	"golang.org/x/time/rate"
 
+	"go.temporal.io/server/common"
 	"go.temporal.io/server/common/dynamicconfig"
 	"go.temporal.io/server/common/log"
 	"go.temporal.io/server/common/log/tag"
@@ -78,6 +80,15 @@ func (a *activities) BatchActivity(ctx context.Context, batchParams BatchParams)
 		metricsHandler.Counter(metrics.BatcherOperationFailures.GetMetricName()).Record(1)
 		logger.Error("Failed to run batch operation due to namespace mismatch", tag.Error(err))
 		return hbd, err
+	}
+
+	// Deserialize batch reset options if set
+	if b := batchParams.ResetParams.ResetOptions; b != nil {
+		batchParams.ResetParams.resetOptions = &commonpb.ResetOptions{}
+		if err := batchParams.ResetParams.resetOptions.Unmarshal(b); err != nil {
+			logger.Error("Failed to deserialize batch reset options", tag.Error(err))
+			return hbd, err
+		}
 	}
 
 	sdkClient := a.ClientFactory.NewClient(sdkclient.Options{
@@ -274,7 +285,19 @@ func startTaskProcessor(
 							WorkflowId: workflowID,
 							RunId:      runID,
 						}
-						eventId, err := getResetEventIDByType(ctx, batchParams.ResetParams.ResetType, batchParams.Namespace, workflowExecution, frontendClient, logger)
+						var eventId int64
+						var err error
+						var resetReapplyType enumspb.ResetReapplyType
+						if batchParams.ResetParams.resetOptions != nil {
+							// New API
+							// Note: getResetEventIDByOptions may modify workflowExecution.RunId, if reset should be to a prior run
+							eventId, err = getResetEventIDByOptions(ctx, batchParams.ResetParams.resetOptions, batchParams.Namespace, workflowExecution, frontendClient, logger)
+							resetReapplyType = batchParams.ResetParams.resetOptions.ResetReapplyType
+						} else {
+							// Old API
+							eventId, err = getResetEventIDByType(ctx, batchParams.ResetParams.ResetType, batchParams.Namespace, workflowExecution, frontendClient, logger)
+							resetReapplyType = batchParams.ResetParams.ResetReapplyType
+						}
 						if err != nil {
 							return err
 						}
@@ -282,9 +305,9 @@ func startTaskProcessor(
 							Namespace:                 batchParams.Namespace,
 							WorkflowExecution:         workflowExecution,
 							Reason:                    batchParams.Reason,
-							WorkflowTaskFinishEventId: eventId,
 							RequestId:                 uuid.New(),
-							ResetReapplyType:          batchParams.ResetParams.ResetReapplyType,
+							WorkflowTaskFinishEventId: eventId,
+							ResetReapplyType:          resetReapplyType,
 						})
 						return err
 					})
@@ -325,7 +348,7 @@ func processTask(
 	err = procFn(task.execution.GetWorkflowId(), task.execution.GetRunId())
 	if err != nil {
 		// NotFound means wf is not running or deleted
-		if _, isNotFound := err.(*serviceerror.NotFound); !isNotFound {
+		if !common.IsNotFoundError(err) {
 			return err
 		}
 	}
@@ -342,12 +365,14 @@ func isDone(ctx context.Context) bool {
 	}
 }
 
-func getResetEventIDByType(ctx context.Context,
+func getResetEventIDByType(
+	ctx context.Context,
 	resetType enumspb.ResetType,
 	namespaceStr string,
 	workflowExecution *commonpb.WorkflowExecution,
 	frontendClient workflowservice.WorkflowServiceClient,
-	logger log.Logger) (int64, error) {
+	logger log.Logger,
+) (int64, error) {
 	switch resetType {
 	case enumspb.RESET_TYPE_FIRST_WORKFLOW_TASK:
 		return getFirstWorkflowTaskEventID(ctx, namespaceStr, workflowExecution, frontendClient, logger)
@@ -359,11 +384,37 @@ func getResetEventIDByType(ctx context.Context,
 	}
 }
 
-func getLastWorkflowTaskEventID(ctx context.Context,
+// Note: may modify workflowExecution.RunId
+func getResetEventIDByOptions(
+	ctx context.Context,
+	resetOptions *commonpb.ResetOptions,
 	namespaceStr string,
 	workflowExecution *commonpb.WorkflowExecution,
 	frontendClient workflowservice.WorkflowServiceClient,
-	logger log.Logger) (workflowTaskEventID int64, err error) {
+	logger log.Logger,
+) (int64, error) {
+	switch target := resetOptions.Target.(type) {
+	case *commonpb.ResetOptions_FirstWorkflowTask:
+		return getFirstWorkflowTaskEventID(ctx, namespaceStr, workflowExecution, frontendClient, logger)
+	case *commonpb.ResetOptions_LastWorkflowTask:
+		return getLastWorkflowTaskEventID(ctx, namespaceStr, workflowExecution, frontendClient, logger)
+	case *commonpb.ResetOptions_WorkflowTaskId:
+		return target.WorkflowTaskId, nil
+	case *commonpb.ResetOptions_BuildId:
+		return getAutoResetPoint(ctx, namespaceStr, workflowExecution, frontendClient, logger, target.BuildId, resetOptions.CurrentRunOnly)
+	default:
+		errorMsg := fmt.Sprintf("provided reset target (%+v) is not supported.", resetOptions.Target)
+		return 0, serviceerror.NewInvalidArgument(errorMsg)
+	}
+}
+
+func getLastWorkflowTaskEventID(
+	ctx context.Context,
+	namespaceStr string,
+	workflowExecution *commonpb.WorkflowExecution,
+	frontendClient workflowservice.WorkflowServiceClient,
+	logger log.Logger,
+) (workflowTaskEventID int64, err error) {
 	req := &workflowservice.GetWorkflowExecutionHistoryReverseRequest{
 		Namespace:       namespaceStr,
 		Execution:       workflowExecution,
@@ -373,7 +424,7 @@ func getLastWorkflowTaskEventID(ctx context.Context,
 	for {
 		resp, err := frontendClient.GetWorkflowExecutionHistoryReverse(ctx, req)
 		if err != nil {
-			logger.Error("failed to run GetWorkflowExecutionHistoryReverse")
+			logger.Error("failed to run GetWorkflowExecutionHistoryReverse", tag.Error(err))
 			return 0, errors.New("failed to get workflow execution history")
 		}
 		for _, e := range resp.GetHistory().GetEvents() {
@@ -397,11 +448,13 @@ func getLastWorkflowTaskEventID(ctx context.Context,
 	return
 }
 
-func getFirstWorkflowTaskEventID(ctx context.Context,
+func getFirstWorkflowTaskEventID(
+	ctx context.Context,
 	namespaceStr string,
 	workflowExecution *commonpb.WorkflowExecution,
 	frontendClient workflowservice.WorkflowServiceClient,
-	logger log.Logger) (workflowTaskEventID int64, err error) {
+	logger log.Logger,
+) (workflowTaskEventID int64, err error) {
 	req := &workflowservice.GetWorkflowExecutionHistoryRequest{
 		Namespace:       namespaceStr,
 		Execution:       workflowExecution,
@@ -411,7 +464,7 @@ func getFirstWorkflowTaskEventID(ctx context.Context,
 	for {
 		resp, err := frontendClient.GetWorkflowExecutionHistory(ctx, req)
 		if err != nil {
-			logger.Error("failed to run GetWorkflowExecutionHistory")
+			logger.Error("failed to run GetWorkflowExecutionHistory", tag.Error(err))
 			return 0, errors.New("GetWorkflowExecutionHistory failed")
 		}
 		for _, e := range resp.GetHistory().GetEvents() {
@@ -434,4 +487,37 @@ func getFirstWorkflowTaskEventID(ctx context.Context,
 		return 0, errors.New("unable to find any scheduled or completed task")
 	}
 	return
+}
+
+func getAutoResetPoint(
+	ctx context.Context,
+	namespaceStr string,
+	execution *commonpb.WorkflowExecution,
+	frontendClient workflowservice.WorkflowServiceClient,
+	logger log.Logger,
+	buildId string,
+	currentRunOnly bool,
+) (workflowTaskEventID int64, err error) {
+	res, err := frontendClient.DescribeWorkflowExecution(ctx, &workflowservice.DescribeWorkflowExecutionRequest{
+		Namespace: namespaceStr,
+		Execution: execution,
+	})
+	if err != nil {
+		return 0, err
+	}
+	resetPoints := res.GetWorkflowExecutionInfo().GetAutoResetPoints().GetPoints()
+	for _, point := range resetPoints {
+		if point.BuildId == buildId {
+			if !point.Resettable {
+				return 0, fmt.Errorf("Reset point for %v is not resettable", buildId)
+			} else if point.ExpireTime != nil && point.ExpireTime.Before(time.Now()) {
+				return 0, fmt.Errorf("Reset point for %v is expired", buildId)
+			} else if execution.RunId != point.RunId && currentRunOnly {
+				return 0, fmt.Errorf("Reset point for %v points to previous run and CurrentRunOnly is set", buildId)
+			}
+			execution.RunId = point.RunId
+			return point.FirstWorkflowTaskCompletedId, nil
+		}
+	}
+	return 0, fmt.Errorf("Can't find reset point for %v", buildId)
 }
