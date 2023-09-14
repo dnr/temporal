@@ -3765,25 +3765,26 @@ func (ms *MutableStateImpl) AddContinueAsNewEvent(
 func rolloverAutoResetPointsWithExpiringTime(
 	resetPoints *workflowpb.ResetPoints,
 	prevRunID string,
-	now time.Time,
+	newExecutionStartTime time.Time,
 	namespaceRetention time.Duration,
 ) *workflowpb.ResetPoints {
-	// FIXME: should this expire points here?
-
-	if resetPoints == nil || resetPoints.Points == nil {
+	if resetPoints.GetPoints() == nil {
 		return resetPoints
 	}
 	newPoints := make([]*workflowpb.ResetPointInfo, 0, len(resetPoints.Points))
-	expireTime := now.Add(namespaceRetention)
+	// for continue-as-new, new execution start time is the same as previous execution close time
+	expireTime := newExecutionStartTime.Add(namespaceRetention)
 	for _, rp := range resetPoints.Points {
+		if rp.ExpireTime != nil && rp.ExpireTime.Before(newExecutionStartTime) {
+			// run is expired, don't preserve it
+			continue
+		}
 		if rp.GetRunId() == prevRunID {
 			rp.ExpireTime = &expireTime
 		}
 		newPoints = append(newPoints, rp)
 	}
-	return &workflowpb.ResetPoints{
-		Points: newPoints,
-	}
+	return &workflowpb.ResetPoints{Points: newPoints}
 }
 
 func (ms *MutableStateImpl) ReplicateWorkflowExecutionContinuedAsNewEvent(
