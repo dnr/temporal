@@ -943,15 +943,11 @@ func (t *transferQueueActiveTaskExecutor) processResetWorkflow(
 		tag.WorkflowEventID(resetPoint.GetFirstWorkflowTaskCompletedId()),
 	)
 
-	var baseContext workflow.Context
 	var baseMutableState workflow.MutableState
-	var baseRelease wcache.ReleaseCacheFunc
 	if resetPoint.GetRunId() == executionState.RunId {
-		baseContext = currentContext
 		baseMutableState = currentMutableState
-		baseRelease = currentRelease
 	} else {
-		baseContext, baseRelease, err = getWorkflowExecutionContext(
+		baseContext, baseRelease, err := getWorkflowExecutionContext(
 			ctx,
 			t.shardContext,
 			t.cache,
