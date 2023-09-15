@@ -1256,6 +1256,61 @@ func (s *mutableStateSuite) TestAddResetPointFromCompletion() {
 	s.Equal([]*workflowpb.ResetPointInfo{p2, p3, p4}, s.cleanedResetPoints().GetPoints())
 }
 
+func (s *mutableStateSuite) TestRolloverAutoResetPointsWithExpiringTime() {
+	runId1 := uuid.New()
+	runId2 := uuid.New()
+	runId3 := uuid.New()
+
+	retention := 3 * time.Hour
+	t1 := time.Now()
+	now := t1.Add(1 * time.Hour)
+	t2 := t1.Add(2 * time.Hour)
+	t3 := t1.Add(4 * time.Hour)
+
+	points := []*workflowpb.ResetPointInfo{
+		&workflowpb.ResetPointInfo{
+			BuildId:                      "buildid1",
+			RunId:                        runId1,
+			FirstWorkflowTaskCompletedId: 32,
+			ExpireTime:                   &t1,
+		},
+		&workflowpb.ResetPointInfo{
+			BuildId:                      "buildid2",
+			RunId:                        runId1,
+			FirstWorkflowTaskCompletedId: 63,
+			ExpireTime:                   &t1,
+		},
+		&workflowpb.ResetPointInfo{
+			BuildId:                      "buildid3",
+			RunId:                        runId2,
+			FirstWorkflowTaskCompletedId: 94,
+			ExpireTime:                   &t2,
+		},
+		&workflowpb.ResetPointInfo{
+			BuildId:                      "buildid4",
+			RunId:                        runId3,
+			FirstWorkflowTaskCompletedId: 125,
+		},
+	}
+
+	newPoints := rolloverAutoResetPointsWithExpiringTime(&workflowpb.ResetPoints{Points: points}, runId3, now, retention)
+	expected := []*workflowpb.ResetPointInfo{
+		&workflowpb.ResetPointInfo{
+			BuildId:                      "buildid3",
+			RunId:                        runId2,
+			FirstWorkflowTaskCompletedId: 94,
+			ExpireTime:                   &t2,
+		},
+		&workflowpb.ResetPointInfo{
+			BuildId:                      "buildid4",
+			RunId:                        runId3,
+			FirstWorkflowTaskCompletedId: 125,
+			ExpireTime:                   &t3,
+		},
+	}
+	s.Equal(expected, newPoints.Points)
+}
+
 func (s *mutableStateSuite) getBuildIdsFromMutableState() []string {
 	payload, found := s.mutableState.executionInfo.SearchAttributes[searchattribute.BuildIds]
 	if !found {
