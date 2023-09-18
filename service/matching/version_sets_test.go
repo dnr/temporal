@@ -556,6 +556,8 @@ func TestPromoteWithinSetTargetingNonexistentVersionErrors(t *testing.T) {
 	assert.ErrorAs(t, err, &notFound)
 }
 
+// TODO: tests for mark bad and can't promote bad
+
 func TestToBuildIdOrderingResponseTrimsResponse(t *testing.T) {
 	t.Parallel()
 	clock := hlc.Zero(1)
