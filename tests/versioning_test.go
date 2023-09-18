@@ -35,9 +35,11 @@ import (
 	"time"
 
 	"github.com/dgryski/go-farm"
+	"github.com/pborman/uuid"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 
+	batchpb "go.temporal.io/api/batch/v1"
 	commonpb "go.temporal.io/api/common/v1"
 	enumspb "go.temporal.io/api/enums/v1"
 	"go.temporal.io/api/serviceerror"
@@ -1974,6 +1976,205 @@ func (s *versioningIntegSuite) TestDescribeWorkflowExecution() {
 	var out string
 	s.NoError(run.Get(ctx, &out))
 	s.Equal("ok", out)
+}
+
+func (s *versioningIntegSuite) TestBadBuildAndResetByBuildId() {
+	dc := s.testCluster.host.dcClient
+	dc.OverrideValue(dynamicconfig.MatchingNumTaskqueueReadPartitions, 4)
+	dc.OverrideValue(dynamicconfig.MatchingNumTaskqueueWritePartitions, 4)
+	defer dc.RemoveOverride(dynamicconfig.MatchingNumTaskqueueReadPartitions)
+	defer dc.RemoveOverride(dynamicconfig.MatchingNumTaskqueueWritePartitions)
+
+	tq := s.randomizeStr(s.T().Name())
+	v10 := s.prefixed("v10")
+	v11 := s.prefixed("v11")
+	v12 := s.prefixed("v12")
+
+	var act1count, act2count, act3count, badcount atomic.Int32
+	act1 := func() error { act1count.Add(1); return nil }
+	act2 := func() error { act2count.Add(1); return nil }
+	act3 := func() error { act3count.Add(1); return nil }
+	badact := func() error { badcount.Add(1); return nil }
+
+	started := make(chan struct{}, 1)
+
+	wf10 := func(ctx workflow.Context) (string, error) {
+		ao := workflow.WithActivityOptions(ctx, workflow.ActivityOptions{ScheduleToCloseTimeout: 5 * time.Second})
+
+		s.NoError(workflow.ExecuteActivity(ao, "act1").Get(ctx, nil))
+
+		started <- struct{}{}
+		workflow.GetSignalChannel(ctx, "wait").Receive(ctx, nil)
+
+		return "done 10!", nil
+	}
+
+	wf11 := func(ctx workflow.Context) (string, error) {
+		ao := workflow.WithActivityOptions(ctx, workflow.ActivityOptions{ScheduleToCloseTimeout: 5 * time.Second})
+
+		s.NoError(workflow.ExecuteActivity(ao, "act1").Get(ctx, nil))
+
+		workflow.GetSignalChannel(ctx, "wait").Receive(ctx, nil)
+
+		// same as wf10 up to here
+
+		// run act2
+		s.NoError(workflow.ExecuteActivity(ao, "act2").Get(ctx, nil))
+
+		// now do something bad in a loop.
+		// (we want something that's visible in history, not just failing workflow tasks,
+		// otherwise we wouldn't need a reset to "fix" it, just a new build would be enough.)
+		for {
+			s.NoError(workflow.ExecuteActivity(ao, "badact").Get(ctx, nil))
+			workflow.Sleep(ctx, 200*time.Millisecond)
+		}
+
+		return "done 11!", nil
+	}
+
+	wf12 := func(ctx workflow.Context) (string, error) {
+		ao := workflow.WithActivityOptions(ctx, workflow.ActivityOptions{ScheduleToCloseTimeout: 5 * time.Second})
+
+		s.NoError(workflow.ExecuteActivity(ao, "act1").Get(ctx, nil))
+
+		workflow.GetSignalChannel(ctx, "wait").Receive(ctx, nil)
+
+		s.NoError(workflow.ExecuteActivity(ao, "act2").Get(ctx, nil))
+
+		// same as wf11 up to here
+
+		// instead of calling badact, do something different to force a non-determinism error
+		// (the change of activity type below isn't enough)
+		workflow.Sleep(ctx, 100*time.Millisecond)
+
+		// call act3 once
+		s.NoError(workflow.ExecuteActivity(ao, "act3").Get(ctx, nil))
+
+		return "done 12!", nil
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	s.addNewDefaultBuildId(ctx, tq, v10)
+	s.waitForPropagation(ctx, tq, v10)
+
+	w10 := worker.New(s.sdkClient, tq, worker.Options{
+		BuildID:                 v10,
+		UseBuildIDForVersioning: true,
+	})
+	w10.RegisterWorkflowWithOptions(wf10, workflow.RegisterOptions{Name: "wf"})
+	w10.RegisterActivityWithOptions(act1, activity.RegisterOptions{Name: "act1"})
+	s.NoError(w10.Start())
+
+	run, err := s.sdkClient.ExecuteWorkflow(ctx, sdkclient.StartWorkflowOptions{TaskQueue: tq}, "wf")
+	s.NoError(err)
+	s.waitForChan(ctx, started)
+	time.Sleep(100 * time.Millisecond) // wait for worker to complete task
+
+	w10.Stop() // stop blocked polls
+
+	// should see one run of act1
+	s.Equal(int32(1), act1count.Load())
+
+	// now add v11 as compatible so the next workflow task runs there
+	s.addCompatibleBuildId(ctx, tq, v11, v10, false)
+	s.waitForPropagation(ctx, tq, v11)
+	time.Sleep(100 * time.Millisecond) // make sure it got to sticky queues also
+
+	w11 := worker.New(s.sdkClient, tq, worker.Options{
+		BuildID:                 v11,
+		UseBuildIDForVersioning: true,
+	})
+	w11.RegisterWorkflowWithOptions(wf11, workflow.RegisterOptions{Name: "wf"})
+	w11.RegisterActivityWithOptions(act1, activity.RegisterOptions{Name: "act1"})
+	w11.RegisterActivityWithOptions(act2, activity.RegisterOptions{Name: "act2"})
+	w11.RegisterActivityWithOptions(badact, activity.RegisterOptions{Name: "badact"})
+	s.NoError(w11.Start())
+	defer w11.Stop()
+
+	// unblock the workflow
+	s.NoError(s.sdkClient.SignalWorkflow(ctx, run.GetID(), run.GetRunID(), "wait", nil))
+
+	// wait until we see three calls to badact
+	s.Eventually(func() bool { return badcount.Load() >= 3 }, 5*time.Second, 200*time.Millisecond)
+
+	// at this point act2 should have been invokved once also
+	s.Equal(int32(1), act2count.Load())
+
+	// now mark v11 as bad
+	_, err = s.engine.UpdateWorkerBuildIdCompatibility(ctx, &workflowservice.UpdateWorkerBuildIdCompatibilityRequest{
+		Namespace: s.namespace,
+		TaskQueue: tq,
+		Operation: &workflowservice.UpdateWorkerBuildIdCompatibilityRequest_MarkBadBuild_{
+			MarkBadBuild: &workflowservice.UpdateWorkerBuildIdCompatibilityRequest_MarkBadBuild{
+				BadBuildId: v11,
+			},
+		},
+	})
+	s.NoError(err)
+
+	// we should see workflow tasks stop getting dispatched to v11
+	s.Eventually(func() bool {
+		c1 := badcount.Load()
+		time.Sleep(500 * time.Millisecond)
+		return badcount.Load() == c1
+	}, 6*time.Second, time.Second)
+
+	w11.Stop() // stop blocked polls
+
+	// now register and run v12
+	s.addCompatibleBuildId(ctx, tq, v12, v11, false)
+	s.waitForPropagation(ctx, tq, v12)
+	time.Sleep(100 * time.Millisecond) // make sure it got to sticky queues also
+
+	w12 := worker.New(s.sdkClient, tq, worker.Options{
+		BuildID:                 v12,
+		UseBuildIDForVersioning: true,
+	})
+	w12.RegisterWorkflowWithOptions(wf12, workflow.RegisterOptions{Name: "wf"})
+	w12.RegisterActivityWithOptions(act1, activity.RegisterOptions{Name: "act1"})
+	w12.RegisterActivityWithOptions(act2, activity.RegisterOptions{Name: "act2"})
+	w12.RegisterActivityWithOptions(act3, activity.RegisterOptions{Name: "act3"})
+	w12.RegisterActivityWithOptions(badact, activity.RegisterOptions{Name: "badact"})
+	s.NoError(w12.Start())
+	defer w12.Stop()
+
+	// but v12 is not quite compatible, the workflow should be blocked on non-determinism errors for now.
+	waitCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	s.Error(run.Get(waitCtx, nil))
+
+	// reset it using v11 as the bad build id
+	_, err = s.engine.StartBatchOperation(context.Background(), &workflowservice.StartBatchOperationRequest{
+		Namespace: s.namespace,
+		Operation: &workflowservice.StartBatchOperationRequest_ResetOperation{
+			ResetOperation: &batchpb.BatchOperationReset{
+				Options: &commonpb.ResetOptions{
+					Target: &commonpb.ResetOptions_BuildId{
+						BuildId: v11,
+					},
+				},
+			},
+		},
+		Executions: []*commonpb.WorkflowExecution{
+			{WorkflowId: run.GetID(), RunId: run.GetRunID()},
+		},
+		JobId:  uuid.New(),
+		Reason: "test",
+	})
+	s.NoError(err)
+
+	// now it can complete on v12. (need to loop since runid will be resolved early and we need
+	// to re-resolve to pick up the new run instead of the terminated one)
+	s.Eventually(func() bool {
+		var out string
+		return s.sdkClient.GetWorkflow(ctx, run.GetID(), "").Get(ctx, &out) == nil && out == "done 12!"
+	}, 5*time.Second, 200*time.Millisecond)
+
+	s.Equal(int32(1), act1count.Load()) // we should not see an addition run of act1
+	s.Equal(int32(2), act2count.Load()) // we should see an addition run of act2 (reset point was before it)
+	s.Equal(int32(1), act3count.Load()) // we should see one run of act3
 }
 
 // Add a per test prefix to avoid hitting the namespace limit of mapped task queue per build id
