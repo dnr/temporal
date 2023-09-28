@@ -65,6 +65,8 @@ const (
 	BatchAndCacheTimeQueries = 1
 	// use cache v2, and include ids in jitter
 	NewCacheAndJitter = 2
+	// do refresh in one local activity
+	BatchRefresh = 3
 )
 
 const (
@@ -624,17 +626,20 @@ func (s *scheduler) wfWatcherReturned(f workflow.Future) {
 	id := s.watchingWorkflowId
 	s.watchingWorkflowId = ""
 	s.watchingFuture = nil
-	s.processWatcherResult(id, f)
+	s.processWatcherFuture(id, f)
 }
 
-func (s *scheduler) processWatcherResult(id string, f workflow.Future) {
+func (s *scheduler) processWatcherFuture(id string, f workflow.Future) {
 	var res schedspb.WatchWorkflowResponse
 	err := f.Get(s.ctx, &res)
 	if err != nil {
 		s.logger.Error("error from workflow watcher future", "workflow", id, "error", err)
 		return
 	}
+	s.processWatcherResponse(id, &res)
+}
 
+func (s *scheduler) processWatcherResponse(id string, res *schedspb.WatchWorkflowResponse) {
 	if res.Status == enumspb.WORKFLOW_EXECUTION_STATUS_RUNNING {
 		// this should only happen for a refresh, not a long-poll
 		s.logger.Debug("watcher returned for running workflow")
@@ -1104,19 +1109,34 @@ func (s *scheduler) addSearchAttributes(
 }
 
 func (s *scheduler) refreshWorkflows(executions []*commonpb.WorkflowExecution) {
-	ctx := workflow.WithLocalActivityOptions(s.ctx, defaultLocalActivityOptions)
-	futures := make([]workflow.Future, len(executions))
-	for i, ex := range executions {
-		req := &schedspb.WatchWorkflowRequest{
-			// Note: do not send runid here so that we always get the latest one
-			Execution:           &commonpb.WorkflowExecution{WorkflowId: ex.WorkflowId},
-			FirstExecutionRunId: ex.RunId,
-			LongPoll:            false,
+	if s.hasMinVersion(BatchRefresh) {
+		ctx := workflow.WithLocalActivityOptions(s.ctx, defaultLocalActivityOptions)
+		var res schedspb.BatchRefreshResponse
+		err := workflow.ExecuteLocalActivity(ctx, s.a.BatchRefresh, &schedspb.BatchRefreshRequest{
+			Execution: executions,
+		}).Get(s.ctx, &res)
+		if err != nil {
+			s.logger.Error("error from workflow batch refresh", "error", err)
+			return
 		}
-		futures[i] = workflow.ExecuteLocalActivity(ctx, s.a.WatchWorkflow, req)
-	}
-	for i, ex := range executions {
-		s.processWatcherResult(ex.WorkflowId, futures[i])
+		for i, ex := range executions {
+			s.processWatcherResponse(ex.WorkflowId, res.Response[i])
+		}
+	} else {
+		ctx := workflow.WithLocalActivityOptions(s.ctx, defaultLocalActivityOptions)
+		futures := make([]workflow.Future, len(executions))
+		for i, ex := range executions {
+			req := &schedspb.WatchWorkflowRequest{
+				// Note: do not send runid here so that we always get the latest one
+				Execution:           &commonpb.WorkflowExecution{WorkflowId: ex.WorkflowId},
+				FirstExecutionRunId: ex.RunId,
+				LongPoll:            false,
+			}
+			futures[i] = workflow.ExecuteLocalActivity(ctx, s.a.WatchWorkflow, req)
+		}
+		for i, ex := range executions {
+			s.processWatcherFuture(ex.WorkflowId, futures[i])
+		}
 	}
 }
 

@@ -46,6 +46,7 @@ import (
 	"go.temporal.io/server/common/namespace"
 	"go.temporal.io/server/common/primitives/timestamp"
 	"go.temporal.io/server/common/quotas"
+	"go.temporal.io/server/common/util"
 )
 
 type (
@@ -257,6 +258,32 @@ func (a *activities) WatchWorkflow(ctx context.Context, req *schedspb.WatchWorkf
 		return res, translateError(err, "WatchWorkflow")
 	}
 	return nil, translateError(ctx.Err(), "WatchWorkflow")
+}
+
+func (a *activities) BatchRefresh(ctx context.Context, batchReq *schedspb.BatchRefreshRequest) (*schedspb.BatchRefreshResponse, error) {
+	responses, err := util.MapConcurrent(batchReq.Execution, func(ex *commonpb.WorkflowExecution) (*schedspb.WatchWorkflowResponse, error) {
+		req := &schedspb.WatchWorkflowRequest{
+			// Note: do not send runid here so that we always get the latest one
+			Execution:           &commonpb.WorkflowExecution{WorkflowId: ex.WorkflowId},
+			FirstExecutionRunId: ex.RunId,
+			LongPoll:            false,
+		}
+		for {
+			res, err := a.tryWatchWorkflow(ctx, req)
+			if err != nil {
+				if newRunID, ok := err.(errFollow); ok {
+					req.Execution.RunId = string(newRunID)
+					continue
+				}
+				return nil, err
+			}
+			return res, nil
+		}
+	})
+	if err != nil {
+		return nil, translateError(err, "BatchRefresh")
+	}
+	return &schedspb.BatchRefreshResponse{Response: responses}, nil
 }
 
 func (a *activities) CancelWorkflow(ctx context.Context, req *schedspb.CancelWorkflowRequest) error {
