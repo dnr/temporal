@@ -97,6 +97,17 @@ func InverseMap[M ~map[K]V, K, V comparable](m M) map[V]K {
 
 // MapConcurrent concurrently maps a function over input and fails fast on error.
 func MapConcurrent[IN any, OUT any](input []IN, mapper func(IN) (OUT, error)) ([]OUT, error) {
+	// Handle simple cases without channels/goroutines
+	if len(input) == 0 {
+		return nil, nil
+	} else if len(input) == 1 {
+		out, err := mapper(input[0])
+		if err != nil {
+			return nil, err
+		}
+		return []OUT{out}, nil
+	}
+
 	errorsCh := make(chan error, len(input))
 	results := make([]OUT, len(input))
 
