@@ -2667,8 +2667,7 @@ func (wh *WorkflowHandler) DescribeSchedule(ctx context.Context, request *workfl
 
 	// for all running workflows started by the schedule, we should check that they're still running
 	origLen := len(queryResponse.Info.RunningWorkflows)
-	queryResponse.Info.RunningWorkflows = util.FilterSlice(queryResponse.Info.RunningWorkflows, func(ex *commonpb.WorkflowExecution) bool {
-		// we'll usually have just zero or one of these so we can just do them sequentially
+	isRunning, _ := util.MapConcurrent(queryResponse.Info.RunningWorkflows, func(ex *commonpb.WorkflowExecution) (bool, error) {
 		msResponse, err := wh.historyClient.GetMutableState(ctx, &historyservice.GetMutableStateRequest{
 			NamespaceId: namespaceID.String(),
 			// Note: do not send runid here so that we always get the latest one
@@ -2677,12 +2676,19 @@ func (wh *WorkflowHandler) DescribeSchedule(ctx context.Context, request *workfl
 		if err != nil {
 			// if it's not found, it's certainly not running, so return false. if we got
 			// another error, we don't know the state so assume it's still running.
-			return !common.IsNotFoundError(err)
+			return !common.IsNotFoundError(err), nil
 		}
 		// return true if it is still running and is part of the chain the schedule started
 		return msResponse.WorkflowStatus == enumspb.WORKFLOW_EXECUTION_STATUS_RUNNING &&
-			msResponse.FirstExecutionRunId == ex.RunId
+			msResponse.FirstExecutionRunId == ex.RunId, nil
 	})
+	stillRunning := make([]*commonpb.WorkflowExecution, 0, len(queryResponse.Info.RunningWorkflows))
+	for i, ex := range queryResponse.Info.RunningWorkflows {
+		if isRunning[i] {
+			stillRunning = append(stillRunning, ex)
+		}
+	}
+	queryResponse.Info.RunningWorkflows = stillRunning
 
 	if len(queryResponse.Info.RunningWorkflows) < origLen {
 		// we noticed some "running workflows" aren't running anymore. poke the workflow to
