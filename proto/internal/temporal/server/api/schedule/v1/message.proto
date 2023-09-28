@@ -99,6 +99,17 @@ message WatchWorkflowResponse {
     }
 }
 
+message BatchRefreshRequest {
+    // Unlike WatchWorkflowRequest, we put workflow_id and first_execution_run_id in
+    // WorkflowExecution to avoid parallel repeated fields. The activity implementation should
+    // keep in mind that the run_id is only meant to be first_execution_run_id.
+    repeated temporal.api.common.v1.WorkflowExecution execution = 1;
+}
+
+message BatchRefreshResponse {
+    repeated WatchWorkflowResponse response = 1;
+}
+
 message StartWorkflowRequest {
     temporal.api.workflowservice.v1.StartWorkflowExecutionRequest request = 2;
     reserved 3, 4, 5;
