@@ -147,6 +147,7 @@ type (
 		AllowZeroSleep      bool                     // Whether to allow a zero-length timer. Used for workflow compatibility.
 		ReuseTimer          bool                     // Whether to reuse timer. Used for workflow compatibility.
 		NextTimeCacheV2Size int                      // Size of next time cache (v2)
+		MaxTrackedWorkflows int                      // Max number of workflows to track in RunningWorkflows
 		Version             SchedulerWorkflowVersion // Used to keep track of schedules version to release new features and for backward compatibility
 		// version 0 corresponds to the schedule version that comes before introducing the Version parameter
 
@@ -193,8 +194,9 @@ var (
 		MaxBufferSize:                     1000,
 		AllowZeroSleep:                    true,
 		ReuseTimer:                        true,
-		NextTimeCacheV2Size:               14, // see note below
-		Version:                           NewCacheAndJitter,
+		NextTimeCacheV2Size:               14,                // see note below
+		MaxTrackedWorkflows:               0,                 // TODO: change to 10
+		Version:                           NewCacheAndJitter, // TODO: change to BatchRefresh
 	}
 
 	// Note on NextTimeCacheV2Size: This value must be > FutureActionCountForList. Each
@@ -1002,7 +1004,9 @@ func (s *scheduler) recordAction(result *schedpb.ScheduleActionResult) {
 	s.Info.ActionCount++
 	s.Info.RecentActions = util.SliceTail(append(s.Info.RecentActions, result), s.tweakables.RecentActionCount)
 	if result.StartWorkflowResult != nil {
-		s.Info.RunningWorkflows = append(s.Info.RunningWorkflows, result.StartWorkflowResult)
+		if s.tweakables.MaxTrackedWorkflows == 0 || len(s.Info.RunningWorkflows) < s.tweakables.MaxTrackedWorkflows {
+			s.Info.RunningWorkflows = append(s.Info.RunningWorkflows, result.StartWorkflowResult)
+		}
 	}
 }
 
