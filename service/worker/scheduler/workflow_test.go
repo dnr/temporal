@@ -942,6 +942,81 @@ func (s *workflowSuite) TestOverlapAllowAll() {
 	)
 }
 
+func (s *workflowSuite) TestOverlapAllowAllMaxTracked() {
+	// also contains tests for RunningWorkflows and refresh, since it's convenient to do here
+	currentTweakablePolicies.MaxTrackedWorkflows = 3
+	defer func() { currentTweakablePolicies.MaxTrackedWorkflows = 0 }()
+
+	s.runAcrossContinue(
+		[]workflowRun{
+			{
+				id:     "myid-2022-06-01T00:05:00Z",
+				start:  time.Date(2022, 6, 1, 0, 5, 0, 0, time.UTC),
+				end:    time.Date(2022, 6, 1, 0, 27, 0, 0, time.UTC),
+				result: enumspb.WORKFLOW_EXECUTION_STATUS_COMPLETED,
+			},
+			{
+				id:     "myid-2022-06-01T00:10:00Z",
+				start:  time.Date(2022, 6, 1, 0, 10, 0, 0, time.UTC),
+				end:    time.Date(2022, 6, 1, 0, 22, 0, 0, time.UTC),
+				result: enumspb.WORKFLOW_EXECUTION_STATUS_COMPLETED,
+			},
+			{
+				id:     "myid-2022-06-01T00:15:00Z",
+				start:  time.Date(2022, 6, 1, 0, 15, 0, 0, time.UTC),
+				end:    time.Date(2022, 6, 1, 0, 27, 0, 0, time.UTC),
+				result: enumspb.WORKFLOW_EXECUTION_STATUS_COMPLETED,
+			},
+			{
+				id:     "myid-2022-06-01T00:20:00Z",
+				start:  time.Date(2022, 6, 1, 0, 20, 0, 0, time.UTC),
+				end:    time.Date(2022, 6, 1, 0, 27, 0, 0, time.UTC),
+				result: enumspb.WORKFLOW_EXECUTION_STATUS_COMPLETED,
+			},
+			{
+				id:     "myid-2022-06-01T00:25:00Z",
+				start:  time.Date(2022, 6, 1, 0, 25, 0, 0, time.UTC),
+				end:    time.Date(2022, 6, 1, 0, 27, 0, 0, time.UTC),
+				result: enumspb.WORKFLOW_EXECUTION_STATUS_COMPLETED,
+			},
+		},
+		[]delayedCallback{
+			{
+				at: time.Date(2022, 6, 1, 0, 15, 1, 0, time.UTC),
+				f: func() {
+					// max tracked is 3
+					s.Equal([]string{"myid-2022-06-01T00:05:00Z", "myid-2022-06-01T00:10:00Z", "myid-2022-06-01T00:15:00Z"}, s.runningWorkflows())
+				},
+			},
+			{
+				at: time.Date(2022, 6, 1, 0, 20, 1, 0, time.UTC),
+				f: func() {
+					// max tracked is 3, so still only these three
+					s.Equal([]string{"myid-2022-06-01T00:05:00Z", "myid-2022-06-01T00:10:00Z", "myid-2022-06-01T00:15:00Z"}, s.runningWorkflows())
+				},
+			},
+			{
+				at: time.Date(2022, 6, 1, 0, 25, 1, 0, time.UTC),
+				f: func() {
+					// :10 finished so we can fit :25. :20 is still running too but not tracked.
+					s.Equal([]string{"myid-2022-06-01T00:05:00Z", "myid-2022-06-01T00:15:00Z", "myid-2022-06-01T00:25:00Z"}, s.runningWorkflows())
+				},
+			},
+		},
+		&schedpb.Schedule{
+			Spec: &schedpb.ScheduleSpec{
+				Interval: []*schedpb.IntervalSpec{{
+					Interval: timestamp.DurationPtr(5 * time.Minute),
+				}},
+			},
+			Policies: &schedpb.SchedulePolicies{
+				OverlapPolicy: enumspb.SCHEDULE_OVERLAP_POLICY_ALLOW_ALL,
+			},
+		},
+		8,
+	)
+}
+
 func (s *workflowSuite) TestFailedStart() {
 	s.T().Skip("the workflow test framework seems to have bugs around local activities that fail")
 
