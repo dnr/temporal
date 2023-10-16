@@ -122,12 +122,14 @@ func NewClientBean(factory Factory, clusterMetadata cluster.Metadata) (Bean, err
 			frontend.DefaultTimeout,
 			frontend.DefaultLongPollTimeout,
 		)
+		fmt.Printf("@@@@@ NewClientBean initial conns %v\n", clusterName)
 		adminClients[clusterName] = adminClient
 		frontendClients[clusterName] = frontendClient{
 			connection:            conn,
 			WorkflowServiceClient: client,
 		}
 	}
+	fmt.Printf("@@@@@ NewClientBean adminClients is %v\n", adminClients)
 
 	bean := &clientBeanImpl{
 		factory:         factory,
@@ -145,10 +147,12 @@ func (h *clientBeanImpl) registerClientEviction() {
 	h.clusterMetadata.RegisterMetadataChangeCallback(
 		h,
 		func(oldClusterMetadata map[string]*cluster.ClusterInformation, newClusterMetadata map[string]*cluster.ClusterInformation) {
+			fmt.Printf("################# EVICTION\n")
 			for clusterName := range newClusterMetadata {
 				if clusterName == currentCluster {
 					continue
 				}
+				fmt.Printf("################# EVICTION removing %v\n", clusterName)
 				h.adminClientsLock.Lock()
 				delete(h.adminClients, clusterName)
 				h.adminClientsLock.Unlock()
@@ -179,8 +183,10 @@ func (h *clientBeanImpl) GetRemoteAdminClient(cluster string) (adminservice.Admi
 	client, ok := h.adminClients[cluster]
 	h.adminClientsLock.RUnlock()
 	if ok {
+		fmt.Printf("@@@ GetRemoteAdminClient %v got cached\n", cluster)
 		return client, nil
 	}
+	fmt.Printf("@@@@@@@@@@@@@@@@ GetRemoteAdminClient %v MAKING NEW\n", cluster)
 
 	clusterInfo, clusterFound := h.clusterMetadata.GetAllClusterInfo()[cluster]
 	if !clusterFound {

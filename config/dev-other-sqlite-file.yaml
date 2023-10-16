@@ -12,7 +12,7 @@ persistence:
         user: ""
         password: ""
         pluginName: "sqlite"
-        databaseName: "sqlite-local"
+        databaseName: "sqlite-remote"
         connectAddr: "localhost"
         connectProtocol: "tcp"
         connectAttributes:
@@ -36,7 +36,7 @@ persistence:
         user: ""
         password: ""
         pluginName: "sqlite"
-        databaseName: "sqlite-local"
+        databaseName: "sqlite-remote"
         connectAddr: "localhost"
         connectProtocol: "tcp"
         connectAttributes:
@@ -63,39 +63,43 @@ global:
     internode:
       server:
         requireClientAuth: true
-        certFile: local.pem
-        keyFile: local-key.pem
+        certFile: remote.pem
+        keyFile: remote-key.pem
         clientCaFiles:
           - ca.pem
+          - badca.pem
       client:
-        serverName: local
+        serverName: remote
         rootCaFiles:
           - ca.pem
+          - badca.pem
     frontend:
       server:
         requireClientAuth: true
-        certFile: local.pem
-        keyFile: local-key.pem
+        certFile: remote.pem
+        keyFile: remote-key.pem
         clientCaFiles:
           - ca.pem
+          - badca.pem
       client:
-        serverName: local
+        serverName: remote
         rootCaFiles:
           - ca.pem
+          - badca.pem
     remoteClusters:
       "localhost":
         server:
           requireClientAuth: true
-          certFile: local.pem
-          keyFile: local-key.pem
+          certFile: remote.pem
+          keyFile: remote-key.pem
           clientCaFiles:
             - ca.pem
         client:
-          serverName: remote
+          serverName: local
           rootCaFiles:
             - ca.pem
   pprof:
-    port: 7936
+    port: 17936
   metrics:
     prometheus:
 #      # specify framework to use new approach for initializing metrics and/or use opentelemetry
@@ -107,40 +111,40 @@ global:
 services:
   frontend:
     rpc:
-      grpcPort: 7233
-      membershipPort: 6933
+      grpcPort: 17233
+      membershipPort: 16933
       bindOnLocalHost: true
-      httpPort: 7243
+      httpPort: 17243
 
   matching:
     rpc:
-      grpcPort: 7235
-      membershipPort: 6935
+      grpcPort: 17235
+      membershipPort: 16935
       bindOnLocalHost: true
 
   history:
     rpc:
-      grpcPort: 7234
-      membershipPort: 6934
+      grpcPort: 17234
+      membershipPort: 16934
       bindOnLocalHost: true
 
   worker:
     rpc:
-      grpcPort: 7239
-      membershipPort: 6939
+      grpcPort: 17239
+      membershipPort: 16939
       bindOnLocalHost: true
 
 clusterMetadata:
   enableGlobalNamespace: true
   failoverVersionIncrement: 10
-  masterClusterName: "local"
-  currentClusterName: "local"
+  masterClusterName: "remote"
+  currentClusterName: "remote"
   clusterInformation:
-    local:
+    remote:
       enabled: true
-      initialFailoverVersion: 1
+      initialFailoverVersion: 2
       rpcName: "frontend"
-      rpcAddress: "localhost:7233"
+      rpcAddress: "localhost:17233"
 
 dcRedirectionPolicy:
   policy: "noop"

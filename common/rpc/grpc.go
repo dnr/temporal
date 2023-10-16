@@ -38,6 +38,7 @@ import (
 
 	"go.temporal.io/server/common/headers"
 	"go.temporal.io/server/common/log"
+	"go.temporal.io/server/common/log/tag"
 	"go.temporal.io/server/common/metrics"
 	"go.temporal.io/server/common/rpc/interceptor"
 	serviceerrors "go.temporal.io/server/common/serviceerror"
@@ -105,6 +106,7 @@ func Dial(hostName string, tlsConfig *tls.Config, logger log.Logger, interceptor
 		grpc.WithConnectParams(cp),
 	}
 
+	logger.Error("@@@@@@@##### GRPC DIAL", tag.Host(hostName))
 	return grpc.Dial(
 		hostName,
 		dialOptions...,
