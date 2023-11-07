@@ -33,7 +33,7 @@ import (
 	"time"
 
 	"github.com/temporalio/ringpop-go"
-	"github.com/temporalio/tchannel-go"
+	"github.com/temporalio/ringpop-go/shared"
 
 	"github.com/dgryski/go-farm"
 	"github.com/temporalio/ringpop-go/events"
@@ -372,7 +372,7 @@ func (r *serviceResolver) compareMembers(addrs []string) (map[string]struct{}, *
 
 // buildBroadcastHostPort return the listener hostport from an existing tchannel
 // and overrides the address with broadcastAddress if specified
-func buildBroadcastHostPort(listenerPeerInfo tchannel.LocalPeerInfo, broadcastAddress string) (string, error) {
+func buildBroadcastHostPort(listenerPeerInfo shared.LocalPeerInfo, broadcastAddress string) (string, error) {
 	// Ephemeral port check copied from ringpop-go/ringpop.go/channelAddressResolver
 	// Check that TChannel is listening on a real hostport. By default,
 	// TChannel listens on an ephemeral host/port. The real port is then

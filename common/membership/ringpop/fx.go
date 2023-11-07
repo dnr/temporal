@@ -42,7 +42,7 @@ func provideFactory(lc fx.Lifecycle, params factoryParams) (*factory, error) {
 	if err != nil {
 		return nil, err
 	}
-	lc.Append(fx.StopHook(f.closeTChannel))
+	lc.Append(fx.StopHook(f.Close))
 	return f, nil
 }
 

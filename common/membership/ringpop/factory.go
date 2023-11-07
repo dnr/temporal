@@ -26,7 +26,6 @@ package ringpop
 
 import (
 	"context"
-	"crypto/tls"
 	"errors"
 	"fmt"
 	"net"
@@ -34,11 +33,11 @@ import (
 	"time"
 
 	"github.com/temporalio/ringpop-go"
-	"github.com/temporalio/tchannel-go"
+	"github.com/temporalio/ringpop-go/shared"
+	"github.com/temporalio/ringpop-go/tunnel"
 	"go.uber.org/fx"
 
 	"go.temporal.io/server/common/config"
-	"go.temporal.io/server/common/convert"
 	"go.temporal.io/server/common/dynamicconfig"
 	"go.temporal.io/server/common/headers"
 	"go.temporal.io/server/common/log"
@@ -47,7 +46,6 @@ import (
 	"go.temporal.io/server/common/persistence"
 	"go.temporal.io/server/common/primitives"
 	"go.temporal.io/server/common/rpc/encryption"
-	"go.temporal.io/server/environment"
 )
 
 const (
@@ -79,7 +77,7 @@ type factory struct {
 	TLSFactory      encryption.TLSConfigProvider
 	DC              *dynamicconfig.Collection
 
-	channel *tchannel.Channel
+	channel shared.TChannel
 	monitor *monitor
 	chOnce  sync.Once
 	monOnce sync.Once
@@ -149,17 +147,21 @@ func (factory *factory) broadcastAddressResolver() (string, error) {
 	return buildBroadcastHostPort(factory.getTChannel().PeerInfo(), factory.Config.BroadcastAddress)
 }
 
-func (factory *factory) getTChannel() *tchannel.Channel {
+func (factory *factory) getTChannel() shared.TChannel {
 	factory.chOnce.Do(func() {
 		ringpopServiceName := fmt.Sprintf("%v-ringpop", factory.ServiceName)
-		ringpopHostAddress := net.JoinHostPort(factory.getListenIP().String(), convert.IntToString(factory.RPCConfig.MembershipPort))
-		enableTLS := factory.DC.GetBoolProperty(dynamicconfig.EnableRingpopTLS, false)()
+		// ringpopHostAddress := net.JoinHostPort(factory.getListenIP().String(), convert.IntToString(factory.RPCConfig.MembershipPort))
+		// enableTLS := factory.DC.GetBoolProperty(dynamicconfig.EnableRingpopTLS, false)()
 
-		var tChannel *tchannel.Channel
-		if enableTLS {
-			tChannel = factory.getTLSChannel(ringpopHostAddress, ringpopServiceName)
-		} else {
-			tChannel = factory.getTCPChannel(ringpopHostAddress, ringpopServiceName)
+		// var tChannel *tchannel.Channel
+		// if enableTLS {
+		// 	tChannel = factory.getTLSChannel(ringpopHostAddress, ringpopServiceName)
+		// } else {
+		// 	tChannel = factory.getTCPChannel(ringpopHostAddress, ringpopServiceName)
+		// }
+		tChannel, err := tunnel.NewChannel(ringpopServiceName, nil)
+		if err != nil {
+			factory.Logger.Fatal("Failed to create ringpop TChannel", tag.Error(err))
 		}
 		factory.channel = tChannel
 	})
@@ -167,6 +169,7 @@ func (factory *factory) getTChannel() *tchannel.Channel {
 	return factory.channel
 }
 
+/*
 func (factory *factory) getTCPChannel(ringpopHostAddress string, ringpopServiceName string) *tchannel.Channel {
 	listener, err := net.Listen("tcp", ringpopHostAddress)
 	if err != nil {
@@ -239,11 +242,12 @@ func (factory *factory) getListenIP() net.IP {
 	}
 	return ip
 }
+*/
 
-// closeTChannel allows fx Stop hook to close channel
-func (factory *factory) closeTChannel() {
+// Close allows fx Stop hook to close channel
+func (factory *factory) Close() {
 	if factory.channel != nil {
-		factory.getTChannel().Close()
+		factory.channel.Close()
 		factory.channel = nil
 	}
 }

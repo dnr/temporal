@@ -205,6 +205,7 @@ github.com/temporalio/ringpop-go/logging
 github.com/temporalio/ringpop-go/membership
 github.com/temporalio/ringpop-go/shared
 github.com/temporalio/ringpop-go/swim
+github.com/temporalio/ringpop-go/tunnel
 github.com/temporalio/ringpop-go/util
 github.com/temporalio/tchannel-go
 github.com/temporalio/tchannel-go/internal/argreader

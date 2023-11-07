@@ -32,7 +32,8 @@ import (
 	"github.com/golang/mock/gomock"
 	"github.com/pborman/uuid"
 	"github.com/temporalio/ringpop-go"
-	"github.com/temporalio/tchannel-go"
+	"github.com/temporalio/ringpop-go/shared"
+	"github.com/temporalio/ringpop-go/tunnel"
 
 	"go.temporal.io/server/common/config"
 	"go.temporal.io/server/common/log"
@@ -48,7 +49,7 @@ type testCluster struct {
 	hostAddrs    []string
 	hostInfoList []membership.HostInfo
 	rings        []*monitor
-	channels     []*tchannel.Channel
+	channels     []shared.TChannel
 	seedNode     string
 }
 
@@ -77,13 +78,13 @@ func newTestCluster(
 		hostAddrs:    make([]string, size),
 		hostInfoList: make([]membership.HostInfo, size),
 		rings:        make([]*monitor, size),
-		channels:     make([]*tchannel.Channel, size),
+		channels:     make([]shared.TChannel, size),
 		seedNode:     seed,
 	}
 
 	for i := 0; i < size; i++ {
 		var err error
-		cluster.channels[i], err = tchannel.NewChannel(ringPopApp, nil)
+		cluster.channels[i], err = tunnel.NewChannel(ringPopApp, nil)
 		if err != nil {
 			logger.Error("Failed to create tchannel", tag.Error(err))
 			return nil
