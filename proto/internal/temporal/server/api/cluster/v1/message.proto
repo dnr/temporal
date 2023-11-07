@@ -29,6 +29,14 @@ import "dependencies/gogoproto/gogo.proto";
 
 import "temporal/server/api/enums/v1/cluster.proto";
 
+// FIXME: move to another file
+service TChannelGrpcTunnelService {
+    // (-- api-linter: core::0127::http-annotation=disabled --)
+    // (-- api-linter: core::0136::verb-noun=disabled --)
+    rpc Message (MessageRequest) returns (MessageResponse) {
+    }
+}
+
 message HostInfo {
     string identity = 1;
 }
@@ -54,3 +62,18 @@ message ClusterMember {
     google.protobuf.Timestamp last_heartbit_time = 6 [(gogoproto.stdtime) = true];
     google.protobuf.Timestamp record_expiry_time = 7 [(gogoproto.stdtime) = true];
 }
+
+// FIXME: move to new file
+message MessageRequest {
+    // FIXME: headers?
+    string service_name = 1;
+    string method_name = 2;
+    bytes request = 3;
+}
+
+// FIXME: move to new file
+message MessageResponse {
+    // FIXME: headers?
+    bytes response = 1;
+}
+

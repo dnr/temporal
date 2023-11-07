@@ -28,6 +28,8 @@
 package cluster
 
 import (
+	bytes "bytes"
+	context "context"
 	fmt "fmt"
 	io "io"
 	math "math"
@@ -41,6 +43,9 @@ import (
 	_ "github.com/gogo/protobuf/types"
 	github_com_gogo_protobuf_types "github.com/gogo/protobuf/types"
 	v1 "go.temporal.io/server/api/enums/v1"
+	grpc "google.golang.org/grpc"
+	codes "google.golang.org/grpc/codes"
+	status "google.golang.org/grpc/status"
 )
 
 // Reference imports to suppress errors if they are not otherwise used.
@@ -307,11 +312,119 @@ func (m *ClusterMember) GetRecordExpiryTime() *time.Time {
 	return nil
 }
 
+// FIXME: move to new file
+type MessageRequest struct {
+	// FIXME: headers?
+	ServiceName string `protobuf:"bytes,1,opt,name=service_name,json=serviceName,proto3" json:"service_name,omitempty"`
+	MethodName  string `protobuf:"bytes,2,opt,name=method_name,json=methodName,proto3" json:"method_name,omitempty"`
+	Request     []byte `protobuf:"bytes,3,opt,name=request,proto3" json:"request,omitempty"`
+}
+
+func (m *MessageRequest) Reset()      { *m = MessageRequest{} }
+func (*MessageRequest) ProtoMessage() {}
+func (*MessageRequest) Descriptor() ([]byte, []int) {
+	return fileDescriptor_fcc65697c8eece3a, []int{4}
+}
+func (m *MessageRequest) XXX_Unmarshal(b []byte) error {
+	return m.Unmarshal(b)
+}
+func (m *MessageRequest) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	if deterministic {
+		return xxx_messageInfo_MessageRequest.Marshal(b, m, deterministic)
+	} else {
+		b = b[:cap(b)]
+		n, err := m.MarshalToSizedBuffer(b)
+		if err != nil {
+			return nil, err
+		}
+		return b[:n], nil
+	}
+}
+func (m *MessageRequest) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_MessageRequest.Merge(m, src)
+}
+func (m *MessageRequest) XXX_Size() int {
+	return m.Size()
+}
+func (m *MessageRequest) XXX_DiscardUnknown() {
+	xxx_messageInfo_MessageRequest.DiscardUnknown(m)
+}
+
+var xxx_messageInfo_MessageRequest proto.InternalMessageInfo
+
+func (m *MessageRequest) GetServiceName() string {
+	if m != nil {
+		return m.ServiceName
+	}
+	return ""
+}
+
+func (m *MessageRequest) GetMethodName() string {
+	if m != nil {
+		return m.MethodName
+	}
+	return ""
+}
+
+func (m *MessageRequest) GetRequest() []byte {
+	if m != nil {
+		return m.Request
+	}
+	return nil
+}
+
+// FIXME: move to new file
+type MessageResponse struct {
+	// FIXME: headers?
+	Response []byte `protobuf:"bytes,1,opt,name=response,proto3" json:"response,omitempty"`
+}
+
+func (m *MessageResponse) Reset()      { *m = MessageResponse{} }
+func (*MessageResponse) ProtoMessage() {}
+func (*MessageResponse) Descriptor() ([]byte, []int) {
+	return fileDescriptor_fcc65697c8eece3a, []int{5}
+}
+func (m *MessageResponse) XXX_Unmarshal(b []byte) error {
+	return m.Unmarshal(b)
+}
+func (m *MessageResponse) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	if deterministic {
+		return xxx_messageInfo_MessageResponse.Marshal(b, m, deterministic)
+	} else {
+		b = b[:cap(b)]
+		n, err := m.MarshalToSizedBuffer(b)
+		if err != nil {
+			return nil, err
+		}
+		return b[:n], nil
+	}
+}
+func (m *MessageResponse) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_MessageResponse.Merge(m, src)
+}
+func (m *MessageResponse) XXX_Size() int {
+	return m.Size()
+}
+func (m *MessageResponse) XXX_DiscardUnknown() {
+	xxx_messageInfo_MessageResponse.DiscardUnknown(m)
+}
+
+var xxx_messageInfo_MessageResponse proto.InternalMessageInfo
+
+func (m *MessageResponse) GetResponse() []byte {
+	if m != nil {
+		return m.Response
+	}
+	return nil
+}
+
 func init() {
 	proto.RegisterType((*HostInfo)(nil), "temporal.server.api.cluster.v1.HostInfo")
 	proto.RegisterType((*RingInfo)(nil), "temporal.server.api.cluster.v1.RingInfo")
 	proto.RegisterType((*MembershipInfo)(nil), "temporal.server.api.cluster.v1.MembershipInfo")
 	proto.RegisterType((*ClusterMember)(nil), "temporal.server.api.cluster.v1.ClusterMember")
+	proto.RegisterType((*MessageRequest)(nil), "temporal.server.api.cluster.v1.MessageRequest")
+	proto.RegisterType((*MessageResponse)(nil), "temporal.server.api.cluster.v1.MessageResponse")
 }
 
 func init() {
@@ -319,43 +432,50 @@ func init() {
 }
 
 var fileDescriptor_fcc65697c8eece3a = []byte{
-	// 571 bytes of a gzipped FileDescriptorProto
-	0x1f, 0x8b, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0xff, 0x94, 0x54, 0xbd, 0x6e, 0x13, 0x4d,
-	0x14, 0xdd, 0x89, 0x93, 0xd8, 0x19, 0xe7, 0x8b, 0xf2, 0x4d, 0x83, 0x71, 0x31, 0x71, 0x5c, 0x20,
-	0x0b, 0xa2, 0x5d, 0x25, 0x94, 0x48, 0x48, 0x24, 0x42, 0x4a, 0x84, 0x40, 0x68, 0xa1, 0xa2, 0x59,
-	0xed, 0xcf, 0xcd, 0x7a, 0xa4, 0xdd, 0x9d, 0xd1, 0xcc, 0x38, 0x22, 0x1d, 0x0d, 0x7d, 0x5a, 0xde,
-	0x80, 0x47, 0x41, 0x54, 0x29, 0xd3, 0x81, 0xd7, 0x0d, 0x65, 0x1e, 0x01, 0xcd, 0xcc, 0x6e, 0x00,
-	0xc9, 0x42, 0xa6, 0xbb, 0x3f, 0xe7, 0x9c, 0x3d, 0x7b, 0xef, 0xd5, 0xe0, 0x03, 0x0d, 0xa5, 0xe0,
-	0x32, 0x2e, 0x02, 0x05, 0xf2, 0x02, 0x64, 0x10, 0x0b, 0x16, 0xa4, 0xc5, 0x4c, 0x69, 0x90, 0xc1,
-	0xc5, 0x61, 0x50, 0x82, 0x52, 0x71, 0x0e, 0xbe, 0x90, 0x5c, 0x73, 0x42, 0x5b, 0xb4, 0xef, 0xd0,
-	0x7e, 0x2c, 0x98, 0xdf, 0xa0, 0xfd, 0x8b, 0xc3, 0xe1, 0x5e, 0xce, 0x79, 0x5e, 0x40, 0x60, 0xd1,
-	0xc9, 0xec, 0x3c, 0xd0, 0xac, 0x04, 0xa5, 0xe3, 0x52, 0x38, 0x81, 0xe1, 0x7e, 0x06, 0x02, 0xaa,
-	0x0c, 0xaa, 0x94, 0x81, 0x0a, 0x72, 0x9e, 0x73, 0x5b, 0xb7, 0x51, 0x03, 0x79, 0xb8, 0xcc, 0x11,
-	0x54, 0xb3, 0x52, 0x19, 0x3f, 0xed, 0xc7, 0x2c, 0x76, 0xfc, 0x00, 0xf7, 0x4e, 0xb9, 0xd2, 0x67,
-	0xd5, 0x39, 0x27, 0x43, 0xdc, 0x63, 0x19, 0x54, 0x9a, 0xe9, 0xcb, 0x01, 0x1a, 0xa1, 0xc9, 0x56,
-	0x78, 0x97, 0x8f, 0x3f, 0x22, 0xdc, 0x0b, 0x59, 0x95, 0x5b, 0x20, 0xc1, 0xeb, 0x92, 0x17, 0xd0,
-	0x80, 0x6c, 0x4c, 0xf6, 0xf1, 0x76, 0x09, 0x65, 0x02, 0x32, 0x4a, 0xf9, 0xac, 0xd2, 0x83, 0xb5,
-	0x11, 0x9a, 0x6c, 0x84, 0x7d, 0x57, 0x3b, 0x31, 0x25, 0x72, 0x8c, 0xbb, 0x2e, 0x55, 0x83, 0xce,
-	0xa8, 0x33, 0xe9, 0x1f, 0x4d, 0xfc, 0xbf, 0x4f, 0xc3, 0x6f, 0xad, 0x85, 0x2d, 0x71, 0xfc, 0x15,
-	0xe1, 0x9d, 0x97, 0x2e, 0x9e, 0x32, 0x61, 0xdd, 0xbc, 0xc0, 0xdb, 0xe9, 0x4c, 0x4a, 0xa8, 0x74,
-	0x34, 0xe5, 0x4a, 0x5b, 0x57, 0xff, 0xa2, 0xdd, 0x6f, 0xd8, 0xa6, 0x40, 0x1e, 0xe1, 0xff, 0x25,
-	0xc4, 0xe9, 0x34, 0x4e, 0x0a, 0x88, 0x5a, 0xb7, 0x6b, 0xa3, 0xce, 0x64, 0x2b, 0xdc, 0xbd, 0x6b,
-	0x34, 0x06, 0xc8, 0x53, 0xbc, 0x21, 0x59, 0x95, 0xaf, 0xfc, 0x3b, 0xed, 0x00, 0x43, 0x47, 0x1b,
-	0x7f, 0xea, 0xe0, 0xff, 0x4e, 0x5c, 0xdb, 0x49, 0x92, 0x93, 0xdf, 0x26, 0xbb, 0x73, 0x14, 0x2c,
-	0x15, 0xb4, 0x9b, 0x34, 0x72, 0x7f, 0x50, 0x43, 0x5e, 0x40, 0xb3, 0x8a, 0x7b, 0xb8, 0x6b, 0x06,
-	0x11, 0xb1, 0xcc, 0x6e, 0x61, 0x2b, 0xdc, 0x34, 0xe9, 0x59, 0x46, 0xf6, 0x70, 0x5f, 0x8a, 0x34,
-	0x8a, 0xb3, 0x4c, 0x82, 0x32, 0xae, 0x4d, 0x13, 0x4b, 0x91, 0x3e, 0x73, 0x15, 0x72, 0x1f, 0xf7,
-	0x0c, 0x40, 0x70, 0xa9, 0x07, 0xeb, 0x76, 0x81, 0x5d, 0x29, 0xd2, 0xd7, 0x5c, 0x6a, 0xf2, 0x0a,
-	0x13, 0x05, 0x4a, 0x31, 0x5e, 0x45, 0x4a, 0xc7, 0x52, 0x47, 0xe6, 0x30, 0x07, 0x1b, 0x76, 0xd6,
-	0x43, 0xdf, 0x5d, 0xad, 0xdf, 0x5e, 0xad, 0xff, 0xb6, 0xbd, 0xda, 0xe3, 0xf5, 0xab, 0x6f, 0x7b,
-	0x28, 0xdc, 0x6d, 0xb8, 0x6f, 0x0c, 0xd5, 0x34, 0x8d, 0x5e, 0x11, 0x2b, 0x1d, 0x4d, 0x21, 0x96,
-	0x3a, 0x61, 0x8d, 0xde, 0xe6, 0xaa, 0x7a, 0x86, 0x7b, 0xda, 0x50, 0x5b, 0x3d, 0x09, 0x29, 0x97,
-	0x59, 0x04, 0xef, 0x05, 0x93, 0x97, 0x4e, 0xaf, 0xbb, 0xaa, 0x9e, 0xe3, 0x3e, 0xb7, 0x54, 0xd3,
-	0x3c, 0x4e, 0xae, 0xe7, 0xd4, 0xbb, 0x99, 0x53, 0xef, 0x76, 0x4e, 0xd1, 0x87, 0x9a, 0xa2, 0xcf,
-	0x35, 0x45, 0x5f, 0x6a, 0x8a, 0xae, 0x6b, 0x8a, 0xbe, 0xd7, 0x14, 0xfd, 0xa8, 0xa9, 0x77, 0x5b,
-	0x53, 0x74, 0xb5, 0xa0, 0xde, 0xf5, 0x82, 0x7a, 0x37, 0x0b, 0xea, 0xbd, 0x3b, 0xc8, 0xf9, 0xaf,
-	0x9d, 0x31, 0xbe, 0xfc, 0x49, 0x78, 0xd2, 0x84, 0xc9, 0xa6, 0xf5, 0xf3, 0xf8, 0x67, 0x00, 0x00,
-	0x00, 0xff, 0xff, 0xa4, 0x67, 0x85, 0x8f, 0x43, 0x04, 0x00, 0x00,
+	// 681 bytes of a gzipped FileDescriptorProto
+	0x1f, 0x8b, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0xff, 0x94, 0x54, 0xbf, 0x6f, 0xd3, 0x40,
+	0x14, 0x8e, 0x9b, 0xb6, 0x49, 0x2f, 0xa1, 0x14, 0x2f, 0xa4, 0x19, 0xae, 0x69, 0x06, 0x14, 0x41,
+	0xb1, 0xd5, 0x32, 0x22, 0x21, 0xd1, 0x08, 0xd1, 0x0a, 0x51, 0x21, 0xb7, 0x13, 0x8b, 0x75, 0xb1,
+	0x5f, 0x9d, 0x93, 0xec, 0xbb, 0xe3, 0xee, 0x52, 0xd1, 0x8d, 0x85, 0x81, 0xad, 0x2b, 0xff, 0x01,
+	0x7f, 0x0a, 0x62, 0xea, 0xd8, 0x0d, 0x9a, 0x2e, 0x8c, 0xfd, 0x13, 0xd0, 0xdd, 0xd9, 0x81, 0x4a,
+	0x15, 0x84, 0xed, 0xfd, 0xf8, 0xbe, 0xef, 0xbe, 0xbc, 0xf7, 0x1c, 0xb4, 0xa5, 0xa1, 0x10, 0x5c,
+	0x92, 0x3c, 0x54, 0x20, 0x4f, 0x40, 0x86, 0x44, 0xd0, 0x30, 0xc9, 0x27, 0x4a, 0x83, 0x0c, 0x4f,
+	0xb6, 0xc3, 0x02, 0x94, 0x22, 0x19, 0x04, 0x42, 0x72, 0xcd, 0x7d, 0x5c, 0xa1, 0x03, 0x87, 0x0e,
+	0x88, 0xa0, 0x41, 0x89, 0x0e, 0x4e, 0xb6, 0xbb, 0x1b, 0x19, 0xe7, 0x59, 0x0e, 0xa1, 0x45, 0x8f,
+	0x26, 0xc7, 0xa1, 0xa6, 0x05, 0x28, 0x4d, 0x0a, 0xe1, 0x04, 0xba, 0x9b, 0x29, 0x08, 0x60, 0x29,
+	0xb0, 0x84, 0x82, 0x0a, 0x33, 0x9e, 0x71, 0x5b, 0xb7, 0x51, 0x09, 0x79, 0x78, 0x9b, 0x23, 0x60,
+	0x93, 0x42, 0x19, 0x3f, 0xd5, 0x63, 0x16, 0xdb, 0x7f, 0x80, 0x9a, 0x7b, 0x5c, 0xe9, 0x7d, 0x76,
+	0xcc, 0xfd, 0x2e, 0x6a, 0xd2, 0x14, 0x98, 0xa6, 0xfa, 0xb4, 0xe3, 0xf5, 0xbc, 0xc1, 0x4a, 0x34,
+	0xcb, 0xfb, 0x1f, 0x3d, 0xd4, 0x8c, 0x28, 0xcb, 0x2c, 0xd0, 0x47, 0x8b, 0x92, 0xe7, 0x50, 0x82,
+	0x6c, 0xec, 0x6f, 0xa2, 0x76, 0x01, 0xc5, 0x08, 0x64, 0x9c, 0xf0, 0x09, 0xd3, 0x9d, 0x85, 0x9e,
+	0x37, 0x58, 0x8a, 0x5a, 0xae, 0x36, 0x34, 0x25, 0x7f, 0x17, 0x35, 0x5c, 0xaa, 0x3a, 0xf5, 0x5e,
+	0x7d, 0xd0, 0xda, 0x19, 0x04, 0x7f, 0x9f, 0x46, 0x50, 0x59, 0x8b, 0x2a, 0x62, 0xff, 0x9b, 0x87,
+	0x56, 0x5f, 0xbb, 0x78, 0x4c, 0x85, 0x75, 0xf3, 0x0a, 0xb5, 0x93, 0x89, 0x94, 0xc0, 0x74, 0x3c,
+	0xe6, 0x4a, 0x5b, 0x57, 0xff, 0xa3, 0xdd, 0x2a, 0xd9, 0xa6, 0xe0, 0x3f, 0x42, 0xf7, 0x24, 0x90,
+	0x64, 0x4c, 0x46, 0x39, 0xc4, 0x95, 0xdb, 0x85, 0x5e, 0x7d, 0xb0, 0x12, 0xad, 0xcd, 0x1a, 0xa5,
+	0x01, 0xff, 0x19, 0x5a, 0x92, 0x94, 0x65, 0x73, 0xff, 0x9c, 0x6a, 0x80, 0x91, 0xa3, 0xf5, 0x3f,
+	0xd7, 0xd1, 0x9d, 0xa1, 0x6b, 0x3b, 0x49, 0x7f, 0xf8, 0xc7, 0x64, 0x57, 0x77, 0xc2, 0x5b, 0x05,
+	0xed, 0x26, 0x8d, 0xdc, 0x0d, 0x6a, 0xc4, 0x73, 0x28, 0x57, 0x71, 0x1f, 0x35, 0xcc, 0x20, 0x62,
+	0x9a, 0xda, 0x2d, 0xac, 0x44, 0xcb, 0x26, 0xdd, 0x4f, 0xfd, 0x0d, 0xd4, 0x92, 0x22, 0x89, 0x49,
+	0x9a, 0x4a, 0x50, 0xc6, 0xb5, 0x69, 0x22, 0x29, 0x92, 0xe7, 0xae, 0xe2, 0xaf, 0xa3, 0xa6, 0x01,
+	0x08, 0x2e, 0x75, 0x67, 0xd1, 0x2e, 0xb0, 0x21, 0x45, 0xf2, 0x86, 0x4b, 0xed, 0x1f, 0x20, 0x5f,
+	0x81, 0x52, 0x94, 0xb3, 0x58, 0x69, 0x22, 0x75, 0x6c, 0x0e, 0xb3, 0xb3, 0x64, 0x67, 0xdd, 0x0d,
+	0xdc, 0xd5, 0x06, 0xd5, 0xd5, 0x06, 0x47, 0xd5, 0xd5, 0xee, 0x2e, 0x9e, 0x7d, 0xdf, 0xf0, 0xa2,
+	0xb5, 0x92, 0x7b, 0x68, 0xa8, 0xa6, 0x69, 0xf4, 0x72, 0xa2, 0x74, 0x3c, 0x06, 0x22, 0xf5, 0x88,
+	0x96, 0x7a, 0xcb, 0xf3, 0xea, 0x19, 0xee, 0x5e, 0x49, 0xad, 0xf4, 0x24, 0x24, 0x5c, 0xa6, 0x31,
+	0xbc, 0x17, 0x54, 0x9e, 0x3a, 0xbd, 0xc6, 0xbc, 0x7a, 0x8e, 0xfb, 0xc2, 0x52, 0x4d, 0xb3, 0xcf,
+	0xcc, 0x9d, 0xd9, 0x2f, 0x37, 0x82, 0x77, 0x13, 0x50, 0xda, 0x5c, 0xb8, 0xd9, 0x02, 0x4d, 0x20,
+	0x66, 0xa4, 0xa8, 0xae, 0xbf, 0x55, 0xd6, 0x0e, 0x48, 0x01, 0x66, 0xc0, 0x05, 0xe8, 0x31, 0x4f,
+	0x1d, 0xc2, 0x4d, 0x1f, 0xb9, 0x92, 0x05, 0x74, 0x50, 0x43, 0x3a, 0x39, 0x3b, 0xfd, 0x76, 0x54,
+	0xa5, 0xfd, 0xc7, 0xe8, 0xee, 0xec, 0x3d, 0x25, 0x38, 0x53, 0x60, 0xbe, 0x47, 0x59, 0xc6, 0xf6,
+	0xb1, 0x76, 0x34, 0xcb, 0x77, 0x3e, 0x79, 0x68, 0xfd, 0x68, 0x38, 0x26, 0x8c, 0x41, 0xfe, 0x52,
+	0x8a, 0xe4, 0x68, 0x62, 0xa2, 0x43, 0xe7, 0xc5, 0xcf, 0x51, 0xa3, 0x14, 0xf3, 0x83, 0x7f, 0x1d,
+	0xe5, 0xcd, 0x5f, 0xd9, 0x0d, 0xe7, 0xc6, 0x3b, 0x27, 0xfd, 0xda, 0xee, 0xe8, 0xfc, 0x12, 0xd7,
+	0x2e, 0x2e, 0x71, 0xed, 0xfa, 0x12, 0x7b, 0x1f, 0xa6, 0xd8, 0xfb, 0x32, 0xc5, 0xde, 0xd7, 0x29,
+	0xf6, 0xce, 0xa7, 0xd8, 0xfb, 0x31, 0xc5, 0xde, 0xcf, 0x29, 0xae, 0x5d, 0x4f, 0xb1, 0x77, 0x76,
+	0x85, 0x6b, 0xe7, 0x57, 0xb8, 0x76, 0x71, 0x85, 0x6b, 0x6f, 0xb7, 0x32, 0xfe, 0xfb, 0x29, 0xca,
+	0x6f, 0xff, 0xf7, 0x7c, 0x5a, 0x86, 0xa3, 0x65, 0xbb, 0xba, 0x27, 0xbf, 0x02, 0x00, 0x00, 0xff,
+	0xff, 0x1c, 0x5a, 0x51, 0xb8, 0x6e, 0x05, 0x00, 0x00,
 }
 
 func (this *HostInfo) Equal(that interface{}) bool {
@@ -511,6 +631,60 @@ func (this *ClusterMember) Equal(that interface{}) bool {
 	}
 	return true
 }
+func (this *MessageRequest) Equal(that interface{}) bool {
+	if that == nil {
+		return this == nil
+	}
+
+	that1, ok := that.(*MessageRequest)
+	if !ok {
+		that2, ok := that.(MessageRequest)
+		if ok {
+			that1 = &that2
+		} else {
+			return false
+		}
+	}
+	if that1 == nil {
+		return this == nil
+	} else if this == nil {
+		return false
+	}
+	if this.ServiceName != that1.ServiceName {
+		return false
+	}
+	if this.MethodName != that1.MethodName {
+		return false
+	}
+	if !bytes.Equal(this.Request, that1.Request) {
+		return false
+	}
+	return true
+}
+func (this *MessageResponse) Equal(that interface{}) bool {
+	if that == nil {
+		return this == nil
+	}
+
+	that1, ok := that.(*MessageResponse)
+	if !ok {
+		that2, ok := that.(MessageResponse)
+		if ok {
+			that1 = &that2
+		} else {
+			return false
+		}
+	}
+	if that1 == nil {
+		return this == nil
+	} else if this == nil {
+		return false
+	}
+	if !bytes.Equal(this.Response, that1.Response) {
+		return false
+	}
+	return true
+}
 func (this *HostInfo) GoString() string {
 	if this == nil {
 		return "nil"
@@ -567,6 +741,28 @@ func (this *ClusterMember) GoString() string {
 	s = append(s, "}")
 	return strings.Join(s, "")
 }
+func (this *MessageRequest) GoString() string {
+	if this == nil {
+		return "nil"
+	}
+	s := make([]string, 0, 7)
+	s = append(s, "&cluster.MessageRequest{")
+	s = append(s, "ServiceName: "+fmt.Sprintf("%#v", this.ServiceName)+",\n")
+	s = append(s, "MethodName: "+fmt.Sprintf("%#v", this.MethodName)+",\n")
+	s = append(s, "Request: "+fmt.Sprintf("%#v", this.Request)+",\n")
+	s = append(s, "}")
+	return strings.Join(s, "")
+}
+func (this *MessageResponse) GoString() string {
+	if this == nil {
+		return "nil"
+	}
+	s := make([]string, 0, 5)
+	s = append(s, "&cluster.MessageResponse{")
+	s = append(s, "Response: "+fmt.Sprintf("%#v", this.Response)+",\n")
+	s = append(s, "}")
+	return strings.Join(s, "")
+}
 func valueToGoStringMessage(v interface{}, typ string) string {
 	rv := reflect.ValueOf(v)
 	if rv.IsNil() {
@@ -575,6 +771,91 @@ func valueToGoStringMessage(v interface{}, typ string) string {
 	pv := reflect.Indirect(rv).Interface()
 	return fmt.Sprintf("func(v %v) *%v { return &v } ( %#v )", typ, typ, pv)
 }
+
+// Reference imports to suppress errors if they are not otherwise used.
+var _ context.Context
+var _ grpc.ClientConnInterface
+
+// This is a compile-time assertion to ensure that this generated file
+// is compatible with the grpc package it is being compiled against.
+const _ = grpc.SupportPackageIsVersion4
+
+// TChannelGrpcTunnelServiceClient is the client API for TChannelGrpcTunnelService service.
+//
+// For semantics around ctx use and closing/ending streaming RPCs, please refer to https://godoc.org/google.golang.org/grpc#ClientConn.NewStream.
+type TChannelGrpcTunnelServiceClient interface {
+	// (-- api-linter: core::0127::http-annotation=disabled --)
+	// (-- api-linter: core::0136::verb-noun=disabled --)
+	Message(ctx context.Context, in *MessageRequest, opts ...grpc.CallOption) (*MessageResponse, error)
+}
+
+type tChannelGrpcTunnelServiceClient struct {
+	cc grpc.ClientConnInterface
+}
+
+func NewTChannelGrpcTunnelServiceClient(cc grpc.ClientConnInterface) TChannelGrpcTunnelServiceClient {
+	return &tChannelGrpcTunnelServiceClient{cc}
+}
+
+func (c *tChannelGrpcTunnelServiceClient) Message(ctx context.Context, in *MessageRequest, opts ...grpc.CallOption) (*MessageResponse, error) {
+	out := new(MessageResponse)
+	err := c.cc.Invoke(ctx, "/temporal.server.api.cluster.v1.TChannelGrpcTunnelService/Message", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// TChannelGrpcTunnelServiceServer is the server API for TChannelGrpcTunnelService service.
+type TChannelGrpcTunnelServiceServer interface {
+	// (-- api-linter: core::0127::http-annotation=disabled --)
+	// (-- api-linter: core::0136::verb-noun=disabled --)
+	Message(context.Context, *MessageRequest) (*MessageResponse, error)
+}
+
+// UnimplementedTChannelGrpcTunnelServiceServer can be embedded to have forward compatible implementations.
+type UnimplementedTChannelGrpcTunnelServiceServer struct {
+}
+
+func (*UnimplementedTChannelGrpcTunnelServiceServer) Message(ctx context.Context, req *MessageRequest) (*MessageResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method Message not implemented")
+}
+
+func RegisterTChannelGrpcTunnelServiceServer(s *grpc.Server, srv TChannelGrpcTunnelServiceServer) {
+	s.RegisterService(&_TChannelGrpcTunnelService_serviceDesc, srv)
+}
+
+func _TChannelGrpcTunnelService_Message_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(MessageRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(TChannelGrpcTunnelServiceServer).Message(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/temporal.server.api.cluster.v1.TChannelGrpcTunnelService/Message",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(TChannelGrpcTunnelServiceServer).Message(ctx, req.(*MessageRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+var _TChannelGrpcTunnelService_serviceDesc = grpc.ServiceDesc{
+	ServiceName: "temporal.server.api.cluster.v1.TChannelGrpcTunnelService",
+	HandlerType: (*TChannelGrpcTunnelServiceServer)(nil),
+	Methods: []grpc.MethodDesc{
+		{
+			MethodName: "Message",
+			Handler:    _TChannelGrpcTunnelService_Message_Handler,
+		},
+	},
+	Streams:  []grpc.StreamDesc{},
+	Metadata: "temporal/server/api/cluster/v1/message.proto",
+}
+
 func (m *HostInfo) Marshal() (dAtA []byte, err error) {
 	size := m.Size()
 	dAtA = make([]byte, size)
@@ -789,6 +1070,80 @@ func (m *ClusterMember) MarshalToSizedBuffer(dAtA []byte) (int, error) {
 	return len(dAtA) - i, nil
 }
 
+func (m *MessageRequest) Marshal() (dAtA []byte, err error) {
+	size := m.Size()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBuffer(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *MessageRequest) MarshalTo(dAtA []byte) (int, error) {
+	size := m.Size()
+	return m.MarshalToSizedBuffer(dAtA[:size])
+}
+
+func (m *MessageRequest) MarshalToSizedBuffer(dAtA []byte) (int, error) {
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	if len(m.Request) > 0 {
+		i -= len(m.Request)
+		copy(dAtA[i:], m.Request)
+		i = encodeVarintMessage(dAtA, i, uint64(len(m.Request)))
+		i--
+		dAtA[i] = 0x1a
+	}
+	if len(m.MethodName) > 0 {
+		i -= len(m.MethodName)
+		copy(dAtA[i:], m.MethodName)
+		i = encodeVarintMessage(dAtA, i, uint64(len(m.MethodName)))
+		i--
+		dAtA[i] = 0x12
+	}
+	if len(m.ServiceName) > 0 {
+		i -= len(m.ServiceName)
+		copy(dAtA[i:], m.ServiceName)
+		i = encodeVarintMessage(dAtA, i, uint64(len(m.ServiceName)))
+		i--
+		dAtA[i] = 0xa
+	}
+	return len(dAtA) - i, nil
+}
+
+func (m *MessageResponse) Marshal() (dAtA []byte, err error) {
+	size := m.Size()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBuffer(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *MessageResponse) MarshalTo(dAtA []byte) (int, error) {
+	size := m.Size()
+	return m.MarshalToSizedBuffer(dAtA[:size])
+}
+
+func (m *MessageResponse) MarshalToSizedBuffer(dAtA []byte) (int, error) {
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	if len(m.Response) > 0 {
+		i -= len(m.Response)
+		copy(dAtA[i:], m.Response)
+		i = encodeVarintMessage(dAtA, i, uint64(len(m.Response)))
+		i--
+		dAtA[i] = 0xa
+	}
+	return len(dAtA) - i, nil
+}
+
 func encodeVarintMessage(dAtA []byte, offset int, v uint64) int {
 	offset -= sovMessage(v)
 	base := offset
@@ -895,6 +1250,40 @@ func (m *ClusterMember) Size() (n int) {
 	return n
 }
 
+func (m *MessageRequest) Size() (n int) {
+	if m == nil {
+		return 0
+	}
+	var l int
+	_ = l
+	l = len(m.ServiceName)
+	if l > 0 {
+		n += 1 + l + sovMessage(uint64(l))
+	}
+	l = len(m.MethodName)
+	if l > 0 {
+		n += 1 + l + sovMessage(uint64(l))
+	}
+	l = len(m.Request)
+	if l > 0 {
+		n += 1 + l + sovMessage(uint64(l))
+	}
+	return n
+}
+
+func (m *MessageResponse) Size() (n int) {
+	if m == nil {
+		return 0
+	}
+	var l int
+	_ = l
+	l = len(m.Response)
+	if l > 0 {
+		n += 1 + l + sovMessage(uint64(l))
+	}
+	return n
+}
+
 func sovMessage(x uint64) (n int) {
 	return (math_bits.Len64(x|1) + 6) / 7
 }
@@ -957,6 +1346,28 @@ func (this *ClusterMember) String() string {
 		`SessionStartTime:` + strings.Replace(fmt.Sprintf("%v", this.SessionStartTime), "Timestamp", "types.Timestamp", 1) + `,`,
 		`LastHeartbitTime:` + strings.Replace(fmt.Sprintf("%v", this.LastHeartbitTime), "Timestamp", "types.Timestamp", 1) + `,`,
 		`RecordExpiryTime:` + strings.Replace(fmt.Sprintf("%v", this.RecordExpiryTime), "Timestamp", "types.Timestamp", 1) + `,`,
+		`}`,
+	}, "")
+	return s
+}
+func (this *MessageRequest) String() string {
+	if this == nil {
+		return "nil"
+	}
+	s := strings.Join([]string{`&MessageRequest{`,
+		`ServiceName:` + fmt.Sprintf("%v", this.ServiceName) + `,`,
+		`MethodName:` + fmt.Sprintf("%v", this.MethodName) + `,`,
+		`Request:` + fmt.Sprintf("%v", this.Request) + `,`,
+		`}`,
+	}, "")
+	return s
+}
+func (this *MessageResponse) String() string {
+	if this == nil {
+		return "nil"
+	}
+	s := strings.Join([]string{`&MessageResponse{`,
+		`Response:` + fmt.Sprintf("%v", this.Response) + `,`,
 		`}`,
 	}, "")
 	return s
@@ -1584,6 +1995,244 @@ func (m *ClusterMember) Unmarshal(dAtA []byte) error {
 			}
 			if err := github_com_gogo_protobuf_types.StdTimeUnmarshal(m.RecordExpiryTime, dAtA[iNdEx:postIndex]); err != nil {
 				return err
+			}
+			iNdEx = postIndex
+		default:
+			iNdEx = preIndex
+			skippy, err := skipMessage(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if skippy < 0 {
+				return ErrInvalidLengthMessage
+			}
+			if (iNdEx + skippy) < 0 {
+				return ErrInvalidLengthMessage
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *MessageRequest) Unmarshal(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		for shift := uint(0); ; shift += 7 {
+			if shift >= 64 {
+				return ErrIntOverflowMessage
+			}
+			if iNdEx >= l {
+				return io.ErrUnexpectedEOF
+			}
+			b := dAtA[iNdEx]
+			iNdEx++
+			wire |= uint64(b&0x7F) << shift
+			if b < 0x80 {
+				break
+			}
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: MessageRequest: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: MessageRequest: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		case 1:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field ServiceName", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowMessage
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthMessage
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthMessage
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.ServiceName = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		case 2:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field MethodName", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowMessage
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthMessage
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthMessage
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.MethodName = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		case 3:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Request", wireType)
+			}
+			var byteLen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowMessage
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				byteLen |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if byteLen < 0 {
+				return ErrInvalidLengthMessage
+			}
+			postIndex := iNdEx + byteLen
+			if postIndex < 0 {
+				return ErrInvalidLengthMessage
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.Request = append(m.Request[:0], dAtA[iNdEx:postIndex]...)
+			if m.Request == nil {
+				m.Request = []byte{}
+			}
+			iNdEx = postIndex
+		default:
+			iNdEx = preIndex
+			skippy, err := skipMessage(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if skippy < 0 {
+				return ErrInvalidLengthMessage
+			}
+			if (iNdEx + skippy) < 0 {
+				return ErrInvalidLengthMessage
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *MessageResponse) Unmarshal(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		for shift := uint(0); ; shift += 7 {
+			if shift >= 64 {
+				return ErrIntOverflowMessage
+			}
+			if iNdEx >= l {
+				return io.ErrUnexpectedEOF
+			}
+			b := dAtA[iNdEx]
+			iNdEx++
+			wire |= uint64(b&0x7F) << shift
+			if b < 0x80 {
+				break
+			}
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: MessageResponse: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: MessageResponse: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		case 1:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Response", wireType)
+			}
+			var byteLen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowMessage
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				byteLen |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if byteLen < 0 {
+				return ErrInvalidLengthMessage
+			}
+			postIndex := iNdEx + byteLen
+			if postIndex < 0 {
+				return ErrInvalidLengthMessage
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.Response = append(m.Response[:0], dAtA[iNdEx:postIndex]...)
+			if m.Response == nil {
+				m.Response = []byte{}
 			}
 			iNdEx = postIndex
 		default:

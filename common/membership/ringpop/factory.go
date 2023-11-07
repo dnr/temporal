@@ -36,7 +36,9 @@ import (
 	"github.com/temporalio/ringpop-go/shared"
 	"github.com/temporalio/ringpop-go/tunnel"
 	"go.uber.org/fx"
+	"google.golang.org/grpc"
 
+	clusterpb "go.temporal.io/server/api/cluster/v1"
 	"go.temporal.io/server/common/config"
 	"go.temporal.io/server/common/dynamicconfig"
 	"go.temporal.io/server/common/headers"
@@ -64,6 +66,7 @@ type factoryParams struct {
 	RPCConfig       *config.RPC
 	TLSFactory      encryption.TLSConfigProvider
 	DC              *dynamicconfig.Collection
+	GRPCServer      *grpc.Server
 }
 
 // factory provides ringpop based membership objects
@@ -76,6 +79,7 @@ type factory struct {
 	RPCConfig       *config.RPC
 	TLSFactory      encryption.TLSConfigProvider
 	DC              *dynamicconfig.Collection
+	tcGrpcAdapter   *tcGrpcAdapter
 
 	channel shared.TChannel
 	monitor *monitor
@@ -105,6 +109,7 @@ func newFactory(params factoryParams) (*factory, error) {
 		RPCConfig:       params.RPCConfig,
 		TLSFactory:      params.TLSFactory,
 		DC:              params.DC,
+		tcGrpcAdapter:   newRpGrpcAdapter(params.GRPCServer),
 	}, nil
 }
 
@@ -149,7 +154,6 @@ func (factory *factory) broadcastAddressResolver() (string, error) {
 
 func (factory *factory) getTChannel() shared.TChannel {
 	factory.chOnce.Do(func() {
-		ringpopServiceName := fmt.Sprintf("%v-ringpop", factory.ServiceName)
 		// ringpopHostAddress := net.JoinHostPort(factory.getListenIP().String(), convert.IntToString(factory.RPCConfig.MembershipPort))
 		// enableTLS := factory.DC.GetBoolProperty(dynamicconfig.EnableRingpopTLS, false)()
 
@@ -159,7 +163,7 @@ func (factory *factory) getTChannel() shared.TChannel {
 		// } else {
 		// 	tChannel = factory.getTCPChannel(ringpopHostAddress, ringpopServiceName)
 		// }
-		tChannel, err := tunnel.NewChannel(ringpopServiceName, nil)
+		tChannel, err := tunnel.NewChannel("unused", factory.tcGrpcAdapter)
 		if err != nil {
 			factory.Logger.Fatal("Failed to create ringpop TChannel", tag.Error(err))
 		}
@@ -273,4 +277,60 @@ func (factory *factory) getHostInfoProvider() (membership.HostInfoProvider, erro
 
 	hostInfo := membership.NewHostInfoFromAddress(serviceAddress)
 	return membership.NewHostInfoProvider(hostInfo), nil
+}
+
+// FIXME: move
+type (
+	tcGrpcAdapter struct {
+		lock     sync.Mutex
+		handlers map[string]tunnel.TransportHandler
+	}
+)
+
+func newRpGrpcAdapter(grpcServer *grpc.Server) *tcGrpcAdapter {
+	a := &tcGrpcAdapter{
+		handlers: make(map[string]tunnel.TransportHandler),
+	}
+	clusterpb.RegisterTChannelGrpcTunnelServiceServer(grpcServer, a)
+	return a
+}
+
+func (a *tcGrpcAdapter) Call(
+	ctx context.Context,
+	hostPort string,
+	serviceName string,
+	methodName string,
+	// FIXME: headers? other options?
+	req []byte,
+) ([]byte, error) {
+	// FIXME: write client
+	panic("unimpl")
+}
+
+func (a *tcGrpcAdapter) Register(
+	serviceName string,
+	handler tunnel.TransportHandler,
+) error {
+	a.lock.Lock()
+	defer a.lock.Unlock()
+	a.handlers[serviceName] = handler
+	return nil
+}
+
+func (a *tcGrpcAdapter) Message(
+	ctx context.Context,
+	req *clusterpb.MessageRequest,
+) (*clusterpb.MessageResponse, error) {
+	a.lock.Lock()
+	handler := a.handlers[req.ServiceName]
+	a.lock.Unlock()
+	if handler == nil {
+		return nil, errors.New("FIXME")
+	}
+	peer := "FIXME - unused"
+	resBytes, err := handler(ctx, peer, req.MethodName, req.Request)
+	if err != nil {
+		return nil, err
+	}
+	return &clusterpb.MessageResponse{Response: resBytes}, nil
 }
