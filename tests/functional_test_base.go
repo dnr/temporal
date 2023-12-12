@@ -30,7 +30,6 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
-	"maps"
 	"os"
 	"reflect"
 	"regexp"
@@ -122,16 +121,7 @@ func (s *FunctionalTestBase) setupSuite(defaultClusterConfigFile string, options
 
 	clusterConfig, err := GetTestClusterConfig(defaultClusterConfigFile)
 	s.Require().NoError(err)
-	if clusterConfig.DynamicConfigOverrides == nil {
-		clusterConfig.DynamicConfigOverrides = make(map[dynamicconfig.Key]interface{})
-	}
-	maps.Copy(clusterConfig.DynamicConfigOverrides, map[dynamicconfig.Key]any{
-		dynamicconfig.HistoryScannerEnabled:    false,
-		dynamicconfig.TaskQueueScannerEnabled:  false,
-		dynamicconfig.ExecutionsScannerEnabled: false,
-		dynamicconfig.BuildIdScavengerEnabled:  false,
-	})
-	maps.Copy(clusterConfig.DynamicConfigOverrides, s.dynamicConfigOverrides)
+	clusterConfig.DynamicConfigOverrides = s.dynamicConfigOverrides
 	clusterConfig.ServiceFxOptions = params.ServiceOptions
 	s.testClusterConfig = clusterConfig
 
