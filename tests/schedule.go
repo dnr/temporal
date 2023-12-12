@@ -733,10 +733,10 @@ func (s *ScheduleFunctionalSuite) TestRateLimit() {
 	// sleeps are needed because the refresh is asynchronous, and there's no way to get access
 	// to the actual rate limiter object to refresh it directly.
 	s.OverrideDynamicConfig(dynamicconfig.SchedulerNamespaceStartWorkflowRPS, 1.0)
-	s.OverrideDynamicConfig(dynamicconfig.WorkerPerNamespaceWorkerCount, 0)
+	undo := s.OverrideDynamicConfig(dynamicconfig.WorkerPerNamespaceWorkerCount, 0)
 	s.testCluster.host.workerService.RefreshPerNSWorkerManager()
 	time.Sleep(2 * time.Second)
-	s.testCluster.host.dcClient.RemoveOverride(dynamicconfig.WorkerPerNamespaceWorkerCount)
+	undo()
 	s.testCluster.host.workerService.RefreshPerNSWorkerManager()
 	time.Sleep(2 * time.Second)
 
@@ -795,10 +795,10 @@ func (s *ScheduleFunctionalSuite) TestRateLimit() {
 	}
 
 	s.OverrideDynamicConfig(dynamicconfig.SchedulerNamespaceStartWorkflowRPS, 30.0)
-	s.OverrideDynamicConfig(dynamicconfig.WorkerPerNamespaceWorkerCount, 0)
+	undo = s.OverrideDynamicConfig(dynamicconfig.WorkerPerNamespaceWorkerCount, 0)
 	s.testCluster.host.workerService.RefreshPerNSWorkerManager()
 	time.Sleep(2 * time.Second)
-	s.OverrideDynamicConfig(dynamicconfig.WorkerPerNamespaceWorkerCount, 1)
+	undo()
 	s.testCluster.host.workerService.RefreshPerNSWorkerManager()
 }
 

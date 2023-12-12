@@ -574,7 +574,10 @@ func (s *FunctionalTestBase) parseHistory(expectedHistory string) (string, map[i
 
 // OverrideDynamicConfig overrides a dynamic config value for the duration of a test.
 // Once the test completes the previous value (if any) will be restored.
-func (s *FunctionalTestBase) OverrideDynamicConfig(name dynamicconfig.Key, value any) {
+// It also returns a function to undo the change, if the caller needs to undo it before the
+// test completes.
+func (s *FunctionalTestBase) OverrideDynamicConfig(name dynamicconfig.Key, value any) func() {
 	undo := s.testCluster.host.dcClient.OverrideValue(name, value)
 	s.T().Cleanup(undo)
+	return undo
 }
