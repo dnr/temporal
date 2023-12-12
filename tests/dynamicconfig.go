@@ -26,7 +26,6 @@ package tests
 
 import (
 	"sync"
-	"testing"
 	"time"
 
 	"golang.org/x/exp/maps"
@@ -80,15 +79,14 @@ func (d *dcClient) GetValue(name dynamicconfig.Key) []dynamicconfig.ConstrainedV
 	return d.fallback.GetValue(name)
 }
 
-// OverrideValue overrides a value for the duration of a test. Once the test completes
-// the previous value (if any) will be restored
-func (d *dcClient) OverrideValue(t *testing.T, name dynamicconfig.Key, value any) {
+// OverrideValue overrides a value and returns a function to restore the previous value (if any).
+func (d *dcClient) OverrideValue(name dynamicconfig.Key, value any) func() {
 	d.Lock()
 	defer d.Unlock()
 	priorValue, existed := d.overrides[name]
 	d.overrides[name] = value
 
-	t.Cleanup(func() {
+	return func() {
 		d.Lock()
 		defer d.Unlock()
 
@@ -97,7 +95,7 @@ func (d *dcClient) OverrideValue(t *testing.T, name dynamicconfig.Key, value any
 		} else {
 			delete(d.overrides, name)
 		}
-	})
+	}
 }
 
 func (d *dcClient) RemoveOverride(name dynamicconfig.Key) {

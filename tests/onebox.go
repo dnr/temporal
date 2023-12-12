@@ -32,7 +32,6 @@ import (
 	"net"
 	"strconv"
 	"sync"
-	"testing"
 	"time"
 
 	otelsdktrace "go.opentelemetry.io/otel/sdk/trace"
@@ -187,10 +186,10 @@ type (
 )
 
 // newTemporal returns an instance that hosts full temporal in one process
-func newTemporal(t *testing.T, params *TemporalParams) *temporalImpl {
+func newTemporal(params *TemporalParams) *temporalImpl {
 	testDCClient := newTestDCClient(dynamicconfig.NewNoopClient())
 	for k, v := range params.DynamicConfigOverrides {
-		testDCClient.OverrideValue(t, k, v)
+		testDCClient.OverrideValue(k, v)
 	}
 	impl := &temporalImpl{
 		logger:                           params.Logger,
@@ -221,7 +220,7 @@ func newTemporal(t *testing.T, params *TemporalParams) *temporalImpl {
 		serviceFxOptions:                 params.ServiceFxOptions,
 		taskCategoryRegistry:             params.TaskCategoryRegistry,
 	}
-	impl.overrideHistoryDynamicConfig(t, testDCClient)
+	impl.overrideHistoryDynamicConfig(testDCClient)
 	return impl
 }
 
@@ -818,42 +817,42 @@ func (c *temporalImpl) frontendConfigProvider() *config.Config {
 	}
 }
 
-func (c *temporalImpl) overrideHistoryDynamicConfig(t *testing.T, client *dcClient) {
-	client.OverrideValue(t, dynamicconfig.ReplicationTaskProcessorStartWait, time.Nanosecond)
+func (c *temporalImpl) overrideHistoryDynamicConfig(client *dcClient) {
+	client.OverrideValue(dynamicconfig.ReplicationTaskProcessorStartWait, time.Nanosecond)
 
 	if c.esConfig != nil {
-		client.OverrideValue(t, dynamicconfig.AdvancedVisibilityWritingMode, visibility.SecondaryVisibilityWritingModeDual)
+		client.OverrideValue(dynamicconfig.AdvancedVisibilityWritingMode, visibility.SecondaryVisibilityWritingModeDual)
 	}
 	if c.historyConfig.HistoryCountLimitWarn != 0 {
-		client.OverrideValue(t, dynamicconfig.HistoryCountLimitWarn, c.historyConfig.HistoryCountLimitWarn)
+		client.OverrideValue(dynamicconfig.HistoryCountLimitWarn, c.historyConfig.HistoryCountLimitWarn)
 	}
 	if c.historyConfig.HistoryCountLimitError != 0 {
-		client.OverrideValue(t, dynamicconfig.HistoryCountLimitError, c.historyConfig.HistoryCountLimitError)
+		client.OverrideValue(dynamicconfig.HistoryCountLimitError, c.historyConfig.HistoryCountLimitError)
 	}
 	if c.historyConfig.HistorySizeLimitWarn != 0 {
-		client.OverrideValue(t, dynamicconfig.HistorySizeLimitWarn, c.historyConfig.HistorySizeLimitWarn)
+		client.OverrideValue(dynamicconfig.HistorySizeLimitWarn, c.historyConfig.HistorySizeLimitWarn)
 	}
 	if c.historyConfig.HistorySizeLimitError != 0 {
-		client.OverrideValue(t, dynamicconfig.HistorySizeLimitError, c.historyConfig.HistorySizeLimitError)
+		client.OverrideValue(dynamicconfig.HistorySizeLimitError, c.historyConfig.HistorySizeLimitError)
 	}
 	if c.historyConfig.BlobSizeLimitError != 0 {
-		client.OverrideValue(t, dynamicconfig.BlobSizeLimitError, c.historyConfig.BlobSizeLimitError)
+		client.OverrideValue(dynamicconfig.BlobSizeLimitError, c.historyConfig.BlobSizeLimitError)
 	}
 	if c.historyConfig.BlobSizeLimitWarn != 0 {
-		client.OverrideValue(t, dynamicconfig.BlobSizeLimitWarn, c.historyConfig.BlobSizeLimitWarn)
+		client.OverrideValue(dynamicconfig.BlobSizeLimitWarn, c.historyConfig.BlobSizeLimitWarn)
 	}
 	if c.historyConfig.MutableStateSizeLimitError != 0 {
-		client.OverrideValue(t, dynamicconfig.MutableStateSizeLimitError, c.historyConfig.MutableStateSizeLimitError)
+		client.OverrideValue(dynamicconfig.MutableStateSizeLimitError, c.historyConfig.MutableStateSizeLimitError)
 	}
 	if c.historyConfig.MutableStateSizeLimitWarn != 0 {
-		client.OverrideValue(t, dynamicconfig.MutableStateSizeLimitWarn, c.historyConfig.MutableStateSizeLimitWarn)
+		client.OverrideValue(dynamicconfig.MutableStateSizeLimitWarn, c.historyConfig.MutableStateSizeLimitWarn)
 	}
 
 	// For DeleteWorkflowExecution tests
-	client.OverrideValue(t, dynamicconfig.TransferProcessorUpdateAckInterval, 1*time.Second)
-	client.OverrideValue(t, dynamicconfig.VisibilityProcessorUpdateAckInterval, 1*time.Second)
+	client.OverrideValue(dynamicconfig.TransferProcessorUpdateAckInterval, 1*time.Second)
+	client.OverrideValue(dynamicconfig.VisibilityProcessorUpdateAckInterval, 1*time.Second)
 
-	client.OverrideValue(t, dynamicconfig.EnableAPIGetCurrentRunIDLock, true)
+	client.OverrideValue(dynamicconfig.EnableAPIGetCurrentRunIDLock, true)
 }
 
 func (c *temporalImpl) newRPCFactory(

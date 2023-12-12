@@ -161,7 +161,7 @@ func (s *NDCFunctionalTestSuite) SetupSuite() {
 	}
 	clusterConfigs[0].MockAdminClient = s.mockAdminClient
 
-	cluster, err := s.testClusterFactory.NewCluster(s.T(), clusterConfigs[0], log.With(s.logger, tag.ClusterName(clusterName[0])))
+	cluster, err := s.testClusterFactory.NewCluster(clusterConfigs[0], log.With(s.logger, tag.ClusterName(clusterName[0])))
 	s.Require().NoError(err)
 	s.cluster = cluster
 

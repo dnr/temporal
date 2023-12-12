@@ -88,7 +88,7 @@ func (s *namespaceTestSuite) SetupSuite() {
 		dynamicconfig.DeleteNamespaceDeleteActivityRPS: 1000,
 	}
 
-	cluster, err := s.testClusterFactory.NewCluster(s.T(), s.clusterConfig, s.logger)
+	cluster, err := s.testClusterFactory.NewCluster(s.clusterConfig, s.logger)
 	s.Require().NoError(err)
 	s.cluster = cluster
 	s.frontendClient = s.cluster.GetFrontendClient()

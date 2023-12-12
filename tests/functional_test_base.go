@@ -139,7 +139,7 @@ func (s *FunctionalTestBase) setupSuite(defaultClusterConfigFile string, options
 		s.httpAPIAddress = TestFlags.FrontendHTTPAddr
 	} else {
 		s.Logger.Info("Running functional test against test cluster")
-		cluster, err := s.testClusterFactory.NewCluster(s.T(), clusterConfig, s.Logger)
+		cluster, err := s.testClusterFactory.NewCluster(clusterConfig, s.Logger)
 		s.Require().NoError(err)
 		s.testCluster = cluster
 		s.engine = s.testCluster.GetFrontendClient()
@@ -570,4 +570,11 @@ func (s *FunctionalTestBase) parseHistory(expectedHistory string) (string, map[i
 		}
 	}
 	return s.formatHistoryCompact(h), eventsAttrs
+}
+
+// OverrideDynamicConfig overrides a dynamic config value for the duration of a test.
+// Once the test completes the previous value (if any) will be restored.
+func (s *FunctionalTestBase) OverrideDynamicConfig(name dynamicconfig.Key, value any) {
+	undo := s.testCluster.host.dcClient.OverrideValue(name, value)
+	s.T().Cleanup(undo)
 }

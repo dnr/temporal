@@ -32,7 +32,6 @@ import (
 	"fmt"
 	"os"
 	"path"
-	"testing"
 
 	"github.com/pborman/uuid"
 	"go.uber.org/fx"
@@ -119,15 +118,15 @@ const (
 )
 
 type TestClusterFactory interface {
-	NewCluster(t *testing.T, options *TestClusterConfig, logger log.Logger) (*TestCluster, error)
+	NewCluster(options *TestClusterConfig, logger log.Logger) (*TestCluster, error)
 }
 
 type defaultTestClusterFactory struct {
 	tbFactory PersistenceTestBaseFactory
 }
 
-func (f *defaultTestClusterFactory) NewCluster(t *testing.T, options *TestClusterConfig, logger log.Logger) (*TestCluster, error) {
-	return NewClusterWithPersistenceTestBaseFactory(t, options, logger, f.tbFactory)
+func (f *defaultTestClusterFactory) NewCluster(options *TestClusterConfig, logger log.Logger) (*TestCluster, error) {
+	return NewClusterWithPersistenceTestBaseFactory(options, logger, f.tbFactory)
 }
 
 func NewTestClusterFactory() TestClusterFactory {
@@ -191,7 +190,7 @@ func (f *defaultPersistenceTestBaseFactory) NewTestBase(options *persistencetest
 	return persistencetests.NewTestBase(options)
 }
 
-func NewClusterWithPersistenceTestBaseFactory(t *testing.T, options *TestClusterConfig, logger log.Logger, tbFactory PersistenceTestBaseFactory) (*TestCluster, error) {
+func NewClusterWithPersistenceTestBaseFactory(options *TestClusterConfig, logger log.Logger, tbFactory PersistenceTestBaseFactory) (*TestCluster, error) {
 	clusterMetadataConfig := cluster.NewTestClusterMetadataConfig(
 		options.ClusterMetadata.EnableGlobalNamespace,
 		options.IsMasterCluster,
@@ -320,7 +319,7 @@ func NewClusterWithPersistenceTestBaseFactory(t *testing.T, options *TestCluster
 		logger.Fatal("Failed to start pprof", tag.Error(err))
 	}
 
-	cluster := newTemporal(t, temporalParams)
+	cluster := newTemporal(temporalParams)
 	if err := cluster.Start(); err != nil {
 		return nil, err
 	}

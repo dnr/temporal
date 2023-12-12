@@ -128,11 +128,11 @@ func (s *AdvVisCrossDCTestSuite) SetupSuite() {
 	s.Require().NoError(yaml.Unmarshal(confContent, &clusterConfigs))
 	s.clusterConfigs = clusterConfigs
 
-	c, err := s.testClusterFactory.NewCluster(s.T(), clusterConfigs[0], log.With(s.logger, tag.ClusterName(clusterNameAdvVis[0])))
+	c, err := s.testClusterFactory.NewCluster(clusterConfigs[0], log.With(s.logger, tag.ClusterName(clusterNameAdvVis[0])))
 	s.Require().NoError(err)
 	s.cluster1 = c
 
-	c, err = s.testClusterFactory.NewCluster(s.T(), clusterConfigs[1], log.With(s.logger, tag.ClusterName(clusterNameAdvVis[1])))
+	c, err = s.testClusterFactory.NewCluster(clusterConfigs[1], log.With(s.logger, tag.ClusterName(clusterNameAdvVis[1])))
 	s.Require().NoError(err)
 	s.cluster2 = c
 

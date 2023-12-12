@@ -194,9 +194,8 @@ func (s *VersioningIntegSuite) TestVersioningChangesPropagate() {
 	// ensure at least two hops
 	const partCount = 1 + partitionTreeDegree + partitionTreeDegree*partitionTreeDegree
 
-	dc := s.testCluster.host.dcClient
-	dc.OverrideValue(s.T(), dynamicconfig.MatchingNumTaskqueueReadPartitions, partCount)
-	dc.OverrideValue(s.T(), dynamicconfig.MatchingNumTaskqueueWritePartitions, partCount)
+	s.OverrideDynamicConfig(dynamicconfig.MatchingNumTaskqueueReadPartitions, partCount)
+	s.OverrideDynamicConfig(dynamicconfig.MatchingNumTaskqueueWritePartitions, partCount)
 
 	for _, buildId := range []string{"foo", "foo-v2", "foo-v3"} {
 		s.addNewDefaultBuildId(ctx, tq, buildId)
@@ -235,7 +234,6 @@ func (s *VersioningIntegSuite) TestMaxTaskQueuesPerBuildIdEnforced() {
 }
 
 func (s *VersioningIntegSuite) testWithMatchingBehavior(subtest func()) {
-	dc := s.testCluster.host.dcClient
 	for _, forceForward := range []bool{false, true} {
 		for _, forceAsync := range []bool{false, true} {
 			name := "NoForward"
@@ -251,18 +249,18 @@ func (s *VersioningIntegSuite) testWithMatchingBehavior(subtest func()) {
 
 			s.Run(name, func() {
 				if forceForward {
-					dc.OverrideValue(s.T(), dynamicconfig.MatchingNumTaskqueueReadPartitions, 13)
-					dc.OverrideValue(s.T(), dynamicconfig.MatchingNumTaskqueueWritePartitions, 13)
-					dc.OverrideValue(s.T(), dynamicconfig.TestMatchingLBForceReadPartition, 5)
-					dc.OverrideValue(s.T(), dynamicconfig.TestMatchingLBForceWritePartition, 11)
+					s.OverrideDynamicConfig(dynamicconfig.MatchingNumTaskqueueReadPartitions, 13)
+					s.OverrideDynamicConfig(dynamicconfig.MatchingNumTaskqueueWritePartitions, 13)
+					s.OverrideDynamicConfig(dynamicconfig.TestMatchingLBForceReadPartition, 5)
+					s.OverrideDynamicConfig(dynamicconfig.TestMatchingLBForceWritePartition, 11)
 				} else {
-					dc.OverrideValue(s.T(), dynamicconfig.MatchingNumTaskqueueReadPartitions, 1)
-					dc.OverrideValue(s.T(), dynamicconfig.MatchingNumTaskqueueWritePartitions, 1)
+					s.OverrideDynamicConfig(dynamicconfig.MatchingNumTaskqueueReadPartitions, 1)
+					s.OverrideDynamicConfig(dynamicconfig.MatchingNumTaskqueueWritePartitions, 1)
 				}
 				if forceAsync {
-					dc.OverrideValue(s.T(), dynamicconfig.TestMatchingDisableSyncMatch, true)
+					s.OverrideDynamicConfig(dynamicconfig.TestMatchingDisableSyncMatch, true)
 				} else {
-					dc.OverrideValue(s.T(), dynamicconfig.TestMatchingDisableSyncMatch, false)
+					s.OverrideDynamicConfig(dynamicconfig.TestMatchingDisableSyncMatch, false)
 				}
 
 				subtest()
@@ -390,9 +388,8 @@ func (s *VersioningIntegSuite) dispatchNewWorkflowStartWorkerFirst() {
 
 func (s *VersioningIntegSuite) TestDisableUserData_DefaultTasksBecomeUnversioned() {
 	// force one partition so that we can unload the task queue
-	dc := s.testCluster.host.dcClient
-	dc.OverrideValue(s.T(), dynamicconfig.MatchingNumTaskqueueReadPartitions, 1)
-	dc.OverrideValue(s.T(), dynamicconfig.MatchingNumTaskqueueWritePartitions, 1)
+	s.OverrideDynamicConfig(dynamicconfig.MatchingNumTaskqueueReadPartitions, 1)
+	s.OverrideDynamicConfig(dynamicconfig.MatchingNumTaskqueueWritePartitions, 1)
 
 	tq := s.randomizeStr(s.T().Name())
 	v0 := s.prefixed("v0")
@@ -447,7 +444,7 @@ func (s *VersioningIntegSuite) TestDisableUserData_DefaultTasksBecomeUnversioned
 	time.Sleep(time.Second * 3)
 
 	// Disable user data and unload the task queue.
-	dc.OverrideValue(s.T(), dynamicconfig.MatchingLoadUserData, false)
+	s.OverrideDynamicConfig(dynamicconfig.MatchingLoadUserData, false)
 	s.unloadTaskQueue(ctx, tq)
 
 	// Start an unversioned worker and verify that the second workflow completes.
@@ -789,8 +786,7 @@ func (s *VersioningIntegSuite) dispatchActivityCompatible() {
 }
 
 func (s *VersioningIntegSuite) TestDispatchActivityEager() {
-	dc := s.testCluster.host.dcClient
-	dc.OverrideValue(s.T(), dynamicconfig.EnableActivityEagerExecution, true)
+	s.OverrideDynamicConfig(dynamicconfig.EnableActivityEagerExecution, true)
 
 	tq := s.randomizeStr(s.T().Name())
 	v1 := s.prefixed("v1")
@@ -862,9 +858,8 @@ func (s *VersioningIntegSuite) TestDispatchActivityEager() {
 }
 
 func (s *VersioningIntegSuite) TestDispatchActivityCrossTQFails() {
-	dc := s.testCluster.host.dcClient
-	dc.OverrideValue(s.T(), dynamicconfig.MatchingNumTaskqueueReadPartitions, 1)
-	dc.OverrideValue(s.T(), dynamicconfig.MatchingNumTaskqueueWritePartitions, 1)
+	s.OverrideDynamicConfig(dynamicconfig.MatchingNumTaskqueueReadPartitions, 1)
+	s.OverrideDynamicConfig(dynamicconfig.MatchingNumTaskqueueWritePartitions, 1)
 
 	tq := s.randomizeStr(s.T().Name())
 	crosstq := s.randomizeStr(s.T().Name())
@@ -1067,9 +1062,8 @@ func (s *VersioningIntegSuite) dispatchChildWorkflowUpgrade() {
 }
 
 func (s *VersioningIntegSuite) TestDispatchChildWorkflowCrossTQFails() {
-	dc := s.testCluster.host.dcClient
-	dc.OverrideValue(s.T(), dynamicconfig.MatchingNumTaskqueueReadPartitions, 1)
-	dc.OverrideValue(s.T(), dynamicconfig.MatchingNumTaskqueueWritePartitions, 1)
+	s.OverrideDynamicConfig(dynamicconfig.MatchingNumTaskqueueReadPartitions, 1)
+	s.OverrideDynamicConfig(dynamicconfig.MatchingNumTaskqueueWritePartitions, 1)
 
 	tq := s.randomizeStr(s.T().Name())
 	crosstq := s.randomizeStr(s.T().Name())
@@ -1560,8 +1554,7 @@ func (s *VersioningIntegSuite) TestDisableUserData() {
 	// First insert some data (we'll try to read it below)
 	s.addNewDefaultBuildId(ctx, tq, v1)
 
-	dc := s.testCluster.host.dcClient
-	dc.OverrideValue(s.T(), dynamicconfig.MatchingLoadUserData, false)
+	s.OverrideDynamicConfig(dynamicconfig.MatchingLoadUserData, false)
 
 	// unload so that we reload and pick up LoadUserData dynamic config
 	s.unloadTaskQueue(ctx, tq)
@@ -1592,8 +1585,7 @@ func (s *VersioningIntegSuite) TestDisableUserData_UnversionedWorkflowRuns() {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	dc := s.testCluster.host.dcClient
-	dc.OverrideValue(s.T(), dynamicconfig.MatchingLoadUserData, false)
+	s.OverrideDynamicConfig(dynamicconfig.MatchingLoadUserData, false)
 
 	wf := func(ctx workflow.Context) (string, error) {
 		return "ok", nil
@@ -1615,9 +1607,8 @@ func (s *VersioningIntegSuite) TestDisableUserData_UnversionedWorkflowRuns() {
 
 func (s *VersioningIntegSuite) TestDisableUserData_WorkflowGetsStuck() {
 	// force one partition so that we can unload the task queue
-	dc := s.testCluster.host.dcClient
-	dc.OverrideValue(s.T(), dynamicconfig.MatchingNumTaskqueueReadPartitions, 1)
-	dc.OverrideValue(s.T(), dynamicconfig.MatchingNumTaskqueueWritePartitions, 1)
+	s.OverrideDynamicConfig(dynamicconfig.MatchingNumTaskqueueReadPartitions, 1)
+	s.OverrideDynamicConfig(dynamicconfig.MatchingNumTaskqueueWritePartitions, 1)
 
 	tq := s.T().Name()
 	v1 := s.prefixed("v1")
@@ -1625,7 +1616,7 @@ func (s *VersioningIntegSuite) TestDisableUserData_WorkflowGetsStuck() {
 	defer cancel()
 	s.addNewDefaultBuildId(ctx, tq, v1)
 
-	dc.OverrideValue(s.T(), dynamicconfig.MatchingLoadUserData, false)
+	s.OverrideDynamicConfig(dynamicconfig.MatchingLoadUserData, false)
 
 	s.unloadTaskQueue(ctx, tq)
 
@@ -1671,9 +1662,8 @@ func (s *VersioningIntegSuite) TestDisableUserData_WorkflowGetsStuck() {
 
 func (s *VersioningIntegSuite) TestDisableUserData_QueryFails() {
 	// force one partition so that we can unload the task queue
-	dc := s.testCluster.host.dcClient
-	dc.OverrideValue(s.T(), dynamicconfig.MatchingNumTaskqueueReadPartitions, 1)
-	dc.OverrideValue(s.T(), dynamicconfig.MatchingNumTaskqueueWritePartitions, 1)
+	s.OverrideDynamicConfig(dynamicconfig.MatchingNumTaskqueueReadPartitions, 1)
+	s.OverrideDynamicConfig(dynamicconfig.MatchingNumTaskqueueWritePartitions, 1)
 
 	tq := s.T().Name()
 	v1 := s.prefixed("v1")
@@ -1708,7 +1698,7 @@ func (s *VersioningIntegSuite) TestDisableUserData_QueryFails() {
 	// wait for it to complete
 	s.NoError(run.Get(ctx, nil))
 
-	dc.OverrideValue(s.T(), dynamicconfig.MatchingLoadUserData, false)
+	s.OverrideDynamicConfig(dynamicconfig.MatchingLoadUserData, false)
 
 	s.unloadTaskQueue(ctx, tq)
 
@@ -1720,9 +1710,8 @@ func (s *VersioningIntegSuite) TestDisableUserData_QueryFails() {
 
 func (s *VersioningIntegSuite) TestDisableUserData_DLQ() {
 	// force one partition so we can unload easily
-	dc := s.testCluster.host.dcClient
-	dc.OverrideValue(s.T(), dynamicconfig.MatchingNumTaskqueueReadPartitions, 1)
-	dc.OverrideValue(s.T(), dynamicconfig.MatchingNumTaskqueueWritePartitions, 1)
+	s.OverrideDynamicConfig(dynamicconfig.MatchingNumTaskqueueReadPartitions, 1)
+	s.OverrideDynamicConfig(dynamicconfig.MatchingNumTaskqueueWritePartitions, 1)
 
 	tq := s.randomizeStr(s.T().Name())
 	v1 := s.prefixed("v1")
@@ -1759,7 +1748,7 @@ func (s *VersioningIntegSuite) TestDisableUserData_DLQ() {
 	time.Sleep(100 * time.Millisecond) // wait for worker to respond
 
 	// disable user data and unload so it picks it up
-	dc.OverrideValue(s.T(), dynamicconfig.MatchingLoadUserData, false)
+	s.OverrideDynamicConfig(dynamicconfig.MatchingLoadUserData, false)
 	s.unloadTaskQueue(ctx, tq)
 	s.unloadTaskQueue(ctx, s.getStickyQueueName(ctx, run.GetID()))
 
@@ -1773,7 +1762,7 @@ func (s *VersioningIntegSuite) TestDisableUserData_DLQ() {
 	s.Error(run.Get(waitCtx, nil))
 
 	// enable user data. task can be dispatched from dlq immediately since dlq is still loaded.
-	dc.OverrideValue(s.T(), dynamicconfig.MatchingLoadUserData, true)
+	s.OverrideDynamicConfig(dynamicconfig.MatchingLoadUserData, true)
 	s.unloadTaskQueue(ctx, tq)
 
 	// workflow can finish
@@ -1784,9 +1773,8 @@ func (s *VersioningIntegSuite) TestDisableUserData_DLQ() {
 
 func (s *VersioningIntegSuite) TestDisableUserData_DLQ_WithUnload() {
 	// force one partition so we can unload easily
-	dc := s.testCluster.host.dcClient
-	dc.OverrideValue(s.T(), dynamicconfig.MatchingNumTaskqueueReadPartitions, 1)
-	dc.OverrideValue(s.T(), dynamicconfig.MatchingNumTaskqueueWritePartitions, 1)
+	s.OverrideDynamicConfig(dynamicconfig.MatchingNumTaskqueueReadPartitions, 1)
+	s.OverrideDynamicConfig(dynamicconfig.MatchingNumTaskqueueWritePartitions, 1)
 
 	tq := s.randomizeStr(s.T().Name())
 	v1 := s.prefixed("v1")
@@ -1823,7 +1811,7 @@ func (s *VersioningIntegSuite) TestDisableUserData_DLQ_WithUnload() {
 	time.Sleep(100 * time.Millisecond) // wait for worker to respond
 
 	// disable user data and unload so it picks it up
-	dc.OverrideValue(s.T(), dynamicconfig.MatchingLoadUserData, false)
+	s.OverrideDynamicConfig(dynamicconfig.MatchingLoadUserData, false)
 	s.unloadTaskQueue(ctx, tq)
 	s.unloadTaskQueue(ctx, s.getStickyQueueName(ctx, run.GetID()))
 
@@ -1843,7 +1831,7 @@ func (s *VersioningIntegSuite) TestDisableUserData_DLQ_WithUnload() {
 	s.unloadTaskQueue(ctx, dlqName.FullName())
 
 	// enable user data
-	dc.OverrideValue(s.T(), dynamicconfig.MatchingLoadUserData, true)
+	s.OverrideDynamicConfig(dynamicconfig.MatchingLoadUserData, true)
 	s.unloadTaskQueue(ctx, tq)
 
 	// workflow is still stuck because dlq is unloaded
@@ -1866,9 +1854,8 @@ func (s *VersioningIntegSuite) TestDisableUserData_DLQ_WithUnload() {
 
 func (s *VersioningIntegSuite) TestDescribeTaskQueue() {
 	// force one partition since DescribeTaskQueue only goes to the root
-	dc := s.testCluster.host.dcClient
-	dc.OverrideValue(s.T(), dynamicconfig.MatchingNumTaskqueueReadPartitions, 1)
-	dc.OverrideValue(s.T(), dynamicconfig.MatchingNumTaskqueueWritePartitions, 1)
+	s.OverrideDynamicConfig(dynamicconfig.MatchingNumTaskqueueReadPartitions, 1)
+	s.OverrideDynamicConfig(dynamicconfig.MatchingNumTaskqueueWritePartitions, 1)
 
 	tq := s.randomizeStr(s.T().Name())
 	v1 := s.prefixed("v1")
@@ -1933,9 +1920,8 @@ func (s *VersioningIntegSuite) TestDescribeTaskQueue() {
 }
 
 func (s *VersioningIntegSuite) TestDescribeWorkflowExecution() {
-	dc := s.testCluster.host.dcClient
-	dc.OverrideValue(s.T(), dynamicconfig.MatchingNumTaskqueueReadPartitions, 4)
-	dc.OverrideValue(s.T(), dynamicconfig.MatchingNumTaskqueueWritePartitions, 4)
+	s.OverrideDynamicConfig(dynamicconfig.MatchingNumTaskqueueReadPartitions, 4)
+	s.OverrideDynamicConfig(dynamicconfig.MatchingNumTaskqueueWritePartitions, 4)
 
 	tq := s.randomizeStr(s.T().Name())
 	v1 := s.prefixed("v1")
