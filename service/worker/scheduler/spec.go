@@ -267,6 +267,7 @@ func (cs *CompiledSpec) getNextTime(after time.Time) getNextTimeResult {
 	var nominal time.Time
 	for {
 		nominal = cs.rawNextTime(after)
+		// fmt.Printf("@@@    raw(%v) = %v\n", after, nominal)
 
 		if nominal.IsZero() || (cs.spec.EndTime != nil && nominal.After(*cs.spec.EndTime)) {
 			return getNextTimeResult{}

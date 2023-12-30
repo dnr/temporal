@@ -208,10 +208,17 @@ func (s *scheduler) run() error {
 		_ = m.Marshal(&specJson, s.Schedule.Spec)
 		_ = m.Marshal(&policiesJson, s.Schedule.Policies)
 		s.logger.Info("Starting schedule", "spec", specJson.String(), "policies", policiesJson.String())
+		fmt.Printf("@@@@@@@@@\n@@@ STARTING spec %s pol %s\n", specJson.String(), policiesJson.String())
 
 		s.State.LastProcessedTime = timestamp.TimePtr(s.now())
 		s.State.ConflictToken = InitialConflictToken
 		s.Info.CreateTime = s.State.LastProcessedTime
+	} else {
+		var m jsonpb.Marshaler
+		var specJson, policiesJson strings.Builder
+		_ = m.Marshal(&specJson, s.Schedule.Spec)
+		_ = m.Marshal(&policiesJson, s.Schedule.Policies)
+		fmt.Printf("@@@@@@@@@\n@@@ CONTINUING spec %s pol %s\n", specJson.String(), policiesJson.String())
 	}
 
 	// A schedule may be created with an initial Patch, e.g. start one immediately. Put that in
@@ -220,6 +227,8 @@ func (s *scheduler) run() error {
 	s.InitialPatch = nil
 
 	for iters := s.tweakables.IterationsBeforeContinueAsNew; iters > 0 || s.pendingUpdate != nil || s.pendingPatch != nil; iters-- {
+		fmt.Printf("@@@@@@@@@\n")
+		fmt.Printf("@@@ iters %v\n", iters)
 
 		t1 := timestamp.TimeValue(s.State.LastProcessedTime)
 		t2 := s.now()
@@ -228,24 +237,32 @@ func (s *scheduler) run() error {
 			s.logger.Warn("Time went backwards", "from", t1, "to", t2)
 			t2 = t1
 		}
+		fmt.Printf("@@@ process time range %v -> %v\n", t1, t2)
 		nextWakeup := s.processTimeRange(
 			t1, t2,
 			// resolve this to the schedule's policy as late as possible
 			enumspb.SCHEDULE_OVERLAP_POLICY_UNSPECIFIED,
 			false,
 		)
+		fmt.Printf("@@@ nw now is %v\n", nextWakeup)
 		s.State.LastProcessedTime = timestamp.TimePtr(t2)
 		// handle signals after processing time range that just elapsed
 		scheduleChanged := s.processSignals()
 		if scheduleChanged {
 			// need to calculate sleep again
+			fmt.Printf("@@@ process again after change (nw was %v)\n", nextWakeup)
 			nextWakeup = s.processTimeRange(t2, t2, enumspb.SCHEDULE_OVERLAP_POLICY_UNSPECIFIED, false)
+			fmt.Printf("@@@ nextWakeup now is %v\n", nextWakeup)
 		}
 		// try starting workflows in the buffer
 		//nolint:revive
+		fmt.Printf("@@@ process buffer\n")
 		for s.processBuffer() {
 		}
+		fmt.Printf("@@@ about to upsert\n")
 		s.updateMemoAndSearchAttributes()
+		// fmt.Printf("@@@@@@@@@\n@@@ STATE %#v\n", s)
+		fmt.Printf("@@@ about to sleep\n")
 		// sleep returns on any of:
 		// 1. requested time elapsed
 		// 2. we got a signal (update, request, refresh)
@@ -360,10 +377,13 @@ func (s *scheduler) getNextTime(after time.Time) getNextTimeResult {
 
 	// we populate the map sequentially, if after is not in the map, it means we either exhausted
 	// all items, or we jumped through time (forward or backward), in either case, refresh the cache
+	// fmt.Printf("@@@ CACHE IS %v\n", s.nextTimeResultCache)
 	next, ok := s.nextTimeResultCache[after]
 	if ok {
+		// fmt.Printf("@@@ USING CACHED RESULT %v\n", next)
 		return next
 	}
+	fmt.Printf("@@@ REGEN CACHE from %v\n", after)
 	s.nextTimeResultCache = nil
 	// Run this logic in a SideEffect so that we can fix bugs there without breaking
 	// existing schedule workflows.
@@ -371,11 +391,13 @@ func (s *scheduler) getNextTime(after time.Time) getNextTimeResult {
 		results := make(map[time.Time]getNextTimeResult)
 		for t := after; !t.IsZero() && len(results) < maxNextTimeResultCacheSize; {
 			next := s.cspec.getNextTime(t)
+			fmt.Printf("@@@ adding to cache %v -> %v\n", t, next)
 			results[t] = next
 			t = next.Next
 		}
 		return results
 	}).Get(&s.nextTimeResultCache))
+	fmt.Printf("@@@ NEW CACHE IS %v\n", s.nextTimeResultCache)
 	return s.nextTimeResultCache[after]
 }
 
@@ -414,6 +436,7 @@ func (s *scheduler) processTimeRange(
 			}).Get(&next))
 		} else {
 			next = s.getNextTime(t1)
+			fmt.Printf("@@@ getNextTime(%v) = %v\n", t1, next)
 		}
 		t1 = next.Next
 		if t1.IsZero() || t1.After(t2) {
@@ -478,6 +501,7 @@ func (s *scheduler) sleep(nextWakeup time.Time) {
 		nextWakeup = time.Time{}
 	}
 
+	fmt.Printf("@@ sleep nextWakeup %v\n", nextWakeup)
 	if !nextWakeup.IsZero() {
 		sleepTime := nextWakeup.Sub(s.now())
 		// A previous version of this workflow passed around sleep duration instead of wakeup time,
@@ -490,9 +514,13 @@ func (s *scheduler) sleep(nextWakeup time.Time) {
 		// A previous version of this workflow always created a new timer here, which is wasteful.
 		// We can reuse a previous timer if we have the same deadline and it didn't fire yet.
 		if s.tweakables.ReuseTimer {
+			fmt.Printf("@@ CURRENT TIMER %v\n@@ NEW TIMER %v\n", s.currentTimerDeadline, nextWakeup)
 			if s.currentTimer == nil || !s.currentTimerDeadline.Equal(nextWakeup) {
+				fmt.Printf("@@ creating new timer %v\n", sleepTime)
 				s.currentTimer = workflow.NewTimer(s.ctx, sleepTime)
 				s.currentTimerDeadline = nextWakeup
+			} else {
+				fmt.Printf("@@ reusing timer timer %v\n", sleepTime)
 			}
 			sel.AddFuture(s.currentTimer, func(_ workflow.Future) {
 				s.currentTimer = nil
@@ -501,6 +529,8 @@ func (s *scheduler) sleep(nextWakeup time.Time) {
 			tmr := workflow.NewTimer(s.ctx, sleepTime)
 			sel.AddFuture(tmr, func(_ workflow.Future) {})
 		}
+	} else {
+		fmt.Printf("@@ NOT SLEEPING\n@@ STATE %#v\n", s)
 	}
 
 	if s.watchingFuture != nil {
@@ -707,6 +737,7 @@ func (s *scheduler) updateMemoAndSearchAttributes() {
 		!proto.Equal(&currentInfo, newInfo) {
 		// marshal manually to get proto encoding (default dataconverter will use json)
 		newInfoBytes, err := newInfo.Marshal()
+		fmt.Printf("@@@ MEMO DIFF\n")
 		if err == nil {
 			err = workflow.UpsertMemo(s.ctx, map[string]interface{}{
 				MemoFieldInfo: newInfoBytes,
@@ -715,6 +746,8 @@ func (s *scheduler) updateMemoAndSearchAttributes() {
 		if err != nil {
 			s.logger.Error("error updating memo", "error", err)
 		}
+	} else {
+		fmt.Printf("@@@ no memo diff\n")
 	}
 
 	currentPausedPayload := workflowInfo.SearchAttributes.GetIndexedFields()[searchattribute.TemporalSchedulePaused]
