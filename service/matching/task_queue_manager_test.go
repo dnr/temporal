@@ -840,10 +840,7 @@ func TestUserData_FetchesOnInit(t *testing.T) {
 			LastKnownUserDataVersion: 0,
 			WaitNewData:              false, // first fetch is not long poll
 		}).
-		Return(&matchingservice.GetTaskQueueUserDataResponse{
-			TaskQueueHasUserData: true,
-			UserData:             data1,
-		}, nil)
+		Return(&matchingservice.GetTaskQueueUserDataResponse{UserData: data1}, nil)
 
 	tq := mustCreateTestTaskQueueManagerWithConfig(t, controller, tqCfg)
 	tq.config.GetUserDataMinWaitTime = 10 * time.Second // only one fetch
@@ -886,10 +883,7 @@ func TestUserData_FetchesAndFetchesAgain(t *testing.T) {
 			LastKnownUserDataVersion: 0,
 			WaitNewData:              false, // first is not long poll
 		}).
-		Return(&matchingservice.GetTaskQueueUserDataResponse{
-			TaskQueueHasUserData: true,
-			UserData:             data1,
-		}, nil)
+		Return(&matchingservice.GetTaskQueueUserDataResponse{UserData: data1}, nil)
 
 	tqCfg.matchingClientMock.EXPECT().GetTaskQueueUserData(
 		gomock.Any(),
@@ -900,10 +894,7 @@ func TestUserData_FetchesAndFetchesAgain(t *testing.T) {
 			LastKnownUserDataVersion: 1,
 			WaitNewData:              true, // second is long poll
 		}).
-		Return(&matchingservice.GetTaskQueueUserDataResponse{
-			TaskQueueHasUserData: true,
-			UserData:             data2,
-		}, nil)
+		Return(&matchingservice.GetTaskQueueUserDataResponse{UserData: data2}, nil)
 
 	tqCfg.matchingClientMock.EXPECT().GetTaskQueueUserData(
 		gomock.Any(),
@@ -967,10 +958,7 @@ func TestUserData_FetchDisableEnable(t *testing.T) {
 			LastKnownUserDataVersion: 0,
 			WaitNewData:              false, // first is not long poll
 		}).
-		Return(&matchingservice.GetTaskQueueUserDataResponse{
-			TaskQueueHasUserData: true,
-			UserData:             data1,
-		}, nil)
+		Return(&matchingservice.GetTaskQueueUserDataResponse{UserData: data1}, nil)
 
 	tqCfg.matchingClientMock.EXPECT().GetTaskQueueUserData(
 		gomock.Any(),
@@ -981,10 +969,7 @@ func TestUserData_FetchDisableEnable(t *testing.T) {
 			LastKnownUserDataVersion: 1,
 			WaitNewData:              true, // second is long poll
 		}).
-		Return(&matchingservice.GetTaskQueueUserDataResponse{
-			TaskQueueHasUserData: true,
-			UserData:             data2,
-		}, nil)
+		Return(&matchingservice.GetTaskQueueUserDataResponse{UserData: data2}, nil)
 
 	// after enabling again:
 
@@ -997,10 +982,7 @@ func TestUserData_FetchDisableEnable(t *testing.T) {
 			LastKnownUserDataVersion: 0, // sends zero for first request after re-enabling
 			WaitNewData:              false,
 		}).
-		Return(&matchingservice.GetTaskQueueUserDataResponse{
-			TaskQueueHasUserData: true,
-			UserData:             data3,
-		}, nil)
+		Return(&matchingservice.GetTaskQueueUserDataResponse{UserData: data3}, nil)
 
 	tqCfg.matchingClientMock.EXPECT().GetTaskQueueUserData(
 		gomock.Any(),
@@ -1086,10 +1068,7 @@ func TestUserData_RetriesFetchOnUnavailable(t *testing.T) {
 		}).
 		DoAndReturn(func(ctx context.Context, in *matchingservice.GetTaskQueueUserDataRequest, opts ...grpc.CallOption) (*matchingservice.GetTaskQueueUserDataResponse, error) {
 			<-ch
-			return &matchingservice.GetTaskQueueUserDataResponse{
-				TaskQueueHasUserData: true,
-				UserData:             data1,
-			}, nil
+			return &matchingservice.GetTaskQueueUserDataResponse{UserData: data1}, nil
 		})
 
 	tq := mustCreateTestTaskQueueManagerWithConfig(t, controller, tqCfg)
@@ -1160,10 +1139,7 @@ func TestUserData_RetriesFetchOnUnImplemented(t *testing.T) {
 		}).
 		DoAndReturn(func(ctx context.Context, in *matchingservice.GetTaskQueueUserDataRequest, opts ...grpc.CallOption) (*matchingservice.GetTaskQueueUserDataResponse, error) {
 			<-ch
-			return &matchingservice.GetTaskQueueUserDataResponse{
-				TaskQueueHasUserData: true,
-				UserData:             data1,
-			}, nil
+			return &matchingservice.GetTaskQueueUserDataResponse{UserData: data1}, nil
 		})
 
 	tq := mustCreateTestTaskQueueManagerWithConfig(t, controller, tqCfg)
@@ -1219,10 +1195,7 @@ func TestUserData_FetchesUpTree(t *testing.T) {
 			LastKnownUserDataVersion: 0,
 			WaitNewData:              false,
 		}).
-		Return(&matchingservice.GetTaskQueueUserDataResponse{
-			TaskQueueHasUserData: true,
-			UserData:             data1,
-		}, nil)
+		Return(&matchingservice.GetTaskQueueUserDataResponse{UserData: data1}, nil)
 
 	tq := mustCreateTestTaskQueueManagerWithConfig(t, controller, tqCfg)
 	tq.config.GetUserDataMinWaitTime = 10 * time.Second // wait on success
@@ -1260,10 +1233,7 @@ func TestUserData_FetchesActivityToWorkflow(t *testing.T) {
 			LastKnownUserDataVersion: 0,
 			WaitNewData:              false,
 		}).
-		Return(&matchingservice.GetTaskQueueUserDataResponse{
-			TaskQueueHasUserData: true,
-			UserData:             data1,
-		}, nil)
+		Return(&matchingservice.GetTaskQueueUserDataResponse{UserData: data1}, nil)
 
 	tq := mustCreateTestTaskQueueManagerWithConfig(t, controller, tqCfg)
 	tq.config.GetUserDataMinWaitTime = 10 * time.Second // wait on success
@@ -1304,10 +1274,7 @@ func TestUserData_FetchesStickyToNormal(t *testing.T) {
 			LastKnownUserDataVersion: 0,
 			WaitNewData:              false,
 		}).
-		Return(&matchingservice.GetTaskQueueUserDataResponse{
-			TaskQueueHasUserData: true,
-			UserData:             data1,
-		}, nil)
+		Return(&matchingservice.GetTaskQueueUserDataResponse{UserData: data1}, nil)
 
 	// have to create manually to get sticky
 	logger := log.NewTestLogger()

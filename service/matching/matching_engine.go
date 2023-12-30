@@ -1055,14 +1055,12 @@ func (e *matchingEngineImpl) GetTaskQueueUserData(
 			// long-poll: wait for data to change/appear
 			select {
 			case <-ctx.Done():
-				resp.TaskQueueHasUserData = userData != nil
 				return resp, nil
 			case <-userDataChanged:
 				continue
 			}
 		}
 		if userData != nil {
-			resp.TaskQueueHasUserData = true
 			if userData.Version > version {
 				resp.UserData = userData
 			} else if userData.Version < version {
