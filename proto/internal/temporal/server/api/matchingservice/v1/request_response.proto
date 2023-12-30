@@ -188,6 +188,7 @@ message DescribeTaskQueueRequest {
 message DescribeTaskQueueResponse {
     repeated temporal.api.taskqueue.v1.PollerInfo pollers = 1;
     temporal.api.taskqueue.v1.TaskQueueStatus task_queue_status = 2;
+    temporal.server.api.taskqueue.v1.PartitionState partition_state = 3;
 }
 
 message ListTaskQueuePartitionsRequest {
@@ -251,15 +252,34 @@ message GetTaskQueueUserDataRequest {
     // This value must not be set to a negative number (note that our linter suggests avoiding uint64).
     int64 last_known_user_data_version = 3;
     // If set and last_known_user_data_version is the current version, block until new data is
-    // available (or timeout).
+    // available (or timeout). Deprecated, use PollTaskQueueMetadata.
     bool wait_new_data = 4;
 }
+
 message GetTaskQueueUserDataResponse {
     // Whether this task queue has any stored user data
     bool task_queue_has_user_data = 1;
     // Versioned user data, set if the task queue has user data and the request's last_known_user_data_version is less
     // than the version cached in the root partition.
     temporal.server.api.persistence.v1.VersionedTaskQueueUserData user_data = 2;
+}
+
+message PollTaskQueueMetadataRequest {
+    string namespace_id = 1;
+    // The task queue to fetch metadata from.
+    string task_queue = 2;
+    temporal.api.enums.v1.TaskQueueType task_queue_type = 3;
+    // The value of the last known user data version, or 0 if unknown.
+    int64 last_user_data_version = 4;
+    // The value of the last known partition state version, or 0 if unknown.
+    int64 last_partition_state_version = 5;
+}
+
+message PollTaskQueueMetadataResponse {
+    // Versioned user data.
+    temporal.server.api.persistence.v1.VersionedTaskQueueUserData user_data = 1;
+    // Versioned partition state.
+    temporal.server.api.taskqueue.v1.PartitionState partition_state = 2;
 }
 
 message ApplyTaskQueueUserDataReplicationEventRequest {

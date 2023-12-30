@@ -44,3 +44,24 @@ message TaskVersionDirective {
     }
 }
 
+// PartitionState holds metadata for current partition state of a task queue.
+message PartitionState {
+    // Version is updated each time this state changes. It can be used to distinguish newer
+    // data from older data.
+    int64 version = 1;
+
+    // Current number of partitions. From 0 to current_partitions-1, The matching node assigned
+    // to that partition is responsible for the tasks for that partition.
+    int32 current_partitions = 2;
+
+    // If there are partitions beyond current_partitions that still have spooled tasks, they
+    // can be reassigned to lower partitions to read and dispatch the existing tasks without
+    // accepting more. This array holds the assignments for partitions following
+    // current_partitions. -1 means no assignment.
+    //
+    // E.g., if there were 7 partitions and all had spooled tasks, and the partition count will
+    // drop to 3, then this array might have [1 2 3 2] meaning partition #1 would take #3, 2
+    // would take #4 and #6, and #3 would take #5. After #3's tasks were all dispatched, it
+    // would have [-1 2 3 2], and then after all were dispatched it would be empty.
+    repeated int32 extra_partition_assignment = 3;
+}

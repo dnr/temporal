@@ -86,8 +86,15 @@ service MatchingService {
     //     aip.dev/not-precedent: UpdateWorkerBuildIdCompatibility RPC doesn't follow Google API format. --)
     rpc UpdateWorkerBuildIdCompatibility (UpdateWorkerBuildIdCompatibilityRequest) returns (UpdateWorkerBuildIdCompatibilityResponse) {}
     rpc GetWorkerBuildIdCompatibility (GetWorkerBuildIdCompatibilityRequest) returns (GetWorkerBuildIdCompatibilityResponse) {}
-    // Fetch user data for a task queue, this request should always be routed to the node holding the root partition of the workflow task queue.
+
+    // Fetch user data for a task queue. This request should go to the parent partition of the
+    // requester, but always workflow type.
     rpc GetTaskQueueUserData (GetTaskQueueUserDataRequest) returns (GetTaskQueueUserDataResponse) {}
+
+    // Long-polls for task queue user data and also partition state. Returns if either one changed.
+    // This request should go to the parent partition of the requester. For task queue types
+    // besides workflow, they should request user data from the workflow root.
+    rpc PollTaskQueueMetadata (PollTaskQueueMetadataRequest) returns (PollTaskQueueMetadataResponse) {}
 
     // Apply a user data replication event.
     rpc ApplyTaskQueueUserDataReplicationEvent (ApplyTaskQueueUserDataReplicationEventRequest) returns (ApplyTaskQueueUserDataReplicationEventResponse) {}
