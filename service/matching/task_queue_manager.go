@@ -134,10 +134,8 @@ type (
 		// DispatchQueryTask will dispatch query to local or remote poller. If forwarded then result or error is returned,
 		// if dispatched to local poller then nil and nil is returned.
 		DispatchQueryTask(ctx context.Context, taskID string, request *matchingservice.QueryWorkflowRequest) (*matchingservice.QueryWorkflowResponse, error)
-		// GetUserData returns the versioned user data for this task queue
-		GetUserData() (*persistencespb.VersionedTaskQueueUserData, chan struct{}, error)
-		// GetPartitionState returns the partition state for this task queue
-		GetPartitionState() (*taskqueuespb.PartitionState, chan struct{}, error)
+		// GetMetadata returns the user data and partition state for this task queue, and channels to detect changes.
+		GetMetadata() (*persistencespb.VersionedTaskQueueUserData, chan struct{}, *taskqueuespb.PartitionState, chan struct{}, error)
 		// UpdateUserData updates user data for this task queue and replicates across clusters if necessary.
 		// Extra care should be taken to avoid mutating the existing data in the update function.
 		UpdateUserData(ctx context.Context, options UserDataUpdateOptions, updateFn UserDataUpdateFunc) error
@@ -323,10 +321,12 @@ func (c *taskQueueManagerImpl) Start() {
 	c.liveness.Start()
 	c.taskWriter.Start()
 	c.taskReader.Start()
+	// All task queues that store user data (i.e. the root workflow task queue) also store
+	// partition state. So if we load user data, we don't need to fetch metadata.
 	if c.db.DbStoresUserData() {
 		c.goroGroup.Go(c.loadUserData)
 	} else {
-		c.goroGroup.Go(c.fetchUserData)
+		c.goroGroup.Go(c.fetchMetadata)
 	}
 	c.logger.Info("", tag.LifeCycleStarted)
 	c.taggedMetricsHandler.Counter(metrics.TaskQueueStartedCounter.Name()).Record(1)
@@ -542,15 +542,11 @@ func (c *taskQueueManagerImpl) DispatchQueryTask(
 	return c.matcher.OfferQuery(ctx, task)
 }
 
-// GetUserData returns the user data for the task queue if any.
-// Note: can return nil value with no error.
-func (c *taskQueueManagerImpl) GetUserData() (*persistencespb.VersionedTaskQueueUserData, chan struct{}, error) {
-	return c.db.GetUserData()
-}
-
-// GetPartitionState returns the partition state for the task queue.
-func (c *taskQueueManagerImpl) GetPartitionState() (*taskqueuespb.PartitionState, chan struct{}, error) {
-	return c.db.GetPartitionState()
+// GetMetadata returns the user data for the task queue if any.
+// Note: can return nil values with no error.
+// FIXME: return a struct type
+func (c *taskQueueManagerImpl) GetMetadata() (*persistencespb.VersionedTaskQueueUserData, chan struct{}, *taskqueuespb.PartitionState, chan struct{}, error) {
+	return c.db.GetMetadata()
 }
 
 // UpdateUserData updates user data for this task queue and replicates across clusters if necessary.
@@ -784,7 +780,7 @@ func (c *taskQueueManagerImpl) RedirectToVersionedQueueForPoll(ctx context.Conte
 	// We don't need the userDataChanged channel here because polls have a timeout and the
 	// client will retry, so if we're blocked on the wrong matcher it'll just take one poll
 	// timeout to fix itself.
-	userData, _, err := c.GetUserData()
+	userData, _, _, _, err := c.GetMetadata()
 	if err != nil {
 		return nil, err
 	}
@@ -842,7 +838,7 @@ func (c *taskQueueManagerImpl) RedirectToVersionedQueueForAdd(ctx context.Contex
 	}
 
 	// Have to look up versioning data.
-	userData, userDataChanged, err := c.GetUserData()
+	userData, userDataChanged, _, _, err := c.GetMetadata()
 	if err != nil {
 		return nil, nil, err
 	}
@@ -919,7 +915,7 @@ func (c *taskQueueManagerImpl) loadUserData(ctx context.Context) error {
 	return nil
 }
 
-func (c *taskQueueManagerImpl) userDataFetchSource() (string, error) {
+func (c *taskQueueManagerImpl) metadataFetchSource() (string, error) {
 	if c.kind == enumspb.TASK_QUEUE_KIND_STICKY {
 		// Sticky queues get data from their corresponding normal queue
 		if c.normalName == "" {
@@ -941,7 +937,7 @@ func (c *taskQueueManagerImpl) userDataFetchSource() (string, error) {
 	return parent.FullName(), nil
 }
 
-func (c *taskQueueManagerImpl) fetchUserData(ctx context.Context) error {
+func (c *taskQueueManagerImpl) fetchMetadata(ctx context.Context) error {
 	ctx = c.callerInfoContext(ctx)
 
 	if c.managesSpecificVersionSet() {
@@ -952,7 +948,7 @@ func (c *taskQueueManagerImpl) fetchUserData(ctx context.Context) error {
 
 	// otherwise fetch from parent partition
 
-	fetchSource, err := c.userDataFetchSource()
+	fetchSource, err := c.metadataFetchSource()
 	if err != nil {
 		if err == errMissingNormalQueueName { // nolint:goerr113
 			// pretend we have no user data. this is a sticky queue so the only effect is that we can't
@@ -967,36 +963,31 @@ func (c *taskQueueManagerImpl) fetchUserData(ctx context.Context) error {
 	hasFetched := false
 
 	op := func(ctx context.Context) error {
-		knownUserData, _, _ := c.GetUserData()
+		knownUserData, _, knownPartitionState, _, _ := c.GetMetadata()
 
 		callCtx, cancel := context.WithTimeout(ctx, c.config.MetadataLongPollTimeout())
 		defer cancel()
 
-		res, err := c.matchingClient.GetTaskQueueUserData(callCtx, &matchingservice.GetTaskQueueUserDataRequest{
-			NamespaceId:              c.taskQueueID.namespaceID.String(),
-			TaskQueue:                fetchSource,
-			TaskQueueType:            c.taskQueueID.taskType,
-			LastKnownUserDataVersion: knownUserData.GetVersion(),
-			WaitNewData:              hasFetched,
+		res, err := c.matchingClient.PollTaskQueueMetadata(callCtx, &matchingservice.PollTaskQueueMetadataRequest{
+			NamespaceId:               c.taskQueueID.namespaceID.String(),
+			TaskQueue:                 fetchSource,
+			TaskQueueType:             c.taskQueueID.taskType,
+			LastUserDataVersion:       knownUserData.GetVersion(),
+			LastPartitionStateVersion: knownPartitionState.GetVersion(),
+			WaitNewData:               hasFetched,
 		})
 		if err != nil {
 			var unimplErr *serviceerror.Unimplemented
 			if errors.As(err, &unimplErr) {
 				// This might happen during a deployment. The older version couldn't have had any user data,
 				// so we act as if it just returned an empty response and set ourselves ready.
-				// Return the error so that we backoff with retry, and do not set hasFetchedUserData so that
+				// Return the error so that we backoff with retry, and do not set hasFetched so that
 				// we don't do a long poll next time.
 				c.SetUserDataState(userDataEnabled, nil)
 			}
 			return err
 		}
-		// If the root partition returns nil here, then that means our data matched, and we don't need to update.
-		// If it's nil because it never existed, then we'd never have any data.
-		// It can't be nil due to removing versions, as that would result in a non-nil container with
-		// nil inner fields.
-		if res.GetUserData() != nil {
-			c.db.setMetadataFromParent(res.GetUserData(), FIXME)
-		}
+		c.db.setMetadataFromParent(res.UserData, res.PartitionState)
 		hasFetched = true
 		c.SetUserDataState(userDataEnabled, nil)
 		return nil

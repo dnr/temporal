@@ -589,7 +589,7 @@ func TestUserData_LoadOnInit(t *testing.T) {
 
 	tq.Start()
 	require.NoError(t, tq.WaitUntilInitialized(ctx))
-	userData, _, err := tq.GetUserData()
+	userData, _, _, _, err := tq.GetMetadata()
 	require.NoError(t, err)
 	require.Equal(t, data1, userData)
 	tq.Stop()
@@ -616,13 +616,13 @@ func TestUserData_LoadOnInit_OnlyOnceWhenNoData(t *testing.T) {
 
 	require.Equal(t, 1, tm.getGetUserDataCount(tqId))
 
-	userData, _, err := tq.GetUserData()
+	userData, _, _, _, err := tq.GetMetadata()
 	require.NoError(t, err)
 	require.Nil(t, userData)
 
 	require.Equal(t, 1, tm.getGetUserDataCount(tqId))
 
-	userData, _, err = tq.GetUserData()
+	userData, _, _, _, err = tq.GetMetadata()
 	require.NoError(t, err)
 	require.Nil(t, userData)
 
@@ -631,6 +631,7 @@ func TestUserData_LoadOnInit_OnlyOnceWhenNoData(t *testing.T) {
 	tq.Stop()
 }
 
+// FIXME: replace all GetTaskQueueUserData with GetTaskQueueMetadata
 func TestUserData_FetchesOnInit(t *testing.T) {
 	t.Parallel()
 
@@ -663,7 +664,7 @@ func TestUserData_FetchesOnInit(t *testing.T) {
 
 	tq.Start()
 	require.NoError(t, tq.WaitUntilInitialized(ctx))
-	userData, _, err := tq.GetUserData()
+	userData, _, _, _, err := tq.GetMetadata()
 	require.NoError(t, err)
 	require.Equal(t, data1, userData)
 	tq.Stop()
@@ -728,7 +729,7 @@ func TestUserData_FetchesAndFetchesAgain(t *testing.T) {
 	tq.Start()
 	time.Sleep(100 * time.Millisecond)
 	require.NoError(t, tq.WaitUntilInitialized(ctx))
-	userData, _, err := tq.GetUserData()
+	userData, _, _, _, err := tq.GetMetadata()
 	require.NoError(t, err)
 	require.Equal(t, data2, userData)
 	tq.Stop()
@@ -799,7 +800,7 @@ func TestUserData_RetriesFetchOnUnavailable(t *testing.T) {
 
 	// now it should be ready
 	require.NoError(t, tq.WaitUntilInitialized(ctx))
-	userData, _, err := tq.GetUserData()
+	userData, _, _, _, err := tq.GetMetadata()
 	require.NoError(t, err)
 	require.Equal(t, data1, userData)
 	tq.Stop()
@@ -864,7 +865,7 @@ func TestUserData_RetriesFetchOnUnImplemented(t *testing.T) {
 	// at this point it should have tried once and gotten unimplemented. it should be ready already.
 	require.NoError(t, tq.WaitUntilInitialized(ctx))
 
-	userData, _, err := tq.GetUserData()
+	userData, _, _, _, err := tq.GetMetadata()
 	require.Nil(t, userData)
 	require.NoError(t, err)
 
@@ -872,7 +873,7 @@ func TestUserData_RetriesFetchOnUnImplemented(t *testing.T) {
 	ch <- struct{}{}
 	time.Sleep(100 * time.Millisecond) // time to return
 
-	userData, _, err = tq.GetUserData()
+	userData, _, _, _, err = tq.GetMetadata()
 	require.NoError(t, err)
 	require.Equal(t, data1, userData)
 	tq.Stop()
@@ -910,7 +911,7 @@ func TestUserData_FetchesUpTree(t *testing.T) {
 	tq.config.MetadataLongPollMinWaitTime = 10 * time.Second // wait on success
 	tq.Start()
 	require.NoError(t, tq.WaitUntilInitialized(ctx))
-	userData, _, err := tq.GetUserData()
+	userData, _, _, _, err := tq.GetMetadata()
 	require.NoError(t, err)
 	require.Equal(t, data1, userData)
 	tq.Stop()
@@ -948,7 +949,7 @@ func TestUserData_FetchesActivityToWorkflow(t *testing.T) {
 	tq.config.MetadataLongPollMinWaitTime = 10 * time.Second // wait on success
 	tq.Start()
 	require.NoError(t, tq.WaitUntilInitialized(ctx))
-	userData, _, err := tq.GetUserData()
+	userData, _, _, _, err := tq.GetMetadata()
 	require.NoError(t, err)
 	require.Equal(t, data1, userData)
 	tq.Stop()
@@ -1005,7 +1006,7 @@ func TestUserData_FetchesStickyToNormal(t *testing.T) {
 	tq.config.MetadataLongPollMinWaitTime = 10 * time.Second // wait on success
 	tq.Start()
 	require.NoError(t, tq.WaitUntilInitialized(ctx))
-	userData, _, err := tq.GetUserData()
+	userData, _, _, _, err := tq.GetMetadata()
 	require.NoError(t, err)
 	require.Equal(t, data1, userData)
 	tq.Stop()

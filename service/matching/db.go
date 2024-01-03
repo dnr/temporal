@@ -331,33 +331,38 @@ func (db *taskQueueDB) DbStoresPartitionState() bool {
 	return db.taskQueue.OwnsPartitionState() && db.taskQueueKind == enumspb.TASK_QUEUE_KIND_NORMAL
 }
 
-// GetUserData returns the versioning data for this task queue. Do not mutate the returned pointer, as doing so
-// will cause cache inconsistency.
-func (db *taskQueueDB) GetUserData() (*persistencespb.VersionedTaskQueueUserData, chan struct{}, error) {
+// GetMetadata returns the versioning data and partition state for this task queue.
+// FIXME: return a struct type
+func (db *taskQueueDB) GetMetadata() (
+	*persistencespb.VersionedTaskQueueUserData,
+	chan struct{},
+	*taskqueuespb.PartitionState,
+	chan struct{},
+	error,
+) {
 	db.Lock()
 	defer db.Unlock()
-	return db.getUserDataLocked()
+	return db.getMetadataLocked()
 }
 
-// GetPartitionState returns the partition state for this task queue.
-func (db *taskQueueDB) GetPartitionState() (*taskqueuespb.PartitionState, chan struct{}, error) {
-	// FIXME: merge into above?
-	db.Lock()
-	defer db.Unlock()
-	return db.partitionState, db.partitionStateChanged, nil
-}
-
-func (db *taskQueueDB) getUserDataLocked() (*persistencespb.VersionedTaskQueueUserData, chan struct{}, error) {
+// FIXME: return a struct type
+func (db *taskQueueDB) getMetadataLocked() (
+	*persistencespb.VersionedTaskQueueUserData,
+	chan struct{},
+	*taskqueuespb.PartitionState,
+	chan struct{},
+	error,
+) {
 	switch db.userDataState {
 	case userDataEnabled:
-		return db.userData, db.userDataChanged, nil
+		return db.userData, db.userDataChanged, db.partitionState, db.partitionStateChanged, nil
 	case userDataSpecificVersion:
-		return nil, nil, errNoUserDataOnVersionedTQM
+		return nil, nil, nil, nil, errNoUserDataOnVersionedTQM
 	case userDataClosed:
-		return nil, nil, errTaskQueueClosed
+		return nil, nil, nil, nil, errTaskQueueClosed
 	default:
 		// shouldn't happen
-		return nil, nil, serviceerror.NewInternal("unexpected user data enabled state")
+		return nil, nil, nil, nil, serviceerror.NewInternal("unexpected user data enabled state")
 	}
 }
 
@@ -433,7 +438,7 @@ func (db *taskQueueDB) UpdateUserData(
 	db.Lock()
 	defer db.Unlock()
 
-	userData, _, err := db.getUserDataLocked()
+	userData, _, _, _, err := db.getMetadataLocked()
 	if err != nil {
 		return nil, false, err
 	}
@@ -489,9 +494,16 @@ func (db *taskQueueDB) setMetadataFromParent(
 ) {
 	db.Lock()
 	defer db.Unlock()
-	db.setUserDataLocked(userData)
-	// FIXME: maybe move this condition around?
-	if db.taskQueueKind == enumspb.TASK_QUEUE_KIND_NORMAL && !db.DbStoresPartitionState() {
+	// If the root partition returns nil here, then that means our data matched, and we don't need to update.
+	// If it's nil because it never existed, then we'd never have any data.
+	// It can't be nil due to removing versions, as that would result in a non-nil container with
+	// nil inner fields.
+	if userData != nil {
+		db.setUserDataLocked(userData)
+	}
+	// If we are the root activity/nexus tq, we'll get a partition state from the workflow tq
+	// even though we own our own partition state. Just ignore it.
+	if partitionState != nil && db.taskQueueKind == enumspb.TASK_QUEUE_KIND_NORMAL && !db.DbStoresPartitionState() {
 		db.setPartitionStateLocked(partitionState)
 	}
 }

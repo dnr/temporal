@@ -1006,7 +1006,7 @@ func (e *matchingEngineImpl) GetWorkerBuildIdCompatibility(
 		}
 		return nil, err
 	}
-	userData, _, err := tqMgr.GetUserData()
+	userData, _, _, _, err := tqMgr.GetMetadata()
 	if err != nil {
 		return nil, err
 	}
@@ -1043,7 +1043,7 @@ func (e *matchingEngineImpl) GetTaskQueueUserData(
 
 	for {
 		resp := &matchingservice.GetTaskQueueUserDataResponse{}
-		userData, userDataChanged, err := tqMgr.GetUserData()
+		userData, userDataChanged, _, _, err := tqMgr.GetMetadata()
 		if err != nil {
 			return nil, err
 		}
@@ -1098,8 +1098,7 @@ func (e *matchingEngineImpl) PollTaskQueueMetadata(
 	}
 
 	for {
-		userData, userDataChanged, err := tqMgr.GetUserData()
-		partitionState, partitionStateChanged, err := tqMgr.GetPartitionState()
+		userData, userDataChanged, partitionState, partitionStateChanged, err := tqMgr.GetMetadata()
 		if err != nil {
 			return nil, err
 		}
