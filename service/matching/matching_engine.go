@@ -164,8 +164,6 @@ var (
 	identityKey identityCtxKey = "identity"
 )
 
-var _ Engine = (*matchingEngineImpl)(nil) // Asserts that interface is indeed implemented
-
 // NewEngine creates an instance of matching engine
 func NewEngine(
 	taskManager persistence.TaskManager,
@@ -180,7 +178,7 @@ func NewEngine(
 	clusterMeta cluster.Metadata,
 	namespaceReplicationQueue persistence.NamespaceReplicationQueue,
 	visibilityManager manager.VisibilityManager,
-) Engine {
+) *matchingEngineImpl {
 
 	return &matchingEngineImpl{
 		status:                    common.DaemonStatusInitialized,

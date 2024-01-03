@@ -48,7 +48,7 @@ type (
 	Handler struct {
 		matchingservice.UnsafeMatchingServiceServer
 
-		engine            Engine
+		engine            *matchingEngineImpl
 		config            *Config
 		metricsHandler    metrics.Handler
 		logger            log.Logger
