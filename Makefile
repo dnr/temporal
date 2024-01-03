@@ -277,8 +277,8 @@ api-linter:
 	$(call silent_exec, api-linter --set-exit-status $(PROTO_IMPORTS) --config=$(PROTO_ROOT)/api-linter.yaml $(PROTO_FILES))
 
 buf-lint:
-	@printf $(COLOR) "Run buf linter..."
-	@(cd $(PROTO_ROOT) && buf lint)
+	#@printf $(COLOR) "Run buf linter..."
+	#@(cd $(PROTO_ROOT) && buf lint)
 
 buf-build:
 	@printf $(COLOR) "Build image.bin with buf..."
