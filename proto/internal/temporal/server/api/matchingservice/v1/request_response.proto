@@ -239,6 +239,7 @@ message GetWorkerBuildIdCompatibilityResponse {
     temporal.api.workflowservice.v1.GetWorkerBuildIdCompatibilityResponse response = 1;
 }
 
+// Deprecated, use PollTaskQueueMetadata
 message GetTaskQueueUserDataRequest {
     string namespace_id = 1;
     // The task queue to fetch data from. The task queue is always considered as a normal
@@ -252,7 +253,7 @@ message GetTaskQueueUserDataRequest {
     // This value must not be set to a negative number (note that our linter suggests avoiding uint64).
     int64 last_known_user_data_version = 3;
     // If set and last_known_user_data_version is the current version, block until new data is
-    // available (or timeout). Deprecated, use PollTaskQueueMetadata.
+    // available (or timeout).
     bool wait_new_data = 4;
 }
 
@@ -268,10 +269,13 @@ message PollTaskQueueMetadataRequest {
     // The task queue to fetch metadata from.
     string task_queue = 2;
     temporal.api.enums.v1.TaskQueueType task_queue_type = 3;
+    // If set and the versions below are the current versions, block until new data is
+    // available (or timeout).
+    bool wait_new_data = 4;
     // The value of the last known user data version, or 0 if unknown.
-    int64 last_user_data_version = 4;
+    int64 last_user_data_version = 5;
     // The value of the last known partition state version, or 0 if unknown.
-    int64 last_partition_state_version = 5;
+    int64 last_partition_state_version = 6;
 }
 
 message PollTaskQueueMetadataResponse {

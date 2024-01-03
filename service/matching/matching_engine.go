@@ -1037,7 +1037,7 @@ func (e *matchingEngineImpl) GetTaskQueueUserData(
 
 	if req.WaitNewData {
 		var cancel context.CancelFunc
-		ctx, cancel = newChildContext(ctx, e.config.GetUserDataLongPollTimeout(), returnEmptyTaskTimeBudget)
+		ctx, cancel = newChildContext(ctx, e.config.MetadataLongPollTimeout(), returnEmptyTaskTimeBudget)
 		defer cancel()
 		// mark alive so that it doesn't unload while a child partition is doing a long poll
 		tqMgr.MarkAlive()
@@ -1069,6 +1069,66 @@ func (e *matchingEngineImpl) GetTaskQueueUserData(
 			}
 		}
 		return resp, nil
+	}
+}
+
+func (e *matchingEngineImpl) PollTaskQueueMetadata(
+	ctx context.Context,
+	req *matchingservice.PollTaskQueueMetadataRequest,
+) (*matchingservice.PollTaskQueueMetadataResponse, error) {
+	namespaceID := namespace.ID(req.GetNamespaceId())
+	taskQueue, err := newTaskQueueID(namespaceID, req.GetTaskQueue(), req.GetTaskQueueType())
+	if err != nil {
+		return nil, err
+	}
+	tqMgr, err := e.getTaskQueueManager(ctx, taskQueue, normalStickyInfo, true)
+	if err != nil {
+		return nil, err
+	}
+	userDataVersion := req.LastUserDataVersion
+	partitionStateVersion := req.LastPartitionStateVersion
+	if userDataVersion < 0 || partitionStateVersion < 0 {
+		return nil, serviceerror.NewInvalidArgument("user data/partition version must not be negative")
+	}
+
+	if req.WaitNewData {
+		var cancel context.CancelFunc
+		ctx, cancel = newChildContext(ctx, e.config.MetadataLongPollTimeout(), returnEmptyTaskTimeBudget)
+		defer cancel()
+		// mark alive so that it doesn't unload while a child partition is doing a long poll
+		tqMgr.MarkAlive()
+	}
+
+	for {
+		userData, userDataChanged, err := tqMgr.GetUserData()
+		partitionState, partitionStateChanged, err := tqMgr.GetPartitionState()
+		if err != nil {
+			return nil, err
+		}
+		if req.WaitNewData &&
+			userData.GetVersion() == userDataVersion &&
+			partitionState.GetVersion() == partitionStateVersion {
+			// long-poll: wait for data to change/appear
+			select {
+			case <-ctx.Done():
+				return &matchingservice.PollTaskQueueMetadataResponse{}, nil
+			case <-userDataChanged:
+				continue
+			case <-partitionStateChanged:
+				continue
+			}
+		}
+		if userData != nil && userData.Version < userDataVersion ||
+			partitionState != nil && partitionState.Version < partitionStateVersion {
+			// This is unlikely but may happen during ownership transfer.
+			// We rely on client retries in this case to let the system self-heal.
+			return nil, serviceerror.NewInvalidArgument(
+				"requested task queue metadata for version greater than known version")
+		}
+		return &matchingservice.PollTaskQueueMetadataResponse{
+			UserData:       userData,
+			PartitionState: partitionState,
+		}, nil
 	}
 }
 

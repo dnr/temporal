@@ -137,6 +137,8 @@ type (
 		DispatchQueryTask(ctx context.Context, taskID string, request *matchingservice.QueryWorkflowRequest) (*matchingservice.QueryWorkflowResponse, error)
 		// GetUserData returns the versioned user data for this task queue
 		GetUserData() (*persistencespb.VersionedTaskQueueUserData, chan struct{}, error)
+		// GetPartitionState returns the partition state for this task queue
+		GetPartitionState() (*taskqueuespb.PartitionState, chan struct{}, error)
 		// UpdateUserData updates user data for this task queue and replicates across clusters if necessary.
 		// Extra care should be taken to avoid mutating the existing data in the update function.
 		UpdateUserData(ctx context.Context, options UserDataUpdateOptions, updateFn UserDataUpdateFunc) error
@@ -549,6 +551,11 @@ func (c *taskQueueManagerImpl) GetUserData() (*persistencespb.VersionedTaskQueue
 	return c.db.GetUserData()
 }
 
+// GetPartitionState returns the partition state for the task queue.
+func (c *taskQueueManagerImpl) GetPartitionState() (*taskqueuespb.PartitionState, chan struct{}, error) {
+	return c.db.GetPartitionState()
+}
+
 // UpdateUserData updates user data for this task queue and replicates across clusters if necessary.
 func (c *taskQueueManagerImpl) UpdateUserData(ctx context.Context, options UserDataUpdateOptions, updateFn UserDataUpdateFunc) error {
 	newData, shouldReplicate, err := c.db.UpdateUserData(ctx, updateFn, options.KnownVersion, options.TaskQueueLimitPerBuildId)
@@ -946,7 +953,7 @@ func (c *taskQueueManagerImpl) loadUserData(ctx context.Context) error {
 			// if already loaded, set enabled
 			c.SetUserDataState(userDataEnabled, nil)
 		}
-		common.InterruptibleSleep(ctx, c.config.GetUserDataLongPollTimeout())
+		common.InterruptibleSleep(ctx, c.config.MetadataLongPollTimeout())
 	}
 
 	return nil
@@ -978,7 +985,7 @@ func (c *taskQueueManagerImpl) fetchUserData(ctx context.Context) error {
 	ctx = c.callerInfoContext(ctx)
 
 	if c.managesSpecificVersionSet() {
-		// tqm for specific version set doesn't have its own user data
+		// tqm for specific version set doesn't have its own user data or partition state
 		c.SetUserDataState(userDataSpecificVersion, nil)
 		return nil
 	}
@@ -995,9 +1002,9 @@ func (c *taskQueueManagerImpl) fetchUserData(ctx context.Context) error {
 		return err
 	}
 
-	// hasFetchedUserData is true if we have gotten a successful reply to GetTaskQueueUserData.
+	// hasFetched is true if we have gotten a successful reply.
 	// It's used to control whether we do a long poll or a simple get.
-	hasFetchedUserData := false
+	hasFetched := false
 
 	op := func(ctx context.Context) error {
 		if !c.config.LoadUserData() {
@@ -1012,18 +1019,18 @@ func (c *taskQueueManagerImpl) fetchUserData(ctx context.Context) error {
 			// Start with a non-long poll after re-enabling after disable, so that we don't have to wait the
 			// full long poll interval before calling SetUserDataStatus to enable again.
 			// Leave knownUserData as nil and GetVersion will return 0.
-			hasFetchedUserData = false
+			hasFetched = false
 		}
 
-		callCtx, cancel := context.WithTimeout(ctx, c.config.GetUserDataLongPollTimeout())
+		callCtx, cancel := context.WithTimeout(ctx, c.config.MetadataLongPollTimeout())
 		defer cancel()
 
 		res, err := c.matchingClient.GetTaskQueueUserData(callCtx, &matchingservice.GetTaskQueueUserDataRequest{
 			NamespaceId:              c.taskQueueID.namespaceID.String(),
 			TaskQueue:                fetchSource,
-			TaskQueueType:            enumspb.TASK_QUEUE_TYPE_WORKFLOW,
+			TaskQueueType:            c.taskQueueID.taskType,
 			LastKnownUserDataVersion: knownUserData.GetVersion(),
-			WaitNewData:              hasFetchedUserData,
+			WaitNewData:              hasFetched,
 		})
 		if err != nil {
 			var unimplErr *serviceerror.Unimplemented
@@ -1045,18 +1052,18 @@ func (c *taskQueueManagerImpl) fetchUserData(ctx context.Context) error {
 		// It can't be nil due to removing versions, as that would result in a non-nil container with
 		// nil inner fields.
 		if res.GetUserData() != nil {
-			c.db.setUserDataForNonOwningPartition(res.GetUserData())
+			c.db.setMetadataFromParent(res.GetUserData(), FIXME)
 		}
-		hasFetchedUserData = true
+		hasFetched = true
 		c.SetUserDataState(userDataEnabled, nil)
 		return nil
 	}
 
-	minWaitTime := c.config.GetUserDataMinWaitTime
+	minWaitTime := c.config.MetadataLongPollMinWaitTime
 
 	for ctx.Err() == nil {
 		start := time.Now()
-		_ = backoff.ThrottleRetryContext(ctx, op, c.config.GetUserDataRetryPolicy, nil)
+		_ = backoff.ThrottleRetryContext(ctx, op, c.config.PollMetadataRetryPolicy, nil)
 		elapsed := time.Since(start)
 
 		// In general, we want to start a new call immediately on completion of the previous
@@ -1067,9 +1074,9 @@ func (c *taskQueueManagerImpl) fetchUserData(ctx context.Context) error {
 			common.InterruptibleSleep(ctx, minWaitTime-elapsed)
 			// Don't let this get near our call timeout, otherwise we can't tell the difference
 			// between a fast reply and a timeout.
-			minWaitTime = min(minWaitTime*2, c.config.GetUserDataLongPollTimeout()/2)
+			minWaitTime = min(minWaitTime*2, c.config.MetadataLongPollTimeout()/2)
 		} else {
-			minWaitTime = c.config.GetUserDataMinWaitTime
+			minWaitTime = c.config.MetadataLongPollMinWaitTime
 		}
 	}
 

@@ -76,6 +76,10 @@ func (tid *taskQueueID) OwnsUserData() bool {
 	return tid.IsRoot() && tid.VersionSet() == "" && tid.taskType == enumspb.TASK_QUEUE_TYPE_WORKFLOW
 }
 
+func (tid *taskQueueID) OwnsPartitionState() bool {
+	return tid.IsRoot() && tid.VersionSet() == ""
+}
+
 func (tid *taskQueueID) String() string {
 	return fmt.Sprintf("TaskQueue(name:%q part:%d vset:%s type:%s nsid:%.5s…)",
 		tid.BaseNameString(),

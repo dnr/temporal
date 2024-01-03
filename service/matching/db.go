@@ -36,6 +36,7 @@ import (
 
 	"go.temporal.io/server/api/matchingservice/v1"
 	persistencespb "go.temporal.io/server/api/persistence/v1"
+	taskqueuespb "go.temporal.io/server/api/taskqueue/v1"
 	"go.temporal.io/server/common"
 	"go.temporal.io/server/common/log"
 	"go.temporal.io/server/common/log/tag"
@@ -71,17 +72,19 @@ const (
 type (
 	taskQueueDB struct {
 		sync.Mutex
-		namespaceID     namespace.ID
-		taskQueue       *taskQueueID
-		taskQueueKind   enumspb.TaskQueueKind
-		rangeID         int64
-		ackLevel        int64
-		userData        *persistencespb.VersionedTaskQueueUserData
-		userDataChanged chan struct{}
-		userDataState   userDataState
-		store           persistence.TaskManager
-		logger          log.Logger
-		matchingClient  matchingservice.MatchingServiceClient
+		namespaceID           namespace.ID
+		taskQueue             *taskQueueID
+		taskQueueKind         enumspb.TaskQueueKind
+		rangeID               int64
+		ackLevel              int64
+		userData              *persistencespb.VersionedTaskQueueUserData
+		userDataChanged       chan struct{}
+		userDataState         userDataState
+		partitionState        *taskqueuespb.PartitionState
+		partitionStateChanged chan struct{}
+		store                 persistence.TaskManager
+		logger                log.Logger
+		matchingClient        matchingservice.MatchingServiceClient
 	}
 	taskQueueState struct {
 		rangeID  int64
@@ -122,13 +125,14 @@ func newTaskQueueDB(
 	logger log.Logger,
 ) *taskQueueDB {
 	return &taskQueueDB{
-		namespaceID:     namespaceID,
-		taskQueue:       taskQueue,
-		taskQueueKind:   kind,
-		store:           store,
-		logger:          logger,
-		userDataChanged: make(chan struct{}),
-		matchingClient:  matchingClient,
+		namespaceID:           namespaceID,
+		taskQueue:             taskQueue,
+		taskQueueKind:         kind,
+		store:                 store,
+		logger:                logger,
+		userDataChanged:       make(chan struct{}),
+		partitionStateChanged: make(chan struct{}),
+		matchingClient:        matchingClient,
 	}
 }
 
@@ -181,6 +185,11 @@ func (db *taskQueueDB) takeOverTaskQueueLocked(
 		}
 		db.ackLevel = response.TaskQueueInfo.AckLevel
 		db.rangeID = response.RangeID + 1
+		// If we own the partition state, fill it in from the response. Otherwise,
+		// taskQueueManager can call setMetadataFromParent later to fill it in.
+		if db.DbStoresPartitionState() {
+			db.partitionState = response.TaskQueueInfo.PartitionState
+		}
 		return nil
 
 	case *serviceerror.NotFound:
@@ -327,12 +336,25 @@ func (db *taskQueueDB) DbStoresUserData() bool {
 	return db.taskQueue.OwnsUserData() && db.taskQueueKind == enumspb.TASK_QUEUE_KIND_NORMAL
 }
 
+// DbStoresPartitionState returns true if we are storing partition state in the db.
+func (db *taskQueueDB) DbStoresPartitionState() bool {
+	return db.taskQueue.OwnsPartitionState() && db.taskQueueKind == enumspb.TASK_QUEUE_KIND_NORMAL
+}
+
 // GetUserData returns the versioning data for this task queue. Do not mutate the returned pointer, as doing so
 // will cause cache inconsistency.
 func (db *taskQueueDB) GetUserData() (*persistencespb.VersionedTaskQueueUserData, chan struct{}, error) {
 	db.Lock()
 	defer db.Unlock()
 	return db.getUserDataLocked()
+}
+
+// GetPartitionState returns the partition state for this task queue.
+func (db *taskQueueDB) GetPartitionState() (*taskqueuespb.PartitionState, chan struct{}, error) {
+	// FIXME: merge into above?
+	db.Lock()
+	defer db.Unlock()
+	return db.partitionState, db.partitionStateChanged, nil
 }
 
 func (db *taskQueueDB) getUserDataLocked() (*persistencespb.VersionedTaskQueueUserData, chan struct{}, error) {
@@ -357,6 +379,12 @@ func (db *taskQueueDB) setUserDataLocked(userData *persistencespb.VersionedTaskQ
 	db.userData = userData
 	close(db.userDataChanged)
 	db.userDataChanged = make(chan struct{})
+}
+
+func (db *taskQueueDB) setPartitionStateLocked(partitionState *taskqueuespb.PartitionState) {
+	db.partitionState = partitionState
+	close(db.partitionStateChanged)
+	db.partitionStateChanged = make(chan struct{})
 }
 
 // Loads user data from db (called only on initialization of taskQueueManager).
@@ -469,10 +497,17 @@ func (db *taskQueueDB) UpdateUserData(
 	return updatedVersionedData, shouldReplicate, err
 }
 
-func (db *taskQueueDB) setUserDataForNonOwningPartition(userData *persistencespb.VersionedTaskQueueUserData) {
+func (db *taskQueueDB) setMetadataFromParent(
+	userData *persistencespb.VersionedTaskQueueUserData,
+	partitionState *taskqueuespb.PartitionState,
+) {
 	db.Lock()
 	defer db.Unlock()
 	db.setUserDataLocked(userData)
+	// FIXME: maybe move this condition around?
+	if db.taskQueueKind == enumspb.TASK_QUEUE_KIND_NORMAL && !db.DbStoresPartitionState() {
+		db.setPartitionStateLocked(partitionState)
+	}
 }
 
 func (db *taskQueueDB) expiryTime() *timestamppb.Timestamp {
@@ -486,7 +521,13 @@ func (db *taskQueueDB) expiryTime() *timestamppb.Timestamp {
 	}
 }
 
+// call with lock
 func (db *taskQueueDB) cachedQueueInfo() *persistencespb.TaskQueueInfo {
+	var partitionState *taskqueuespb.PartitionState
+	if db.DbStoresPartitionState() {
+		partitionState = db.partitionState
+	}
+
 	return &persistencespb.TaskQueueInfo{
 		NamespaceId:    db.namespaceID.String(),
 		Name:           db.taskQueue.FullName(),
@@ -495,5 +536,6 @@ func (db *taskQueueDB) cachedQueueInfo() *persistencespb.TaskQueueInfo {
 		AckLevel:       db.ackLevel,
 		ExpiryTime:     db.expiryTime(),
 		LastUpdateTime: timestamp.TimeNowPtrUtc(),
+		PartitionState: partitionState,
 	}
 }

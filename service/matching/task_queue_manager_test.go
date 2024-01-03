@@ -723,7 +723,7 @@ func TestUserData_LoadDisableEnable(t *testing.T) {
 	loadUserData := make(chan bool)
 
 	tq := mustCreateTestTaskQueueManagerWithConfig(t, controller, tqCfg)
-	tq.config.GetUserDataLongPollTimeout = dynamicconfig.GetDurationPropertyFn(10 * time.Millisecond)
+	tq.config.MetadataLongPollTimeout = dynamicconfig.GetDurationPropertyFn(10 * time.Millisecond)
 	tq.config.LoadUserData = func() bool { return <-loadUserData }
 
 	require.NoError(t, tq.engine.taskManager.UpdateTaskQueueUserData(context.Background(),
@@ -843,7 +843,7 @@ func TestUserData_FetchesOnInit(t *testing.T) {
 		Return(&matchingservice.GetTaskQueueUserDataResponse{UserData: data1}, nil)
 
 	tq := mustCreateTestTaskQueueManagerWithConfig(t, controller, tqCfg)
-	tq.config.GetUserDataMinWaitTime = 10 * time.Second // only one fetch
+	tq.config.MetadataLongPollMinWaitTime = 10 * time.Second // only one fetch
 
 	tq.Start()
 	require.NoError(t, tq.WaitUntilInitialized(ctx))
@@ -908,7 +908,7 @@ func TestUserData_FetchesAndFetchesAgain(t *testing.T) {
 		Return(nil, serviceerror.NewUnavailable("hold on")).AnyTimes()
 
 	tq := mustCreateTestTaskQueueManagerWithConfig(t, controller, tqCfg)
-	tq.config.GetUserDataMinWaitTime = 10 * time.Millisecond // fetch again quickly
+	tq.config.MetadataLongPollMinWaitTime = 10 * time.Millisecond // fetch again quickly
 	tq.Start()
 	time.Sleep(100 * time.Millisecond)
 	require.NoError(t, tq.WaitUntilInitialized(ctx))
@@ -932,8 +932,8 @@ func TestUserData_FetchDisableEnable(t *testing.T) {
 	loadUserData := make(chan bool)
 
 	tq := mustCreateTestTaskQueueManagerWithConfig(t, controller, tqCfg)
-	tq.config.GetUserDataMinWaitTime = 10 * time.Millisecond // fetch again quickly
-	tq.config.GetUserDataRetryPolicy = backoff.NewExponentialRetryPolicy(10 * time.Millisecond).WithMaximumInterval(10 * time.Millisecond)
+	tq.config.MetadataLongPollMinWaitTime = 10 * time.Millisecond // fetch again quickly
+	tq.config.PollMetadataRetryPolicy = backoff.NewExponentialRetryPolicy(10 * time.Millisecond).WithMaximumInterval(10 * time.Millisecond)
 	tq.config.LoadUserData = func() bool { return <-loadUserData }
 
 	data1 := &persistencespb.VersionedTaskQueueUserData{
@@ -1072,8 +1072,8 @@ func TestUserData_RetriesFetchOnUnavailable(t *testing.T) {
 		})
 
 	tq := mustCreateTestTaskQueueManagerWithConfig(t, controller, tqCfg)
-	tq.config.GetUserDataMinWaitTime = 10 * time.Second // wait on success
-	tq.config.GetUserDataRetryPolicy = backoff.NewExponentialRetryPolicy(50 * time.Millisecond).
+	tq.config.MetadataLongPollMinWaitTime = 10 * time.Second // wait on success
+	tq.config.PollMetadataRetryPolicy = backoff.NewExponentialRetryPolicy(50 * time.Millisecond).
 		WithMaximumInterval(50 * time.Millisecond) // faster retry on failure
 
 	tq.Start()
@@ -1143,8 +1143,8 @@ func TestUserData_RetriesFetchOnUnImplemented(t *testing.T) {
 		})
 
 	tq := mustCreateTestTaskQueueManagerWithConfig(t, controller, tqCfg)
-	tq.config.GetUserDataMinWaitTime = 10 * time.Second // wait on success
-	tq.config.GetUserDataRetryPolicy = backoff.NewExponentialRetryPolicy(50 * time.Millisecond).
+	tq.config.MetadataLongPollMinWaitTime = 10 * time.Second // wait on success
+	tq.config.PollMetadataRetryPolicy = backoff.NewExponentialRetryPolicy(50 * time.Millisecond).
 		WithMaximumInterval(50 * time.Millisecond) // faster retry on failure
 
 	tq.Start()
@@ -1198,7 +1198,7 @@ func TestUserData_FetchesUpTree(t *testing.T) {
 		Return(&matchingservice.GetTaskQueueUserDataResponse{UserData: data1}, nil)
 
 	tq := mustCreateTestTaskQueueManagerWithConfig(t, controller, tqCfg)
-	tq.config.GetUserDataMinWaitTime = 10 * time.Second // wait on success
+	tq.config.MetadataLongPollMinWaitTime = 10 * time.Second // wait on success
 	tq.Start()
 	require.NoError(t, tq.WaitUntilInitialized(ctx))
 	userData, _, err := tq.GetUserData()
@@ -1236,7 +1236,7 @@ func TestUserData_FetchesActivityToWorkflow(t *testing.T) {
 		Return(&matchingservice.GetTaskQueueUserDataResponse{UserData: data1}, nil)
 
 	tq := mustCreateTestTaskQueueManagerWithConfig(t, controller, tqCfg)
-	tq.config.GetUserDataMinWaitTime = 10 * time.Second // wait on success
+	tq.config.MetadataLongPollMinWaitTime = 10 * time.Second // wait on success
 	tq.Start()
 	require.NoError(t, tq.WaitUntilInitialized(ctx))
 	userData, _, err := tq.GetUserData()
@@ -1293,7 +1293,7 @@ func TestUserData_FetchesStickyToNormal(t *testing.T) {
 	require.NoError(t, err)
 	tq := tlMgr.(*taskQueueManagerImpl)
 
-	tq.config.GetUserDataMinWaitTime = 10 * time.Second // wait on success
+	tq.config.MetadataLongPollMinWaitTime = 10 * time.Second // wait on success
 	tq.Start()
 	require.NoError(t, tq.WaitUntilInitialized(ctx))
 	userData, _, err := tq.GetUserData()

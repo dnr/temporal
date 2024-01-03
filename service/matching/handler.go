@@ -324,6 +324,14 @@ func (h *Handler) GetTaskQueueUserData(
 	return h.engine.GetTaskQueueUserData(ctx, request)
 }
 
+func (h *Handler) PollTaskQueueMetadata(
+	ctx context.Context,
+	request *matchingservice.PollTaskQueueMetadataRequest,
+) (_ *matchingservice.PollTaskQueueMetadataResponse, retError error) {
+	defer log.CapturePanic(h.logger, &retError)
+	return h.engine.PollTaskQueueMetadata(ctx, request)
+}
+
 func (h *Handler) ApplyTaskQueueUserDataReplicationEvent(
 	ctx context.Context,
 	request *matchingservice.ApplyTaskQueueUserDataReplicationEventRequest,

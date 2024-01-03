@@ -462,8 +462,8 @@ const (
 	MatchingForwarderMaxChildrenPerNode = "matching.forwarderMaxChildrenPerNode"
 	// MatchingShutdownDrainDuration is the duration of traffic drain during shutdown
 	MatchingShutdownDrainDuration = "matching.shutdownDrainDuration"
-	// MatchingGetUserDataLongPollTimeout is the max length of long polls for GetUserData calls between partitions.
-	MatchingGetUserDataLongPollTimeout = "matching.getUserDataLongPollTimeout"
+	// MatchingMetadataLongPollTimeout is the max length of long polls for propagating metadata across partitions.
+	MatchingMetadataLongPollTimeout = "matching.metadataLongPollTimeout"
 	// MatchingBacklogNegligibleAge if the head of backlog gets older than this we stop sync match and
 	// forwarding to ensure more equal dispatch order among partitions.
 	MatchingBacklogNegligibleAge = "matching.backlogNegligibleAge"

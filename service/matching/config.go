@@ -67,7 +67,7 @@ type (
 		VersionCompatibleSetLimitPerQueue dynamicconfig.IntPropertyFnWithNamespaceFilter
 		VersionBuildIdLimitPerQueue       dynamicconfig.IntPropertyFnWithNamespaceFilter
 		TaskQueueLimitPerBuildId          dynamicconfig.IntPropertyFnWithNamespaceFilter
-		GetUserDataLongPollTimeout        dynamicconfig.DurationPropertyFn
+		MetadataLongPollTimeout           dynamicconfig.DurationPropertyFn
 		BacklogNegligibleAge              dynamicconfig.DurationPropertyFnWithTaskQueueInfoFilters
 		MaxWaitForPollerBeforeFwd         dynamicconfig.DurationPropertyFnWithTaskQueueInfoFilters
 
@@ -119,8 +119,8 @@ type (
 		MinTaskThrottlingBurstSize func() int
 		MaxTaskDeleteBatchSize     func() int
 
-		GetUserDataLongPollTimeout dynamicconfig.DurationPropertyFn
-		GetUserDataMinWaitTime     time.Duration
+		MetadataLongPollTimeout     dynamicconfig.DurationPropertyFn
+		MetadataLongPollMinWaitTime time.Duration
 
 		// taskWriter configuration
 		OutstandingTaskAppendsThreshold func() int
@@ -139,7 +139,7 @@ type (
 		LoadUserData func() bool
 
 		// Retry policy for fetching user data from root partition. Should retry forever.
-		GetUserDataRetryPolicy backoff.RetryPolicy
+		PollMetadataRetryPolicy backoff.RetryPolicy
 	}
 )
 
@@ -196,7 +196,7 @@ func NewConfig(
 		VersionCompatibleSetLimitPerQueue:     dc.GetIntPropertyFilteredByNamespace(dynamicconfig.VersionCompatibleSetLimitPerQueue, 10),
 		VersionBuildIdLimitPerQueue:           dc.GetIntPropertyFilteredByNamespace(dynamicconfig.VersionBuildIdLimitPerQueue, 100),
 		TaskQueueLimitPerBuildId:              dc.GetIntPropertyFilteredByNamespace(dynamicconfig.TaskQueuesPerBuildIdLimit, 20),
-		GetUserDataLongPollTimeout:            dc.GetDurationProperty(dynamicconfig.MatchingGetUserDataLongPollTimeout, 5*time.Minute-10*time.Second),
+		MetadataLongPollTimeout:               dc.GetDurationProperty(dynamicconfig.MatchingMetadataLongPollTimeout, 5*time.Minute-10*time.Second),
 		BacklogNegligibleAge:                  dc.GetDurationPropertyFilteredByTaskQueueInfo(dynamicconfig.MatchingBacklogNegligibleAge, 24*365*10*time.Hour),
 		MaxWaitForPollerBeforeFwd:             dc.GetDurationPropertyFilteredByTaskQueueInfo(dynamicconfig.MatchingMaxWaitForPollerBeforeFwd, 200*time.Millisecond),
 
@@ -250,8 +250,8 @@ func newTaskQueueConfig(id *taskQueueID, config *Config, namespace namespace.Nam
 		MaxTaskDeleteBatchSize: func() int {
 			return config.MaxTaskDeleteBatchSize(namespace.String(), taskQueueName, taskType)
 		},
-		GetUserDataLongPollTimeout: config.GetUserDataLongPollTimeout,
-		GetUserDataMinWaitTime:     1 * time.Second,
+		MetadataLongPollTimeout:     config.MetadataLongPollTimeout,
+		MetadataLongPollMinWaitTime: 1 * time.Second,
 		OutstandingTaskAppendsThreshold: func() int {
 			return config.OutstandingTaskAppendsThreshold(namespace.String(), taskQueueName, taskType)
 		},
@@ -284,6 +284,6 @@ func newTaskQueueConfig(id *taskQueueID, config *Config, namespace namespace.Nam
 				return max(1, config.ForwarderMaxChildrenPerNode(namespace.String(), taskQueueName, taskType))
 			},
 		},
-		GetUserDataRetryPolicy: backoff.NewExponentialRetryPolicy(1 * time.Second).WithMaximumInterval(5 * time.Minute),
+		PollMetadataRetryPolicy: backoff.NewExponentialRetryPolicy(1 * time.Second).WithMaximumInterval(5 * time.Minute),
 	}
 }
