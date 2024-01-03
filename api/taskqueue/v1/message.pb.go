@@ -134,6 +134,83 @@ func (*TaskVersionDirective_UseDefault) isTaskVersionDirective_Value() {}
 
 func (*TaskVersionDirective_BuildId) isTaskVersionDirective_Value() {}
 
+// PartitionState holds metadata for current partition state of a task queue.
+type PartitionState struct {
+	state         protoimpl.MessageState
+	sizeCache     protoimpl.SizeCache
+	unknownFields protoimpl.UnknownFields
+
+	// Version is updated each time this state changes. It can be used to distinguish newer
+	// data from older data.
+	Version int64 `protobuf:"varint,1,opt,name=version,proto3" json:"version,omitempty"`
+	// Current number of partitions. From 0 to current_partitions-1, The matching node assigned
+	// to that partition is responsible for the tasks for that partition.
+	CurrentPartitions int32 `protobuf:"varint,2,opt,name=current_partitions,json=currentPartitions,proto3" json:"current_partitions,omitempty"`
+	// If there are partitions beyond current_partitions that still have spooled tasks, they
+	// can be reassigned to lower partitions to read and dispatch the existing tasks without
+	// accepting more. This array holds the assignments for partitions following
+	// current_partitions. -1 means no assignment.
+	//
+	// E.g., if there were 7 partitions and all had spooled tasks, and the partition count will
+	// drop to 3, then this array might have [1 2 3 2] meaning partition #1 would take #3, 2
+	// would take #4 and #6, and #3 would take #5. After #3's tasks were all dispatched, it
+	// would have [-1 2 3 2], and then after all were dispatched it would be empty.
+	ExtraPartitionAssignment []int32 `protobuf:"varint,3,rep,packed,name=extra_partition_assignment,json=extraPartitionAssignment,proto3" json:"extra_partition_assignment,omitempty"`
+}
+
+func (x *PartitionState) Reset() {
+	*x = PartitionState{}
+	if protoimpl.UnsafeEnabled {
+		mi := &file_temporal_server_api_taskqueue_v1_message_proto_msgTypes[1]
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		ms.StoreMessageInfo(mi)
+	}
+}
+
+func (x *PartitionState) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PartitionState) ProtoMessage() {}
+
+func (x *PartitionState) ProtoReflect() protoreflect.Message {
+	mi := &file_temporal_server_api_taskqueue_v1_message_proto_msgTypes[1]
+	if protoimpl.UnsafeEnabled && x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PartitionState.ProtoReflect.Descriptor instead.
+func (*PartitionState) Descriptor() ([]byte, []int) {
+	return file_temporal_server_api_taskqueue_v1_message_proto_rawDescGZIP(), []int{1}
+}
+
+func (x *PartitionState) GetVersion() int64 {
+	if x != nil {
+		return x.Version
+	}
+	return 0
+}
+
+func (x *PartitionState) GetCurrentPartitions() int32 {
+	if x != nil {
+		return x.CurrentPartitions
+	}
+	return 0
+}
+
+func (x *PartitionState) GetExtraPartitionAssignment() []int32 {
+	if x != nil {
+		return x.ExtraPartitionAssignment
+	}
+	return nil
+}
+
 var File_temporal_server_api_taskqueue_v1_message_proto protoreflect.FileDescriptor
 
 var file_temporal_server_api_taskqueue_v1_message_proto_rawDesc = []byte{
@@ -151,11 +228,20 @@ var file_temporal_server_api_taskqueue_v1_message_proto_rawDesc = []byte{
 	0x6d, 0x70, 0x74, 0x79, 0x48, 0x00, 0x52, 0x0a, 0x75, 0x73, 0x65, 0x44, 0x65, 0x66, 0x61, 0x75,
 	0x6c, 0x74, 0x12, 0x1b, 0x0a, 0x08, 0x62, 0x75, 0x69, 0x6c, 0x64, 0x5f, 0x69, 0x64, 0x18, 0x02,
 	0x20, 0x01, 0x28, 0x09, 0x48, 0x00, 0x52, 0x07, 0x62, 0x75, 0x69, 0x6c, 0x64, 0x49, 0x64, 0x42,
-	0x07, 0x0a, 0x05, 0x76, 0x61, 0x6c, 0x75, 0x65, 0x42, 0x32, 0x5a, 0x30, 0x67, 0x6f, 0x2e, 0x74,
-	0x65, 0x6d, 0x70, 0x6f, 0x72, 0x61, 0x6c, 0x2e, 0x69, 0x6f, 0x2f, 0x73, 0x65, 0x72, 0x76, 0x65,
-	0x72, 0x2f, 0x61, 0x70, 0x69, 0x2f, 0x74, 0x61, 0x73, 0x6b, 0x71, 0x75, 0x65, 0x75, 0x65, 0x2f,
-	0x76, 0x31, 0x3b, 0x74, 0x61, 0x73, 0x6b, 0x71, 0x75, 0x65, 0x75, 0x65, 0x62, 0x06, 0x70, 0x72,
-	0x6f, 0x74, 0x6f, 0x33,
+	0x07, 0x0a, 0x05, 0x76, 0x61, 0x6c, 0x75, 0x65, 0x22, 0x97, 0x01, 0x0a, 0x0e, 0x50, 0x61, 0x72,
+	0x74, 0x69, 0x74, 0x69, 0x6f, 0x6e, 0x53, 0x74, 0x61, 0x74, 0x65, 0x12, 0x18, 0x0a, 0x07, 0x76,
+	0x65, 0x72, 0x73, 0x69, 0x6f, 0x6e, 0x18, 0x01, 0x20, 0x01, 0x28, 0x03, 0x52, 0x07, 0x76, 0x65,
+	0x72, 0x73, 0x69, 0x6f, 0x6e, 0x12, 0x2d, 0x0a, 0x12, 0x63, 0x75, 0x72, 0x72, 0x65, 0x6e, 0x74,
+	0x5f, 0x70, 0x61, 0x72, 0x74, 0x69, 0x74, 0x69, 0x6f, 0x6e, 0x73, 0x18, 0x02, 0x20, 0x01, 0x28,
+	0x05, 0x52, 0x11, 0x63, 0x75, 0x72, 0x72, 0x65, 0x6e, 0x74, 0x50, 0x61, 0x72, 0x74, 0x69, 0x74,
+	0x69, 0x6f, 0x6e, 0x73, 0x12, 0x3c, 0x0a, 0x1a, 0x65, 0x78, 0x74, 0x72, 0x61, 0x5f, 0x70, 0x61,
+	0x72, 0x74, 0x69, 0x74, 0x69, 0x6f, 0x6e, 0x5f, 0x61, 0x73, 0x73, 0x69, 0x67, 0x6e, 0x6d, 0x65,
+	0x6e, 0x74, 0x18, 0x03, 0x20, 0x03, 0x28, 0x05, 0x52, 0x18, 0x65, 0x78, 0x74, 0x72, 0x61, 0x50,
+	0x61, 0x72, 0x74, 0x69, 0x74, 0x69, 0x6f, 0x6e, 0x41, 0x73, 0x73, 0x69, 0x67, 0x6e, 0x6d, 0x65,
+	0x6e, 0x74, 0x42, 0x32, 0x5a, 0x30, 0x67, 0x6f, 0x2e, 0x74, 0x65, 0x6d, 0x70, 0x6f, 0x72, 0x61,
+	0x6c, 0x2e, 0x69, 0x6f, 0x2f, 0x73, 0x65, 0x72, 0x76, 0x65, 0x72, 0x2f, 0x61, 0x70, 0x69, 0x2f,
+	0x74, 0x61, 0x73, 0x6b, 0x71, 0x75, 0x65, 0x75, 0x65, 0x2f, 0x76, 0x31, 0x3b, 0x74, 0x61, 0x73,
+	0x6b, 0x71, 0x75, 0x65, 0x75, 0x65, 0x62, 0x06, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x33,
 }
 
 var (
@@ -170,13 +256,14 @@ func file_temporal_server_api_taskqueue_v1_message_proto_rawDescGZIP() []byte {
 	return file_temporal_server_api_taskqueue_v1_message_proto_rawDescData
 }
 
-var file_temporal_server_api_taskqueue_v1_message_proto_msgTypes = make([]protoimpl.MessageInfo, 1)
+var file_temporal_server_api_taskqueue_v1_message_proto_msgTypes = make([]protoimpl.MessageInfo, 2)
 var file_temporal_server_api_taskqueue_v1_message_proto_goTypes = []interface{}{
 	(*TaskVersionDirective)(nil), // 0: temporal.server.api.taskqueue.v1.TaskVersionDirective
-	(*emptypb.Empty)(nil),        // 1: google.protobuf.Empty
+	(*PartitionState)(nil),       // 1: temporal.server.api.taskqueue.v1.PartitionState
+	(*emptypb.Empty)(nil),        // 2: google.protobuf.Empty
 }
 var file_temporal_server_api_taskqueue_v1_message_proto_depIdxs = []int32{
-	1, // 0: temporal.server.api.taskqueue.v1.TaskVersionDirective.use_default:type_name -> google.protobuf.Empty
+	2, // 0: temporal.server.api.taskqueue.v1.TaskVersionDirective.use_default:type_name -> google.protobuf.Empty
 	1, // [1:1] is the sub-list for method output_type
 	1, // [1:1] is the sub-list for method input_type
 	1, // [1:1] is the sub-list for extension type_name
@@ -202,6 +289,18 @@ func file_temporal_server_api_taskqueue_v1_message_proto_init() {
 				return nil
 			}
 		}
+		file_temporal_server_api_taskqueue_v1_message_proto_msgTypes[1].Exporter = func(v interface{}, i int) interface{} {
+			switch v := v.(*PartitionState); i {
+			case 0:
+				return &v.state
+			case 1:
+				return &v.sizeCache
+			case 2:
+				return &v.unknownFields
+			default:
+				return nil
+			}
+		}
 	}
 	file_temporal_server_api_taskqueue_v1_message_proto_msgTypes[0].OneofWrappers = []interface{}{
 		(*TaskVersionDirective_UseDefault)(nil),
@@ -213,7 +312,7 @@ func file_temporal_server_api_taskqueue_v1_message_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: file_temporal_server_api_taskqueue_v1_message_proto_rawDesc,
 			NumEnums:      0,
-			NumMessages:   1,
+			NumMessages:   2,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

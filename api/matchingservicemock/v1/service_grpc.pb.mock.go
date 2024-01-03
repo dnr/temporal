@@ -280,6 +280,26 @@ func (mr *MockMatchingServiceClientMockRecorder) PollActivityTaskQueue(ctx, in i
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "PollActivityTaskQueue", reflect.TypeOf((*MockMatchingServiceClient)(nil).PollActivityTaskQueue), varargs...)
 }
 
+// PollTaskQueueMetadata mocks base method.
+func (m *MockMatchingServiceClient) PollTaskQueueMetadata(ctx context.Context, in *matchingservice.PollTaskQueueMetadataRequest, opts ...grpc.CallOption) (*matchingservice.PollTaskQueueMetadataResponse, error) {
+	m.ctrl.T.Helper()
+	varargs := []interface{}{ctx, in}
+	for _, a := range opts {
+		varargs = append(varargs, a)
+	}
+	ret := m.ctrl.Call(m, "PollTaskQueueMetadata", varargs...)
+	ret0, _ := ret[0].(*matchingservice.PollTaskQueueMetadataResponse)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// PollTaskQueueMetadata indicates an expected call of PollTaskQueueMetadata.
+func (mr *MockMatchingServiceClientMockRecorder) PollTaskQueueMetadata(ctx, in interface{}, opts ...interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	varargs := append([]interface{}{ctx, in}, opts...)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "PollTaskQueueMetadata", reflect.TypeOf((*MockMatchingServiceClient)(nil).PollTaskQueueMetadata), varargs...)
+}
+
 // PollWorkflowTaskQueue mocks base method.
 func (m *MockMatchingServiceClient) PollWorkflowTaskQueue(ctx context.Context, in *matchingservice.PollWorkflowTaskQueueRequest, opts ...grpc.CallOption) (*matchingservice.PollWorkflowTaskQueueResponse, error) {
 	m.ctrl.T.Helper()
@@ -586,6 +606,21 @@ func (m *MockMatchingServiceServer) PollActivityTaskQueue(arg0 context.Context, 
 func (mr *MockMatchingServiceServerMockRecorder) PollActivityTaskQueue(arg0, arg1 interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "PollActivityTaskQueue", reflect.TypeOf((*MockMatchingServiceServer)(nil).PollActivityTaskQueue), arg0, arg1)
+}
+
+// PollTaskQueueMetadata mocks base method.
+func (m *MockMatchingServiceServer) PollTaskQueueMetadata(arg0 context.Context, arg1 *matchingservice.PollTaskQueueMetadataRequest) (*matchingservice.PollTaskQueueMetadataResponse, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "PollTaskQueueMetadata", arg0, arg1)
+	ret0, _ := ret[0].(*matchingservice.PollTaskQueueMetadataResponse)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// PollTaskQueueMetadata indicates an expected call of PollTaskQueueMetadata.
+func (mr *MockMatchingServiceServerMockRecorder) PollTaskQueueMetadata(arg0, arg1 interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "PollTaskQueueMetadata", reflect.TypeOf((*MockMatchingServiceServer)(nil).PollTaskQueueMetadata), arg0, arg1)
 }
 
 // PollWorkflowTaskQueue mocks base method.

@@ -200,6 +200,21 @@ func (c *retryableClient) PollActivityTaskQueue(
 	return resp, err
 }
 
+func (c *retryableClient) PollTaskQueueMetadata(
+	ctx context.Context,
+	request *matchingservice.PollTaskQueueMetadataRequest,
+	opts ...grpc.CallOption,
+) (*matchingservice.PollTaskQueueMetadataResponse, error) {
+	var resp *matchingservice.PollTaskQueueMetadataResponse
+	op := func(ctx context.Context) error {
+		var err error
+		resp, err = c.client.PollTaskQueueMetadata(ctx, request, opts...)
+		return err
+	}
+	err := backoff.ThrottleRetryContext(ctx, op, c.policy, c.isRetryable)
+	return resp, err
+}
+
 func (c *retryableClient) PollWorkflowTaskQueue(
 	ctx context.Context,
 	request *matchingservice.PollWorkflowTaskQueueRequest,

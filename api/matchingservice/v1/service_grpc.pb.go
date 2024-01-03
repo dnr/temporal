@@ -54,6 +54,7 @@ const (
 	MatchingService_UpdateWorkerBuildIdCompatibility_FullMethodName       = "/temporal.server.api.matchingservice.v1.MatchingService/UpdateWorkerBuildIdCompatibility"
 	MatchingService_GetWorkerBuildIdCompatibility_FullMethodName          = "/temporal.server.api.matchingservice.v1.MatchingService/GetWorkerBuildIdCompatibility"
 	MatchingService_GetTaskQueueUserData_FullMethodName                   = "/temporal.server.api.matchingservice.v1.MatchingService/GetTaskQueueUserData"
+	MatchingService_PollTaskQueueMetadata_FullMethodName                  = "/temporal.server.api.matchingservice.v1.MatchingService/PollTaskQueueMetadata"
 	MatchingService_ApplyTaskQueueUserDataReplicationEvent_FullMethodName = "/temporal.server.api.matchingservice.v1.MatchingService/ApplyTaskQueueUserDataReplicationEvent"
 	MatchingService_GetBuildIdTaskQueueMapping_FullMethodName             = "/temporal.server.api.matchingservice.v1.MatchingService/GetBuildIdTaskQueueMapping"
 	MatchingService_ForceUnloadTaskQueue_FullMethodName                   = "/temporal.server.api.matchingservice.v1.MatchingService/ForceUnloadTaskQueue"
@@ -103,8 +104,13 @@ type MatchingServiceClient interface {
 	//	aip.dev/not-precedent: UpdateWorkerBuildIdCompatibility RPC doesn't follow Google API format. --)
 	UpdateWorkerBuildIdCompatibility(ctx context.Context, in *UpdateWorkerBuildIdCompatibilityRequest, opts ...grpc.CallOption) (*UpdateWorkerBuildIdCompatibilityResponse, error)
 	GetWorkerBuildIdCompatibility(ctx context.Context, in *GetWorkerBuildIdCompatibilityRequest, opts ...grpc.CallOption) (*GetWorkerBuildIdCompatibilityResponse, error)
-	// Fetch user data for a task queue, this request should always be routed to the node holding the root partition of the workflow task queue.
+	// Fetch user data for a task queue. This request should go to the parent partition of the
+	// requester, but always workflow type.
 	GetTaskQueueUserData(ctx context.Context, in *GetTaskQueueUserDataRequest, opts ...grpc.CallOption) (*GetTaskQueueUserDataResponse, error)
+	// Long-polls for task queue user data and also partition state. Returns if either one changed.
+	// This request should go to the parent partition of the requester. For task queue types
+	// besides workflow, they should request user data from the workflow root.
+	PollTaskQueueMetadata(ctx context.Context, in *PollTaskQueueMetadataRequest, opts ...grpc.CallOption) (*PollTaskQueueMetadataResponse, error)
 	// Apply a user data replication event.
 	ApplyTaskQueueUserDataReplicationEvent(ctx context.Context, in *ApplyTaskQueueUserDataReplicationEventRequest, opts ...grpc.CallOption) (*ApplyTaskQueueUserDataReplicationEventResponse, error)
 	// Gets all task queue names mapped to a given build ID
@@ -242,6 +248,15 @@ func (c *matchingServiceClient) GetTaskQueueUserData(ctx context.Context, in *Ge
 	return out, nil
 }
 
+func (c *matchingServiceClient) PollTaskQueueMetadata(ctx context.Context, in *PollTaskQueueMetadataRequest, opts ...grpc.CallOption) (*PollTaskQueueMetadataResponse, error) {
+	out := new(PollTaskQueueMetadataResponse)
+	err := c.cc.Invoke(ctx, MatchingService_PollTaskQueueMetadata_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *matchingServiceClient) ApplyTaskQueueUserDataReplicationEvent(ctx context.Context, in *ApplyTaskQueueUserDataReplicationEventRequest, opts ...grpc.CallOption) (*ApplyTaskQueueUserDataReplicationEventResponse, error) {
 	out := new(ApplyTaskQueueUserDataReplicationEventResponse)
 	err := c.cc.Invoke(ctx, MatchingService_ApplyTaskQueueUserDataReplicationEvent_FullMethodName, in, out, opts...)
@@ -329,8 +344,13 @@ type MatchingServiceServer interface {
 	//	aip.dev/not-precedent: UpdateWorkerBuildIdCompatibility RPC doesn't follow Google API format. --)
 	UpdateWorkerBuildIdCompatibility(context.Context, *UpdateWorkerBuildIdCompatibilityRequest) (*UpdateWorkerBuildIdCompatibilityResponse, error)
 	GetWorkerBuildIdCompatibility(context.Context, *GetWorkerBuildIdCompatibilityRequest) (*GetWorkerBuildIdCompatibilityResponse, error)
-	// Fetch user data for a task queue, this request should always be routed to the node holding the root partition of the workflow task queue.
+	// Fetch user data for a task queue. This request should go to the parent partition of the
+	// requester, but always workflow type.
 	GetTaskQueueUserData(context.Context, *GetTaskQueueUserDataRequest) (*GetTaskQueueUserDataResponse, error)
+	// Long-polls for task queue user data and also partition state. Returns if either one changed.
+	// This request should go to the parent partition of the requester. For task queue types
+	// besides workflow, they should request user data from the workflow root.
+	PollTaskQueueMetadata(context.Context, *PollTaskQueueMetadataRequest) (*PollTaskQueueMetadataResponse, error)
 	// Apply a user data replication event.
 	ApplyTaskQueueUserDataReplicationEvent(context.Context, *ApplyTaskQueueUserDataReplicationEventRequest) (*ApplyTaskQueueUserDataReplicationEventResponse, error)
 	// Gets all task queue names mapped to a given build ID
@@ -392,6 +412,9 @@ func (UnimplementedMatchingServiceServer) GetWorkerBuildIdCompatibility(context.
 }
 func (UnimplementedMatchingServiceServer) GetTaskQueueUserData(context.Context, *GetTaskQueueUserDataRequest) (*GetTaskQueueUserDataResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetTaskQueueUserData not implemented")
+}
+func (UnimplementedMatchingServiceServer) PollTaskQueueMetadata(context.Context, *PollTaskQueueMetadataRequest) (*PollTaskQueueMetadataResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method PollTaskQueueMetadata not implemented")
 }
 func (UnimplementedMatchingServiceServer) ApplyTaskQueueUserDataReplicationEvent(context.Context, *ApplyTaskQueueUserDataReplicationEventRequest) (*ApplyTaskQueueUserDataReplicationEventResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ApplyTaskQueueUserDataReplicationEvent not implemented")
@@ -637,6 +660,24 @@ func _MatchingService_GetTaskQueueUserData_Handler(srv interface{}, ctx context.
 	return interceptor(ctx, in, info, handler)
 }
 
+func _MatchingService_PollTaskQueueMetadata_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(PollTaskQueueMetadataRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(MatchingServiceServer).PollTaskQueueMetadata(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: MatchingService_PollTaskQueueMetadata_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(MatchingServiceServer).PollTaskQueueMetadata(ctx, req.(*PollTaskQueueMetadataRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _MatchingService_ApplyTaskQueueUserDataReplicationEvent_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(ApplyTaskQueueUserDataReplicationEventRequest)
 	if err := dec(in); err != nil {
@@ -781,6 +822,10 @@ var MatchingService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetTaskQueueUserData",
 			Handler:    _MatchingService_GetTaskQueueUserData_Handler,
+		},
+		{
+			MethodName: "PollTaskQueueMetadata",
+			Handler:    _MatchingService_PollTaskQueueMetadata_Handler,
 		},
 		{
 			MethodName: "ApplyTaskQueueUserDataReplicationEvent",

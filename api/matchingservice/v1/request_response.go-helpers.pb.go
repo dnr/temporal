@@ -917,6 +917,80 @@ func (this *GetTaskQueueUserDataResponse) Equal(that interface{}) bool {
 	return proto.Equal(this, that1)
 }
 
+// Marshal an object of type PollTaskQueueMetadataRequest to the protobuf v3 wire format
+func (val *PollTaskQueueMetadataRequest) Marshal() ([]byte, error) {
+	return proto.Marshal(val)
+}
+
+// Unmarshal an object of type PollTaskQueueMetadataRequest from the protobuf v3 wire format
+func (val *PollTaskQueueMetadataRequest) Unmarshal(buf []byte) error {
+	return proto.Unmarshal(buf, val)
+}
+
+// Size returns the size of the object, in bytes, once serialized
+func (val *PollTaskQueueMetadataRequest) Size() int {
+	return proto.Size(val)
+}
+
+// Equal returns whether two PollTaskQueueMetadataRequest values are equivalent by recursively
+// comparing the message's fields.
+// For more information see the documentation for
+// https://pkg.go.dev/google.golang.org/protobuf/proto#Equal
+func (this *PollTaskQueueMetadataRequest) Equal(that interface{}) bool {
+	if that == nil {
+		return this == nil
+	}
+
+	var that1 *PollTaskQueueMetadataRequest
+	switch t := that.(type) {
+	case *PollTaskQueueMetadataRequest:
+		that1 = t
+	case PollTaskQueueMetadataRequest:
+		that1 = &t
+	default:
+		return false
+	}
+
+	return proto.Equal(this, that1)
+}
+
+// Marshal an object of type PollTaskQueueMetadataResponse to the protobuf v3 wire format
+func (val *PollTaskQueueMetadataResponse) Marshal() ([]byte, error) {
+	return proto.Marshal(val)
+}
+
+// Unmarshal an object of type PollTaskQueueMetadataResponse from the protobuf v3 wire format
+func (val *PollTaskQueueMetadataResponse) Unmarshal(buf []byte) error {
+	return proto.Unmarshal(buf, val)
+}
+
+// Size returns the size of the object, in bytes, once serialized
+func (val *PollTaskQueueMetadataResponse) Size() int {
+	return proto.Size(val)
+}
+
+// Equal returns whether two PollTaskQueueMetadataResponse values are equivalent by recursively
+// comparing the message's fields.
+// For more information see the documentation for
+// https://pkg.go.dev/google.golang.org/protobuf/proto#Equal
+func (this *PollTaskQueueMetadataResponse) Equal(that interface{}) bool {
+	if that == nil {
+		return this == nil
+	}
+
+	var that1 *PollTaskQueueMetadataResponse
+	switch t := that.(type) {
+	case *PollTaskQueueMetadataResponse:
+		that1 = t
+	case PollTaskQueueMetadataResponse:
+		that1 = &t
+	default:
+		return false
+	}
+
+	return proto.Equal(this, that1)
+}
+
 // Marshal an object of type ApplyTaskQueueUserDataReplicationEventRequest to the protobuf v3 wire format
 func (val *ApplyTaskQueueUserDataReplicationEventRequest) Marshal() ([]byte, error) {
 	return proto.Marshal(val)
