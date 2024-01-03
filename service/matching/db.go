@@ -501,9 +501,12 @@ func (db *taskQueueDB) setMetadataFromParent(
 	if userData != nil {
 		db.setUserDataLocked(userData)
 	}
-	// If we are the root activity/nexus tq, we'll get a partition state from the workflow tq
-	// even though we own our own partition state. Just ignore it.
-	if partitionState != nil && db.taskQueueKind == enumspb.TASK_QUEUE_KIND_NORMAL && !db.DbStoresPartitionState() {
+	// If we are the root activity/nexus tq, we'll get a partition state from the workflow tq even though
+	// we own our own partition state. Just ignore it. Also ignore an update to an older version.
+	if partitionState != nil &&
+		db.taskQueueKind == enumspb.TASK_QUEUE_KIND_NORMAL &&
+		!db.DbStoresPartitionState() &&
+		db.partitionState.GetVersion() < partitionState.Version {
 		db.setPartitionStateLocked(partitionState)
 	}
 }

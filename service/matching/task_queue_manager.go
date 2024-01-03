@@ -328,6 +328,7 @@ func (c *taskQueueManagerImpl) Start() {
 	} else {
 		c.goroGroup.Go(c.fetchMetadata)
 	}
+	c.goroGroup.Go(c.partitionStateLoop)
 	c.logger.Info("", tag.LifeCycleStarted)
 	c.taggedMetricsHandler.Counter(metrics.TaskQueueStartedCounter.Name()).Record(1)
 }
@@ -1015,4 +1016,54 @@ func (c *taskQueueManagerImpl) fetchMetadata(ctx context.Context) error {
 	}
 
 	return ctx.Err()
+}
+
+func (c *taskQueueManagerImpl) partitionStateLoop(ctx context.Context) error {
+	for ctx.Err() == nil {
+		_, _, partitionState, partitionStateChanged, err := c.GetMetadata()
+		if err != nil {
+			// This only happens if:
+			// - this is a tqm for a specific version
+			// - this tqm is closing
+			// In both cases we can just exit this loop.
+			return err
+		}
+		c.syncPartitionState(partitionState)
+		select {
+		case <-ctx.Done():
+		case <-partitionStateChanged:
+		}
+	}
+}
+
+func (c *taskQueueManagerImpl) syncPartitionState(state *taskqueuespb.PartitionState) {
+	if state == nil {
+		// FIXME: consider default behavior here
+		return
+	}
+
+	self := c.taskQueueID.Partition()
+
+	if self >= state.CurrentPartitions {
+		// This partition should not exist. Any tasks in the db may have been reassigned to a
+		// lower partition to process.
+		c.skipFinalUpdate.Store(true)
+		c.unloadFromEngine()
+		return
+	}
+
+	for i, owner := range state.ExtraPartitionAssignment {
+		if owner == self {
+			// FIXME: comment
+			newPartition := int(state.CurrentPartitions) + i
+			newId := newTaskQueueIDWithPartition(c.taskQueueID, newPartition)
+			tqm, _ := c.engine.getTaskQueueManagerNoWait(newId, c.stickyInfo, true)
+			if tqm != nil {
+				// FIXME: how do we keep alive until it's drained? timeout in the loop above?
+				tqm.MarkAlive()
+			}
+		} else {
+			// FIXME: unload if we have it loaded but shouldn't?
+		}
+	}
 }
