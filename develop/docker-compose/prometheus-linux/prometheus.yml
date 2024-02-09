@@ -10,3 +10,6 @@ scrape_configs:
       - targets:
           # port should match value from server config listenAddress.
           - localhost:8000
+          - localhost:8001
+          - localhost:8002
+          - localhost:8003

@@ -250,7 +250,8 @@ func (e *matchingEngineImpl) listenerKey() string {
 func (e *matchingEngineImpl) watchMembership() {
 	self := e.hostInfoProvider.HostInfo().Identity()
 
-	for range e.membershipChangedCh {
+	for ev := range e.membershipChangedCh {
+		e.logger.Warn("MEMBERSHIP CHANGED", tag.NewStringTag("event", fmt.Sprintf("%#v", ev)))
 		// Check all our loaded task queues to see if we lost ownership of any of them.
 		e.taskQueuesLock.RLock()
 		ids := make([]*taskQueueID, 0, len(e.taskQueues))
@@ -284,6 +285,7 @@ func (e *matchingEngineImpl) watchMembership() {
 						return
 					}
 					// now we can unload
+					e.logger.Warn("UNLOADING STALE TASK QUEUE", tag.WorkflowTaskQueueName(id.FullName()))
 					e.unloadTaskQueueById(id, nil)
 				}
 			})
