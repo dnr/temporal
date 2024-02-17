@@ -35,6 +35,7 @@ import (
 
 	"github.com/temporalio/ringpop-go"
 	"github.com/temporalio/tchannel-go"
+	"golang.org/x/exp/maps"
 	"golang.org/x/exp/slices"
 
 	"github.com/dgryski/go-farm"
@@ -75,6 +76,13 @@ const (
 	defaultRefreshInterval = time.Second * 10
 	replicaPoints          = 100
 
+	// We're passing around absolute timestamps, so we have to worry about clock skew.
+	// With significant clock skew and scheduled start/leave times, nodes might disagree on who
+	// is in the ring. We can set a bound on how far in the future we allow scheduled times to
+	// be, and if they're outside this range, ignore the scheduled time and let them take
+	// effect immediately. This means there shouldn't be disagreement for more than 30 seconds.
+	maxScheduledEventTimeSeconds = 30
+
 	// refreshModeAlways means always do a refresh right now.
 	refreshModeAlways refreshMode = iota
 	// refreshModeLazy means only do a refresh if it's been minRefreshInternal since the last one.
@@ -96,6 +104,7 @@ type (
 		refreshLock         sync.Mutex
 		lastRefreshTime     time.Time
 		scheduledRefreshMap map[int64]*time.Timer
+		noticedClockSkew    map[addressAndTime]struct{}
 
 		listenerLock sync.RWMutex
 		listeners    map[string]chan<- *membership.ChangedEvent
@@ -108,10 +117,18 @@ type (
 		hosts map[string]*hostInfo
 	}
 
+	addressAndTime struct {
+		address     string
+		unixSeconds int64
+	}
+
 	refreshMode int
 )
 
 var _ membership.ServiceResolver = (*serviceResolver)(nil)
+
+// errMissingLabel is not a real error, just a sentinel value
+var errMissingLabel = errors.New("missing label")
 
 func newServiceResolver(
 	service primitives.ServiceName,
@@ -298,6 +315,7 @@ func (r *serviceResolver) refreshLocked() (*membership.ChangedEvent, error) {
 
 	// if we found an add/remove event, schedule another refresh right at that time
 	r.scheduleRefresh(nextEvent)
+	r.cleanClockSkewMap()
 
 	newMembersMap, changedEvent := r.compareMembers(hosts)
 	if changedEvent == nil {
@@ -349,33 +367,41 @@ func (r *serviceResolver) getReachableMembers() ([]*hostInfo, int64, error) {
 
 	// Filter members by startAt/stopAt times and extract next scheduled event time. We only
 	// need to keep track of one event since we'll refresh at that time and find the next one.
+	// Note that nextEvent is mutated by the filter functions below.
 	nowUnix := time.Now().Unix()
 	nextEvent := int64(math.MaxInt64)
-	filteredMembers := make([]swim.Member, 0, len(members))
-	for _, member := range members {
-		if startAtStr, ok := member.Label(startAtKey); ok {
-			if startAt, err := strconv.ParseInt(startAtStr, 10, 64); err == nil {
-				if startAt > nowUnix {
-					nextEvent = min(nextEvent, startAt)
-					continue
-				}
-			}
+
+	// Filter by startAt
+	members = slices.DeleteFunc(members, func(member swim.Member) bool {
+		startAt, err := parseIntLabel(member, startAtKey)
+		if err != nil {
+			return false
+		} else if r.suspectedClockSkew(member.Address, startAt, nowUnix) {
+			return false
+		} else if startAt <= nowUnix {
+			return false
 		}
-		if stopAtStr, ok := member.Label(stopAtKey); ok {
-			if stopAt, err := strconv.ParseInt(stopAtStr, 10, 64); err == nil {
-				if stopAt <= nowUnix {
-					continue
-				} else {
-					nextEvent = min(nextEvent, stopAt)
-				}
-			}
+		nextEvent = min(nextEvent, startAt)
+		return true
+	})
+
+	// Filter by stopAt
+	members = slices.DeleteFunc(members, func(member swim.Member) bool {
+		stopAt, err := parseIntLabel(member, stopAtKey)
+		if err != nil {
+			return false
+		} else if r.suspectedClockSkew(member.Address, stopAt, nowUnix) {
+			return false
+		} else if stopAt > nowUnix {
+			nextEvent = min(nextEvent, stopAt)
+			return false
 		}
-		filteredMembers = append(filteredMembers, member)
-	}
+		return true
+	})
 
 	// Turn swim.Members into hostInfo
-	hosts := make([]*hostInfo, len(filteredMembers))
-	for i, member := range filteredMembers {
+	hosts := make([]*hostInfo, len(members))
+	for i, member := range members {
 		servicePort := r.port
 
 		// Each temporal service in the ring should advertise which port it has its gRPC listener
@@ -404,6 +430,35 @@ func (r *serviceResolver) getReachableMembers() ([]*hostInfo, int64, error) {
 		nextEvent = 0
 	}
 	return hosts, nextEvent, nil
+}
+
+// suspectedClockSkew returns true if we suspect the given address+event time is skewed
+// relative to our clock, because it currently or previously fell outside of a small window
+// around the current time.
+func (r *serviceResolver) suspectedClockSkew(address string, eventTime, now int64) bool {
+	key := addressAndTime{address: address, unixSeconds: eventTime}
+	if _, ok := r.noticedClockSkew[key]; ok {
+		return true
+	}
+	if eventTime < now+maxScheduledEventTimeSeconds {
+		return false
+	}
+	// This event is too far in the future, ignore it. See note on clock skew above.
+	r.noticedClockSkew[key] = struct{}{}
+	r.logger.Warn("ringpop startAt/stopAt label too far in the future",
+		tag.Host(address), tag.Timestamp(time.Unix(eventTime, 0)))
+	return true
+}
+
+func (r *serviceResolver) cleanClockSkewMap() {
+	// only bother going through the map if we get big enough
+	if len(r.noticedClockSkew) < 100 {
+		return
+	}
+	now := time.Now().Unix()
+	maps.DeleteFunc(r.noticedClockSkew, func(key addressAndTime, value struct{}) bool {
+		return key.unixSeconds < now
+	})
 }
 
 func (r *serviceResolver) emitEvent(event *membership.ChangedEvent) {
@@ -515,4 +570,13 @@ func buildBroadcastHostPort(listenerPeerInfo tchannel.LocalPeerInfo, broadcastAd
 	}
 
 	return listenerPeerInfo.HostPort, nil
+}
+
+// parseIntLabel returns the value of the given label as an integer.
+func parseIntLabel(member swim.Member, label string) (int64, error) {
+	str, ok := member.Label(label)
+	if !ok {
+		return 0, errMissingLabel
+	}
+	return strconv.ParseInt(str, 10, 64)
 }

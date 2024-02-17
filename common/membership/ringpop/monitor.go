@@ -167,10 +167,13 @@ func (rpo *monitor) Start() {
 		rpo.logger.Fatal("unable to get ringpop labels", tag.Error(err))
 	}
 
-	if !rpo.joinTime.IsZero() {
+	if until := time.Until(rpo.joinTime); until > 0 && until.Seconds() < maxScheduledEventTimeSeconds {
 		if err = labels.Set(startAtKey, strconv.FormatInt(rpo.joinTime.Unix(), 10)); err != nil {
 			rpo.logger.Fatal("unable to set ringpop label", tag.Error(err), tag.Key(startAtKey))
 		}
+		// Clean up the label eventually, but we don't really care when. Add a little jitter
+		// since each update will get propagated around, and join time will be aligned if
+		// multiple nodes come online around the same time.
 		clearAfter := time.Until(rpo.joinTime.Add(backoff.Jitter(10*time.Second, 0.2)))
 		time.AfterFunc(clearAfter, rpo.clearStartAt)
 	}
@@ -416,9 +419,13 @@ func (rpo *monitor) Stop() {
 	rpo.rp.Destroy()
 }
 
-func (rpo *monitor) EvictSelf(asOf time.Time) error {
+func (rpo *monitor) EvictSelf() error {
+	return rpo.EvictSelfAt(time.Time{})
+}
+
+func (rpo *monitor) EvictSelfAt(asOf time.Time) error {
 	until := time.Until(asOf)
-	if until <= 0 {
+	if until <= 0 || until.Seconds() > maxScheduledEventTimeSeconds {
 		return rpo.rp.SelfEvict()
 	}
 	// set label for eviction time in the future

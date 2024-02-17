@@ -56,7 +56,11 @@ func (s *simpleMonitor) Start() {
 	}
 }
 
-func (s *simpleMonitor) EvictSelf(asOf time.Time) error {
+func (s *simpleMonitor) EvictSelf() error {
+	return nil
+}
+
+func (s *simpleMonitor) EvictSelfAt(asOf time.Time) error {
 	return nil
 }
 
