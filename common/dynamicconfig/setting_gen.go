@@ -107,6 +107,18 @@ func (c *Collection) GetBoolPropertyFilteredByShardID(s *BoolSetting) BoolProper
 	}
 }
 
+func GetBoolPropertyFn(value bool) BoolPropertyFn {
+	return func() bool { return value }
+}
+
+func GetBoolPropertyFilteredByNamespace(value bool) BoolPropertyFnWithNamespaceFilter {
+	return func(string) bool { return value }
+}
+
+func GetBoolPropertyFilteredByTaskQueueInfo(value bool) BoolPropertyFnWithTaskQueueInfoFilters {
+	return func(string, string, enumspb.TaskQueueType) bool { return value }
+}
+
 const TypeInt Type = 1 // go type: int
 
 type IntSetting Setting[int]
@@ -179,6 +191,18 @@ func (c *Collection) GetIntPropertyFilteredByShardID(s *IntSetting) IntPropertyF
 			convertInt,
 		)
 	}
+}
+
+func GetIntPropertyFn(value int) IntPropertyFn {
+	return func() int { return value }
+}
+
+func GetIntPropertyFilteredByNamespace(value int) IntPropertyFnWithNamespaceFilter {
+	return func(string) int { return value }
+}
+
+func GetIntPropertyFilteredByTaskQueueInfo(value int) IntPropertyFnWithTaskQueueInfoFilters {
+	return func(string, string, enumspb.TaskQueueType) int { return value }
 }
 
 const TypeFloat Type = 2 // go type: float64
@@ -255,6 +279,18 @@ func (c *Collection) GetFloatPropertyFilteredByShardID(s *FloatSetting) FloatPro
 	}
 }
 
+func GetFloatPropertyFn(value float64) FloatPropertyFn {
+	return func() float64 { return value }
+}
+
+func GetFloatPropertyFilteredByNamespace(value float64) FloatPropertyFnWithNamespaceFilter {
+	return func(string) float64 { return value }
+}
+
+func GetFloatPropertyFilteredByTaskQueueInfo(value float64) FloatPropertyFnWithTaskQueueInfoFilters {
+	return func(string, string, enumspb.TaskQueueType) float64 { return value }
+}
+
 const TypeString Type = 3 // go type: string
 
 type StringSetting Setting[string]
@@ -327,6 +363,18 @@ func (c *Collection) GetStringPropertyFilteredByShardID(s *StringSetting) String
 			convertString,
 		)
 	}
+}
+
+func GetStringPropertyFn(value string) StringPropertyFn {
+	return func() string { return value }
+}
+
+func GetStringPropertyFilteredByNamespace(value string) StringPropertyFnWithNamespaceFilter {
+	return func(string) string { return value }
+}
+
+func GetStringPropertyFilteredByTaskQueueInfo(value string) StringPropertyFnWithTaskQueueInfoFilters {
+	return func(string, string, enumspb.TaskQueueType) string { return value }
 }
 
 const TypeDuration Type = 4 // go type: time.Duration
@@ -403,6 +451,18 @@ func (c *Collection) GetDurationPropertyFilteredByShardID(s *DurationSetting) Du
 	}
 }
 
+func GetDurationPropertyFn(value time.Duration) DurationPropertyFn {
+	return func() time.Duration { return value }
+}
+
+func GetDurationPropertyFilteredByNamespace(value time.Duration) DurationPropertyFnWithNamespaceFilter {
+	return func(string) time.Duration { return value }
+}
+
+func GetDurationPropertyFilteredByTaskQueueInfo(value time.Duration) DurationPropertyFnWithTaskQueueInfoFilters {
+	return func(string, string, enumspb.TaskQueueType) time.Duration { return value }
+}
+
 const TypeMap Type = 5 // go type: map[string]any
 
 type MapSetting Setting[map[string]any]
@@ -475,4 +535,16 @@ func (c *Collection) GetMapPropertyFilteredByShardID(s *MapSetting) MapPropertyF
 			convertMap,
 		)
 	}
+}
+
+func GetMapPropertyFn(value map[string]any) MapPropertyFn {
+	return func() map[string]any { return value }
+}
+
+func GetMapPropertyFilteredByNamespace(value map[string]any) MapPropertyFnWithNamespaceFilter {
+	return func(string) map[string]any { return value }
+}
+
+func GetMapPropertyFilteredByTaskQueueInfo(value map[string]any) MapPropertyFnWithTaskQueueInfoFilters {
+	return func(string, string, enumspb.TaskQueueType) map[string]any { return value }
 }

@@ -156,6 +156,18 @@ func (c *Collection) Get{{.Name}}PropertyFilteredByShardID(s *{{.Name}}Setting) 
 		)
 	}
 }
+
+func Get{{.Name}}PropertyFn(value {{.GoType}}) {{.Name}}PropertyFn {
+	return func() {{.GoType}} { return value }
+}
+
+func Get{{.Name}}PropertyFilteredByNamespace(value {{.GoType}}) {{.Name}}PropertyFnWithNamespaceFilter {
+	return func(string) {{.GoType}} { return value }
+}
+
+func Get{{.Name}}PropertyFilteredByTaskQueueInfo(value {{.GoType}}) {{.Name}}PropertyFnWithTaskQueueInfoFilters {
+	return func(string, string, enumspb.TaskQueueType) {{.GoType}} { return value }
+}
 `, tp)
 }
 
