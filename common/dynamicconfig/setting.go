@@ -26,8 +26,6 @@
 
 package dynamicconfig
 
-import "time"
-
 type (
 	Type int
 
@@ -47,13 +45,6 @@ type (
 		Description string
 	}
 
-	BoolSetting     Setting[bool]
-	IntSetting      Setting[int]
-	FloatSetting    Setting[float64]
-	StringSetting   Setting[string]
-	DurationSetting Setting[time.Duration]
-	MapSetting      Setting[map[string]any]
-
 	GenericSetting interface {
 		GetKey() Key
 		GetType() Type
@@ -64,15 +55,6 @@ type (
 )
 
 const (
-	TypeBool     Type = iota // go type: bool
-	TypeInt                  // go type: int
-	TypeFloat                // go type: float64
-	TypeString               // go type: string
-	TypeDuration             // go type: time.Duration
-	TypeMap                  // go type: map[string]any
-)
-
-const (
 	PrecedenceGlobal Precedence = iota
 	PrecedenceNamespace
 	PrecedenceNamespaceId
@@ -80,34 +62,3 @@ const (
 	PrecedenceShardId
 	PrecedenceTaskType
 )
-
-func (s *BoolSetting) GetKey() Key                   { return s.Key }
-func (s *BoolSetting) GetType() Type                 { return s.Type }
-func (s *BoolSetting) GetPrecedence() Precedence     { return s.Precedence }
-func (s *BoolSetting) GetDefault() any               { return s.Default }
-func (s *BoolSetting) GetDescription() string        { return s.Description }
-func (s *IntSetting) GetKey() Key                    { return s.Key }
-func (s *IntSetting) GetType() Type                  { return s.Type }
-func (s *IntSetting) GetPrecedence() Precedence      { return s.Precedence }
-func (s *IntSetting) GetDefault() any                { return s.Default }
-func (s *IntSetting) GetDescription() string         { return s.Description }
-func (s *FloatSetting) GetKey() Key                  { return s.Key }
-func (s *FloatSetting) GetType() Type                { return s.Type }
-func (s *FloatSetting) GetPrecedence() Precedence    { return s.Precedence }
-func (s *FloatSetting) GetDefault() any              { return s.Default }
-func (s *FloatSetting) GetDescription() string       { return s.Description }
-func (s *StringSetting) GetKey() Key                 { return s.Key }
-func (s *StringSetting) GetType() Type               { return s.Type }
-func (s *StringSetting) GetPrecedence() Precedence   { return s.Precedence }
-func (s *StringSetting) GetDefault() any             { return s.Default }
-func (s *StringSetting) GetDescription() string      { return s.Description }
-func (s *DurationSetting) GetKey() Key               { return s.Key }
-func (s *DurationSetting) GetType() Type             { return s.Type }
-func (s *DurationSetting) GetPrecedence() Precedence { return s.Precedence }
-func (s *DurationSetting) GetDefault() any           { return s.Default }
-func (s *DurationSetting) GetDescription() string    { return s.Description }
-func (s *MapSetting) GetKey() Key                    { return s.Key }
-func (s *MapSetting) GetType() Type                  { return s.Type }
-func (s *MapSetting) GetPrecedence() Precedence      { return s.Precedence }
-func (s *MapSetting) GetDefault() any                { return s.Default }
-func (s *MapSetting) GetDescription() string         { return s.Description }

@@ -30,6 +30,8 @@ import (
 	enumspb "go.temporal.io/api/enums/v1"
 )
 
+// FIXME: move to codegen
+
 // These mock functions are for tests to use config properties that are dynamic
 
 // GetIntPropertyFn returns value as IntPropertyFn
