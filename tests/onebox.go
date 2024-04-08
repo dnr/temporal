@@ -191,7 +191,7 @@ type (
 func newTemporal(t *testing.T, params *TemporalParams) *temporalImpl {
 	testDCClient := newTestDCClient(dynamicconfig.NewNoopClient())
 	for k, v := range params.DynamicConfigOverrides {
-		testDCClient.OverrideValue(t, k, v)
+		testDCClient.OverrideValueByName(t, k, v)
 	}
 	impl := &temporalImpl{
 		logger:                           params.Logger,
@@ -816,7 +816,8 @@ func (c *temporalImpl) frontendConfigProvider() *config.Config {
 }
 
 func (c *temporalImpl) overrideHistoryDynamicConfig(t *testing.T, client *dcClient) {
-	client.OverrideValue(t, dynamicconfig.ReplicationTaskProcessorStartWait, time.Nanosecond)
+	// FIXME: unused?
+	// client.OverrideValue(t, dynamicconfig.ReplicationTaskProcessorStartWait, time.Nanosecond)
 
 	if c.esConfig != nil {
 		client.OverrideValue(t, dynamicconfig.SecondaryVisibilityWritingMode, visibility.SecondaryVisibilityWritingModeDual)
@@ -962,6 +963,6 @@ func sdkClientFactoryProvider(
 		tlsConfig,
 		metricsHandler,
 		logger,
-		dc.GetIntProperty(dynamicconfig.WorkerStickyCacheSize, 0),
+		dc.GetInt(dynamicconfig.WorkerStickyCacheSize),
 	)
 }

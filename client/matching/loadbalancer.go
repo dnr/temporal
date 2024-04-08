@@ -67,8 +67,8 @@ type (
 
 	defaultLoadBalancer struct {
 		namespaceIDToName   func(id namespace.ID) (namespace.Name, error)
-		nReadPartitions     dynamicconfig.IntPropertyFnWithTaskQueueInfoFilters
-		nWritePartitions    dynamicconfig.IntPropertyFnWithTaskQueueInfoFilters
+		nReadPartitions     dynamicconfig.IntPropertyFnWithTaskQueueFilter
+		nWritePartitions    dynamicconfig.IntPropertyFnWithTaskQueueFilter
 		forceReadPartition  dynamicconfig.IntPropertyFn
 		forceWritePartition dynamicconfig.IntPropertyFn
 
@@ -104,10 +104,10 @@ func NewLoadBalancer(
 ) LoadBalancer {
 	lb := &defaultLoadBalancer{
 		namespaceIDToName:   namespaceIDToName,
-		nReadPartitions:     dc.GetTaskQueuePartitionsProperty(dynamicconfig.MatchingNumTaskqueueReadPartitions),
-		nWritePartitions:    dc.GetTaskQueuePartitionsProperty(dynamicconfig.MatchingNumTaskqueueWritePartitions),
-		forceReadPartition:  dc.GetIntProperty(dynamicconfig.TestMatchingLBForceReadPartition, -1),
-		forceWritePartition: dc.GetIntProperty(dynamicconfig.TestMatchingLBForceWritePartition, -1),
+		nReadPartitions:     dc.GetIntByTaskQueue(dynamicconfig.MatchingNumTaskqueueReadPartitions),
+		nWritePartitions:    dc.GetIntByTaskQueue(dynamicconfig.MatchingNumTaskqueueWritePartitions),
+		forceReadPartition:  dc.GetInt(dynamicconfig.TestMatchingLBForceReadPartition),
+		forceWritePartition: dc.GetInt(dynamicconfig.TestMatchingLBForceWritePartition),
 		lock:                sync.RWMutex{},
 		taskQueueLBs:        make(map[taskQueueKey]*tqLoadBalancer),
 	}

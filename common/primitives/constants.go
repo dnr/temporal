@@ -1,6 +1,8 @@
 // The MIT License
 //
-// Copyright (c) 2024 Temporal Technologies Inc.  All rights reserved.
+// Copyright (c) 2020 Temporal Technologies Inc.  All rights reserved.
+//
+// Copyright (c) 2020 Uber Technologies, Inc.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -20,26 +22,31 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-package callbacks
+package primitives
 
 import (
 	"time"
 
-	"go.temporal.io/server/common/dynamicconfig"
+	"go.temporal.io/server/common/debug"
 )
 
-var InvocationTaskTimeout = dynamicconfig.NewDurationGlobalSetting(
-	"plugin.callback.invocation.taskTimeout",
-	time.Second*10,
-	`InvocationTaskTimeout is the timeout for executing a single callback invocation task.`,
+const (
+	// DefaultTransactionSizeLimit is the largest allowed transaction size to persistence
+	DefaultTransactionSizeLimit = 4 * 1024 * 1024
 )
 
-type Config struct {
-	InvocationTaskTimeout dynamicconfig.DurationPropertyFn
-}
+const (
+	// DefaultWorkflowTaskTimeout sets the Default Workflow Task timeout for a Workflow
+	DefaultWorkflowTaskTimeout = 10 * time.Second * debug.TimeoutMultiplier
+)
 
-func ConfigProvider(dc *dynamicconfig.Collection) *Config {
-	return &Config{
-		InvocationTaskTimeout: dc.GetDuration(InvocationTaskTimeout),
-	}
-}
+const (
+	// GetHistoryMaxPageSize is the max page size for get history
+	GetHistoryMaxPageSize = 256
+	// ReadDLQMessagesPageSize is the max page size for read DLQ messages
+	ReadDLQMessagesPageSize = 1000
+)
+
+const (
+	DefaultHistoryMaxAutoResetPoints = 20
+)

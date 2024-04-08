@@ -22,16 +22,28 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-package common
+//go:generate go run ../../cmd/tools/gendynamicconfig
 
-import "time"
+package dynamicconfig
 
-// DefaultRetrySettings indicates what the "default" retry settings
-// are if it is not specified on an Activity or for any unset fields
-// if a policy is explicitly set on a workflow
-type DefaultRetrySettings struct {
-	InitialInterval            time.Duration
-	MaximumIntervalCoefficient float64
-	BackoffCoefficient         float64
-	MaximumAttempts            int32
-}
+type (
+	Type int
+
+	Precedence int
+
+	Setting[T any, P any] struct {
+		// string value of key. case-insensitive.
+		key Key
+		// default value. cdef is used in preference to def if non-nil.
+		def  T
+		cdef []TypedConstrainedValue[T]
+		// documentation
+		description string
+	}
+
+	GenericSetting interface {
+		Key() Key
+		Type() Type
+		Precedence() Precedence
+	}
+)
