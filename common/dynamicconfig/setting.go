@@ -34,8 +34,6 @@ type (
 	Setting[T any] struct {
 		// string value of key. case-insensitive.
 		Key Key
-		// type, for validation
-		Type Type
 		// precedence
 		Precedence Precedence
 		// default value. ConstrainedDefault is used in preference to Default if non-nil.

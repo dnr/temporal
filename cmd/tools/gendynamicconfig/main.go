@@ -88,7 +88,7 @@ const Type{{.Name}} Type = {{.Index}} // go type: {{.GoType}}
 type {{.Name}}Setting Setting[{{.GoType}}]
 
 func (s *{{.Name}}Setting) GetKey() Key               { return s.Key }
-func (s *{{.Name}}Setting) GetType() Type             { return s.Type }
+func (s *{{.Name}}Setting) GetType() Type             { return Type{{.Name}} }
 func (s *{{.Name}}Setting) GetPrecedence() Precedence { return s.Precedence }
 func (s *{{.Name}}Setting) GetDefault() any           { return s.Default }
 func (s *{{.Name}}Setting) GetDescription() string    { return s.Description }
