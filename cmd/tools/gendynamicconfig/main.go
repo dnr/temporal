@@ -142,7 +142,7 @@ func (s *{{.T.Name}}{{.P.Name}}Setting) GetDescription() string    { return s.De
 
 type {{.T.Name}}PropertyFn{{if .NotGlobal}}With{{.P.Name}}Filter{{end}} func{{.P.GoArgs}} {{.T.GoType}}
 
-func (c *Collection) Get{{.T.Name}}{{if .NotGlobal}}FilteredBy{{.P.Name}}{{end}}(s *{{.T.Name}}{{.P.Name}}Setting) {{.T.Name}}PropertyFn{{if .NotGlobal}}With{{.P.Name}}Filter{{end}} {
+func (c *Collection) Get{{.T.Name}}{{if .NotGlobal}}By{{.P.Name}}{{end}}(s *{{.T.Name}}{{.P.Name}}Setting) {{.T.Name}}PropertyFn{{if .NotGlobal}}With{{.P.Name}}Filter{{end}} {
 	return func{{.P.GoArgs}} {{.T.GoType}} {
 		return matchAndConvert(
 			c,
