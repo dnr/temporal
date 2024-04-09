@@ -90,17 +90,17 @@ func (s *collectionSuite) TestGetIntPropertyFilteredByNamespace() {
 	s.Equal(50, value(namespace))
 }
 
-func (s *collectionSuite) TestGetStringPropertyFnWithNamespaceFilter() {
+func (s *collectionSuite) TestGetStringPropertyFnFilteredByNamespace() {
 	namespace := "testNamespace"
-	value := s.cln.GetStringPropertyFnWithNamespaceFilter(DefaultEventEncoding, "abc")
+	value := s.cln.GetStringPropertyFnFilteredByNamespace(DefaultEventEncoding, "abc")
 	s.Equal("abc", value(namespace))
 	s.client[DefaultEventEncoding] = "efg"
 	s.Equal("efg", value(namespace))
 }
 
-func (s *collectionSuite) TestGetStringPropertyFnWithNamespaceIDFilter() {
+func (s *collectionSuite) TestGetStringPropertyFnFilteredByNamespaceID() {
 	namespaceID := "testNamespaceID"
-	value := s.cln.GetStringPropertyFnWithNamespaceIDFilter(testGetStringPropertyFilteredByNamespaceIDKey, "abc")
+	value := s.cln.GetStringPropertyFnFilteredByNamespaceID(testGetStringPropertyFilteredByNamespaceIDKey, "abc")
 	s.Equal("abc", value(namespaceID))
 	s.client[testGetStringPropertyFilteredByNamespaceIDKey] = "efg"
 	s.Equal("efg", value(namespaceID))
@@ -131,7 +131,7 @@ func (s *collectionSuite) TestGetBoolProperty() {
 
 func (s *collectionSuite) TestGetBoolPropertyFilteredByNamespaceID() {
 	namespaceID := "testNamespaceID"
-	value := s.cln.GetBoolPropertyFnWithNamespaceIDFilter(testGetBoolPropertyFilteredByNamespaceIDKey, true)
+	value := s.cln.GetBoolPropertyFnFilteredByNamespaceID(testGetBoolPropertyFilteredByNamespaceIDKey, true)
 	s.Equal(true, value(namespaceID))
 	s.client[testGetBoolPropertyFilteredByNamespaceIDKey] = false
 	s.Equal(false, value(namespaceID))

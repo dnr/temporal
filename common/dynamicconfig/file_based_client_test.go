@@ -184,7 +184,7 @@ func (s *fileBasedClientSuite) TestGetBoolValue() {
 }
 
 func (s *fileBasedClientSuite) TestGetStringValue() {
-	v := s.collection.GetStringPropertyFnWithNamespaceFilter(testGetStringPropertyKey, "defaultString")("random-namespace")
+	v := s.collection.GetStringPropertyFnFilteredByNamespace(testGetStringPropertyKey, "defaultString")("random-namespace")
 	s.Equal("constrained-string", v)
 }
 
@@ -207,7 +207,7 @@ func (s *fileBasedClientSuite) TestGetMapValue() {
 
 func (s *fileBasedClientSuite) TestGetMapValue_WrongType() {
 	var defaultVal map[string]interface{}
-	v := s.collection.GetMapPropertyFnWithNamespaceFilter(testGetMapPropertyKey, defaultVal)("random-namespace")
+	v := s.collection.GetMapPropertyFnFilteredByNamespace(testGetMapPropertyKey, defaultVal)("random-namespace")
 	s.Equal(defaultVal, v)
 }
 
