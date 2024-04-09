@@ -28,8 +28,7 @@ import (
 	"os"
 	"time"
 
-	"go.temporal.io/server/common"
-	"go.temporal.io/server/common/namespace"
+	"go.temporal.io/server/common/primitives"
 )
 
 var (
@@ -45,7 +44,7 @@ var (
 		Default:     10000,
 		Description: `AdminMatchingNamespaceToPartitionDispatchRate is the max qps of any task queue partition for a given namespace`,
 	}
-	AdminMatchingNamespaceTaskqueueToPartitionDispatchRate = &FloatTaskQueueInfoSetting{
+	AdminMatchingNamespaceTaskqueueToPartitionDispatchRate = &FloatTaskQueueSetting{
 		Key:         "admin.matchingNamespaceTaskqueueToPartitionDispatchRate",
 		Default:     1000,
 		Description: `AdminMatchingNamespaceTaskqueueToPartitionDispatchRate is the max qps of a task queue partition for a given namespace & task queue`,
@@ -118,7 +117,7 @@ for signal / start / signal with start API if namespace is not active`,
 	}
 	TransactionSizeLimit = &IntGlobalSetting{
 		Key:         "system.transactionSizeLimit",
-		Default:     common.DefaultTransactionSizeLimit,
+		Default:     primitives.DefaultTransactionSizeLimit,
 		Description: `TransactionSizeLimit is the largest allowed transaction size to persistence`,
 	}
 	DisallowQuery = &BoolNamespaceSetting{
@@ -209,15 +208,15 @@ response to a StartWorkflowExecution request and skipping the trip through match
 		Default:     50,
 		Description: `ShardRPSWarnLimit is the per-shard RPS limit for warning`,
 	}
-	ShardPerNsRPSWarnPercent = &Float64GlobalSetting{
+	ShardPerNsRPSWarnPercent = &FloatGlobalSetting{
 		Key:     "system.shardPerNsRPSWarnPercent",
 		Default: 0.8,
 		Description: `ShardPerNsRPSWarnPercent is the per-shard per-namespace RPS limit for warning as a percentage of ShardRPSWarnLimit
 these warning are not emitted if the value is set to 0 or less`,
 	}
-	OperatorRPSRatio = &Float64GlobalSetting{
+	OperatorRPSRatio = &FloatGlobalSetting{
 		Key:     "system.operatorRPSRatio",
-		Default: common.DefaultOperatorRPSRatio,
+		Default: 0.2,
 		Description: `OperatorRPSRatio is the percentage of the rate limit provided to priority rate limiters that should be used for
 operator API calls (highest priority). Should be >0.0 and <= 1.0 (defaults to 20% if not specified)`,
 	}
@@ -252,17 +251,17 @@ operator API calls (highest priority). Should be >0.0 and <= 1.0 (defaults to 20
 
 	// utf-8 validation
 
-	ValidateUTF8SampleRPCRequest = &Float64GlobalSetting{
+	ValidateUTF8SampleRPCRequest = &FloatGlobalSetting{
 		Key:         "system.validateUTF8.sample.rpcRequest",
 		Default:     0.0,
 		Description: `Sample rate of utf-8 string validation for rpc requests`,
 	}
-	ValidateUTF8SampleRPCResponse = &Float64GlobalSetting{
+	ValidateUTF8SampleRPCResponse = &FloatGlobalSetting{
 		Key:         "system.validateUTF8.sample.rpcResponse",
 		Default:     0.0,
 		Description: `Sample rate of utf-8 string validation for rpc responses`,
 	}
-	ValidateUTF8SamplePersistence = &Float64GlobalSetting{
+	ValidateUTF8SamplePersistence = &FloatGlobalSetting{
 		Key:         "system.validateUTF8.sample.persistence",
 		Default:     0.0,
 		Description: `Sample rate of utf-8 string validation for persistence [de]serialization`,
@@ -384,7 +383,7 @@ suggest continue-as-new (in workflow task started event)`,
 	}
 	HistoryMaxPageSize = &IntNamespaceSetting{
 		Key:         "limit.historyMaxPageSize",
-		Default:     common.GetHistoryMaxPageSize,
+		Default:     primitives.GetHistoryMaxPageSize,
 		Description: `HistoryMaxPageSize is default max size for GetWorkflowExecutionHistory in one page`,
 	}
 	MaxIDLengthLimit = &IntGlobalSetting{
@@ -497,7 +496,7 @@ is currently processing a task.
 2. There are delays in the visibility task processor (which is asynchronous).
 3. There's propagation delay of the versioning data between matching nodes.`,
 	}
-	BuildIdScavenengerVisibilityRPS = &Float64GlobalSetting{
+	BuildIdScavenengerVisibilityRPS = &FloatGlobalSetting{
 		Key:         "worker.buildIdScavengerVisibilityRPS",
 		Default:     1.0,
 		Description: `BuildIdScavengerVisibilityRPS is the rate limit for visibility calls from the build id scavenger`,
@@ -532,7 +531,7 @@ is currently processing a task.
 	}
 	FrontendPersistenceDynamicRateLimitingParams = &MapGlobalSetting{
 		Key:     "frontend.persistenceDynamicRateLimitingParams",
-		Default: dynamicconfig.DefaultDynamicRateLimitingParams,
+		Default: DefaultDynamicRateLimitingParams,
 		Description: `FrontendPersistenceDynamicRateLimitingParams is a map that contains all adjustable dynamic rate limiting params
 see DefaultDynamicRateLimitingParams for available options and defaults`,
 	}
@@ -543,7 +542,7 @@ see DefaultDynamicRateLimitingParams for available options and defaults`,
 	}
 	FrontendHistoryMaxPageSize = &IntNamespaceSetting{
 		Key:         "frontend.historyMaxPageSize",
-		Default:     common.GetHistoryMaxPageSize,
+		Default:     primitives.GetHistoryMaxPageSize,
 		Description: `FrontendHistoryMaxPageSize is default max size for GetWorkflowExecutionHistory in one page`,
 	}
 	FrontendRPS = &IntGlobalSetting{
@@ -678,7 +677,7 @@ This config is EXPERIMENTAL and may be changed or removed in a later release.`,
 	}
 	FrontendMaxBadBinaries = &IntNamespaceSetting{
 		Key:         "frontend.maxBadBinaries",
-		Default:     namespace.MaxBadBinaries,
+		Default:     10,
 		Description: `FrontendMaxBadBinaries is the max number of bad binaries in namespace config`,
 	}
 	SendRawWorkflowHistory = &BoolNamespaceSetting{
@@ -708,7 +707,7 @@ This config is EXPERIMENTAL and may be changed or removed in a later release.`,
 	}
 	EnableServerVersionCheck = &BoolGlobalSetting{
 		Key:         "frontend.enableServerVersionCheck",
-		Default:     os.Getenv("TEMPORAL_VERSION_CHECK_DISABLED"),
+		Default:     os.Getenv("TEMPORAL_VERSION_CHECK_DISABLED") == "",
 		Description: `EnableServerVersionCheck is a flag that controls whether or not periodic version checking is enabled`,
 	}
 	EnableTokenNamespaceEnforcement = &BoolGlobalSetting{
@@ -805,14 +804,14 @@ of Timeout and if no activity is seen even after that the connection is closed.`
 		Default:     true,
 		Description: `FrontendEnableBatcher enables batcher-related RPCs in the frontend`,
 	}
-	FrontendAccessHistoryFraction = &Float64GlobalSetting{
+	FrontendAccessHistoryFraction = &FloatGlobalSetting{
 		Key:     "frontend.accessHistoryFraction",
 		Default: 0.0,
 		Description: `FrontendAccessHistoryFraction (0.0~1.0) is the fraction of history operations that are sent to the history
 service using the new RPCs. The remaining access history via the existing implementation.
 TODO: remove once migration completes.`,
 	}
-	FrontendAdminDeleteAccessHistoryFraction = &Float64GlobalSetting{
+	FrontendAdminDeleteAccessHistoryFraction = &FloatGlobalSetting{
 		Key:     "frontend.adminDeleteAccessHistoryFraction",
 		Default: 0.0,
 		Description: `FrontendAdminDeleteAccessHistoryFraction (0.0~1.0) is the fraction of admin DeleteWorkflowExecution requests
@@ -928,36 +927,36 @@ Default is 0, means, namespace will be deleted immediately.`,
 	}
 	MatchingPersistenceDynamicRateLimitingParams = &MapGlobalSetting{
 		Key:     "matching.persistenceDynamicRateLimitingParams",
-		Default: dynamicconfig.DefaultDynamicRateLimitingParams,
+		Default: DefaultDynamicRateLimitingParams,
 		Description: `MatchingPersistenceDynamicRateLimitingParams is a map that contains all adjustable dynamic rate limiting params
 see DefaultDynamicRateLimitingParams for available options and defaults`,
 	}
-	MatchingMinTaskThrottlingBurstSize = &IntTaskQueueInfoSetting{
+	MatchingMinTaskThrottlingBurstSize = &IntTaskQueueSetting{
 		Key:         "matching.minTaskThrottlingBurstSize",
 		Default:     1,
 		Description: `MatchingMinTaskThrottlingBurstSize is the minimum burst size for task queue throttling`,
 	}
-	MatchingGetTasksBatchSize = &IntTaskQueueInfoSetting{
+	MatchingGetTasksBatchSize = &IntTaskQueueSetting{
 		Key:         "matching.getTasksBatchSize",
 		Default:     1000,
 		Description: `MatchingGetTasksBatchSize is the maximum batch size to fetch from the task buffer`,
 	}
-	MatchingLongPollExpirationInterval = &DurationTaskQueueInfoSetting{
+	MatchingLongPollExpirationInterval = &DurationTaskQueueSetting{
 		Key:         "matching.longPollExpirationInterval",
 		Default:     time.Minute,
 		Description: `MatchingLongPollExpirationInterval is the long poll expiration interval in the matching service`,
 	}
-	MatchingSyncMatchWaitDuration = &DurationTaskQueueInfoSetting{
+	MatchingSyncMatchWaitDuration = &DurationTaskQueueSetting{
 		Key:         "matching.syncMatchWaitDuration",
 		Default:     200 * time.Millisecond,
 		Description: `MatchingSyncMatchWaitDuration is to wait time for sync match`,
 	}
 	MatchingHistoryMaxPageSize = &IntNamespaceSetting{
 		Key:         "matching.historyMaxPageSize",
-		Default:     common.GetHistoryMaxPageSize,
+		Default:     primitives.GetHistoryMaxPageSize,
 		Description: `MatchingHistoryMaxPageSize is the maximum page size of history events returned on PollWorkflowTaskQueue requests`,
 	}
-	MatchingLoadUserData = &BoolTaskQueueInfoSetting{
+	MatchingLoadUserData = &BoolTaskQueueSetting{
 		Key:     "matching.loadUserData",
 		Default: true,
 		Description: `MatchingLoadUserData can be used to entirely disable loading user data from persistence (and the inter node RPCs
@@ -965,28 +964,28 @@ that propoagate it). When turned off, features that rely on user data (e.g. work
 be disabled. When disabled, matching will drop tasks for versioned workflows and activities to avoid breaking
 versioning semantics. Operator intervention will be required to reschedule the dropped tasks.`,
 	}
-	MatchingUpdateAckInterval = &DurationTaskQueueInfoSetting{
+	MatchingUpdateAckInterval = &DurationTaskQueueSetting{
 		Key:         "matching.updateAckInterval",
 		Default:     defaultUpdateAckInterval,
 		Description: `MatchingUpdateAckInterval is the interval for update ack`,
 	}
-	MatchingMaxTaskQueueIdleTime = &DurationTaskQueueInfoSetting{
+	MatchingMaxTaskQueueIdleTime = &DurationTaskQueueSetting{
 		Key:     "matching.maxTaskQueueIdleTime",
 		Default: 5 * time.Minute,
 		Description: `MatchingMaxTaskQueueIdleTime is the time after which an idle task queue will be unloaded.
 Note: this should be greater than matching.longPollExpirationInterval and matching.getUserDataLongPollTimeout.`,
 	}
-	MatchingOutstandingTaskAppendsThreshold = &IntTaskQueueInfoSetting{
+	MatchingOutstandingTaskAppendsThreshold = &IntTaskQueueSetting{
 		Key:         "matching.outstandingTaskAppendsThreshold",
 		Default:     250,
 		Description: `MatchingOutstandingTaskAppendsThreshold is the threshold for outstanding task appends`,
 	}
-	MatchingMaxTaskBatchSize = &IntTaskQueueInfoSetting{
+	MatchingMaxTaskBatchSize = &IntTaskQueueSetting{
 		Key:         "matching.maxTaskBatchSize",
 		Default:     100,
 		Description: `MatchingMaxTaskBatchSize is max batch size for task writer`,
 	}
-	MatchingMaxTaskDeleteBatchSize = &IntTaskQueueInfoSetting{
+	MatchingMaxTaskDeleteBatchSize = &IntTaskQueueSetting{
 		Key:         "matching.maxTaskDeleteBatchSize",
 		Default:     100,
 		Description: `MatchingMaxTaskDeleteBatchSize is the max batch size for range deletion of tasks`,
@@ -998,31 +997,30 @@ Note: this should be greater than matching.longPollExpirationInterval and matchi
 	}
 	MatchingNumTaskqueueWritePartitions = &IntNamespaceSetting{
 		Key:                "matching.numTaskqueueWritePartitions",
-		ConstrainedDefault: asdf,
+		ConstrainedDefault: defaultNumTaskQueuePartitions,
 		Description:        `MatchingNumTaskqueueWritePartitions is the number of write partitions for a task queue`,
 	}
 	MatchingNumTaskqueueReadPartitions = &IntNamespaceSetting{
 		Key:                "matching.numTaskqueueReadPartitions",
-		ConstrainedDefault: asdf,
+		ConstrainedDefault: defaultNumTaskQueuePartitions,
 		Description:        `MatchingNumTaskqueueReadPartitions is the number of read partitions for a task queue`,
 	}
-	MatchingNumTaskqueueReadPartitions   = "matching.numTaskqueueReadPartitions"
-	MatchingForwarderMaxOutstandingPolls = &IntTaskQueueInfoSetting{
+	MatchingForwarderMaxOutstandingPolls = &IntTaskQueueSetting{
 		Key:         "matching.forwarderMaxOutstandingPolls",
 		Default:     1,
 		Description: `MatchingForwarderMaxOutstandingPolls is the max number of inflight polls from the forwarder`,
 	}
-	MatchingForwarderMaxOutstandingTasks = &IntTaskQueueInfoSetting{
+	MatchingForwarderMaxOutstandingTasks = &IntTaskQueueSetting{
 		Key:         "matching.forwarderMaxOutstandingTasks",
 		Default:     1,
 		Description: `MatchingForwarderMaxOutstandingTasks is the max number of inflight addTask/queryTask from the forwarder`,
 	}
-	MatchingForwarderMaxRatePerSecond = &IntTaskQueueInfoSetting{
+	MatchingForwarderMaxRatePerSecond = &IntTaskQueueSetting{
 		Key:         "matching.forwarderMaxRatePerSecond",
 		Default:     10,
 		Description: `MatchingForwarderMaxRatePerSecond is the max rate at which add/query can be forwarded`,
 	}
-	MatchingForwarderMaxChildrenPerNode = &IntTaskQueueInfoSetting{
+	MatchingForwarderMaxChildrenPerNode = &IntTaskQueueSetting{
 		Key:         "matching.forwarderMaxChildrenPerNode",
 		Default:     20,
 		Description: `MatchingForwarderMaxChildrenPerNode is the max number of children per node in the task queue partition tree`,
@@ -1043,13 +1041,13 @@ This can help reduce effects of task queue movement.`,
 		Default:     5*time.Minute - 10*time.Second,
 		Description: `MatchingGetUserDataLongPollTimeout is the max length of long polls for GetUserData calls between partitions.`,
 	}
-	MatchingBacklogNegligibleAge = &DurationTaskQueueInfoSetting{
+	MatchingBacklogNegligibleAge = &DurationTaskQueueSetting{
 		Key:     "matching.backlogNegligibleAge",
 		Default: 24 * 365 * 10 * time.Hour,
 		Description: `MatchingBacklogNegligibleAge if the head of backlog gets older than this we stop sync match and
 forwarding to ensure more equal dispatch order among partitions.`,
 	}
-	MatchingMaxWaitForPollerBeforeFwd = &DurationTaskQueueInfoSetting{
+	MatchingMaxWaitForPollerBeforeFwd = &DurationTaskQueueSetting{
 		Key:     "matching.maxWaitForPollerBeforeFwd",
 		Default: 200 * time.Millisecond,
 		Description: `MatchingMaxWaitForPollerBeforeFwd in presence of a non-negligible backlog, we resume forwarding tasks if the
@@ -1071,7 +1069,7 @@ duration since last poll exceeds this threshold.`,
 		Description: `MatchingMembershipUnloadDelay is how long to wait to re-confirm loss of ownership before unloading a task queue.
 Set to zero to disable proactive unload.`,
 	}
-	MatchingQueryWorkflowTaskTimeoutLogRate = &FloatTaskQueueInfoSetting{
+	MatchingQueryWorkflowTaskTimeoutLogRate = &FloatTaskQueueSetting{
 		Key:     "matching.queryWorkflowTaskTimeoutLogRate",
 		Default: 0.0,
 		Description: `MatchingQueryWorkflowTaskTimeoutLogRate defines the sampling rate for logs when a query workflow task times out. Since
@@ -1149,7 +1147,7 @@ If value less or equal to 0, will fall back to HistoryPersistenceMaxQPS`,
 	}
 	HistoryPersistenceDynamicRateLimitingParams = &MapGlobalSetting{
 		Key:     "history.persistenceDynamicRateLimitingParams",
-		Default: dynamicconfig.DefaultDynamicRateLimitingParams,
+		Default: DefaultDynamicRateLimitingParams,
 		Description: `HistoryPersistenceDynamicRateLimitingParams is a map that contains all adjustable dynamic rate limiting params
 see DefaultDynamicRateLimitingParams for available options and defaults`,
 	}
@@ -1418,7 +1416,7 @@ If value less or equal to 0, will fall back to HistoryPersistenceNamespaceMaxQPS
 		Default:     30 * time.Second,
 		Description: `TimerProcessorUpdateAckInterval is update interval for timer processor`,
 	}
-	TimerProcessorUpdateAckIntervalJitterCoefficient = &Float64GlobalSetting{
+	TimerProcessorUpdateAckIntervalJitterCoefficient = &FloatGlobalSetting{
 		Key:         "history.timerProcessorUpdateAckIntervalJitterCoefficient",
 		Default:     0.15,
 		Description: `TimerProcessorUpdateAckIntervalJitterCoefficient is the update interval jitter coefficient`,
@@ -1438,7 +1436,7 @@ If value less or equal to 0, will fall back to HistoryPersistenceNamespaceMaxQPS
 		Default:     5 * time.Minute,
 		Description: `TimerProcessorMaxPollInterval is max poll interval for timer processor`,
 	}
-	TimerProcessorMaxPollIntervalJitterCoefficient = &Float64GlobalSetting{
+	TimerProcessorMaxPollIntervalJitterCoefficient = &FloatGlobalSetting{
 		Key:         "history.timerProcessorMaxPollIntervalJitterCoefficient",
 		Default:     0.15,
 		Description: `TimerProcessorMaxPollIntervalJitterCoefficient is the max poll interval jitter coefficient`,
@@ -1505,7 +1503,7 @@ If value less or equal to 0, will fall back to HistoryPersistenceNamespaceMaxQPS
 		Default:     1 * time.Minute,
 		Description: `TransferProcessorMaxPollInterval max poll interval for transferQueueProcessor`,
 	}
-	TransferProcessorMaxPollIntervalJitterCoefficient = &Float64GlobalSetting{
+	TransferProcessorMaxPollIntervalJitterCoefficient = &FloatGlobalSetting{
 		Key:         "history.transferProcessorMaxPollIntervalJitterCoefficient",
 		Default:     0.15,
 		Description: `TransferProcessorMaxPollIntervalJitterCoefficient is the max poll interval jitter coefficient`,
@@ -1515,7 +1513,7 @@ If value less or equal to 0, will fall back to HistoryPersistenceNamespaceMaxQPS
 		Default:     30 * time.Second,
 		Description: `TransferProcessorUpdateAckInterval is update interval for transferQueueProcessor`,
 	}
-	TransferProcessorUpdateAckIntervalJitterCoefficient = &Float64GlobalSetting{
+	TransferProcessorUpdateAckIntervalJitterCoefficient = &FloatGlobalSetting{
 		Key:         "history.transferProcessorUpdateAckIntervalJitterCoefficient",
 		Default:     0.15,
 		Description: `TransferProcessorUpdateAckIntervalJitterCoefficient is the update interval jitter coefficient`,
@@ -1564,7 +1562,7 @@ If value less or equal to 0, will fall back to HistoryPersistenceNamespaceMaxQPS
 		Default:     1 * time.Minute,
 		Description: `OutboundProcessorMaxPollInterval max poll interval for outboundQueueFactory`,
 	}
-	OutboundProcessorMaxPollIntervalJitterCoefficient = &Float64GlobalSetting{
+	OutboundProcessorMaxPollIntervalJitterCoefficient = &FloatGlobalSetting{
 		Key:         "history.outboundProcessorMaxPollIntervalJitterCoefficient",
 		Default:     0.15,
 		Description: `OutboundProcessorMaxPollIntervalJitterCoefficient is the max poll interval jitter coefficient`,
@@ -1574,7 +1572,7 @@ If value less or equal to 0, will fall back to HistoryPersistenceNamespaceMaxQPS
 		Default:     30 * time.Second,
 		Description: `OutboundProcessorUpdateAckInterval is update interval for outboundQueueFactory`,
 	}
-	OutboundProcessorUpdateAckIntervalJitterCoefficient = &Float64GlobalSetting{
+	OutboundProcessorUpdateAckIntervalJitterCoefficient = &FloatGlobalSetting{
 		Key:         "history.outboundProcessorUpdateAckIntervalJitterCoefficient",
 		Default:     0.15,
 		Description: `OutboundProcessorUpdateAckIntervalJitterCoefficient is the update interval jitter coefficient`,
@@ -1625,7 +1623,7 @@ If value less or equal to 0, will fall back to HistoryPersistenceNamespaceMaxQPS
 		Default:     1 * time.Minute,
 		Description: `VisibilityProcessorMaxPollInterval max poll interval for visibilityQueueProcessor`,
 	}
-	VisibilityProcessorMaxPollIntervalJitterCoefficient = &Float64GlobalSetting{
+	VisibilityProcessorMaxPollIntervalJitterCoefficient = &FloatGlobalSetting{
 		Key:         "history.visibilityProcessorMaxPollIntervalJitterCoefficient",
 		Default:     0.15,
 		Description: `VisibilityProcessorMaxPollIntervalJitterCoefficient is the max poll interval jitter coefficient`,
@@ -1635,7 +1633,7 @@ If value less or equal to 0, will fall back to HistoryPersistenceNamespaceMaxQPS
 		Default:     30 * time.Second,
 		Description: `VisibilityProcessorUpdateAckInterval is update interval for visibilityQueueProcessor`,
 	}
-	VisibilityProcessorUpdateAckIntervalJitterCoefficient = &Float64GlobalSetting{
+	VisibilityProcessorUpdateAckIntervalJitterCoefficient = &FloatGlobalSetting{
 		Key:         "history.visibilityProcessorUpdateAckIntervalJitterCoefficient",
 		Default:     0.15,
 		Description: `VisibilityProcessorUpdateAckIntervalJitterCoefficient is the update interval jitter coefficient`,
@@ -1689,7 +1687,7 @@ archivalQueueProcessor`,
 		Default:     5 * time.Minute,
 		Description: `ArchivalProcessorMaxPollInterval max poll interval for archivalQueueProcessor`,
 	}
-	ArchivalProcessorMaxPollIntervalJitterCoefficient = &Float64GlobalSetting{
+	ArchivalProcessorMaxPollIntervalJitterCoefficient = &FloatGlobalSetting{
 		Key:         "history.archivalProcessorMaxPollIntervalJitterCoefficient",
 		Default:     0.15,
 		Description: `ArchivalProcessorMaxPollIntervalJitterCoefficient is the max poll interval jitter coefficient`,
@@ -1699,7 +1697,7 @@ archivalQueueProcessor`,
 		Default:     30 * time.Second,
 		Description: `ArchivalProcessorUpdateAckInterval is update interval for archivalQueueProcessor`,
 	}
-	ArchivalProcessorUpdateAckIntervalJitterCoefficient = &Float64GlobalSetting{
+	ArchivalProcessorUpdateAckIntervalJitterCoefficient = &FloatGlobalSetting{
 		Key:         "history.archivalProcessorUpdateAckIntervalJitterCoefficient",
 		Default:     0.15,
 		Description: `ArchivalProcessorUpdateAckIntervalJitterCoefficient is the update interval jitter coefficient`,
@@ -1715,7 +1713,7 @@ archivalQueueProcessor`,
 		Default:     5 * time.Minute,
 		Description: `ArchivalProcessorArchiveDelay is the delay before archivalQueueProcessor starts to process archival tasks`,
 	}
-	ArchivalBackendMaxRPS = &Float64GlobalSetting{
+	ArchivalBackendMaxRPS = &FloatGlobalSetting{
 		Key:         "history.archivalBackendMaxRPS",
 		Default:     10000.0,
 		Description: `ArchivalBackendMaxRPS is the maximum rate of requests per second to the archival backend`,
@@ -1752,7 +1750,7 @@ archivalQueueProcessor`,
 		Default:     1 * time.Minute,
 		Description: `ReplicatorProcessorMaxPollInterval is max poll interval for ReplicatorProcessor`,
 	}
-	ReplicatorProcessorMaxPollIntervalJitterCoefficient = &Float64GlobalSetting{
+	ReplicatorProcessorMaxPollIntervalJitterCoefficient = &FloatGlobalSetting{
 		Key:         "history.replicatorProcessorMaxPollIntervalJitterCoefficient",
 		Default:     0.15,
 		Description: `ReplicatorProcessorMaxPollIntervalJitterCoefficient is the max poll interval jitter coefficient`,
@@ -1802,13 +1800,13 @@ When the this config is zero or lower we will only update shard info at most onc
 	}
 	DefaultActivityRetryPolicy = &MapNamespaceSetting{
 		Key:     "history.defaultActivityRetryPolicy",
-		Default: common.GetDefaultRetryPolicyConfigOptions(),
+		Default: GetDefaultRetryPolicyConfigOptions(),
 		Description: `DefaultActivityRetryPolicy represents the out-of-box retry policy for activities where
 the user has not specified an explicit RetryPolicy`,
 	}
 	DefaultWorkflowRetryPolicy = &MapNamespaceSetting{
 		Key:     "history.defaultWorkflowRetryPolicy",
-		Default: common.GetDefaultRetryPolicyConfigOptions(),
+		Default: GetDefaultRetryPolicyConfigOptions(),
 		Description: `DefaultWorkflowRetryPolicy represents the out-of-box retry policy for unset fields
 where the user has set an explicit RetryPolicy, but not specified all the fields`,
 	}
@@ -1855,7 +1853,7 @@ the number of children greater than or equal to this threshold`,
 	}
 	DefaultWorkflowTaskTimeout = &DurationNamespaceSetting{
 		Key:         "history.defaultWorkflowTaskTimeout",
-		Default:     common.DefaultWorkflowTaskTimeout,
+		Default:     primitives.DefaultWorkflowTaskTimeout,
 		Description: `DefaultWorkflowTaskTimeout for a workflow task`,
 	}
 	SkipReapplicationByNamespaceID = &BoolNamespaceIDSetting{
@@ -1883,7 +1881,7 @@ the number of children greater than or equal to this threshold`,
 		Default:     0,
 		Description: `MutableStateChecksumVerifyProbability is the probability [0-100] that checksum will be verified for mutable state`,
 	}
-	MutableStateChecksumInvalidateBefore = &Float64GlobalSetting{
+	MutableStateChecksumInvalidateBefore = &FloatGlobalSetting{
 		Key:         "history.mutableStateChecksumInvalidateBefore",
 		Default:     0,
 		Description: `MutableStateChecksumInvalidateBefore is the epoch timestamp before which all checksums are to be discarded`,
@@ -1899,7 +1897,7 @@ the number of children greater than or equal to this threshold`,
 		Default:     2 * time.Second,
 		Description: `ReplicationTaskFetcherAggregationInterval determines how frequently the fetch requests are sent`,
 	}
-	ReplicationTaskFetcherTimerJitterCoefficient = &Float64GlobalSetting{
+	ReplicationTaskFetcherTimerJitterCoefficient = &FloatGlobalSetting{
 		Key:         "history.ReplicationTaskFetcherTimerJitterCoefficient",
 		Default:     0.15,
 		Description: `ReplicationTaskFetcherTimerJitterCoefficient is the jitter for fetcher timer`,
@@ -1914,7 +1912,7 @@ the number of children greater than or equal to this threshold`,
 		Default:     1 * time.Second,
 		Description: `ReplicationTaskProcessorErrorRetryWait is the initial retry wait when we see errors in applying replication tasks`,
 	}
-	ReplicationTaskProcessorErrorRetryBackoffCoefficient = &Float64ShardIDSetting{
+	ReplicationTaskProcessorErrorRetryBackoffCoefficient = &FloatShardIDSetting{
 		Key:         "history.ReplicationTaskProcessorErrorRetryBackoffCoefficient",
 		Default:     1.2,
 		Description: `ReplicationTaskProcessorErrorRetryBackoffCoefficient is the retry wait backoff time coefficient`,
@@ -1944,7 +1942,7 @@ the number of children greater than or equal to this threshold`,
 		Default:     1 * time.Minute,
 		Description: `ReplicationTaskProcessorCleanupInterval determines how frequently the cleanup replication queue`,
 	}
-	ReplicationTaskProcessorCleanupJitterCoefficient = &Float64ShardIDSetting{
+	ReplicationTaskProcessorCleanupJitterCoefficient = &FloatShardIDSetting{
 		Key:         "history.ReplicationTaskProcessorCleanupJitterCoefficient",
 		Default:     0.15,
 		Description: `ReplicationTaskProcessorCleanupJitterCoefficient is the jitter for cleanup timer`,
@@ -1952,12 +1950,12 @@ the number of children greater than or equal to this threshold`,
 	// FIXME: unused?
 	// // ReplicationTaskProcessorStartWait is the wait time before each task processing batch
 	// ReplicationTaskProcessorStartWait = "history.ReplicationTaskProcessorStartWait"
-	ReplicationTaskProcessorHostQPS = &Float64GlobalSetting{
+	ReplicationTaskProcessorHostQPS = &FloatGlobalSetting{
 		Key:         "history.ReplicationTaskProcessorHostQPS",
 		Default:     1500,
 		Description: `ReplicationTaskProcessorHostQPS is the qps of task processing rate limiter on host level`,
 	}
-	ReplicationTaskProcessorShardQPS = &Float64GlobalSetting{
+	ReplicationTaskProcessorShardQPS = &FloatGlobalSetting{
 		Key:         "history.ReplicationTaskProcessorShardQPS",
 		Default:     30,
 		Description: `ReplicationTaskProcessorShardQPS is the qps of task processing rate limiter on shard level`,
@@ -2060,7 +2058,7 @@ that task will be sent to DLQ.`,
 	}
 	WorkerPersistenceDynamicRateLimitingParams = &MapGlobalSetting{
 		Key:     "worker.persistenceDynamicRateLimitingParams",
-		Default: dynamicconfig.DefaultDynamicRateLimitingParams,
+		Default: DefaultDynamicRateLimitingParams,
 		Description: `WorkerPersistenceDynamicRateLimitingParams is a map that contains all adjustable dynamic rate limiting params
 see DefaultDynamicRateLimitingParams for available options and defaults`,
 	}

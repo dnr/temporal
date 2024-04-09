@@ -48,11 +48,9 @@ import (
 	"go.temporal.io/server/api/matchingservice/v1"
 	workflowspb "go.temporal.io/server/api/workflow/v1"
 	"go.temporal.io/server/common/backoff"
-	"go.temporal.io/server/common/dynamicconfig"
 	"go.temporal.io/server/common/log"
 	"go.temporal.io/server/common/log/tag"
 	"go.temporal.io/server/common/metrics"
-	"go.temporal.io/server/common/number"
 	"go.temporal.io/server/common/primitives/timestamp"
 	serviceerrors "go.temporal.io/server/common/serviceerror"
 )
@@ -110,16 +108,6 @@ const (
 	sdkClientFactoryRetryInitialInterval    = 200 * time.Millisecond
 	sdkClientFactoryRetryMaxInterval        = 5 * time.Second
 	sdkClientFactoryRetryExpirationInterval = time.Minute
-
-	defaultInitialInterval            = time.Second
-	defaultMaximumIntervalCoefficient = 100.0
-	defaultBackoffCoefficient         = 2.0
-	defaultMaximumAttempts            = 0
-
-	initialIntervalInSecondsConfigKey   = "InitialIntervalInSeconds"
-	maximumIntervalCoefficientConfigKey = "MaximumIntervalCoefficient"
-	backoffCoefficientConfigKey         = "BackoffCoefficient"
-	maximumAttemptsConfigKey            = "MaximumAttempts"
 
 	contextExpireThreshold = 10 * time.Millisecond
 
@@ -607,52 +595,6 @@ func ValidateRetryPolicy(policy *commonpb.RetryPolicy) error {
 	return nil
 }
 
-func GetDefaultRetryPolicyConfigOptions() map[string]interface{} {
-	return map[string]interface{}{
-		initialIntervalInSecondsConfigKey:   int(defaultInitialInterval.Seconds()),
-		maximumIntervalCoefficientConfigKey: defaultMaximumIntervalCoefficient,
-		backoffCoefficientConfigKey:         defaultBackoffCoefficient,
-		maximumAttemptsConfigKey:            defaultMaximumAttempts,
-	}
-}
-
-func FromConfigToDefaultRetrySettings(options map[string]interface{}) DefaultRetrySettings {
-	defaultSettings := DefaultRetrySettings{
-		InitialInterval:            defaultInitialInterval,
-		MaximumIntervalCoefficient: defaultMaximumIntervalCoefficient,
-		BackoffCoefficient:         defaultBackoffCoefficient,
-		MaximumAttempts:            defaultMaximumAttempts,
-	}
-
-	if seconds, ok := options[initialIntervalInSecondsConfigKey]; ok {
-		defaultSettings.InitialInterval = time.Duration(
-			number.NewNumber(
-				seconds,
-			).GetIntOrDefault(int(defaultInitialInterval.Nanoseconds())),
-		) * time.Second
-	}
-
-	if coefficient, ok := options[maximumIntervalCoefficientConfigKey]; ok {
-		defaultSettings.MaximumIntervalCoefficient = number.NewNumber(
-			coefficient,
-		).GetFloatOrDefault(defaultMaximumIntervalCoefficient)
-	}
-
-	if coefficient, ok := options[backoffCoefficientConfigKey]; ok {
-		defaultSettings.BackoffCoefficient = number.NewNumber(
-			coefficient,
-		).GetFloatOrDefault(defaultBackoffCoefficient)
-	}
-
-	if attempts, ok := options[maximumAttemptsConfigKey]; ok {
-		defaultSettings.MaximumAttempts = int32(number.NewNumber(
-			attempts,
-		).GetIntOrDefault(defaultMaximumAttempts))
-	}
-
-	return defaultSettings
-}
-
 // CreateHistoryStartWorkflowRequest create a start workflow request for history.
 // Note: this mutates startRequest by unsetting the fields ContinuedFailure and
 // LastCompletionResult (these should only be set on workflows created by the scheduler
@@ -799,7 +741,7 @@ func OverrideWorkflowTaskTimeout(
 	namespace string,
 	taskStartToCloseTimeout time.Duration,
 	workflowRunTimeout time.Duration,
-	getDefaultTimeoutFunc dynamicconfig.DurationPropertyFnWithNamespaceFilter,
+	getDefaultTimeoutFunc func(namespace string) time.Duration,
 ) time.Duration {
 
 	if taskStartToCloseTimeout == 0 {

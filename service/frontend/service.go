@@ -267,7 +267,7 @@ func NewConfig(
 		DisallowQuery:                            dc.GetBoolPropertyFnFilteredByNamespace(dynamicconfig.DisallowQuery, false),
 		SendRawWorkflowHistory:                   dc.GetBoolPropertyFnFilteredByNamespace(dynamicconfig.SendRawWorkflowHistory, false),
 		DefaultWorkflowRetryPolicy:               dc.GetMapPropertyFnFilteredByNamespace(dynamicconfig.DefaultWorkflowRetryPolicy, common.GetDefaultRetryPolicyConfigOptions()),
-		DefaultWorkflowTaskTimeout:               dc.GetDurationPropertyFilteredByNamespace(dynamicconfig.DefaultWorkflowTaskTimeout, common.DefaultWorkflowTaskTimeout),
+		DefaultWorkflowTaskTimeout:               dc.GetDurationPropertyFilteredByNamespace(dynamicconfig.DefaultWorkflowTaskTimeout, primitives.DefaultWorkflowTaskTimeout),
 		EnableServerVersionCheck:                 dc.GetBoolProperty(dynamicconfig.EnableServerVersionCheck, os.Getenv("TEMPORAL_VERSION_CHECK_DISABLED") == ""),
 		EnableTokenNamespaceEnforcement:          dc.GetBoolProperty(dynamicconfig.EnableTokenNamespaceEnforcement, true),
 		KeepAliveMinTime:                         dc.GetDurationProperty(dynamicconfig.KeepAliveMinTime, 10*time.Second),

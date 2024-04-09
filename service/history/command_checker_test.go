@@ -133,7 +133,7 @@ func (s *commandAttrValidatorSuite) SetupTest() {
 		DefaultActivityRetryPolicy:        dynamicconfig.GetMapPropertyFnFilteredByNamespace(common.GetDefaultRetryPolicyConfigOptions()),
 		DefaultWorkflowRetryPolicy:        dynamicconfig.GetMapPropertyFnFilteredByNamespace(common.GetDefaultRetryPolicyConfigOptions()),
 		EnableCrossNamespaceCommands:      dynamicconfig.GetBoolPropertyFn(true),
-		DefaultWorkflowTaskTimeout:        dynamicconfig.GetDurationPropertyFnFilteredByNamespace(common.DefaultWorkflowTaskTimeout),
+		DefaultWorkflowTaskTimeout:        dynamicconfig.GetDurationPropertyFnFilteredByNamespace(primitives.DefaultWorkflowTaskTimeout),
 	}
 	s.validator = newCommandAttrValidator(
 		s.mockNamespaceCache,
