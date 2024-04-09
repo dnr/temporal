@@ -535,25 +535,6 @@ func CreateMatchingPollWorkflowTaskQueueResponse(historyResponse *historyservice
 	return matchingResp
 }
 
-// EnsureRetryPolicyDefaults ensures the policy subfields, if not explicitly set, are set to the specified defaults
-func EnsureRetryPolicyDefaults(originalPolicy *commonpb.RetryPolicy, defaultSettings DefaultRetrySettings) {
-	if originalPolicy.GetMaximumAttempts() == 0 {
-		originalPolicy.MaximumAttempts = defaultSettings.MaximumAttempts
-	}
-
-	if timestamp.DurationValue(originalPolicy.GetInitialInterval()) == 0 {
-		originalPolicy.InitialInterval = durationpb.New(defaultSettings.InitialInterval)
-	}
-
-	if timestamp.DurationValue(originalPolicy.GetMaximumInterval()) == 0 {
-		originalPolicy.MaximumInterval = durationpb.New(time.Duration(defaultSettings.MaximumIntervalCoefficient) * timestamp.DurationValue(originalPolicy.GetInitialInterval()))
-	}
-
-	if originalPolicy.GetBackoffCoefficient() == 0 {
-		originalPolicy.BackoffCoefficient = defaultSettings.BackoffCoefficient
-	}
-}
-
 // ValidateRetryPolicy validates a retry policy
 func ValidateRetryPolicy(policy *commonpb.RetryPolicy) error {
 	if policy == nil {

@@ -28,9 +28,13 @@ import (
 	"math/rand"
 	"time"
 
+	commonpb "go.temporal.io/api/common/v1"
+	"google.golang.org/protobuf/types/known/durationpb"
+
 	"go.temporal.io/server/common/metrics"
 	"go.temporal.io/server/common/number"
 	"go.temporal.io/server/common/primitives"
+	"go.temporal.io/server/common/primitives/timestamp"
 )
 
 const GlobalDefaultNumTaskQueuePartitions = 4
@@ -164,10 +168,8 @@ type DefaultRetrySettings struct {
 
 func FromConfigToDefaultRetrySettings(options map[string]interface{}) DefaultRetrySettings {
 	defaultSettings := DefaultRetrySettings{
-		InitialInterval:            defaultInitialInterval,
-		MaximumIntervalCoefficient: defaultMaximumIntervalCoefficient,
-		BackoffCoefficient:         defaultBackoffCoefficient,
-		MaximumAttempts:            defaultMaximumAttempts,
+		InitialInterval: defaultInitialInterval,
+		MaximumAttempts: defaultMaximumAttempts,
 	}
 
 	if seconds, ok := options[initialIntervalInSecondsConfigKey]; ok {
@@ -197,4 +199,23 @@ func FromConfigToDefaultRetrySettings(options map[string]interface{}) DefaultRet
 	}
 
 	return defaultSettings
+}
+
+// EnsureRetryPolicyDefaults ensures the policy subfields, if not explicitly set, are set to the specified defaults
+func EnsureRetryPolicyDefaults(originalPolicy *commonpb.RetryPolicy, defaultSettings DefaultRetrySettings) {
+	if originalPolicy.GetMaximumAttempts() == 0 {
+		originalPolicy.MaximumAttempts = defaultSettings.MaximumAttempts
+	}
+
+	if timestamp.DurationValue(originalPolicy.GetInitialInterval()) == 0 {
+		originalPolicy.InitialInterval = durationpb.New(defaultSettings.InitialInterval)
+	}
+
+	if timestamp.DurationValue(originalPolicy.GetMaximumInterval()) == 0 {
+		originalPolicy.MaximumInterval = durationpb.New(time.Duration(defaultSettings.MaximumIntervalCoefficient) * timestamp.DurationValue(originalPolicy.GetInitialInterval()))
+	}
+
+	if originalPolicy.GetBackoffCoefficient() == 0 {
+		originalPolicy.BackoffCoefficient = defaultSettings.BackoffCoefficient
+	}
 }

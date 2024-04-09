@@ -4282,8 +4282,8 @@ func (wh *WorkflowHandler) validateRetryPolicy(namespaceName namespace.Name, ret
 		return nil
 	}
 
-	defaultWorkflowRetrySettings := common.FromConfigToDefaultRetrySettings(wh.getDefaultWorkflowRetrySettings(namespaceName.String()))
-	common.EnsureRetryPolicyDefaults(retryPolicy, defaultWorkflowRetrySettings)
+	defaultWorkflowRetrySettings := dynamicconfig.FromConfigToDefaultRetrySettings(wh.getDefaultWorkflowRetrySettings(namespaceName.String()))
+	dynamicconfig.EnsureRetryPolicyDefaults(retryPolicy, defaultWorkflowRetrySettings)
 	return common.ValidateRetryPolicy(retryPolicy)
 }
 
