@@ -82,7 +82,7 @@ var defaultNumTaskQueuePartitions = []TypedConstrainedValue[int]{
 	},
 }
 
-var DefaultPerShardNamespaceRPSMax = GetIntPropertyFilteredByNamespace(0)
+var DefaultPerShardNamespaceRPSMax = GetIntPropertyFnFilteredByNamespace(0)
 
 const (
 	// dynamic config map keys and defaults for client.DynamicRateLimitingParams for controlling dynamic rate limiting options

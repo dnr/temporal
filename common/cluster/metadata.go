@@ -189,7 +189,7 @@ func NewMetadata(
 		copyClusterInfo[k] = v
 	}
 	if refreshDuration == nil {
-		refreshDuration = dynamicconfig.GetDurationProperty(refreshInterval)
+		refreshDuration = dynamicconfig.GetDurationPropertyFn(refreshInterval)
 	}
 	return &metadataImpl{
 		status:                   common.DaemonStatusInitialized,

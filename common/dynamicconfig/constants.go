@@ -1009,12 +1009,12 @@ Note: this should be greater than matching.longPollExpirationInterval and matchi
 		Default:     20,
 		Description: `MatchingThrottledLogRPS is the rate limit on number of log messages emitted per second for throttled logger`,
 	}
-	MatchingNumTaskqueueWritePartitions = &IntNamespaceSetting{
+	MatchingNumTaskqueueWritePartitions = &IntTaskQueueSetting{
 		Key:                "matching.numTaskqueueWritePartitions",
 		ConstrainedDefault: defaultNumTaskQueuePartitions,
 		Description:        `MatchingNumTaskqueueWritePartitions is the number of write partitions for a task queue`,
 	}
-	MatchingNumTaskqueueReadPartitions = &IntNamespaceSetting{
+	MatchingNumTaskqueueReadPartitions = &IntTaskQueueSetting{
 		Key:                "matching.numTaskqueueReadPartitions",
 		ConstrainedDefault: defaultNumTaskQueuePartitions,
 		Description:        `MatchingNumTaskqueueReadPartitions is the number of read partitions for a task queue`,
@@ -2259,7 +2259,7 @@ If the service configures with archival feature enabled, update worker.historySc
 		Default:     30.0,
 		Description: `SchedulerNamespaceStartWorkflowRPS is the per-namespace limit for starting workflows by schedules`,
 	}
-	WorkerDeleteNamespaceActivityLimitsConfig = &MapNamespaceSetting{
+	WorkerDeleteNamespaceActivityLimitsConfig = &MapGlobalSetting{
 		Key:     "worker.deleteNamespaceActivityLimitsConfig",
 		Default: map[string]any{},
 		Description: `WorkerDeleteNamespaceActivityLimitsConfig is a map that contains a copy of relevant sdkworker.Options

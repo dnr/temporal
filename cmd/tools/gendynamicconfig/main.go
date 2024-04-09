@@ -153,7 +153,7 @@ func (c *Collection) Get{{.T.Name}}{{if .NotGlobal}}By{{.P.Name}}{{end}}(s *{{.T
 	}
 }
 
-func Get{{.T.Name}}Property{{if .NotGlobal}}FilteredBy{{.P.Name}}{{end}}(value {{.T.GoType}}) {{.T.Name}}PropertyFn{{if .NotGlobal}}With{{.P.Name}}Filter{{end}} {
+func Get{{.T.Name}}PropertyFn{{if .NotGlobal}}FilteredBy{{.P.Name}}{{end}}(value {{.T.GoType}}) {{.T.Name}}PropertyFn{{if .NotGlobal}}With{{.P.Name}}Filter{{end}} {
 	return func{{.P.GoArgs}} {{.T.GoType}} {
 		return value
 	}
