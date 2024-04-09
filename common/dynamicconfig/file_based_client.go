@@ -186,7 +186,14 @@ func (fc *fileBasedClient) update() error {
 				return err
 			}
 		}
-		// FIXME: validate against registry here!
+
+		if setting := globalRegistry.query(Key(key)); setting == nil {
+			fc.logger.Info("loaded unregistered dynamic config key", tag.Key(key))
+		} else {
+			// FIXME: validate type using setting
+			// FIXME: validate constraints using setting
+		}
+
 		newValues[strings.ToLower(key)] = cvs
 	}
 

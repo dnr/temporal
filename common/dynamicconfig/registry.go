@@ -1,6 +1,9 @@
 package dynamicconfig
 
-import "strings"
+import (
+	"fmt"
+	"strings"
+)
 
 type (
 	registry struct {
@@ -10,36 +13,33 @@ type (
 )
 
 var (
-	globalRegistry *registry
+	globalRegistry registry
 )
 
-// Packages should call Register on all known settings from their init functions.
-func Register(settings []GenericSetting) {
-	if globalRegistry != nil && globalRegistry.queried {
+// Packages should call Register or RegisterGeneric on all known settings from init or static
+// initializers.
+func RegisterGeneric(s GenericSetting) {
+	if globalRegistry.queried {
 		panic("must call Register from init()")
 	}
-	if globalRegistry == nil {
-		globalRegistry = &registry{settings: make(map[string]GenericSetting)}
+	if globalRegistry.settings == nil {
+		globalRegistry.settings = make(map[string]GenericSetting)
 	}
-	for _, s := range settings {
-		validateSetting(s)
-		keyStr := strings.ToLower(s.GetKey().String())
-		if globalRegistry.settings[keyStr] != nil {
-			panic("duplicate registration")
-		}
-		globalRegistry.settings[keyStr] = s
+	keyStr := strings.ToLower(s.GetKey().String())
+	if globalRegistry.settings[keyStr] != nil {
+		panic(fmt.Sprintf("duplicate registration of dynamic config key: %q", keyStr))
 	}
+	globalRegistry.settings[keyStr] = s
 }
 
-func validateSetting(s GenericSetting) {
-	// FIXME: check type + precedence in range
-	// FIXME: check type of Default against type
+func Register[S GenericSetting](s S) S {
+	RegisterGeneric(s)
+	return s
 }
 
 func (r *registry) query(k Key) GenericSetting {
-	if globalRegistry == nil {
-		return nil
+	if !globalRegistry.queried {
+		globalRegistry.queried = true
 	}
-	globalRegistry.queried = true
 	return globalRegistry.settings[strings.ToLower(k.String())]
 }

@@ -124,6 +124,12 @@ func matchAndConvert[T any, P any](
 	precedence []Constraints,
 	converter func(value any) (T, error),
 ) T {
+	if globalRegistry.query(s.Key) == nil {
+		if c.throttleLog() {
+			c.logger.Warn("query on unregistered dynamic config key", tag.Key(s.Key.String()))
+		}
+	}
+
 	cvs := c.client.GetValue(s.Key)
 
 	defaultCVs := s.ConstrainedDefault
