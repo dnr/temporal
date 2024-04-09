@@ -154,19 +154,19 @@ func NewConfig(
 	dc *dynamicconfig.Collection,
 ) *Config {
 	return &Config{
-		PersistenceMaxQPS:                     dc.GetIntProperty(dynamicconfig.MatchingPersistenceMaxQPS, 3000),
-		PersistenceGlobalMaxQPS:               dc.GetIntProperty(dynamicconfig.MatchingPersistenceGlobalMaxQPS, 0),
+		PersistenceMaxQPS:                     dc.GetInt(dynamicconfig.MatchingPersistenceMaxQPS),
+		PersistenceGlobalMaxQPS:               dc.GetInt(dynamicconfig.MatchingPersistenceGlobalMaxQPS),
 		PersistenceNamespaceMaxQPS:            dc.GetIntPropertyFilteredByNamespace(dynamicconfig.MatchingPersistenceNamespaceMaxQPS, 0),
 		PersistenceGlobalNamespaceMaxQPS:      dc.GetIntPropertyFilteredByNamespace(dynamicconfig.MatchingPersistenceGlobalNamespaceMaxQPS, 0),
 		PersistencePerShardNamespaceMaxQPS:    dynamicconfig.DefaultPerShardNamespaceRPSMax,
-		EnablePersistencePriorityRateLimiting: dc.GetBoolProperty(dynamicconfig.MatchingEnablePersistencePriorityRateLimiting, true),
-		PersistenceDynamicRateLimitingParams:  dc.GetMapProperty(dynamicconfig.MatchingPersistenceDynamicRateLimitingParams, dynamicconfig.DefaultDynamicRateLimitingParams),
+		EnablePersistencePriorityRateLimiting: dc.GetBool(dynamicconfig.MatchingEnablePersistencePriorityRateLimiting),
+		PersistenceDynamicRateLimitingParams:  dc.GetMap(dynamicconfig.MatchingPersistenceDynamicRateLimitingParams),
 		SyncMatchWaitDuration:                 dc.GetDurationPropertyFilteredByTaskQueueInfo(dynamicconfig.MatchingSyncMatchWaitDuration, 200*time.Millisecond),
-		TestDisableSyncMatch:                  dc.GetBoolProperty(dynamicconfig.TestMatchingDisableSyncMatch, false),
+		TestDisableSyncMatch:                  dc.GetBool(dynamicconfig.TestMatchingDisableSyncMatch),
 		LoadUserData:                          dc.GetBoolPropertyFilteredByTaskQueueInfo(dynamicconfig.MatchingLoadUserData, true),
 		HistoryMaxPageSize:                    dc.GetIntPropertyFilteredByNamespace(dynamicconfig.MatchingHistoryMaxPageSize, common.GetHistoryMaxPageSize),
-		RPS:                                   dc.GetIntProperty(dynamicconfig.MatchingRPS, 1200),
-		OperatorRPSRatio:                      dc.GetFloat64Property(dynamicconfig.OperatorRPSRatio, common.DefaultOperatorRPSRatio),
+		RPS:                                   dc.GetInt(dynamicconfig.MatchingRPS),
+		OperatorRPSRatio:                      dc.GetFloat64(dynamicconfig.OperatorRPSRatio),
 		RangeSize:                             100000,
 		GetTasksBatchSize:                     dc.GetIntPropertyFilteredByTaskQueueInfo(dynamicconfig.MatchingGetTasksBatchSize, 1000),
 		UpdateAckInterval:                     dc.GetDurationPropertyFilteredByTaskQueueInfo(dynamicconfig.MatchingUpdateAckInterval, defaultUpdateAckInterval),
@@ -176,24 +176,24 @@ func NewConfig(
 		MaxTaskDeleteBatchSize:                dc.GetIntPropertyFilteredByTaskQueueInfo(dynamicconfig.MatchingMaxTaskDeleteBatchSize, 100),
 		OutstandingTaskAppendsThreshold:       dc.GetIntPropertyFilteredByTaskQueueInfo(dynamicconfig.MatchingOutstandingTaskAppendsThreshold, 250),
 		MaxTaskBatchSize:                      dc.GetIntPropertyFilteredByTaskQueueInfo(dynamicconfig.MatchingMaxTaskBatchSize, 100),
-		ThrottledLogRPS:                       dc.GetIntProperty(dynamicconfig.MatchingThrottledLogRPS, 20),
+		ThrottledLogRPS:                       dc.GetInt(dynamicconfig.MatchingThrottledLogRPS),
 		NumTaskqueueWritePartitions:           dc.GetIntPropertyFilteredByTaskQueueInfo(dynamicconfig.MatchingNumTaskqueueWritePartitions),
 		NumTaskqueueReadPartitions:            dc.GetIntPropertyFilteredByTaskQueueInfo(dynamicconfig.MatchingNumTaskqueueReadPartitions),
 		ForwarderMaxOutstandingPolls:          dc.GetIntPropertyFilteredByTaskQueueInfo(dynamicconfig.MatchingForwarderMaxOutstandingPolls, 1),
 		ForwarderMaxOutstandingTasks:          dc.GetIntPropertyFilteredByTaskQueueInfo(dynamicconfig.MatchingForwarderMaxOutstandingTasks, 1),
 		ForwarderMaxRatePerSecond:             dc.GetIntPropertyFilteredByTaskQueueInfo(dynamicconfig.MatchingForwarderMaxRatePerSecond, 10),
 		ForwarderMaxChildrenPerNode:           dc.GetIntPropertyFilteredByTaskQueueInfo(dynamicconfig.MatchingForwarderMaxChildrenPerNode, 20),
-		AlignMembershipChange:                 dc.GetDurationProperty(dynamicconfig.MatchingAlignMembershipChange, 0*time.Second),
-		ShutdownDrainDuration:                 dc.GetDurationProperty(dynamicconfig.MatchingShutdownDrainDuration, 0*time.Second),
+		AlignMembershipChange:                 dc.GetDuration(dynamicconfig.MatchingAlignMembershipChange),
+		ShutdownDrainDuration:                 dc.GetDuration(dynamicconfig.MatchingShutdownDrainDuration),
 		VersionCompatibleSetLimitPerQueue:     dc.GetIntPropertyFilteredByNamespace(dynamicconfig.VersionCompatibleSetLimitPerQueue, 10),
 		VersionBuildIdLimitPerQueue:           dc.GetIntPropertyFilteredByNamespace(dynamicconfig.VersionBuildIdLimitPerQueue, 100),
 		TaskQueueLimitPerBuildId:              dc.GetIntPropertyFilteredByNamespace(dynamicconfig.TaskQueuesPerBuildIdLimit, 20),
-		GetUserDataLongPollTimeout:            dc.GetDurationProperty(dynamicconfig.MatchingGetUserDataLongPollTimeout, 5*time.Minute-10*time.Second), // Use -10 seconds so that we send back empty response instead of timeout
+		GetUserDataLongPollTimeout:            dc.GetDuration(dynamicconfig.MatchingGetUserDataLongPollTimeout), // Use -10 seconds so that we send back empty response instead of timeout
 		BacklogNegligibleAge:                  dc.GetDurationPropertyFilteredByTaskQueueInfo(dynamicconfig.MatchingBacklogNegligibleAge, 24*365*10*time.Hour),
 		MaxWaitForPollerBeforeFwd:             dc.GetDurationPropertyFilteredByTaskQueueInfo(dynamicconfig.MatchingMaxWaitForPollerBeforeFwd, 200*time.Millisecond),
-		QueryPollerUnavailableWindow:          dc.GetDurationProperty(dynamicconfig.QueryPollerUnavailableWindow, 20*time.Second),
+		QueryPollerUnavailableWindow:          dc.GetDuration(dynamicconfig.QueryPollerUnavailableWindow),
 		QueryWorkflowTaskTimeoutLogRate:       dc.GetFloatPropertyFilteredByTaskQueueInfo(dynamicconfig.MatchingQueryWorkflowTaskTimeoutLogRate, 0.0),
-		MembershipUnloadDelay:                 dc.GetDurationProperty(dynamicconfig.MatchingMembershipUnloadDelay, 500*time.Millisecond),
+		MembershipUnloadDelay:                 dc.GetDuration(dynamicconfig.MatchingMembershipUnloadDelay),
 
 		AdminNamespaceToPartitionDispatchRate:          dc.GetFloatPropertyFilteredByNamespace(dynamicconfig.AdminMatchingNamespaceToPartitionDispatchRate, 10000),
 		AdminNamespaceTaskqueueToPartitionDispatchRate: dc.GetFloatPropertyFilteredByTaskQueueInfo(dynamicconfig.AdminMatchingNamespaceTaskqueueToPartitionDispatchRate, 1000),
@@ -204,9 +204,9 @@ func NewConfig(
 		VisibilityDisableOrderByClause:    dc.GetBoolPropertyFnFilteredByNamespace(dynamicconfig.VisibilityDisableOrderByClause, true),
 		VisibilityEnableManualPagination:  dc.GetBoolPropertyFnFilteredByNamespace(dynamicconfig.VisibilityEnableManualPagination, true),
 
-		ListNexusIncomingServicesLongPollTimeout: dc.GetDurationProperty(dynamicconfig.MatchingListNexusIncomingServicesLongPollTimeout, 5*time.Minute-10*time.Second), // Use -10 seconds so that we send back empty response instead of timeout
+		ListNexusIncomingServicesLongPollTimeout: dc.GetDuration(dynamicconfig.MatchingListNexusIncomingServicesLongPollTimeout), // Use -10 seconds so that we send back empty response instead of timeout
 
-		FrontendAccessHistoryFraction: dc.GetFloat64Property(dynamicconfig.FrontendAccessHistoryFraction, 0.0),
+		FrontendAccessHistoryFraction: dc.GetFloat64(dynamicconfig.FrontendAccessHistoryFraction),
 	}
 }
 

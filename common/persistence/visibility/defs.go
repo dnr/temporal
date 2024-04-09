@@ -44,14 +44,14 @@ const (
 func GetVisibilityPersistenceMaxReadQPS(
 	dc *dynamicconfig.Collection,
 ) dynamicconfig.IntPropertyFn {
-	return dc.GetIntProperty(dynamicconfig.VisibilityPersistenceMaxReadQPS, 9000)
+	return dc.GetInt(dynamicconfig.VisibilityPersistenceMaxReadQPS)
 }
 
 //nolint:revive
 func GetVisibilityPersistenceMaxWriteQPS(
 	dc *dynamicconfig.Collection,
 ) dynamicconfig.IntPropertyFn {
-	return dc.GetIntProperty(dynamicconfig.VisibilityPersistenceMaxWriteQPS, 9000)
+	return dc.GetInt(dynamicconfig.VisibilityPersistenceMaxWriteQPS)
 }
 
 //nolint:revive

@@ -472,7 +472,7 @@ func TaskCategoryRegistryProvider(archivalMetadata archiver.ArchivalMetadata, dc
 	}
 	// Can't use history service configs.Config because this provider is applied to all services (see docstring for this
 	// function for more info).
-	if dc.GetBoolProperty(dynamicconfig.OutboundProcessorEnabled, false)() {
+	if dc.GetBool(dynamicconfig.OutboundProcessorEnabled)() {
 		registry.AddCategory(tasks.CategoryOutbound)
 	}
 	return registry
