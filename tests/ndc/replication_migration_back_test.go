@@ -113,7 +113,7 @@ func (s *ReplicationMigrationBackTestSuite) SetupSuite() {
 	s.Require().NoError(yaml.Unmarshal(confContent, &clusterConfigs))
 	passiveClusterConfig := clusterConfigs[1]
 	passiveClusterConfig.WorkerConfig = &tests.WorkerConfig{}
-	passiveClusterConfig.DynamicConfigOverrides = SettingsToKeys(map[dynamicconfig.GenericSetting]any{
+	passiveClusterConfig.DynamicConfigOverrides = tests.SettingsToKeys(map[dynamicconfig.GenericSetting]any{
 		dynamicconfig.EnableReplicationStream:             true,
 		dynamicconfig.EnableEagerNamespaceRefresher:       true,
 		dynamicconfig.EnableReplicateLocalGeneratedEvents: true,
