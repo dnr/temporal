@@ -186,6 +186,7 @@ func (fc *fileBasedClient) update() error {
 				return err
 			}
 		}
+		// FIXME: validate against registry here!
 		newValues[strings.ToLower(key)] = cvs
 	}
 
