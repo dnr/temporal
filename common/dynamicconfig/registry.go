@@ -23,7 +23,11 @@ func Register(settings []GenericSetting) {
 	}
 	for _, s := range settings {
 		validateSetting(s)
-		globalRegistry.settings[strings.ToLower(s.GetKey().String())] = s
+		keyStr := strings.ToLower(s.GetKey().String())
+		if globalRegistry.settings[keyStr] != nil {
+			panic("duplicate registration")
+		}
+		globalRegistry.settings[keyStr] = s
 	}
 }
 

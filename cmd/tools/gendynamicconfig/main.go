@@ -39,6 +39,12 @@ type (
 		GoType string
 		Index  int
 	}
+	settingPrecedence struct {
+		Name       string
+		GoArgs     string
+		GoArgNames string
+		Index      int
+	}
 )
 
 var (
@@ -68,6 +74,38 @@ var (
 			GoType: "map[string]any",
 		},
 	}
+	precedences = []*settingPrecedence{
+		{
+			Name:       "Global",
+			GoArgs:     "()",
+			GoArgNames: "()",
+		},
+		{
+			Name:       "Namespace",
+			GoArgs:     "(namespace string)",
+			GoArgNames: "(namespace)",
+		},
+		{
+			Name:       "NamespaceID",
+			GoArgs:     "(namespaceID string)",
+			GoArgNames: "(namespaceID)",
+		},
+		{
+			Name:       "TaskQueue",
+			GoArgs:     "(namespace string, taskQueue string, taskQueueType enumspb.TaskQueueType)",
+			GoArgNames: "(namespace, taskQueue, taskQueueType)",
+		},
+		{
+			Name:       "ShardID",
+			GoArgs:     "(shardID int32)",
+			GoArgNames: "(shardID)",
+		},
+		{
+			Name:       "TaskType",
+			GoArgs:     "(taskType enumsspb.TaskType)",
+			GoArgNames: "(taskType)",
+		},
+	}
 )
 
 func panicIfErr(err error) {
@@ -80,95 +118,47 @@ func writeTemplatedCode(w io.Writer, text string, data any) {
 	panicIfErr(template.Must(template.New("code").Parse(text)).Execute(w, data))
 }
 
-func generateType(w io.Writer, idx int, tp *settingType) {
-	tp.Index = idx
+func generateTypeEnum(w io.Writer, tp *settingType) {
 	writeTemplatedCode(w, `
 const Type{{.Name}} Type = {{.Index}} // go type: {{.GoType}}
-
-type {{.Name}}Setting Setting[{{.GoType}}]
-
-func (s *{{.Name}}Setting) GetKey() Key               { return s.Key }
-func (s *{{.Name}}Setting) GetType() Type             { return Type{{.Name}} }
-func (s *{{.Name}}Setting) GetPrecedence() Precedence { return s.Precedence }
-func (s *{{.Name}}Setting) GetDefault() any           { return s.Default }
-func (s *{{.Name}}Setting) GetDescription() string    { return s.Description }
-
-type (
-	{{.Name}}PropertyFn                         func() {{.GoType}}
-	{{.Name}}PropertyFnWithNamespaceFilter      func(namespace string) {{.GoType}}
-	{{.Name}}PropertyFnWithNamespaceIDFilter    func(namespaceID string) {{.GoType}}
-	{{.Name}}PropertyFnWithShardIDFilter        func(shardID int32) {{.GoType}}
-	{{.Name}}PropertyFnWithTaskQueueInfoFilters func(namespace string, taskQueue string, taskType enumspb.TaskQueueType) {{.GoType}}
-	{{.Name}}PropertyFnWithTaskTypeFilter       func(task enumsspb.TaskType) {{.GoType}}
-)
-
-func (c *Collection) Get{{.Name}}Property(s *{{.Name}}Setting) {{.Name}}PropertyFn {
-	return func() {{.GoType}} {
-		return matchAndConvert(
-			c,
-			(*Setting[{{.GoType}}])(s),
-			globalPrecedence(),
-			convert{{.Name}},
-		)
-	}
-}
-
-func (c *Collection) Get{{.Name}}PropertyFnWithNamespaceFilter(s *{{.Name}}Setting) {{.Name}}PropertyFnWithNamespaceFilter {
-	return func(namespace string) {{.GoType}} {
-		return matchAndConvert(
-			c,
-			(*Setting[{{.GoType}}])(s),
-			namespacePrecedence(namespace),
-			convert{{.Name}},
-		)
-	}
-}
-
-func (c *Collection) Get{{.Name}}PropertyFnWithNamespaceIDFilter(s *{{.Name}}Setting) {{.Name}}PropertyFnWithNamespaceIDFilter {
-	return func(namespaceID string) {{.GoType}} {
-		return matchAndConvert(
-			c,
-			(*Setting[{{.GoType}}])(s),
-			namespaceIDPrecedence(namespaceID),
-			convert{{.Name}},
-		)
-	}
-}
-
-func (c *Collection) Get{{.Name}}PropertyFilteredByTaskQueueInfo(s *{{.Name}}Setting) {{.Name}}PropertyFnWithTaskQueueInfoFilters {
-	return func(namespace string, taskQueue string, taskType enumspb.TaskQueueType) {{.GoType}} {
-		return matchAndConvert(
-			c,
-			(*Setting[{{.GoType}}])(s),
-			taskQueuePrecedence(namespace, taskQueue, taskType),
-			convert{{.Name}},
-		)
-	}
-}
-
-func (c *Collection) Get{{.Name}}PropertyFilteredByShardID(s *{{.Name}}Setting) {{.Name}}PropertyFnWithShardIDFilter {
-	return func(shardID int32) {{.GoType}} {
-		return matchAndConvert(
-			c,
-			(*Setting[{{.GoType}}])(s),
-			shardIDPrecedence(shardID),
-			convert{{.Name}},
-		)
-	}
-}
-
-func Get{{.Name}}PropertyFn(value {{.GoType}}) {{.Name}}PropertyFn {
-	return func() {{.GoType}} { return value }
-}
-
-func Get{{.Name}}PropertyFilteredByNamespace(value {{.GoType}}) {{.Name}}PropertyFnWithNamespaceFilter {
-	return func(string) {{.GoType}} { return value }
-}
-
-func Get{{.Name}}PropertyFilteredByTaskQueueInfo(value {{.GoType}}) {{.Name}}PropertyFnWithTaskQueueInfoFilters {
-	return func(string, string, enumspb.TaskQueueType) {{.GoType}} { return value }
-}
 `, tp)
+}
+
+func generatePrecEnum(w io.Writer, prec *settingPrecedence) {
+	writeTemplatedCode(w, `
+const Precedence{{.Name}} Precedence = {{.Index}}
+`, prec)
+}
+
+func generateType(w io.Writer, tp *settingType, prec *settingPrecedence) {
+	writeTemplatedCode(w, `
+type {{.T.Name}}{{.P.Name}}Setting Setting[{{.T.GoType}}, func{{.P.GoArgs}}]
+
+func (s *{{.T.Name}}{{.P.Name}}Setting) GetKey() Key               { return s.Key }
+func (s *{{.T.Name}}{{.P.Name}}Setting) GetType() Type             { return Type{{.T.Name}} }
+func (s *{{.T.Name}}{{.P.Name}}Setting) GetPrecedence() Precedence { return Precedence{{.P.Name}} }
+func (s *{{.T.Name}}{{.P.Name}}Setting) GetDefault() any           { return s.Default }
+func (s *{{.T.Name}}{{.P.Name}}Setting) GetDescription() string    { return s.Description }
+
+type {{.T.Name}}PropertyFn{{if .NotGlobal}}With{{.P.Name}}Filter{{end}} func{{.P.GoArgs}} {{.T.GoType}}
+
+func (c *Collection) Get{{.T.Name}}{{if .NotGlobal}}FilteredBy{{.P.Name}}{{end}}(s *{{.T.Name}}{{.P.Name}}Setting) {{.T.Name}}PropertyFn{{if .NotGlobal}}With{{.P.Name}}Filter{{end}} {
+	return func{{.P.GoArgs}} {{.T.GoType}} {
+		return matchAndConvert(
+			c,
+			(*Setting[{{.T.GoType}}, func{{.P.GoArgs}}])(s),
+			precedence{{.P.Name}}{{.P.GoArgNames}},
+			convert{{.T.Name}},
+		)
+	}
+}
+
+func Get{{.T.Name}}Property{{if .NotGlobal}}FilteredBy{{.P.Name}}{{end}}(value {{.T.GoType}}) {{.T.Name}}PropertyFn{{if .NotGlobal}}With{{.P.Name}}Filter{{end}} {
+	return func{{.P.GoArgs}} {{.T.GoType}} {
+		return value
+	}
+}
+`, map[string]any{"T": tp, "P": prec, "NotGlobal": prec.Name != "Global"})
 }
 
 func generate(w io.Writer) {
@@ -183,7 +173,17 @@ import (
 )
 `, nil)
 	for idx, tp := range types {
-		generateType(w, idx, tp)
+		tp.Index = idx
+		generateTypeEnum(w, tp)
+	}
+	for idx, prec := range precedences {
+		prec.Index = idx
+		generatePrecEnum(w, prec)
+	}
+	for _, tp := range types {
+		for _, prec := range precedences {
+			generateType(w, tp, prec)
+		}
 	}
 }
 

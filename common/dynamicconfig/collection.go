@@ -124,9 +124,9 @@ func findMatch[T any](cvs []ConstrainedValue, defaultCVs []TypedConstrainedValue
 
 // matchAndConvert can't be a method of Collection because methods can't be generic, but we can
 // take a *Collection as an argument.
-func matchAndConvert[T any](
+func matchAndConvert[T any, P any](
 	c *Collection,
-	s *Setting[T],
+	s *Setting[T, P],
 	precedence []Constraints,
 	converter func(value any) (T, error),
 ) T {
@@ -163,27 +163,27 @@ func matchAndConvert[T any](
 	return typedVal
 }
 
-func globalPrecedence() []Constraints {
+func precedenceGlobal() []Constraints {
 	return []Constraints{
 		{},
 	}
 }
 
-func namespacePrecedence(namespace string) []Constraints {
+func precedenceNamespace(namespace string) []Constraints {
 	return []Constraints{
 		{Namespace: namespace},
 		{},
 	}
 }
 
-func namespaceIDPrecedence(namespaceID string) []Constraints {
+func precedenceNamespaceID(namespaceID string) []Constraints {
 	return []Constraints{
 		{NamespaceID: namespaceID},
 		{},
 	}
 }
 
-func taskQueuePrecedence(namespace string, taskQueue string, taskType enumspb.TaskQueueType) []Constraints {
+func precedenceTaskQueue(namespace string, taskQueue string, taskType enumspb.TaskQueueType) []Constraints {
 	return []Constraints{
 		{Namespace: namespace, TaskQueueName: taskQueue, TaskQueueType: taskType},
 		{Namespace: namespace, TaskQueueName: taskQueue},
@@ -196,14 +196,14 @@ func taskQueuePrecedence(namespace string, taskQueue string, taskType enumspb.Ta
 	}
 }
 
-func shardIDPrecedence(shardID int32) []Constraints {
+func precedenceShardID(shardID int32) []Constraints {
 	return []Constraints{
 		{ShardID: shardID},
 		{},
 	}
 }
 
-func taskTypePrecedence(taskType enumsspb.TaskType) []Constraints {
+func precedenceTaskType(taskType enumsspb.TaskType) []Constraints {
 	return []Constraints{
 		{TaskType: taskType},
 		{},

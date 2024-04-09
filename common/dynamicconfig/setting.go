@@ -31,11 +31,9 @@ type (
 
 	Precedence int
 
-	Setting[T any] struct {
+	Setting[T any, P any] struct {
 		// string value of key. case-insensitive.
 		Key Key
-		// precedence
-		Precedence Precedence
 		// default value. ConstrainedDefault is used in preference to Default if non-nil.
 		Default            T
 		ConstrainedDefault []TypedConstrainedValue[T]
@@ -50,13 +48,4 @@ type (
 		GetDefault() any
 		GetDescription() string
 	}
-)
-
-const (
-	PrecedenceGlobal Precedence = iota
-	PrecedenceNamespace
-	PrecedenceNamespaceId
-	PrecedenceTaskQueue
-	PrecedenceShardId
-	PrecedenceTaskType
 )

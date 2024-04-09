@@ -35,516 +35,996 @@ import (
 
 const TypeBool Type = 0 // go type: bool
 
-type BoolSetting Setting[bool]
-
-func (s *BoolSetting) GetKey() Key               { return s.Key }
-func (s *BoolSetting) GetType() Type             { return s.Type }
-func (s *BoolSetting) GetPrecedence() Precedence { return s.Precedence }
-func (s *BoolSetting) GetDefault() any           { return s.Default }
-func (s *BoolSetting) GetDescription() string    { return s.Description }
-
-type (
-	BoolPropertyFn                         func() bool
-	BoolPropertyFnWithNamespaceFilter      func(namespace string) bool
-	BoolPropertyFnWithNamespaceIDFilter    func(namespaceID string) bool
-	BoolPropertyFnWithShardIDFilter        func(shardID int32) bool
-	BoolPropertyFnWithTaskQueueInfoFilters func(namespace string, taskQueue string, taskType enumspb.TaskQueueType) bool
-	BoolPropertyFnWithTaskTypeFilter       func(task enumsspb.TaskType) bool
-)
-
-func (c *Collection) GetBoolProperty(s *BoolSetting) BoolPropertyFn {
-	return func() bool {
-		return matchAndConvert(
-			c,
-			(*Setting[bool])(s),
-			globalPrecedence(),
-			convertBool,
-		)
-	}
-}
-
-func (c *Collection) GetBoolPropertyFnWithNamespaceFilter(s *BoolSetting) BoolPropertyFnWithNamespaceFilter {
-	return func(namespace string) bool {
-		return matchAndConvert(
-			c,
-			(*Setting[bool])(s),
-			namespacePrecedence(namespace),
-			convertBool,
-		)
-	}
-}
-
-func (c *Collection) GetBoolPropertyFnWithNamespaceIDFilter(s *BoolSetting) BoolPropertyFnWithNamespaceIDFilter {
-	return func(namespaceID string) bool {
-		return matchAndConvert(
-			c,
-			(*Setting[bool])(s),
-			namespaceIDPrecedence(namespaceID),
-			convertBool,
-		)
-	}
-}
-
-func (c *Collection) GetBoolPropertyFilteredByTaskQueueInfo(s *BoolSetting) BoolPropertyFnWithTaskQueueInfoFilters {
-	return func(namespace string, taskQueue string, taskType enumspb.TaskQueueType) bool {
-		return matchAndConvert(
-			c,
-			(*Setting[bool])(s),
-			taskQueuePrecedence(namespace, taskQueue, taskType),
-			convertBool,
-		)
-	}
-}
-
-func (c *Collection) GetBoolPropertyFilteredByShardID(s *BoolSetting) BoolPropertyFnWithShardIDFilter {
-	return func(shardID int32) bool {
-		return matchAndConvert(
-			c,
-			(*Setting[bool])(s),
-			shardIDPrecedence(shardID),
-			convertBool,
-		)
-	}
-}
-
-func GetBoolPropertyFn(value bool) BoolPropertyFn {
-	return func() bool { return value }
-}
-
-func GetBoolPropertyFilteredByNamespace(value bool) BoolPropertyFnWithNamespaceFilter {
-	return func(string) bool { return value }
-}
-
-func GetBoolPropertyFilteredByTaskQueueInfo(value bool) BoolPropertyFnWithTaskQueueInfoFilters {
-	return func(string, string, enumspb.TaskQueueType) bool { return value }
-}
-
 const TypeInt Type = 1 // go type: int
-
-type IntSetting Setting[int]
-
-func (s *IntSetting) GetKey() Key               { return s.Key }
-func (s *IntSetting) GetType() Type             { return s.Type }
-func (s *IntSetting) GetPrecedence() Precedence { return s.Precedence }
-func (s *IntSetting) GetDefault() any           { return s.Default }
-func (s *IntSetting) GetDescription() string    { return s.Description }
-
-type (
-	IntPropertyFn                         func() int
-	IntPropertyFnWithNamespaceFilter      func(namespace string) int
-	IntPropertyFnWithNamespaceIDFilter    func(namespaceID string) int
-	IntPropertyFnWithShardIDFilter        func(shardID int32) int
-	IntPropertyFnWithTaskQueueInfoFilters func(namespace string, taskQueue string, taskType enumspb.TaskQueueType) int
-	IntPropertyFnWithTaskTypeFilter       func(task enumsspb.TaskType) int
-)
-
-func (c *Collection) GetIntProperty(s *IntSetting) IntPropertyFn {
-	return func() int {
-		return matchAndConvert(
-			c,
-			(*Setting[int])(s),
-			globalPrecedence(),
-			convertInt,
-		)
-	}
-}
-
-func (c *Collection) GetIntPropertyFnWithNamespaceFilter(s *IntSetting) IntPropertyFnWithNamespaceFilter {
-	return func(namespace string) int {
-		return matchAndConvert(
-			c,
-			(*Setting[int])(s),
-			namespacePrecedence(namespace),
-			convertInt,
-		)
-	}
-}
-
-func (c *Collection) GetIntPropertyFnWithNamespaceIDFilter(s *IntSetting) IntPropertyFnWithNamespaceIDFilter {
-	return func(namespaceID string) int {
-		return matchAndConvert(
-			c,
-			(*Setting[int])(s),
-			namespaceIDPrecedence(namespaceID),
-			convertInt,
-		)
-	}
-}
-
-func (c *Collection) GetIntPropertyFilteredByTaskQueueInfo(s *IntSetting) IntPropertyFnWithTaskQueueInfoFilters {
-	return func(namespace string, taskQueue string, taskType enumspb.TaskQueueType) int {
-		return matchAndConvert(
-			c,
-			(*Setting[int])(s),
-			taskQueuePrecedence(namespace, taskQueue, taskType),
-			convertInt,
-		)
-	}
-}
-
-func (c *Collection) GetIntPropertyFilteredByShardID(s *IntSetting) IntPropertyFnWithShardIDFilter {
-	return func(shardID int32) int {
-		return matchAndConvert(
-			c,
-			(*Setting[int])(s),
-			shardIDPrecedence(shardID),
-			convertInt,
-		)
-	}
-}
-
-func GetIntPropertyFn(value int) IntPropertyFn {
-	return func() int { return value }
-}
-
-func GetIntPropertyFilteredByNamespace(value int) IntPropertyFnWithNamespaceFilter {
-	return func(string) int { return value }
-}
-
-func GetIntPropertyFilteredByTaskQueueInfo(value int) IntPropertyFnWithTaskQueueInfoFilters {
-	return func(string, string, enumspb.TaskQueueType) int { return value }
-}
 
 const TypeFloat Type = 2 // go type: float64
 
-type FloatSetting Setting[float64]
-
-func (s *FloatSetting) GetKey() Key               { return s.Key }
-func (s *FloatSetting) GetType() Type             { return s.Type }
-func (s *FloatSetting) GetPrecedence() Precedence { return s.Precedence }
-func (s *FloatSetting) GetDefault() any           { return s.Default }
-func (s *FloatSetting) GetDescription() string    { return s.Description }
-
-type (
-	FloatPropertyFn                         func() float64
-	FloatPropertyFnWithNamespaceFilter      func(namespace string) float64
-	FloatPropertyFnWithNamespaceIDFilter    func(namespaceID string) float64
-	FloatPropertyFnWithShardIDFilter        func(shardID int32) float64
-	FloatPropertyFnWithTaskQueueInfoFilters func(namespace string, taskQueue string, taskType enumspb.TaskQueueType) float64
-	FloatPropertyFnWithTaskTypeFilter       func(task enumsspb.TaskType) float64
-)
-
-func (c *Collection) GetFloatProperty(s *FloatSetting) FloatPropertyFn {
-	return func() float64 {
-		return matchAndConvert(
-			c,
-			(*Setting[float64])(s),
-			globalPrecedence(),
-			convertFloat,
-		)
-	}
-}
-
-func (c *Collection) GetFloatPropertyFnWithNamespaceFilter(s *FloatSetting) FloatPropertyFnWithNamespaceFilter {
-	return func(namespace string) float64 {
-		return matchAndConvert(
-			c,
-			(*Setting[float64])(s),
-			namespacePrecedence(namespace),
-			convertFloat,
-		)
-	}
-}
-
-func (c *Collection) GetFloatPropertyFnWithNamespaceIDFilter(s *FloatSetting) FloatPropertyFnWithNamespaceIDFilter {
-	return func(namespaceID string) float64 {
-		return matchAndConvert(
-			c,
-			(*Setting[float64])(s),
-			namespaceIDPrecedence(namespaceID),
-			convertFloat,
-		)
-	}
-}
-
-func (c *Collection) GetFloatPropertyFilteredByTaskQueueInfo(s *FloatSetting) FloatPropertyFnWithTaskQueueInfoFilters {
-	return func(namespace string, taskQueue string, taskType enumspb.TaskQueueType) float64 {
-		return matchAndConvert(
-			c,
-			(*Setting[float64])(s),
-			taskQueuePrecedence(namespace, taskQueue, taskType),
-			convertFloat,
-		)
-	}
-}
-
-func (c *Collection) GetFloatPropertyFilteredByShardID(s *FloatSetting) FloatPropertyFnWithShardIDFilter {
-	return func(shardID int32) float64 {
-		return matchAndConvert(
-			c,
-			(*Setting[float64])(s),
-			shardIDPrecedence(shardID),
-			convertFloat,
-		)
-	}
-}
-
-func GetFloatPropertyFn(value float64) FloatPropertyFn {
-	return func() float64 { return value }
-}
-
-func GetFloatPropertyFilteredByNamespace(value float64) FloatPropertyFnWithNamespaceFilter {
-	return func(string) float64 { return value }
-}
-
-func GetFloatPropertyFilteredByTaskQueueInfo(value float64) FloatPropertyFnWithTaskQueueInfoFilters {
-	return func(string, string, enumspb.TaskQueueType) float64 { return value }
-}
-
 const TypeString Type = 3 // go type: string
-
-type StringSetting Setting[string]
-
-func (s *StringSetting) GetKey() Key               { return s.Key }
-func (s *StringSetting) GetType() Type             { return s.Type }
-func (s *StringSetting) GetPrecedence() Precedence { return s.Precedence }
-func (s *StringSetting) GetDefault() any           { return s.Default }
-func (s *StringSetting) GetDescription() string    { return s.Description }
-
-type (
-	StringPropertyFn                         func() string
-	StringPropertyFnWithNamespaceFilter      func(namespace string) string
-	StringPropertyFnWithNamespaceIDFilter    func(namespaceID string) string
-	StringPropertyFnWithShardIDFilter        func(shardID int32) string
-	StringPropertyFnWithTaskQueueInfoFilters func(namespace string, taskQueue string, taskType enumspb.TaskQueueType) string
-	StringPropertyFnWithTaskTypeFilter       func(task enumsspb.TaskType) string
-)
-
-func (c *Collection) GetStringProperty(s *StringSetting) StringPropertyFn {
-	return func() string {
-		return matchAndConvert(
-			c,
-			(*Setting[string])(s),
-			globalPrecedence(),
-			convertString,
-		)
-	}
-}
-
-func (c *Collection) GetStringPropertyFnWithNamespaceFilter(s *StringSetting) StringPropertyFnWithNamespaceFilter {
-	return func(namespace string) string {
-		return matchAndConvert(
-			c,
-			(*Setting[string])(s),
-			namespacePrecedence(namespace),
-			convertString,
-		)
-	}
-}
-
-func (c *Collection) GetStringPropertyFnWithNamespaceIDFilter(s *StringSetting) StringPropertyFnWithNamespaceIDFilter {
-	return func(namespaceID string) string {
-		return matchAndConvert(
-			c,
-			(*Setting[string])(s),
-			namespaceIDPrecedence(namespaceID),
-			convertString,
-		)
-	}
-}
-
-func (c *Collection) GetStringPropertyFilteredByTaskQueueInfo(s *StringSetting) StringPropertyFnWithTaskQueueInfoFilters {
-	return func(namespace string, taskQueue string, taskType enumspb.TaskQueueType) string {
-		return matchAndConvert(
-			c,
-			(*Setting[string])(s),
-			taskQueuePrecedence(namespace, taskQueue, taskType),
-			convertString,
-		)
-	}
-}
-
-func (c *Collection) GetStringPropertyFilteredByShardID(s *StringSetting) StringPropertyFnWithShardIDFilter {
-	return func(shardID int32) string {
-		return matchAndConvert(
-			c,
-			(*Setting[string])(s),
-			shardIDPrecedence(shardID),
-			convertString,
-		)
-	}
-}
-
-func GetStringPropertyFn(value string) StringPropertyFn {
-	return func() string { return value }
-}
-
-func GetStringPropertyFilteredByNamespace(value string) StringPropertyFnWithNamespaceFilter {
-	return func(string) string { return value }
-}
-
-func GetStringPropertyFilteredByTaskQueueInfo(value string) StringPropertyFnWithTaskQueueInfoFilters {
-	return func(string, string, enumspb.TaskQueueType) string { return value }
-}
 
 const TypeDuration Type = 4 // go type: time.Duration
 
-type DurationSetting Setting[time.Duration]
+const TypeMap Type = 5 // go type: map[string]any
 
-func (s *DurationSetting) GetKey() Key               { return s.Key }
-func (s *DurationSetting) GetType() Type             { return s.Type }
-func (s *DurationSetting) GetPrecedence() Precedence { return s.Precedence }
-func (s *DurationSetting) GetDefault() any           { return s.Default }
-func (s *DurationSetting) GetDescription() string    { return s.Description }
+const PrecedenceGlobal Precedence = 0
 
-type (
-	DurationPropertyFn                         func() time.Duration
-	DurationPropertyFnWithNamespaceFilter      func(namespace string) time.Duration
-	DurationPropertyFnWithNamespaceIDFilter    func(namespaceID string) time.Duration
-	DurationPropertyFnWithShardIDFilter        func(shardID int32) time.Duration
-	DurationPropertyFnWithTaskQueueInfoFilters func(namespace string, taskQueue string, taskType enumspb.TaskQueueType) time.Duration
-	DurationPropertyFnWithTaskTypeFilter       func(task enumsspb.TaskType) time.Duration
-)
+const PrecedenceNamespace Precedence = 1
 
-func (c *Collection) GetDurationProperty(s *DurationSetting) DurationPropertyFn {
+const PrecedenceNamespaceID Precedence = 2
+
+const PrecedenceTaskQueue Precedence = 3
+
+const PrecedenceShardID Precedence = 4
+
+const PrecedenceTaskType Precedence = 5
+
+type BoolGlobalSetting Setting[bool, func()]
+
+func (s *BoolGlobalSetting) GetKey() Key               { return s.Key }
+func (s *BoolGlobalSetting) GetType() Type             { return TypeBool }
+func (s *BoolGlobalSetting) GetPrecedence() Precedence { return PrecedenceGlobal }
+func (s *BoolGlobalSetting) GetDefault() any           { return s.Default }
+func (s *BoolGlobalSetting) GetDescription() string    { return s.Description }
+
+type BoolPropertyFn func() bool
+
+func (c *Collection) GetBool(s *BoolGlobalSetting) BoolPropertyFn {
+	return func() bool {
+		return matchAndConvert(
+			c,
+			(*Setting[bool, func()])(s),
+			precedenceGlobal(),
+			convertBool,
+		)
+	}
+}
+
+func GetBoolProperty(value bool) BoolPropertyFn {
+	return func() bool {
+		return value
+	}
+}
+
+type BoolNamespaceSetting Setting[bool, func(namespace string)]
+
+func (s *BoolNamespaceSetting) GetKey() Key               { return s.Key }
+func (s *BoolNamespaceSetting) GetType() Type             { return TypeBool }
+func (s *BoolNamespaceSetting) GetPrecedence() Precedence { return PrecedenceNamespace }
+func (s *BoolNamespaceSetting) GetDefault() any           { return s.Default }
+func (s *BoolNamespaceSetting) GetDescription() string    { return s.Description }
+
+type BoolPropertyFnWithNamespaceFilter func(namespace string) bool
+
+func (c *Collection) GetBoolFilteredByNamespace(s *BoolNamespaceSetting) BoolPropertyFnWithNamespaceFilter {
+	return func(namespace string) bool {
+		return matchAndConvert(
+			c,
+			(*Setting[bool, func(namespace string)])(s),
+			precedenceNamespace(namespace),
+			convertBool,
+		)
+	}
+}
+
+func GetBoolPropertyFilteredByNamespace(value bool) BoolPropertyFnWithNamespaceFilter {
+	return func(namespace string) bool {
+		return value
+	}
+}
+
+type BoolNamespaceIDSetting Setting[bool, func(namespaceID string)]
+
+func (s *BoolNamespaceIDSetting) GetKey() Key               { return s.Key }
+func (s *BoolNamespaceIDSetting) GetType() Type             { return TypeBool }
+func (s *BoolNamespaceIDSetting) GetPrecedence() Precedence { return PrecedenceNamespaceID }
+func (s *BoolNamespaceIDSetting) GetDefault() any           { return s.Default }
+func (s *BoolNamespaceIDSetting) GetDescription() string    { return s.Description }
+
+type BoolPropertyFnWithNamespaceIDFilter func(namespaceID string) bool
+
+func (c *Collection) GetBoolFilteredByNamespaceID(s *BoolNamespaceIDSetting) BoolPropertyFnWithNamespaceIDFilter {
+	return func(namespaceID string) bool {
+		return matchAndConvert(
+			c,
+			(*Setting[bool, func(namespaceID string)])(s),
+			precedenceNamespaceID(namespaceID),
+			convertBool,
+		)
+	}
+}
+
+func GetBoolPropertyFilteredByNamespaceID(value bool) BoolPropertyFnWithNamespaceIDFilter {
+	return func(namespaceID string) bool {
+		return value
+	}
+}
+
+type BoolTaskQueueSetting Setting[bool, func(namespace string, taskQueue string, taskQueueType enumspb.TaskQueueType)]
+
+func (s *BoolTaskQueueSetting) GetKey() Key               { return s.Key }
+func (s *BoolTaskQueueSetting) GetType() Type             { return TypeBool }
+func (s *BoolTaskQueueSetting) GetPrecedence() Precedence { return PrecedenceTaskQueue }
+func (s *BoolTaskQueueSetting) GetDefault() any           { return s.Default }
+func (s *BoolTaskQueueSetting) GetDescription() string    { return s.Description }
+
+type BoolPropertyFnWithTaskQueueFilter func(namespace string, taskQueue string, taskQueueType enumspb.TaskQueueType) bool
+
+func (c *Collection) GetBoolFilteredByTaskQueue(s *BoolTaskQueueSetting) BoolPropertyFnWithTaskQueueFilter {
+	return func(namespace string, taskQueue string, taskQueueType enumspb.TaskQueueType) bool {
+		return matchAndConvert(
+			c,
+			(*Setting[bool, func(namespace string, taskQueue string, taskQueueType enumspb.TaskQueueType)])(s),
+			precedenceTaskQueue(namespace, taskQueue, taskQueueType),
+			convertBool,
+		)
+	}
+}
+
+func GetBoolPropertyFilteredByTaskQueue(value bool) BoolPropertyFnWithTaskQueueFilter {
+	return func(namespace string, taskQueue string, taskQueueType enumspb.TaskQueueType) bool {
+		return value
+	}
+}
+
+type BoolShardIDSetting Setting[bool, func(shardID int32)]
+
+func (s *BoolShardIDSetting) GetKey() Key               { return s.Key }
+func (s *BoolShardIDSetting) GetType() Type             { return TypeBool }
+func (s *BoolShardIDSetting) GetPrecedence() Precedence { return PrecedenceShardID }
+func (s *BoolShardIDSetting) GetDefault() any           { return s.Default }
+func (s *BoolShardIDSetting) GetDescription() string    { return s.Description }
+
+type BoolPropertyFnWithShardIDFilter func(shardID int32) bool
+
+func (c *Collection) GetBoolFilteredByShardID(s *BoolShardIDSetting) BoolPropertyFnWithShardIDFilter {
+	return func(shardID int32) bool {
+		return matchAndConvert(
+			c,
+			(*Setting[bool, func(shardID int32)])(s),
+			precedenceShardID(shardID),
+			convertBool,
+		)
+	}
+}
+
+func GetBoolPropertyFilteredByShardID(value bool) BoolPropertyFnWithShardIDFilter {
+	return func(shardID int32) bool {
+		return value
+	}
+}
+
+type BoolTaskTypeSetting Setting[bool, func(taskType enumsspb.TaskType)]
+
+func (s *BoolTaskTypeSetting) GetKey() Key               { return s.Key }
+func (s *BoolTaskTypeSetting) GetType() Type             { return TypeBool }
+func (s *BoolTaskTypeSetting) GetPrecedence() Precedence { return PrecedenceTaskType }
+func (s *BoolTaskTypeSetting) GetDefault() any           { return s.Default }
+func (s *BoolTaskTypeSetting) GetDescription() string    { return s.Description }
+
+type BoolPropertyFnWithTaskTypeFilter func(taskType enumsspb.TaskType) bool
+
+func (c *Collection) GetBoolFilteredByTaskType(s *BoolTaskTypeSetting) BoolPropertyFnWithTaskTypeFilter {
+	return func(taskType enumsspb.TaskType) bool {
+		return matchAndConvert(
+			c,
+			(*Setting[bool, func(taskType enumsspb.TaskType)])(s),
+			precedenceTaskType(taskType),
+			convertBool,
+		)
+	}
+}
+
+func GetBoolPropertyFilteredByTaskType(value bool) BoolPropertyFnWithTaskTypeFilter {
+	return func(taskType enumsspb.TaskType) bool {
+		return value
+	}
+}
+
+type IntGlobalSetting Setting[int, func()]
+
+func (s *IntGlobalSetting) GetKey() Key               { return s.Key }
+func (s *IntGlobalSetting) GetType() Type             { return TypeInt }
+func (s *IntGlobalSetting) GetPrecedence() Precedence { return PrecedenceGlobal }
+func (s *IntGlobalSetting) GetDefault() any           { return s.Default }
+func (s *IntGlobalSetting) GetDescription() string    { return s.Description }
+
+type IntPropertyFn func() int
+
+func (c *Collection) GetInt(s *IntGlobalSetting) IntPropertyFn {
+	return func() int {
+		return matchAndConvert(
+			c,
+			(*Setting[int, func()])(s),
+			precedenceGlobal(),
+			convertInt,
+		)
+	}
+}
+
+func GetIntProperty(value int) IntPropertyFn {
+	return func() int {
+		return value
+	}
+}
+
+type IntNamespaceSetting Setting[int, func(namespace string)]
+
+func (s *IntNamespaceSetting) GetKey() Key               { return s.Key }
+func (s *IntNamespaceSetting) GetType() Type             { return TypeInt }
+func (s *IntNamespaceSetting) GetPrecedence() Precedence { return PrecedenceNamespace }
+func (s *IntNamespaceSetting) GetDefault() any           { return s.Default }
+func (s *IntNamespaceSetting) GetDescription() string    { return s.Description }
+
+type IntPropertyFnWithNamespaceFilter func(namespace string) int
+
+func (c *Collection) GetIntFilteredByNamespace(s *IntNamespaceSetting) IntPropertyFnWithNamespaceFilter {
+	return func(namespace string) int {
+		return matchAndConvert(
+			c,
+			(*Setting[int, func(namespace string)])(s),
+			precedenceNamespace(namespace),
+			convertInt,
+		)
+	}
+}
+
+func GetIntPropertyFilteredByNamespace(value int) IntPropertyFnWithNamespaceFilter {
+	return func(namespace string) int {
+		return value
+	}
+}
+
+type IntNamespaceIDSetting Setting[int, func(namespaceID string)]
+
+func (s *IntNamespaceIDSetting) GetKey() Key               { return s.Key }
+func (s *IntNamespaceIDSetting) GetType() Type             { return TypeInt }
+func (s *IntNamespaceIDSetting) GetPrecedence() Precedence { return PrecedenceNamespaceID }
+func (s *IntNamespaceIDSetting) GetDefault() any           { return s.Default }
+func (s *IntNamespaceIDSetting) GetDescription() string    { return s.Description }
+
+type IntPropertyFnWithNamespaceIDFilter func(namespaceID string) int
+
+func (c *Collection) GetIntFilteredByNamespaceID(s *IntNamespaceIDSetting) IntPropertyFnWithNamespaceIDFilter {
+	return func(namespaceID string) int {
+		return matchAndConvert(
+			c,
+			(*Setting[int, func(namespaceID string)])(s),
+			precedenceNamespaceID(namespaceID),
+			convertInt,
+		)
+	}
+}
+
+func GetIntPropertyFilteredByNamespaceID(value int) IntPropertyFnWithNamespaceIDFilter {
+	return func(namespaceID string) int {
+		return value
+	}
+}
+
+type IntTaskQueueSetting Setting[int, func(namespace string, taskQueue string, taskQueueType enumspb.TaskQueueType)]
+
+func (s *IntTaskQueueSetting) GetKey() Key               { return s.Key }
+func (s *IntTaskQueueSetting) GetType() Type             { return TypeInt }
+func (s *IntTaskQueueSetting) GetPrecedence() Precedence { return PrecedenceTaskQueue }
+func (s *IntTaskQueueSetting) GetDefault() any           { return s.Default }
+func (s *IntTaskQueueSetting) GetDescription() string    { return s.Description }
+
+type IntPropertyFnWithTaskQueueFilter func(namespace string, taskQueue string, taskQueueType enumspb.TaskQueueType) int
+
+func (c *Collection) GetIntFilteredByTaskQueue(s *IntTaskQueueSetting) IntPropertyFnWithTaskQueueFilter {
+	return func(namespace string, taskQueue string, taskQueueType enumspb.TaskQueueType) int {
+		return matchAndConvert(
+			c,
+			(*Setting[int, func(namespace string, taskQueue string, taskQueueType enumspb.TaskQueueType)])(s),
+			precedenceTaskQueue(namespace, taskQueue, taskQueueType),
+			convertInt,
+		)
+	}
+}
+
+func GetIntPropertyFilteredByTaskQueue(value int) IntPropertyFnWithTaskQueueFilter {
+	return func(namespace string, taskQueue string, taskQueueType enumspb.TaskQueueType) int {
+		return value
+	}
+}
+
+type IntShardIDSetting Setting[int, func(shardID int32)]
+
+func (s *IntShardIDSetting) GetKey() Key               { return s.Key }
+func (s *IntShardIDSetting) GetType() Type             { return TypeInt }
+func (s *IntShardIDSetting) GetPrecedence() Precedence { return PrecedenceShardID }
+func (s *IntShardIDSetting) GetDefault() any           { return s.Default }
+func (s *IntShardIDSetting) GetDescription() string    { return s.Description }
+
+type IntPropertyFnWithShardIDFilter func(shardID int32) int
+
+func (c *Collection) GetIntFilteredByShardID(s *IntShardIDSetting) IntPropertyFnWithShardIDFilter {
+	return func(shardID int32) int {
+		return matchAndConvert(
+			c,
+			(*Setting[int, func(shardID int32)])(s),
+			precedenceShardID(shardID),
+			convertInt,
+		)
+	}
+}
+
+func GetIntPropertyFilteredByShardID(value int) IntPropertyFnWithShardIDFilter {
+	return func(shardID int32) int {
+		return value
+	}
+}
+
+type IntTaskTypeSetting Setting[int, func(taskType enumsspb.TaskType)]
+
+func (s *IntTaskTypeSetting) GetKey() Key               { return s.Key }
+func (s *IntTaskTypeSetting) GetType() Type             { return TypeInt }
+func (s *IntTaskTypeSetting) GetPrecedence() Precedence { return PrecedenceTaskType }
+func (s *IntTaskTypeSetting) GetDefault() any           { return s.Default }
+func (s *IntTaskTypeSetting) GetDescription() string    { return s.Description }
+
+type IntPropertyFnWithTaskTypeFilter func(taskType enumsspb.TaskType) int
+
+func (c *Collection) GetIntFilteredByTaskType(s *IntTaskTypeSetting) IntPropertyFnWithTaskTypeFilter {
+	return func(taskType enumsspb.TaskType) int {
+		return matchAndConvert(
+			c,
+			(*Setting[int, func(taskType enumsspb.TaskType)])(s),
+			precedenceTaskType(taskType),
+			convertInt,
+		)
+	}
+}
+
+func GetIntPropertyFilteredByTaskType(value int) IntPropertyFnWithTaskTypeFilter {
+	return func(taskType enumsspb.TaskType) int {
+		return value
+	}
+}
+
+type FloatGlobalSetting Setting[float64, func()]
+
+func (s *FloatGlobalSetting) GetKey() Key               { return s.Key }
+func (s *FloatGlobalSetting) GetType() Type             { return TypeFloat }
+func (s *FloatGlobalSetting) GetPrecedence() Precedence { return PrecedenceGlobal }
+func (s *FloatGlobalSetting) GetDefault() any           { return s.Default }
+func (s *FloatGlobalSetting) GetDescription() string    { return s.Description }
+
+type FloatPropertyFn func() float64
+
+func (c *Collection) GetFloat(s *FloatGlobalSetting) FloatPropertyFn {
+	return func() float64 {
+		return matchAndConvert(
+			c,
+			(*Setting[float64, func()])(s),
+			precedenceGlobal(),
+			convertFloat,
+		)
+	}
+}
+
+func GetFloatProperty(value float64) FloatPropertyFn {
+	return func() float64 {
+		return value
+	}
+}
+
+type FloatNamespaceSetting Setting[float64, func(namespace string)]
+
+func (s *FloatNamespaceSetting) GetKey() Key               { return s.Key }
+func (s *FloatNamespaceSetting) GetType() Type             { return TypeFloat }
+func (s *FloatNamespaceSetting) GetPrecedence() Precedence { return PrecedenceNamespace }
+func (s *FloatNamespaceSetting) GetDefault() any           { return s.Default }
+func (s *FloatNamespaceSetting) GetDescription() string    { return s.Description }
+
+type FloatPropertyFnWithNamespaceFilter func(namespace string) float64
+
+func (c *Collection) GetFloatFilteredByNamespace(s *FloatNamespaceSetting) FloatPropertyFnWithNamespaceFilter {
+	return func(namespace string) float64 {
+		return matchAndConvert(
+			c,
+			(*Setting[float64, func(namespace string)])(s),
+			precedenceNamespace(namespace),
+			convertFloat,
+		)
+	}
+}
+
+func GetFloatPropertyFilteredByNamespace(value float64) FloatPropertyFnWithNamespaceFilter {
+	return func(namespace string) float64 {
+		return value
+	}
+}
+
+type FloatNamespaceIDSetting Setting[float64, func(namespaceID string)]
+
+func (s *FloatNamespaceIDSetting) GetKey() Key               { return s.Key }
+func (s *FloatNamespaceIDSetting) GetType() Type             { return TypeFloat }
+func (s *FloatNamespaceIDSetting) GetPrecedence() Precedence { return PrecedenceNamespaceID }
+func (s *FloatNamespaceIDSetting) GetDefault() any           { return s.Default }
+func (s *FloatNamespaceIDSetting) GetDescription() string    { return s.Description }
+
+type FloatPropertyFnWithNamespaceIDFilter func(namespaceID string) float64
+
+func (c *Collection) GetFloatFilteredByNamespaceID(s *FloatNamespaceIDSetting) FloatPropertyFnWithNamespaceIDFilter {
+	return func(namespaceID string) float64 {
+		return matchAndConvert(
+			c,
+			(*Setting[float64, func(namespaceID string)])(s),
+			precedenceNamespaceID(namespaceID),
+			convertFloat,
+		)
+	}
+}
+
+func GetFloatPropertyFilteredByNamespaceID(value float64) FloatPropertyFnWithNamespaceIDFilter {
+	return func(namespaceID string) float64 {
+		return value
+	}
+}
+
+type FloatTaskQueueSetting Setting[float64, func(namespace string, taskQueue string, taskQueueType enumspb.TaskQueueType)]
+
+func (s *FloatTaskQueueSetting) GetKey() Key               { return s.Key }
+func (s *FloatTaskQueueSetting) GetType() Type             { return TypeFloat }
+func (s *FloatTaskQueueSetting) GetPrecedence() Precedence { return PrecedenceTaskQueue }
+func (s *FloatTaskQueueSetting) GetDefault() any           { return s.Default }
+func (s *FloatTaskQueueSetting) GetDescription() string    { return s.Description }
+
+type FloatPropertyFnWithTaskQueueFilter func(namespace string, taskQueue string, taskQueueType enumspb.TaskQueueType) float64
+
+func (c *Collection) GetFloatFilteredByTaskQueue(s *FloatTaskQueueSetting) FloatPropertyFnWithTaskQueueFilter {
+	return func(namespace string, taskQueue string, taskQueueType enumspb.TaskQueueType) float64 {
+		return matchAndConvert(
+			c,
+			(*Setting[float64, func(namespace string, taskQueue string, taskQueueType enumspb.TaskQueueType)])(s),
+			precedenceTaskQueue(namespace, taskQueue, taskQueueType),
+			convertFloat,
+		)
+	}
+}
+
+func GetFloatPropertyFilteredByTaskQueue(value float64) FloatPropertyFnWithTaskQueueFilter {
+	return func(namespace string, taskQueue string, taskQueueType enumspb.TaskQueueType) float64 {
+		return value
+	}
+}
+
+type FloatShardIDSetting Setting[float64, func(shardID int32)]
+
+func (s *FloatShardIDSetting) GetKey() Key               { return s.Key }
+func (s *FloatShardIDSetting) GetType() Type             { return TypeFloat }
+func (s *FloatShardIDSetting) GetPrecedence() Precedence { return PrecedenceShardID }
+func (s *FloatShardIDSetting) GetDefault() any           { return s.Default }
+func (s *FloatShardIDSetting) GetDescription() string    { return s.Description }
+
+type FloatPropertyFnWithShardIDFilter func(shardID int32) float64
+
+func (c *Collection) GetFloatFilteredByShardID(s *FloatShardIDSetting) FloatPropertyFnWithShardIDFilter {
+	return func(shardID int32) float64 {
+		return matchAndConvert(
+			c,
+			(*Setting[float64, func(shardID int32)])(s),
+			precedenceShardID(shardID),
+			convertFloat,
+		)
+	}
+}
+
+func GetFloatPropertyFilteredByShardID(value float64) FloatPropertyFnWithShardIDFilter {
+	return func(shardID int32) float64 {
+		return value
+	}
+}
+
+type FloatTaskTypeSetting Setting[float64, func(taskType enumsspb.TaskType)]
+
+func (s *FloatTaskTypeSetting) GetKey() Key               { return s.Key }
+func (s *FloatTaskTypeSetting) GetType() Type             { return TypeFloat }
+func (s *FloatTaskTypeSetting) GetPrecedence() Precedence { return PrecedenceTaskType }
+func (s *FloatTaskTypeSetting) GetDefault() any           { return s.Default }
+func (s *FloatTaskTypeSetting) GetDescription() string    { return s.Description }
+
+type FloatPropertyFnWithTaskTypeFilter func(taskType enumsspb.TaskType) float64
+
+func (c *Collection) GetFloatFilteredByTaskType(s *FloatTaskTypeSetting) FloatPropertyFnWithTaskTypeFilter {
+	return func(taskType enumsspb.TaskType) float64 {
+		return matchAndConvert(
+			c,
+			(*Setting[float64, func(taskType enumsspb.TaskType)])(s),
+			precedenceTaskType(taskType),
+			convertFloat,
+		)
+	}
+}
+
+func GetFloatPropertyFilteredByTaskType(value float64) FloatPropertyFnWithTaskTypeFilter {
+	return func(taskType enumsspb.TaskType) float64 {
+		return value
+	}
+}
+
+type StringGlobalSetting Setting[string, func()]
+
+func (s *StringGlobalSetting) GetKey() Key               { return s.Key }
+func (s *StringGlobalSetting) GetType() Type             { return TypeString }
+func (s *StringGlobalSetting) GetPrecedence() Precedence { return PrecedenceGlobal }
+func (s *StringGlobalSetting) GetDefault() any           { return s.Default }
+func (s *StringGlobalSetting) GetDescription() string    { return s.Description }
+
+type StringPropertyFn func() string
+
+func (c *Collection) GetString(s *StringGlobalSetting) StringPropertyFn {
+	return func() string {
+		return matchAndConvert(
+			c,
+			(*Setting[string, func()])(s),
+			precedenceGlobal(),
+			convertString,
+		)
+	}
+}
+
+func GetStringProperty(value string) StringPropertyFn {
+	return func() string {
+		return value
+	}
+}
+
+type StringNamespaceSetting Setting[string, func(namespace string)]
+
+func (s *StringNamespaceSetting) GetKey() Key               { return s.Key }
+func (s *StringNamespaceSetting) GetType() Type             { return TypeString }
+func (s *StringNamespaceSetting) GetPrecedence() Precedence { return PrecedenceNamespace }
+func (s *StringNamespaceSetting) GetDefault() any           { return s.Default }
+func (s *StringNamespaceSetting) GetDescription() string    { return s.Description }
+
+type StringPropertyFnWithNamespaceFilter func(namespace string) string
+
+func (c *Collection) GetStringFilteredByNamespace(s *StringNamespaceSetting) StringPropertyFnWithNamespaceFilter {
+	return func(namespace string) string {
+		return matchAndConvert(
+			c,
+			(*Setting[string, func(namespace string)])(s),
+			precedenceNamespace(namespace),
+			convertString,
+		)
+	}
+}
+
+func GetStringPropertyFilteredByNamespace(value string) StringPropertyFnWithNamespaceFilter {
+	return func(namespace string) string {
+		return value
+	}
+}
+
+type StringNamespaceIDSetting Setting[string, func(namespaceID string)]
+
+func (s *StringNamespaceIDSetting) GetKey() Key               { return s.Key }
+func (s *StringNamespaceIDSetting) GetType() Type             { return TypeString }
+func (s *StringNamespaceIDSetting) GetPrecedence() Precedence { return PrecedenceNamespaceID }
+func (s *StringNamespaceIDSetting) GetDefault() any           { return s.Default }
+func (s *StringNamespaceIDSetting) GetDescription() string    { return s.Description }
+
+type StringPropertyFnWithNamespaceIDFilter func(namespaceID string) string
+
+func (c *Collection) GetStringFilteredByNamespaceID(s *StringNamespaceIDSetting) StringPropertyFnWithNamespaceIDFilter {
+	return func(namespaceID string) string {
+		return matchAndConvert(
+			c,
+			(*Setting[string, func(namespaceID string)])(s),
+			precedenceNamespaceID(namespaceID),
+			convertString,
+		)
+	}
+}
+
+func GetStringPropertyFilteredByNamespaceID(value string) StringPropertyFnWithNamespaceIDFilter {
+	return func(namespaceID string) string {
+		return value
+	}
+}
+
+type StringTaskQueueSetting Setting[string, func(namespace string, taskQueue string, taskQueueType enumspb.TaskQueueType)]
+
+func (s *StringTaskQueueSetting) GetKey() Key               { return s.Key }
+func (s *StringTaskQueueSetting) GetType() Type             { return TypeString }
+func (s *StringTaskQueueSetting) GetPrecedence() Precedence { return PrecedenceTaskQueue }
+func (s *StringTaskQueueSetting) GetDefault() any           { return s.Default }
+func (s *StringTaskQueueSetting) GetDescription() string    { return s.Description }
+
+type StringPropertyFnWithTaskQueueFilter func(namespace string, taskQueue string, taskQueueType enumspb.TaskQueueType) string
+
+func (c *Collection) GetStringFilteredByTaskQueue(s *StringTaskQueueSetting) StringPropertyFnWithTaskQueueFilter {
+	return func(namespace string, taskQueue string, taskQueueType enumspb.TaskQueueType) string {
+		return matchAndConvert(
+			c,
+			(*Setting[string, func(namespace string, taskQueue string, taskQueueType enumspb.TaskQueueType)])(s),
+			precedenceTaskQueue(namespace, taskQueue, taskQueueType),
+			convertString,
+		)
+	}
+}
+
+func GetStringPropertyFilteredByTaskQueue(value string) StringPropertyFnWithTaskQueueFilter {
+	return func(namespace string, taskQueue string, taskQueueType enumspb.TaskQueueType) string {
+		return value
+	}
+}
+
+type StringShardIDSetting Setting[string, func(shardID int32)]
+
+func (s *StringShardIDSetting) GetKey() Key               { return s.Key }
+func (s *StringShardIDSetting) GetType() Type             { return TypeString }
+func (s *StringShardIDSetting) GetPrecedence() Precedence { return PrecedenceShardID }
+func (s *StringShardIDSetting) GetDefault() any           { return s.Default }
+func (s *StringShardIDSetting) GetDescription() string    { return s.Description }
+
+type StringPropertyFnWithShardIDFilter func(shardID int32) string
+
+func (c *Collection) GetStringFilteredByShardID(s *StringShardIDSetting) StringPropertyFnWithShardIDFilter {
+	return func(shardID int32) string {
+		return matchAndConvert(
+			c,
+			(*Setting[string, func(shardID int32)])(s),
+			precedenceShardID(shardID),
+			convertString,
+		)
+	}
+}
+
+func GetStringPropertyFilteredByShardID(value string) StringPropertyFnWithShardIDFilter {
+	return func(shardID int32) string {
+		return value
+	}
+}
+
+type StringTaskTypeSetting Setting[string, func(taskType enumsspb.TaskType)]
+
+func (s *StringTaskTypeSetting) GetKey() Key               { return s.Key }
+func (s *StringTaskTypeSetting) GetType() Type             { return TypeString }
+func (s *StringTaskTypeSetting) GetPrecedence() Precedence { return PrecedenceTaskType }
+func (s *StringTaskTypeSetting) GetDefault() any           { return s.Default }
+func (s *StringTaskTypeSetting) GetDescription() string    { return s.Description }
+
+type StringPropertyFnWithTaskTypeFilter func(taskType enumsspb.TaskType) string
+
+func (c *Collection) GetStringFilteredByTaskType(s *StringTaskTypeSetting) StringPropertyFnWithTaskTypeFilter {
+	return func(taskType enumsspb.TaskType) string {
+		return matchAndConvert(
+			c,
+			(*Setting[string, func(taskType enumsspb.TaskType)])(s),
+			precedenceTaskType(taskType),
+			convertString,
+		)
+	}
+}
+
+func GetStringPropertyFilteredByTaskType(value string) StringPropertyFnWithTaskTypeFilter {
+	return func(taskType enumsspb.TaskType) string {
+		return value
+	}
+}
+
+type DurationGlobalSetting Setting[time.Duration, func()]
+
+func (s *DurationGlobalSetting) GetKey() Key               { return s.Key }
+func (s *DurationGlobalSetting) GetType() Type             { return TypeDuration }
+func (s *DurationGlobalSetting) GetPrecedence() Precedence { return PrecedenceGlobal }
+func (s *DurationGlobalSetting) GetDefault() any           { return s.Default }
+func (s *DurationGlobalSetting) GetDescription() string    { return s.Description }
+
+type DurationPropertyFn func() time.Duration
+
+func (c *Collection) GetDuration(s *DurationGlobalSetting) DurationPropertyFn {
 	return func() time.Duration {
 		return matchAndConvert(
 			c,
-			(*Setting[time.Duration])(s),
-			globalPrecedence(),
+			(*Setting[time.Duration, func()])(s),
+			precedenceGlobal(),
 			convertDuration,
 		)
 	}
 }
 
-func (c *Collection) GetDurationPropertyFnWithNamespaceFilter(s *DurationSetting) DurationPropertyFnWithNamespaceFilter {
+func GetDurationProperty(value time.Duration) DurationPropertyFn {
+	return func() time.Duration {
+		return value
+	}
+}
+
+type DurationNamespaceSetting Setting[time.Duration, func(namespace string)]
+
+func (s *DurationNamespaceSetting) GetKey() Key               { return s.Key }
+func (s *DurationNamespaceSetting) GetType() Type             { return TypeDuration }
+func (s *DurationNamespaceSetting) GetPrecedence() Precedence { return PrecedenceNamespace }
+func (s *DurationNamespaceSetting) GetDefault() any           { return s.Default }
+func (s *DurationNamespaceSetting) GetDescription() string    { return s.Description }
+
+type DurationPropertyFnWithNamespaceFilter func(namespace string) time.Duration
+
+func (c *Collection) GetDurationFilteredByNamespace(s *DurationNamespaceSetting) DurationPropertyFnWithNamespaceFilter {
 	return func(namespace string) time.Duration {
 		return matchAndConvert(
 			c,
-			(*Setting[time.Duration])(s),
-			namespacePrecedence(namespace),
+			(*Setting[time.Duration, func(namespace string)])(s),
+			precedenceNamespace(namespace),
 			convertDuration,
 		)
 	}
-}
-
-func (c *Collection) GetDurationPropertyFnWithNamespaceIDFilter(s *DurationSetting) DurationPropertyFnWithNamespaceIDFilter {
-	return func(namespaceID string) time.Duration {
-		return matchAndConvert(
-			c,
-			(*Setting[time.Duration])(s),
-			namespaceIDPrecedence(namespaceID),
-			convertDuration,
-		)
-	}
-}
-
-func (c *Collection) GetDurationPropertyFilteredByTaskQueueInfo(s *DurationSetting) DurationPropertyFnWithTaskQueueInfoFilters {
-	return func(namespace string, taskQueue string, taskType enumspb.TaskQueueType) time.Duration {
-		return matchAndConvert(
-			c,
-			(*Setting[time.Duration])(s),
-			taskQueuePrecedence(namespace, taskQueue, taskType),
-			convertDuration,
-		)
-	}
-}
-
-func (c *Collection) GetDurationPropertyFilteredByShardID(s *DurationSetting) DurationPropertyFnWithShardIDFilter {
-	return func(shardID int32) time.Duration {
-		return matchAndConvert(
-			c,
-			(*Setting[time.Duration])(s),
-			shardIDPrecedence(shardID),
-			convertDuration,
-		)
-	}
-}
-
-func GetDurationPropertyFn(value time.Duration) DurationPropertyFn {
-	return func() time.Duration { return value }
 }
 
 func GetDurationPropertyFilteredByNamespace(value time.Duration) DurationPropertyFnWithNamespaceFilter {
-	return func(string) time.Duration { return value }
+	return func(namespace string) time.Duration {
+		return value
+	}
 }
 
-func GetDurationPropertyFilteredByTaskQueueInfo(value time.Duration) DurationPropertyFnWithTaskQueueInfoFilters {
-	return func(string, string, enumspb.TaskQueueType) time.Duration { return value }
+type DurationNamespaceIDSetting Setting[time.Duration, func(namespaceID string)]
+
+func (s *DurationNamespaceIDSetting) GetKey() Key               { return s.Key }
+func (s *DurationNamespaceIDSetting) GetType() Type             { return TypeDuration }
+func (s *DurationNamespaceIDSetting) GetPrecedence() Precedence { return PrecedenceNamespaceID }
+func (s *DurationNamespaceIDSetting) GetDefault() any           { return s.Default }
+func (s *DurationNamespaceIDSetting) GetDescription() string    { return s.Description }
+
+type DurationPropertyFnWithNamespaceIDFilter func(namespaceID string) time.Duration
+
+func (c *Collection) GetDurationFilteredByNamespaceID(s *DurationNamespaceIDSetting) DurationPropertyFnWithNamespaceIDFilter {
+	return func(namespaceID string) time.Duration {
+		return matchAndConvert(
+			c,
+			(*Setting[time.Duration, func(namespaceID string)])(s),
+			precedenceNamespaceID(namespaceID),
+			convertDuration,
+		)
+	}
 }
 
-const TypeMap Type = 5 // go type: map[string]any
+func GetDurationPropertyFilteredByNamespaceID(value time.Duration) DurationPropertyFnWithNamespaceIDFilter {
+	return func(namespaceID string) time.Duration {
+		return value
+	}
+}
 
-type MapSetting Setting[map[string]any]
+type DurationTaskQueueSetting Setting[time.Duration, func(namespace string, taskQueue string, taskQueueType enumspb.TaskQueueType)]
 
-func (s *MapSetting) GetKey() Key               { return s.Key }
-func (s *MapSetting) GetType() Type             { return s.Type }
-func (s *MapSetting) GetPrecedence() Precedence { return s.Precedence }
-func (s *MapSetting) GetDefault() any           { return s.Default }
-func (s *MapSetting) GetDescription() string    { return s.Description }
+func (s *DurationTaskQueueSetting) GetKey() Key               { return s.Key }
+func (s *DurationTaskQueueSetting) GetType() Type             { return TypeDuration }
+func (s *DurationTaskQueueSetting) GetPrecedence() Precedence { return PrecedenceTaskQueue }
+func (s *DurationTaskQueueSetting) GetDefault() any           { return s.Default }
+func (s *DurationTaskQueueSetting) GetDescription() string    { return s.Description }
 
-type (
-	MapPropertyFn                         func() map[string]any
-	MapPropertyFnWithNamespaceFilter      func(namespace string) map[string]any
-	MapPropertyFnWithNamespaceIDFilter    func(namespaceID string) map[string]any
-	MapPropertyFnWithShardIDFilter        func(shardID int32) map[string]any
-	MapPropertyFnWithTaskQueueInfoFilters func(namespace string, taskQueue string, taskType enumspb.TaskQueueType) map[string]any
-	MapPropertyFnWithTaskTypeFilter       func(task enumsspb.TaskType) map[string]any
-)
+type DurationPropertyFnWithTaskQueueFilter func(namespace string, taskQueue string, taskQueueType enumspb.TaskQueueType) time.Duration
 
-func (c *Collection) GetMapProperty(s *MapSetting) MapPropertyFn {
+func (c *Collection) GetDurationFilteredByTaskQueue(s *DurationTaskQueueSetting) DurationPropertyFnWithTaskQueueFilter {
+	return func(namespace string, taskQueue string, taskQueueType enumspb.TaskQueueType) time.Duration {
+		return matchAndConvert(
+			c,
+			(*Setting[time.Duration, func(namespace string, taskQueue string, taskQueueType enumspb.TaskQueueType)])(s),
+			precedenceTaskQueue(namespace, taskQueue, taskQueueType),
+			convertDuration,
+		)
+	}
+}
+
+func GetDurationPropertyFilteredByTaskQueue(value time.Duration) DurationPropertyFnWithTaskQueueFilter {
+	return func(namespace string, taskQueue string, taskQueueType enumspb.TaskQueueType) time.Duration {
+		return value
+	}
+}
+
+type DurationShardIDSetting Setting[time.Duration, func(shardID int32)]
+
+func (s *DurationShardIDSetting) GetKey() Key               { return s.Key }
+func (s *DurationShardIDSetting) GetType() Type             { return TypeDuration }
+func (s *DurationShardIDSetting) GetPrecedence() Precedence { return PrecedenceShardID }
+func (s *DurationShardIDSetting) GetDefault() any           { return s.Default }
+func (s *DurationShardIDSetting) GetDescription() string    { return s.Description }
+
+type DurationPropertyFnWithShardIDFilter func(shardID int32) time.Duration
+
+func (c *Collection) GetDurationFilteredByShardID(s *DurationShardIDSetting) DurationPropertyFnWithShardIDFilter {
+	return func(shardID int32) time.Duration {
+		return matchAndConvert(
+			c,
+			(*Setting[time.Duration, func(shardID int32)])(s),
+			precedenceShardID(shardID),
+			convertDuration,
+		)
+	}
+}
+
+func GetDurationPropertyFilteredByShardID(value time.Duration) DurationPropertyFnWithShardIDFilter {
+	return func(shardID int32) time.Duration {
+		return value
+	}
+}
+
+type DurationTaskTypeSetting Setting[time.Duration, func(taskType enumsspb.TaskType)]
+
+func (s *DurationTaskTypeSetting) GetKey() Key               { return s.Key }
+func (s *DurationTaskTypeSetting) GetType() Type             { return TypeDuration }
+func (s *DurationTaskTypeSetting) GetPrecedence() Precedence { return PrecedenceTaskType }
+func (s *DurationTaskTypeSetting) GetDefault() any           { return s.Default }
+func (s *DurationTaskTypeSetting) GetDescription() string    { return s.Description }
+
+type DurationPropertyFnWithTaskTypeFilter func(taskType enumsspb.TaskType) time.Duration
+
+func (c *Collection) GetDurationFilteredByTaskType(s *DurationTaskTypeSetting) DurationPropertyFnWithTaskTypeFilter {
+	return func(taskType enumsspb.TaskType) time.Duration {
+		return matchAndConvert(
+			c,
+			(*Setting[time.Duration, func(taskType enumsspb.TaskType)])(s),
+			precedenceTaskType(taskType),
+			convertDuration,
+		)
+	}
+}
+
+func GetDurationPropertyFilteredByTaskType(value time.Duration) DurationPropertyFnWithTaskTypeFilter {
+	return func(taskType enumsspb.TaskType) time.Duration {
+		return value
+	}
+}
+
+type MapGlobalSetting Setting[map[string]any, func()]
+
+func (s *MapGlobalSetting) GetKey() Key               { return s.Key }
+func (s *MapGlobalSetting) GetType() Type             { return TypeMap }
+func (s *MapGlobalSetting) GetPrecedence() Precedence { return PrecedenceGlobal }
+func (s *MapGlobalSetting) GetDefault() any           { return s.Default }
+func (s *MapGlobalSetting) GetDescription() string    { return s.Description }
+
+type MapPropertyFn func() map[string]any
+
+func (c *Collection) GetMap(s *MapGlobalSetting) MapPropertyFn {
 	return func() map[string]any {
 		return matchAndConvert(
 			c,
-			(*Setting[map[string]any])(s),
-			globalPrecedence(),
+			(*Setting[map[string]any, func()])(s),
+			precedenceGlobal(),
 			convertMap,
 		)
 	}
 }
 
-func (c *Collection) GetMapPropertyFnWithNamespaceFilter(s *MapSetting) MapPropertyFnWithNamespaceFilter {
+func GetMapProperty(value map[string]any) MapPropertyFn {
+	return func() map[string]any {
+		return value
+	}
+}
+
+type MapNamespaceSetting Setting[map[string]any, func(namespace string)]
+
+func (s *MapNamespaceSetting) GetKey() Key               { return s.Key }
+func (s *MapNamespaceSetting) GetType() Type             { return TypeMap }
+func (s *MapNamespaceSetting) GetPrecedence() Precedence { return PrecedenceNamespace }
+func (s *MapNamespaceSetting) GetDefault() any           { return s.Default }
+func (s *MapNamespaceSetting) GetDescription() string    { return s.Description }
+
+type MapPropertyFnWithNamespaceFilter func(namespace string) map[string]any
+
+func (c *Collection) GetMapFilteredByNamespace(s *MapNamespaceSetting) MapPropertyFnWithNamespaceFilter {
 	return func(namespace string) map[string]any {
 		return matchAndConvert(
 			c,
-			(*Setting[map[string]any])(s),
-			namespacePrecedence(namespace),
+			(*Setting[map[string]any, func(namespace string)])(s),
+			precedenceNamespace(namespace),
 			convertMap,
 		)
 	}
-}
-
-func (c *Collection) GetMapPropertyFnWithNamespaceIDFilter(s *MapSetting) MapPropertyFnWithNamespaceIDFilter {
-	return func(namespaceID string) map[string]any {
-		return matchAndConvert(
-			c,
-			(*Setting[map[string]any])(s),
-			namespaceIDPrecedence(namespaceID),
-			convertMap,
-		)
-	}
-}
-
-func (c *Collection) GetMapPropertyFilteredByTaskQueueInfo(s *MapSetting) MapPropertyFnWithTaskQueueInfoFilters {
-	return func(namespace string, taskQueue string, taskType enumspb.TaskQueueType) map[string]any {
-		return matchAndConvert(
-			c,
-			(*Setting[map[string]any])(s),
-			taskQueuePrecedence(namespace, taskQueue, taskType),
-			convertMap,
-		)
-	}
-}
-
-func (c *Collection) GetMapPropertyFilteredByShardID(s *MapSetting) MapPropertyFnWithShardIDFilter {
-	return func(shardID int32) map[string]any {
-		return matchAndConvert(
-			c,
-			(*Setting[map[string]any])(s),
-			shardIDPrecedence(shardID),
-			convertMap,
-		)
-	}
-}
-
-func GetMapPropertyFn(value map[string]any) MapPropertyFn {
-	return func() map[string]any { return value }
 }
 
 func GetMapPropertyFilteredByNamespace(value map[string]any) MapPropertyFnWithNamespaceFilter {
-	return func(string) map[string]any { return value }
+	return func(namespace string) map[string]any {
+		return value
+	}
 }
 
-func GetMapPropertyFilteredByTaskQueueInfo(value map[string]any) MapPropertyFnWithTaskQueueInfoFilters {
-	return func(string, string, enumspb.TaskQueueType) map[string]any { return value }
+type MapNamespaceIDSetting Setting[map[string]any, func(namespaceID string)]
+
+func (s *MapNamespaceIDSetting) GetKey() Key               { return s.Key }
+func (s *MapNamespaceIDSetting) GetType() Type             { return TypeMap }
+func (s *MapNamespaceIDSetting) GetPrecedence() Precedence { return PrecedenceNamespaceID }
+func (s *MapNamespaceIDSetting) GetDefault() any           { return s.Default }
+func (s *MapNamespaceIDSetting) GetDescription() string    { return s.Description }
+
+type MapPropertyFnWithNamespaceIDFilter func(namespaceID string) map[string]any
+
+func (c *Collection) GetMapFilteredByNamespaceID(s *MapNamespaceIDSetting) MapPropertyFnWithNamespaceIDFilter {
+	return func(namespaceID string) map[string]any {
+		return matchAndConvert(
+			c,
+			(*Setting[map[string]any, func(namespaceID string)])(s),
+			precedenceNamespaceID(namespaceID),
+			convertMap,
+		)
+	}
+}
+
+func GetMapPropertyFilteredByNamespaceID(value map[string]any) MapPropertyFnWithNamespaceIDFilter {
+	return func(namespaceID string) map[string]any {
+		return value
+	}
+}
+
+type MapTaskQueueSetting Setting[map[string]any, func(namespace string, taskQueue string, taskQueueType enumspb.TaskQueueType)]
+
+func (s *MapTaskQueueSetting) GetKey() Key               { return s.Key }
+func (s *MapTaskQueueSetting) GetType() Type             { return TypeMap }
+func (s *MapTaskQueueSetting) GetPrecedence() Precedence { return PrecedenceTaskQueue }
+func (s *MapTaskQueueSetting) GetDefault() any           { return s.Default }
+func (s *MapTaskQueueSetting) GetDescription() string    { return s.Description }
+
+type MapPropertyFnWithTaskQueueFilter func(namespace string, taskQueue string, taskQueueType enumspb.TaskQueueType) map[string]any
+
+func (c *Collection) GetMapFilteredByTaskQueue(s *MapTaskQueueSetting) MapPropertyFnWithTaskQueueFilter {
+	return func(namespace string, taskQueue string, taskQueueType enumspb.TaskQueueType) map[string]any {
+		return matchAndConvert(
+			c,
+			(*Setting[map[string]any, func(namespace string, taskQueue string, taskQueueType enumspb.TaskQueueType)])(s),
+			precedenceTaskQueue(namespace, taskQueue, taskQueueType),
+			convertMap,
+		)
+	}
+}
+
+func GetMapPropertyFilteredByTaskQueue(value map[string]any) MapPropertyFnWithTaskQueueFilter {
+	return func(namespace string, taskQueue string, taskQueueType enumspb.TaskQueueType) map[string]any {
+		return value
+	}
+}
+
+type MapShardIDSetting Setting[map[string]any, func(shardID int32)]
+
+func (s *MapShardIDSetting) GetKey() Key               { return s.Key }
+func (s *MapShardIDSetting) GetType() Type             { return TypeMap }
+func (s *MapShardIDSetting) GetPrecedence() Precedence { return PrecedenceShardID }
+func (s *MapShardIDSetting) GetDefault() any           { return s.Default }
+func (s *MapShardIDSetting) GetDescription() string    { return s.Description }
+
+type MapPropertyFnWithShardIDFilter func(shardID int32) map[string]any
+
+func (c *Collection) GetMapFilteredByShardID(s *MapShardIDSetting) MapPropertyFnWithShardIDFilter {
+	return func(shardID int32) map[string]any {
+		return matchAndConvert(
+			c,
+			(*Setting[map[string]any, func(shardID int32)])(s),
+			precedenceShardID(shardID),
+			convertMap,
+		)
+	}
+}
+
+func GetMapPropertyFilteredByShardID(value map[string]any) MapPropertyFnWithShardIDFilter {
+	return func(shardID int32) map[string]any {
+		return value
+	}
+}
+
+type MapTaskTypeSetting Setting[map[string]any, func(taskType enumsspb.TaskType)]
+
+func (s *MapTaskTypeSetting) GetKey() Key               { return s.Key }
+func (s *MapTaskTypeSetting) GetType() Type             { return TypeMap }
+func (s *MapTaskTypeSetting) GetPrecedence() Precedence { return PrecedenceTaskType }
+func (s *MapTaskTypeSetting) GetDefault() any           { return s.Default }
+func (s *MapTaskTypeSetting) GetDescription() string    { return s.Description }
+
+type MapPropertyFnWithTaskTypeFilter func(taskType enumsspb.TaskType) map[string]any
+
+func (c *Collection) GetMapFilteredByTaskType(s *MapTaskTypeSetting) MapPropertyFnWithTaskTypeFilter {
+	return func(taskType enumsspb.TaskType) map[string]any {
+		return matchAndConvert(
+			c,
+			(*Setting[map[string]any, func(taskType enumsspb.TaskType)])(s),
+			precedenceTaskType(taskType),
+			convertMap,
+		)
+	}
+}
+
+func GetMapPropertyFilteredByTaskType(value map[string]any) MapPropertyFnWithTaskTypeFilter {
+	return func(taskType enumsspb.TaskType) map[string]any {
+		return value
+	}
 }
