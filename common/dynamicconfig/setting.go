@@ -52,6 +52,8 @@ type (
 
 // WithDefault can be used to clone a pre-defined Setting while overriding the
 // default value, to allow dynamic defaults (i.e. set at the call site).
+// Note that the "~" in the type constraint below doesn't seem to work properly,
+// so using this requires a bunch of casting.
 func WithDefault[T any, P any, S ~*Setting[T, P]](setting S, newDefault T) S {
 	newSetting := *setting
 	newSetting.Default = newDefault
