@@ -35,9 +35,8 @@ import (
 func NewActivityWorkerConcurrencyConfig(
 	dc *dynamicconfig.Collection,
 	key dynamicconfig.Key,
-	defaults map[string]any,
 ) ActivityWorkerLimitsConfig {
-	dcOptions := dc.GetMapProperty(key, defaults)()
+	dcOptions := dc.GetMap(key)()
 	var config ActivityWorkerLimitsConfig
 	b, err := json.Marshal(dcOptions)
 	if err != nil {

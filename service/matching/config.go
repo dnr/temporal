@@ -201,8 +201,8 @@ func NewConfig(
 		VisibilityPersistenceMaxReadQPS:   visibility.GetVisibilityPersistenceMaxReadQPS(dc),
 		VisibilityPersistenceMaxWriteQPS:  visibility.GetVisibilityPersistenceMaxWriteQPS(dc),
 		EnableReadFromSecondaryVisibility: visibility.GetEnableReadFromSecondaryVisibilityConfig(dc),
-		VisibilityDisableOrderByClause:    dc.GetBoolPropertyFnFilteredByNamespace(dynamicconfig.VisibilityDisableOrderByClause, true),
-		VisibilityEnableManualPagination:  dc.GetBoolPropertyFnFilteredByNamespace(dynamicconfig.VisibilityEnableManualPagination, true),
+		VisibilityDisableOrderByClause:    dc.GetBoolByNamespace(dynamicconfig.VisibilityDisableOrderByClause),
+		VisibilityEnableManualPagination:  dc.GetBoolByNamespace(dynamicconfig.VisibilityEnableManualPagination),
 
 		ListNexusIncomingServicesLongPollTimeout: dc.GetDuration(dynamicconfig.MatchingListNexusIncomingServicesLongPollTimeout), // Use -10 seconds so that we send back empty response instead of timeout
 

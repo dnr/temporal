@@ -221,7 +221,7 @@ func NewConfig(
 		BatcherConcurrency:                    dc.GetIntPropertyFilteredByNamespace(dynamicconfig.BatcherConcurrency, batcher.DefaultConcurrency),
 		EnableParentClosePolicyWorker:         dc.GetBool(dynamicconfig.EnableParentClosePolicyWorker),
 		PerNamespaceWorkerCount:               dc.GetIntPropertyFilteredByNamespace(dynamicconfig.WorkerPerNamespaceWorkerCount, 1),
-		PerNamespaceWorkerOptions:             dc.GetMapPropertyFnFilteredByNamespace(dynamicconfig.WorkerPerNamespaceWorkerOptions, map[string]any{}),
+		PerNamespaceWorkerOptions:             dc.GetMapByNamespace(dynamicconfig.WorkerPerNamespaceWorkerOptions),
 		PerNamespaceWorkerStartRate:           dc.GetFloat64(dynamicconfig.WorkerPerNamespaceWorkerStartRate),
 		ThrottledLogRPS:                       dc.GetInt(dynamicconfig.WorkerThrottledLogRPS),
 		PersistenceMaxQPS:                     dc.GetInt(dynamicconfig.WorkerPersistenceMaxQPS),
@@ -236,8 +236,8 @@ func NewConfig(
 		VisibilityPersistenceMaxReadQPS:   visibility.GetVisibilityPersistenceMaxReadQPS(dc),
 		VisibilityPersistenceMaxWriteQPS:  visibility.GetVisibilityPersistenceMaxWriteQPS(dc),
 		EnableReadFromSecondaryVisibility: visibility.GetEnableReadFromSecondaryVisibilityConfig(dc),
-		VisibilityDisableOrderByClause:    dc.GetBoolPropertyFnFilteredByNamespace(dynamicconfig.VisibilityDisableOrderByClause, true),
-		VisibilityEnableManualPagination:  dc.GetBoolPropertyFnFilteredByNamespace(dynamicconfig.VisibilityEnableManualPagination, true),
+		VisibilityDisableOrderByClause:    dc.GetBoolByNamespace(dynamicconfig.VisibilityDisableOrderByClause),
+		VisibilityEnableManualPagination:  dc.GetBoolByNamespace(dynamicconfig.VisibilityEnableManualPagination),
 	}
 	return config
 }

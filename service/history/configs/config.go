@@ -369,10 +369,10 @@ func NewConfig(
 		VisibilityPersistenceMaxWriteQPS:      visibility.GetVisibilityPersistenceMaxWriteQPS(dc),
 		EnableReadFromSecondaryVisibility:     visibility.GetEnableReadFromSecondaryVisibilityConfig(dc),
 		SecondaryVisibilityWritingMode:        visibility.GetSecondaryVisibilityWritingModeConfig(dc),
-		VisibilityDisableOrderByClause:        dc.GetBoolPropertyFnFilteredByNamespace(dynamicconfig.VisibilityDisableOrderByClause, true),
-		VisibilityEnableManualPagination:      dc.GetBoolPropertyFnFilteredByNamespace(dynamicconfig.VisibilityEnableManualPagination, true),
-		VisibilityAllowList:                   dc.GetBoolPropertyFnFilteredByNamespace(dynamicconfig.VisibilityAllowList, true),
-		SuppressErrorSetSystemSearchAttribute: dc.GetBoolPropertyFnFilteredByNamespace(dynamicconfig.SuppressErrorSetSystemSearchAttribute, false),
+		VisibilityDisableOrderByClause:        dc.GetBoolByNamespace(dynamicconfig.VisibilityDisableOrderByClause),
+		VisibilityEnableManualPagination:      dc.GetBoolByNamespace(dynamicconfig.VisibilityEnableManualPagination),
+		VisibilityAllowList:                   dc.GetBoolByNamespace(dynamicconfig.VisibilityAllowList),
+		SuppressErrorSetSystemSearchAttribute: dc.GetBoolByNamespace(dynamicconfig.SuppressErrorSetSystemSearchAttribute),
 
 		EmitShardLagLog: dc.GetBool(dynamicconfig.EmitShardLagLog),
 		// HistoryCacheLimitSizeBased should not change during runtime.
@@ -491,8 +491,8 @@ func NewConfig(
 		// history client: client/history/client.go set the client timeout 30s
 		// TODO: Return this value to the client: go.temporal.io/server/issues/294
 		LongPollExpirationInterval:          dc.GetDurationPropertyFilteredByNamespace(dynamicconfig.HistoryLongPollExpirationInterval, time.Second*20),
-		EventEncodingType:                   dc.GetStringPropertyFnFilteredByNamespace(dynamicconfig.DefaultEventEncoding, enumspb.ENCODING_TYPE_PROTO3.String()),
-		EnableParentClosePolicy:             dc.GetBoolPropertyFnFilteredByNamespace(dynamicconfig.EnableParentClosePolicy, true),
+		EventEncodingType:                   dc.GetStringByNamespace(dynamicconfig.DefaultEventEncoding)),
+		EnableParentClosePolicy:             dc.GetBoolByNamespace(dynamicconfig.EnableParentClosePolicy),
 		NumParentClosePolicySystemWorkflows: dc.GetInt(dynamicconfig.NumParentClosePolicySystemWorkflows),
 		EnableParentClosePolicyWorker:       dc.GetBool(dynamicconfig.EnableParentClosePolicyWorker),
 		ParentClosePolicyThreshold:          dc.GetIntPropertyFilteredByNamespace(dynamicconfig.ParentClosePolicyThreshold, 10),
@@ -518,10 +518,10 @@ func NewConfig(
 		MutableStateSizeLimitWarn:                 dc.GetInt(dynamicconfig.MutableStateSizeLimitWarn),
 
 		ThrottledLogRPS:   dc.GetInt(dynamicconfig.HistoryThrottledLogRPS),
-		EnableStickyQuery: dc.GetBoolPropertyFnFilteredByNamespace(dynamicconfig.EnableStickyQuery, true),
+		EnableStickyQuery: dc.GetBoolByNamespace(dynamicconfig.EnableStickyQuery),
 
-		DefaultActivityRetryPolicy:   dc.GetMapPropertyFnFilteredByNamespace(dynamicconfig.DefaultActivityRetryPolicy, common.GetDefaultRetryPolicyConfigOptions()),
-		DefaultWorkflowRetryPolicy:   dc.GetMapPropertyFnFilteredByNamespace(dynamicconfig.DefaultWorkflowRetryPolicy, common.GetDefaultRetryPolicyConfigOptions()),
+		DefaultActivityRetryPolicy:   dc.GetMapByNamespace(dynamicconfig.DefaultActivityRetryPolicy)),
+		DefaultWorkflowRetryPolicy:   dc.GetMapByNamespace(dynamicconfig.DefaultWorkflowRetryPolicy)),
 		WorkflowTaskHeartbeatTimeout: dc.GetDurationPropertyFilteredByNamespace(dynamicconfig.WorkflowTaskHeartbeatTimeout, time.Minute*30),
 		WorkflowTaskCriticalAttempts: dc.GetInt(dynamicconfig.WorkflowTaskCriticalAttempts),
 		WorkflowTaskRetryMaxInterval: dc.GetDuration(dynamicconfig.WorkflowTaskRetryMaxInterval),
@@ -547,7 +547,7 @@ func NewConfig(
 
 		StandbyTaskReReplicationContextTimeout: dc.GetDurationPropertyFilteredByNamespaceID(dynamicconfig.StandbyTaskReReplicationContextTimeout, 30*time.Second),
 
-		SkipReapplicationByNamespaceID: dc.GetBoolPropertyFnFilteredByNamespaceID(dynamicconfig.SkipReapplicationByNamespaceID, false),
+		SkipReapplicationByNamespaceID: dc.GetBoolByNamespaceID(dynamicconfig.SkipReapplicationByNamespaceID),
 
 		// ===== Visibility related =====
 		VisibilityTaskBatchSize:                               dc.GetInt(dynamicconfig.VisibilityTaskBatchSize),
@@ -562,7 +562,7 @@ func NewConfig(
 		VisibilityProcessorUpdateAckIntervalJitterCoefficient: dc.GetFloat64(dynamicconfig.VisibilityProcessorUpdateAckIntervalJitterCoefficient),
 		VisibilityProcessorPollBackoffInterval:                dc.GetDuration(dynamicconfig.VisibilityProcessorPollBackoffInterval),
 		VisibilityProcessorEnsureCloseBeforeDelete:            dc.GetBool(dynamicconfig.VisibilityProcessorEnsureCloseBeforeDelete),
-		VisibilityProcessorEnableCloseWorkflowCleanup:         dc.GetBoolPropertyFnFilteredByNamespace(dynamicconfig.VisibilityProcessorEnableCloseWorkflowCleanup, false),
+		VisibilityProcessorEnableCloseWorkflowCleanup:         dc.GetBoolByNamespace(dynamicconfig.VisibilityProcessorEnableCloseWorkflowCleanup),
 		VisibilityQueueMaxReaderCount:                         dc.GetInt(dynamicconfig.VisibilityQueueMaxReaderCount),
 
 		SearchAttributesNumberOfKeysLimit: dc.GetIntPropertyFilteredByNamespace(dynamicconfig.SearchAttributesNumberOfKeysLimit, 100),
@@ -580,8 +580,8 @@ func NewConfig(
 		ESProcessorAckTimeout:    dc.GetDuration(dynamicconfig.WorkerESProcessorAckTimeout),
 
 		EnableCrossNamespaceCommands:  dc.GetBool(dynamicconfig.EnableCrossNamespaceCommands),
-		EnableActivityEagerExecution:  dc.GetBoolPropertyFnFilteredByNamespace(dynamicconfig.EnableActivityEagerExecution, false),
-		EnableEagerWorkflowStart:      dc.GetBoolPropertyFnFilteredByNamespace(dynamicconfig.EnableEagerWorkflowStart, false),
+		EnableActivityEagerExecution:  dc.GetBoolByNamespace(dynamicconfig.EnableActivityEagerExecution),
+		EnableEagerWorkflowStart:      dc.GetBoolByNamespace(dynamicconfig.EnableEagerWorkflowStart),
 		NamespaceCacheRefreshInterval: dc.GetDuration(dynamicconfig.NamespaceCacheRefreshInterval),
 
 		// Archival related
@@ -602,7 +602,7 @@ func NewConfig(
 		WorkflowExecutionMaxInFlightUpdates: dc.GetIntPropertyFilteredByNamespace(dynamicconfig.WorkflowExecutionMaxInFlightUpdates, 10),
 		WorkflowExecutionMaxTotalUpdates:    dc.GetIntPropertyFilteredByNamespace(dynamicconfig.WorkflowExecutionMaxTotalUpdates, 2000),
 
-		SendRawWorkflowHistory: dc.GetBoolPropertyFnFilteredByNamespace(dynamicconfig.SendRawWorkflowHistory, false),
+		SendRawWorkflowHistory: dc.GetBoolByNamespace(dynamicconfig.SendRawWorkflowHistory),
 
 		FrontendAccessHistoryFraction: dc.GetFloat64(dynamicconfig.FrontendAccessHistoryFraction),
 	}

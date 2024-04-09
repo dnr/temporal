@@ -83,7 +83,7 @@ func NewResult(
 		Component: &workerComponent{
 			specBuilder:              specBuilder,
 			activityDeps:             params,
-			enabledForNs:             dcCollection.GetBoolPropertyFnFilteredByNamespace(dynamicconfig.WorkerEnableScheduler, true),
+			enabledForNs:             dcCollection.GetBoolByNamespace(dynamicconfig.WorkerEnableScheduler),
 			globalNSStartWorkflowRPS: dcCollection.GetFloatPropertyFilteredByNamespace(dynamicconfig.SchedulerNamespaceStartWorkflowRPS, 30.0),
 			maxBlobSize:              dcCollection.GetIntPropertyFilteredByNamespace(dynamicconfig.BlobSizeLimitError, eventStorageSize),
 		},
