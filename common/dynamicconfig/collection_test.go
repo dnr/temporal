@@ -34,13 +34,9 @@ import (
 	"go.temporal.io/server/common/log"
 )
 
-const (
+var (
 	// dynamic config for tests
 	unknownKey                                        = "unknownKey"
-	testGetPropertyKey                                = "testGetPropertyKey"
-	testCaseInsensitivePropertyKey                    = "testCaseInsensitivePropertyKey"
-	testGetIntPropertyKey                             = "testGetIntPropertyKey"
-	testGetFloat64PropertyKey                         = "testGetFloat64PropertyKey"
 	testGetDurationPropertyKey                        = "testGetDurationPropertyKey"
 	testGetBoolPropertyKey                            = "testGetBoolPropertyKey"
 	testGetStringPropertyKey                          = "testGetStringPropertyKey"
@@ -76,73 +72,105 @@ func (s *collectionSuite) SetupSuite() {
 }
 
 func (s *collectionSuite) TestGetIntProperty() {
-	value := s.cln.GetIntProperty(testGetIntPropertyKey, 10)
+	setting := &IntGlobalSetting{
+		Key:     "testGetIntPropertyKey",
+		Default: 10,
+	}
+	value := s.cln.GetInt(setting)
 	s.Equal(10, value())
-	s.client[testGetIntPropertyKey] = 50
+	s.client[setting.Key] = 50
 	s.Equal(50, value())
 }
 
 func (s *collectionSuite) TestGetIntPropertyFilteredByNamespace() {
+	setting := &IntNamespaceSetting{
+		Key:     "testGetIntPropertyFilteredByNamespaceKey",
+		Default: 10,
+	}
 	namespace := "testNamespace"
-	value := s.cln.GetIntPropertyFilteredByNamespace(testGetIntPropertyFilteredByNamespaceKey, 10)
+	value := s.cln.GetIntByNamespace(setting)
 	s.Equal(10, value(namespace))
-	s.client[testGetIntPropertyFilteredByNamespaceKey] = 50
+	s.client[setting.Key] = 50
 	s.Equal(50, value(namespace))
 }
 
 func (s *collectionSuite) TestGetStringPropertyFnFilteredByNamespace() {
 	namespace := "testNamespace"
-	value := s.cln.GetStringPropertyFnFilteredByNamespace(DefaultEventEncoding, "abc")
-	s.Equal("abc", value(namespace))
-	s.client[DefaultEventEncoding] = "efg"
+	value := s.cln.GetStringByNamespace(DefaultEventEncoding)
+	s.Equal(DefaultEventEncoding.Default, value(namespace))
+	s.client[DefaultEventEncoding.Key] = "efg"
 	s.Equal("efg", value(namespace))
 }
 
 func (s *collectionSuite) TestGetStringPropertyFnFilteredByNamespaceID() {
+	setting := &StringNamespaceIDSetting{
+		Key:     "testGetStringPropertyFilteredByNamespaceIDKey",
+		Default: "abc",
+	}
 	namespaceID := "testNamespaceID"
-	value := s.cln.GetStringPropertyFnFilteredByNamespaceID(testGetStringPropertyFilteredByNamespaceIDKey, "abc")
+	value := s.cln.GetStringByNamespaceID(setting)
 	s.Equal("abc", value(namespaceID))
-	s.client[testGetStringPropertyFilteredByNamespaceIDKey] = "efg"
+	s.client[setting.Key] = "efg"
 	s.Equal("efg", value(namespaceID))
 }
 
 func (s *collectionSuite) TestGetIntPropertyFilteredByTaskQueueInfo() {
+	setting := &IntTaskQueueSetting{
+		Key:     "testGetIntPropertyFilteredByTaskQueueInfoKey",
+		Default: 10,
+	}
 	namespace := "testNamespace"
 	taskQueue := "testTaskQueue"
-	value := s.cln.GetIntPropertyFilteredByTaskQueueInfo(testGetIntPropertyFilteredByTaskQueueInfoKey, 10)
+	value := s.cln.GetIntByTaskQueue(setting)
 	s.Equal(10, value(namespace, taskQueue, 0))
-	s.client[testGetIntPropertyFilteredByTaskQueueInfoKey] = 50
+	s.client[setting.Key] = 50
 	s.Equal(50, value(namespace, taskQueue, 0))
 }
 
 func (s *collectionSuite) TestGetFloat64Property() {
-	value := s.cln.GetFloat64Property(testGetFloat64PropertyKey, 0.1)
+	setting := &FloatGlobalSetting{
+		Key:     "testGetFloat64PropertyKey",
+		Default: 0.1,
+	}
+	value := s.cln.GetFloat(setting)
 	s.Equal(0.1, value())
-	s.client[testGetFloat64PropertyKey] = 0.01
+	s.client[setting.Key] = 0.01
 	s.Equal(0.01, value())
 }
 
 func (s *collectionSuite) TestGetBoolProperty() {
-	value := s.cln.GetBoolProperty(testGetBoolPropertyKey, true)
+	setting := &BoolGlobalSetting{
+		Key:     "testGetBoolPropertyKey",
+		Default: true,
+	}
+	value := s.cln.GetBool(setting)
 	s.Equal(true, value())
-	s.client[testGetBoolPropertyKey] = false
+	s.client[setting.Key] = false
 	s.Equal(false, value())
 }
 
 func (s *collectionSuite) TestGetBoolPropertyFilteredByNamespaceID() {
+	setting := &BoolNamespaceIDSetting{
+		Key:     "testGetBoolPropertyFilteredByNamespaceIDKey",
+		Default: true,
+	}
 	namespaceID := "testNamespaceID"
-	value := s.cln.GetBoolPropertyFnFilteredByNamespaceID(testGetBoolPropertyFilteredByNamespaceIDKey, true)
+	value := s.cln.GetBoolByNamespaceID(setting)
 	s.Equal(true, value(namespaceID))
-	s.client[testGetBoolPropertyFilteredByNamespaceIDKey] = false
+	s.client[setting.Key] = false
 	s.Equal(false, value(namespaceID))
 }
 
 func (s *collectionSuite) TestGetBoolPropertyFilteredByTaskQueueInfo() {
+	setting := &BoolTaskQueueSetting{
+		Key:     "testGetBoolPropertyFilteredByTaskQueueInfoKey",
+		Default: false,
+	}
 	namespace := "testNamespace"
 	taskQueue := "testTaskQueue"
-	value := s.cln.GetBoolPropertyFilteredByTaskQueueInfo(testGetBoolPropertyFilteredByTaskQueueInfoKey, false)
+	value := s.cln.GetBoolByTaskQueue(setting)
 	s.Equal(false, value(namespace, taskQueue, 0))
-	s.client[testGetBoolPropertyFilteredByTaskQueueInfoKey] = true
+	s.client[setting.Key] = true
 	s.Equal(true, value(namespace, taskQueue, 0))
 }
 
