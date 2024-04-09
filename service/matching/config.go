@@ -32,7 +32,6 @@ import (
 	"go.temporal.io/server/common/dynamicconfig"
 	"go.temporal.io/server/common/namespace"
 	"go.temporal.io/server/common/persistence/visibility"
-	"go.temporal.io/server/common/primitives"
 )
 
 type (
@@ -154,19 +153,6 @@ type (
 func NewConfig(
 	dc *dynamicconfig.Collection,
 ) *Config {
-	defaultUpdateAckInterval := []dynamicconfig.ConstrainedValue{
-		// Use a longer default interval for the per-namespace internal worker queues.
-		{
-			Constraints: dynamicconfig.Constraints{
-				TaskQueueName: primitives.PerNSWorkerTaskQueue,
-			},
-			Value: 5 * time.Minute,
-		},
-		// Default for everything else.
-		{
-			Value: 1 * time.Minute,
-		},
-	}
 	return &Config{
 		PersistenceMaxQPS:                     dc.GetIntProperty(dynamicconfig.MatchingPersistenceMaxQPS, 3000),
 		PersistenceGlobalMaxQPS:               dc.GetIntProperty(dynamicconfig.MatchingPersistenceGlobalMaxQPS, 0),

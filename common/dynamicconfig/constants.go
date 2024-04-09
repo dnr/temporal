@@ -135,7 +135,7 @@ for signal / start / signal with start API if namespace is not active`,
 	}
 	ClusterMetadataRefreshInterval = &DurationGlobalSetting{
 		Key:         "system.clusterMetadataRefreshInterval",
-		Default:     refreshInterval,
+		Default:     time.Minute,
 		Description: `ClusterMetadataRefreshInterval is config to manage cluster metadata table refresh interval`,
 	}
 	ForceSearchAttributesCacheRefreshOnRead = &BoolGlobalSetting{
@@ -965,8 +965,20 @@ be disabled. When disabled, matching will drop tasks for versioned workflows and
 versioning semantics. Operator intervention will be required to reschedule the dropped tasks.`,
 	}
 	MatchingUpdateAckInterval = &DurationTaskQueueSetting{
-		Key:         "matching.updateAckInterval",
-		Default:     defaultUpdateAckInterval,
+		Key: "matching.updateAckInterval",
+		ConstrainedDefault: []TypedConstrainedValue[time.Duration]{
+			// Use a longer default interval for the per-namespace internal worker queues.
+			{
+				Constraints: Constraints{
+					TaskQueueName: primitives.PerNSWorkerTaskQueue,
+				},
+				Value: 5 * time.Minute,
+			},
+			// Default for everything else.
+			{
+				Value: 1 * time.Minute,
+			},
+		},
 		Description: `MatchingUpdateAckInterval is the interval for update ack`,
 	}
 	MatchingMaxTaskQueueIdleTime = &DurationTaskQueueSetting{
