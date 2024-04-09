@@ -77,7 +77,7 @@ func NewResult(
 		Component: &workerComponent{
 			activityDeps:   params,
 			dc:             dc,
-			enabledFeature: dc.GetBoolByNamespace(dynamicconfig.EnableBatcher),
+			enabledFeature: dc.GetBoolByNamespace(dynamicconfig.EnableBatcherNamespace),
 		},
 	}
 }

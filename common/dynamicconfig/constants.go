@@ -64,11 +64,16 @@ var (
 		Default:     9000,
 		Description: `VisibilityPersistenceMaxWriteQPS is the max QPC system host can query visibility DB for write.`,
 	}
-	// FIXME
-	// // EnableReadFromSecondaryVisibility is the config to enable read from secondary visibility
-	// EnableReadFromSecondaryVisibility = "system.enableReadFromSecondaryVisibility"
-	// // SecondaryVisibilityWritingMode is key for how to write to secondary visibility
-	// SecondaryVisibilityWritingMode = "system.secondaryVisibilityWritingMode"
+	EnableReadFromSecondaryVisibility = &BoolNamespaceSetting{
+		Key:         "system.enableReadFromSecondaryVisibility",
+		Default:     false,
+		Description: `EnableReadFromSecondaryVisibility is the config to enable read from secondary visibility`,
+	}
+	SecondaryVisibilityWritingMode = &StringGlobalSetting{
+		Key:         "system.secondaryVisibilityWritingMode",
+		Default:     "off",
+		Description: `SecondaryVisibilityWritingMode is key for how to write to secondary visibility`,
+	}
 	VisibilityDisableOrderByClause = &BoolNamespaceSetting{
 		Key:         "system.visibilityDisableOrderByClause",
 		Default:     true,
@@ -2193,7 +2198,13 @@ Should be at least WorkerESProcessorFlushInterval+<time to process request>.`,
 		Description: `HistoryScannerVerifyRetention indicates the history scanner verify data retention.
 If the service configures with archival feature enabled, update worker.historyScannerVerifyRetention to be double of the data retention.`,
 	}
-	EnableBatcher = &BoolNamespaceSetting{
+	// TODO: these two use the same key for different scopes. fix this to use different keys.
+	EnableBatcherGlobal = &BoolGlobalSetting{
+		Key:         "worker.enableBatcher",
+		Default:     true,
+		Description: `EnableBatcher decides whether start batcher in our worker`,
+	}
+	EnableBatcherNamespace = &BoolNamespaceSetting{
 		Key:         "worker.enableBatcher",
 		Default:     true,
 		Description: `EnableBatcher decides whether start batcher in our worker`,
@@ -2238,7 +2249,7 @@ If the service configures with archival feature enabled, update worker.historySc
 		Default:     map[string]any{},
 		Description: `WorkerPerNamespaceWorkerOptions are SDK worker options for per-namespace worker`,
 	}
-	WorkerPerNamespaceWorkerStartRate = &FloatNamespaceSetting{
+	WorkerPerNamespaceWorkerStartRate = &FloatGlobalSetting{
 		Key:         "worker.perNamespaceWorkerStartRate",
 		Default:     10.0,
 		Description: `WorkerPerNamespaceWorkerStartRate controls how fast per-namespace workers can be started (workers/second)`,

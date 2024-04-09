@@ -26,10 +26,8 @@ package worker
 
 import (
 	"context"
-	"time"
 
 	"go.temporal.io/api/serviceerror"
-	"go.temporal.io/server/common"
 
 	"go.temporal.io/server/api/matchingservice/v1"
 	"go.temporal.io/server/client"
@@ -214,15 +212,15 @@ func NewConfig(
 			ExecutionScannerWorkerCount:             dc.GetInt(dynamicconfig.ExecutionScannerWorkerCount),
 			ExecutionScannerHistoryEventIdValidator: dc.GetBool(dynamicconfig.ExecutionScannerHistoryEventIdValidator),
 			RemovableBuildIdDurationSinceDefault:    dc.GetDuration(dynamicconfig.RemovableBuildIdDurationSinceDefault),
-			BuildIdScavengerVisibilityRPS:           dc.GetFloat64(dynamicconfig.BuildIdScavenengerVisibilityRPS),
+			BuildIdScavengerVisibilityRPS:           dc.GetFloat(dynamicconfig.BuildIdScavenengerVisibilityRPS),
 		},
-		EnableBatcher:                         dc.GetBool(dynamicconfig.EnableBatcher),
+		EnableBatcher:                         dc.GetBool(dynamicconfig.EnableBatcherGlobal),
 		BatcherRPS:                            dc.GetIntByNamespace(dynamicconfig.BatcherRPS),
 		BatcherConcurrency:                    dc.GetIntByNamespace(dynamicconfig.BatcherConcurrency),
 		EnableParentClosePolicyWorker:         dc.GetBool(dynamicconfig.EnableParentClosePolicyWorker),
 		PerNamespaceWorkerCount:               dc.GetIntByNamespace(dynamicconfig.WorkerPerNamespaceWorkerCount),
 		PerNamespaceWorkerOptions:             dc.GetMapByNamespace(dynamicconfig.WorkerPerNamespaceWorkerOptions),
-		PerNamespaceWorkerStartRate:           dc.GetFloat64(dynamicconfig.WorkerPerNamespaceWorkerStartRate),
+		PerNamespaceWorkerStartRate:           dc.GetFloat(dynamicconfig.WorkerPerNamespaceWorkerStartRate),
 		ThrottledLogRPS:                       dc.GetInt(dynamicconfig.WorkerThrottledLogRPS),
 		PersistenceMaxQPS:                     dc.GetInt(dynamicconfig.WorkerPersistenceMaxQPS),
 		PersistenceGlobalMaxQPS:               dc.GetInt(dynamicconfig.WorkerPersistenceGlobalMaxQPS),
@@ -231,7 +229,7 @@ func NewConfig(
 		PersistencePerShardNamespaceMaxQPS:    dynamicconfig.DefaultPerShardNamespaceRPSMax,
 		EnablePersistencePriorityRateLimiting: dc.GetBool(dynamicconfig.WorkerEnablePersistencePriorityRateLimiting),
 		PersistenceDynamicRateLimitingParams:  dc.GetMap(dynamicconfig.WorkerPersistenceDynamicRateLimitingParams),
-		OperatorRPSRatio:                      dc.GetFloat64(dynamicconfig.OperatorRPSRatio),
+		OperatorRPSRatio:                      dc.GetFloat(dynamicconfig.OperatorRPSRatio),
 
 		VisibilityPersistenceMaxReadQPS:   visibility.GetVisibilityPersistenceMaxReadQPS(dc),
 		VisibilityPersistenceMaxWriteQPS:  visibility.GetVisibilityPersistenceMaxWriteQPS(dc),

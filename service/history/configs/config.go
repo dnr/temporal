@@ -25,14 +25,11 @@
 package configs
 
 import (
-	"time"
-
-	enumspb "go.temporal.io/api/enums/v1"
-
 	"go.temporal.io/server/common"
 	"go.temporal.io/server/common/dynamicconfig"
 	"go.temporal.io/server/common/namespace"
 	"go.temporal.io/server/common/persistence/visibility"
+	"go.temporal.io/server/common/tasks"
 )
 
 // Config represents configuration for history service
@@ -343,14 +340,26 @@ func NewConfig(
 	dc *dynamicconfig.Collection,
 	numberOfShards int32,
 ) *Config {
+	// Helper function for casting around WithDefault to make Go happy
+	getMapWithDefaultWeights := func(
+		setting *dynamicconfig.MapNamespaceSetting,
+		defaultWeights map[tasks.Priority]int,
+	) dynamicconfig.MapPropertyFnWithNamespaceFilter {
+		defaultValue := ConvertWeightsToDynamicConfigValue(defaultWeights)
+		genericSetting := (*dynamicconfig.Setting[map[string]any, func(string)])(setting)
+		newSetting := dynamicconfig.WithDefault(genericSetting, defaultValue)
+		newMapNamespaceSetting := (*dynamicconfig.MapNamespaceSetting)(newSetting)
+		return dc.GetMapByNamespace(newMapNamespaceSetting)
+	}
+
 	cfg := &Config{
 		NumberOfShards: numberOfShards,
 
 		EnableReplicationStream: dc.GetBool(dynamicconfig.EnableReplicationStream),
-		HistoryReplicationDLQV2: dc.GetBoolProperty(dynamicconfig.EnableHistoryReplicationDLQV2, false),
+		HistoryReplicationDLQV2: dc.GetBool(dynamicconfig.EnableHistoryReplicationDLQV2),
 
 		RPS:                                   dc.GetInt(dynamicconfig.HistoryRPS),
-		OperatorRPSRatio:                      dc.GetFloat64(dynamicconfig.OperatorRPSRatio),
+		OperatorRPSRatio:                      dc.GetFloat(dynamicconfig.OperatorRPSRatio),
 		MaxIDLengthLimit:                      dc.GetInt(dynamicconfig.MaxIDLengthLimit),
 		PersistenceMaxQPS:                     dc.GetInt(dynamicconfig.HistoryPersistenceMaxQPS),
 		PersistenceGlobalMaxQPS:               dc.GetInt(dynamicconfig.HistoryPersistenceGlobalMaxQPS),
@@ -387,7 +396,7 @@ func NewConfig(
 		EnableHostLevelHistoryCache:           dc.GetBool(dynamicconfig.EnableHostHistoryCache),
 		EnableMutableStateTransitionHistory:   dc.GetBool(dynamicconfig.EnableMutableStateTransitionHistory),
 
-		EventsShardLevelCacheMaxSizeBytes: dc.GetInt(dynamicconfig.EventsCacheMaxSizeBytes),              // 512KB
+		EventsShardLevelCacheMaxSizeBytes: dc.GetInt(dynamicconfig.EventsCacheMaxSizeBytes),          // 512KB
 		EventsHostLevelCacheMaxSizeBytes:  dc.GetInt(dynamicconfig.EventsHostLevelCacheMaxSizeBytes), // 256MB
 		EventsCacheTTL:                    dc.GetDuration(dynamicconfig.EventsCacheTTL),
 		EnableHostLevelEventsCache:        dc.GetBool(dynamicconfig.EnableHostLevelEventsCache),
@@ -403,8 +412,8 @@ func NewConfig(
 		HistoryClientOwnershipCachingEnabled: dc.GetBool(dynamicconfig.HistoryClientOwnershipCachingEnabled),
 
 		StandbyClusterDelay:                  dc.GetDuration(dynamicconfig.StandbyClusterDelay),
-		StandbyTaskMissingEventsResendDelay:  dc.GetDurationPropertyFilteredByTaskType(dynamicconfig.StandbyTaskMissingEventsResendDelay, 10*time.Minute),
-		StandbyTaskMissingEventsDiscardDelay: dc.GetDurationPropertyFilteredByTaskType(dynamicconfig.StandbyTaskMissingEventsDiscardDelay, 15*time.Minute),
+		StandbyTaskMissingEventsResendDelay:  dc.GetDurationByTaskType(dynamicconfig.StandbyTaskMissingEventsResendDelay),
+		StandbyTaskMissingEventsDiscardDelay: dc.GetDurationByTaskType(dynamicconfig.StandbyTaskMissingEventsDiscardDelay),
 
 		QueuePendingTaskCriticalCount:    dc.GetInt(dynamicconfig.QueuePendingTaskCriticalCount),
 		QueueReaderStuckCriticalAttempts: dc.GetInt(dynamicconfig.QueueReaderStuckCriticalAttempts),
@@ -426,14 +435,14 @@ func NewConfig(
 
 		TimerTaskBatchSize:                               dc.GetInt(dynamicconfig.TimerTaskBatchSize),
 		TimerProcessorSchedulerWorkerCount:               dc.GetInt(dynamicconfig.TimerProcessorSchedulerWorkerCount),
-		TimerProcessorSchedulerActiveRoundRobinWeights:   dc.GetMapPropertyFnFilteredByNamespace(dynamicconfig.WithDefault(dynamicconfig.TimerProcessorSchedulerActiveRoundRobinWeights, ConvertWeightsToDynamicConfigValue(DefaultActiveTaskPriorityWeight))),
-		TimerProcessorSchedulerStandbyRoundRobinWeights:  dc.GetMapPropertyFnFilteredByNamespace(dynamicconfig.WithDefault(dynamicconfig.TimerProcessorSchedulerStandbyRoundRobinWeights, ConvertWeightsToDynamicConfigValue(DefaultStandbyTaskPriorityWeight))),
+		TimerProcessorSchedulerActiveRoundRobinWeights:   getMapWithDefaultWeights(dynamicconfig.TimerProcessorSchedulerActiveRoundRobinWeights, DefaultActiveTaskPriorityWeight),
+		TimerProcessorSchedulerStandbyRoundRobinWeights:  getMapWithDefaultWeights(dynamicconfig.TimerProcessorSchedulerStandbyRoundRobinWeights, DefaultStandbyTaskPriorityWeight),
 		TimerProcessorUpdateAckInterval:                  dc.GetDuration(dynamicconfig.TimerProcessorUpdateAckInterval),
-		TimerProcessorUpdateAckIntervalJitterCoefficient: dc.GetFloat64(dynamicconfig.TimerProcessorUpdateAckIntervalJitterCoefficient),
+		TimerProcessorUpdateAckIntervalJitterCoefficient: dc.GetFloat(dynamicconfig.TimerProcessorUpdateAckIntervalJitterCoefficient),
 		TimerProcessorMaxPollRPS:                         dc.GetInt(dynamicconfig.TimerProcessorMaxPollRPS),
 		TimerProcessorMaxPollHostRPS:                     dc.GetInt(dynamicconfig.TimerProcessorMaxPollHostRPS),
 		TimerProcessorMaxPollInterval:                    dc.GetDuration(dynamicconfig.TimerProcessorMaxPollInterval),
-		TimerProcessorMaxPollIntervalJitterCoefficient:   dc.GetFloat64(dynamicconfig.TimerProcessorMaxPollIntervalJitterCoefficient),
+		TimerProcessorMaxPollIntervalJitterCoefficient:   dc.GetFloat(dynamicconfig.TimerProcessorMaxPollIntervalJitterCoefficient),
 		TimerProcessorPollBackoffInterval:                dc.GetDuration(dynamicconfig.TimerProcessorPollBackoffInterval),
 		TimerProcessorMaxTimeShift:                       dc.GetDuration(dynamicconfig.TimerProcessorMaxTimeShift),
 		TransferQueueMaxReaderCount:                      dc.GetInt(dynamicconfig.TransferQueueMaxReaderCount),
@@ -443,14 +452,14 @@ func NewConfig(
 
 		TransferTaskBatchSize:                               dc.GetInt(dynamicconfig.TransferTaskBatchSize),
 		TransferProcessorSchedulerWorkerCount:               dc.GetInt(dynamicconfig.TransferProcessorSchedulerWorkerCount),
-		TransferProcessorSchedulerActiveRoundRobinWeights:   dc.GetMapPropertyFnFilteredByNamespace(dynamicconfig.WithDefault(dynamicconfig.TransferProcessorSchedulerActiveRoundRobinWeights, ConvertWeightsToDynamicConfigValue(DefaultActiveTaskPriorityWeight))),
-		TransferProcessorSchedulerStandbyRoundRobinWeights:  dc.GetMapPropertyFnFilteredByNamespace(dynamicconfig.WithDefault(dynamicconfig.TransferProcessorSchedulerStandbyRoundRobinWeights, ConvertWeightsToDynamicConfigValue(DefaultStandbyTaskPriorityWeight))),
+		TransferProcessorSchedulerActiveRoundRobinWeights:   getMapWithDefaultWeights(dynamicconfig.TransferProcessorSchedulerActiveRoundRobinWeights, DefaultActiveTaskPriorityWeight),
+		TransferProcessorSchedulerStandbyRoundRobinWeights:  getMapWithDefaultWeights(dynamicconfig.TransferProcessorSchedulerStandbyRoundRobinWeights, DefaultStandbyTaskPriorityWeight),
 		TransferProcessorMaxPollRPS:                         dc.GetInt(dynamicconfig.TransferProcessorMaxPollRPS),
 		TransferProcessorMaxPollHostRPS:                     dc.GetInt(dynamicconfig.TransferProcessorMaxPollHostRPS),
 		TransferProcessorMaxPollInterval:                    dc.GetDuration(dynamicconfig.TransferProcessorMaxPollInterval),
-		TransferProcessorMaxPollIntervalJitterCoefficient:   dc.GetFloat64(dynamicconfig.TransferProcessorMaxPollIntervalJitterCoefficient),
+		TransferProcessorMaxPollIntervalJitterCoefficient:   dc.GetFloat(dynamicconfig.TransferProcessorMaxPollIntervalJitterCoefficient),
 		TransferProcessorUpdateAckInterval:                  dc.GetDuration(dynamicconfig.TransferProcessorUpdateAckInterval),
-		TransferProcessorUpdateAckIntervalJitterCoefficient: dc.GetFloat64(dynamicconfig.TransferProcessorUpdateAckIntervalJitterCoefficient),
+		TransferProcessorUpdateAckIntervalJitterCoefficient: dc.GetFloat(dynamicconfig.TransferProcessorUpdateAckIntervalJitterCoefficient),
 		TransferProcessorPollBackoffInterval:                dc.GetDuration(dynamicconfig.TransferProcessorPollBackoffInterval),
 		TransferProcessorEnsureCloseBeforeDelete:            dc.GetBool(dynamicconfig.TransferProcessorEnsureCloseBeforeDelete),
 		TimerQueueMaxReaderCount:                            dc.GetInt(dynamicconfig.TimerQueueMaxReaderCount),
@@ -459,18 +468,18 @@ func NewConfig(
 		OutboundProcessorMaxPollRPS:                         dc.GetInt(dynamicconfig.OutboundProcessorMaxPollRPS),
 		OutboundProcessorMaxPollHostRPS:                     dc.GetInt(dynamicconfig.OutboundProcessorMaxPollHostRPS),
 		OutboundProcessorMaxPollInterval:                    dc.GetDuration(dynamicconfig.OutboundProcessorMaxPollInterval),
-		OutboundProcessorMaxPollIntervalJitterCoefficient:   dc.GetFloat64(dynamicconfig.OutboundProcessorMaxPollIntervalJitterCoefficient),
+		OutboundProcessorMaxPollIntervalJitterCoefficient:   dc.GetFloat(dynamicconfig.OutboundProcessorMaxPollIntervalJitterCoefficient),
 		OutboundProcessorUpdateAckInterval:                  dc.GetDuration(dynamicconfig.OutboundProcessorUpdateAckInterval),
-		OutboundProcessorUpdateAckIntervalJitterCoefficient: dc.GetFloat64(dynamicconfig.OutboundProcessorUpdateAckIntervalJitterCoefficient),
+		OutboundProcessorUpdateAckIntervalJitterCoefficient: dc.GetFloat(dynamicconfig.OutboundProcessorUpdateAckIntervalJitterCoefficient),
 		OutboundProcessorPollBackoffInterval:                dc.GetDuration(dynamicconfig.OutboundProcessorPollBackoffInterval),
 		OutboundQueueMaxReaderCount:                         dc.GetInt(dynamicconfig.OutboundQueueMaxReaderCount),
 
 		ReplicatorProcessorMaxPollInterval:                  dc.GetDuration(dynamicconfig.ReplicatorProcessorMaxPollInterval),
-		ReplicatorProcessorMaxPollIntervalJitterCoefficient: dc.GetFloat64(dynamicconfig.ReplicatorProcessorMaxPollIntervalJitterCoefficient),
+		ReplicatorProcessorMaxPollIntervalJitterCoefficient: dc.GetFloat(dynamicconfig.ReplicatorProcessorMaxPollIntervalJitterCoefficient),
 		ReplicatorProcessorFetchTasksBatchSize:              dc.GetInt(dynamicconfig.ReplicatorTaskBatchSize),
 		ReplicatorProcessorMaxSkipTaskCount:                 dc.GetInt(dynamicconfig.ReplicatorMaxSkipTaskCount),
-		ReplicationTaskProcessorHostQPS:                     dc.GetFloat64(dynamicconfig.ReplicationTaskProcessorHostQPS),
-		ReplicationTaskProcessorShardQPS:                    dc.GetFloat64(dynamicconfig.ReplicationTaskProcessorShardQPS),
+		ReplicationTaskProcessorHostQPS:                     dc.GetFloat(dynamicconfig.ReplicationTaskProcessorHostQPS),
+		ReplicationTaskProcessorShardQPS:                    dc.GetFloat(dynamicconfig.ReplicationTaskProcessorShardQPS),
 		ReplicationEnableDLQMetrics:                         dc.GetBool(dynamicconfig.ReplicationEnableDLQMetrics),
 		ReplicationEnableUpdateWithNewTaskMerge:             dc.GetBool(dynamicconfig.ReplicationEnableUpdateWithNewTaskMerge),
 		ReplicationStreamSyncStatusDuration:                 dc.GetDuration(dynamicconfig.ReplicationStreamSyncStatusDuration),
@@ -486,12 +495,12 @@ func NewConfig(
 		ShardUpdateMinInterval:           dc.GetDuration(dynamicconfig.ShardUpdateMinInterval),
 		ShardUpdateMinTasksCompleted:     dc.GetInt(dynamicconfig.ShardUpdateMinTasksCompleted),
 		ShardSyncMinInterval:             dc.GetDuration(dynamicconfig.ShardSyncMinInterval),
-		ShardSyncTimerJitterCoefficient:  dc.GetFloat64(dynamicconfig.TransferProcessorMaxPollIntervalJitterCoefficient),
+		ShardSyncTimerJitterCoefficient:  dc.GetFloat(dynamicconfig.TransferProcessorMaxPollIntervalJitterCoefficient),
 
 		// history client: client/history/client.go set the client timeout 30s
 		// TODO: Return this value to the client: go.temporal.io/server/issues/294
 		LongPollExpirationInterval:          dc.GetDurationByNamespace(dynamicconfig.HistoryLongPollExpirationInterval),
-		EventEncodingType:                   dc.GetStringByNamespace(dynamicconfig.DefaultEventEncoding)),
+		EventEncodingType:                   dc.GetStringByNamespace(dynamicconfig.DefaultEventEncoding),
 		EnableParentClosePolicy:             dc.GetBoolByNamespace(dynamicconfig.EnableParentClosePolicy),
 		NumParentClosePolicySystemWorkflows: dc.GetInt(dynamicconfig.NumParentClosePolicySystemWorkflows),
 		EnableParentClosePolicyWorker:       dc.GetBool(dynamicconfig.EnableParentClosePolicyWorker),
@@ -520,30 +529,30 @@ func NewConfig(
 		ThrottledLogRPS:   dc.GetInt(dynamicconfig.HistoryThrottledLogRPS),
 		EnableStickyQuery: dc.GetBoolByNamespace(dynamicconfig.EnableStickyQuery),
 
-		DefaultActivityRetryPolicy:   dc.GetMapByNamespace(dynamicconfig.DefaultActivityRetryPolicy)),
-		DefaultWorkflowRetryPolicy:   dc.GetMapByNamespace(dynamicconfig.DefaultWorkflowRetryPolicy)),
+		DefaultActivityRetryPolicy:   dc.GetMapByNamespace(dynamicconfig.DefaultActivityRetryPolicy),
+		DefaultWorkflowRetryPolicy:   dc.GetMapByNamespace(dynamicconfig.DefaultWorkflowRetryPolicy),
 		WorkflowTaskHeartbeatTimeout: dc.GetDurationByNamespace(dynamicconfig.WorkflowTaskHeartbeatTimeout),
 		WorkflowTaskCriticalAttempts: dc.GetInt(dynamicconfig.WorkflowTaskCriticalAttempts),
 		WorkflowTaskRetryMaxInterval: dc.GetDuration(dynamicconfig.WorkflowTaskRetryMaxInterval),
 
 		ReplicationTaskFetcherParallelism:            dc.GetInt(dynamicconfig.ReplicationTaskFetcherParallelism),
 		ReplicationTaskFetcherAggregationInterval:    dc.GetDuration(dynamicconfig.ReplicationTaskFetcherAggregationInterval),
-		ReplicationTaskFetcherTimerJitterCoefficient: dc.GetFloat64(dynamicconfig.ReplicationTaskFetcherTimerJitterCoefficient),
+		ReplicationTaskFetcherTimerJitterCoefficient: dc.GetFloat(dynamicconfig.ReplicationTaskFetcherTimerJitterCoefficient),
 		ReplicationTaskFetcherErrorRetryWait:         dc.GetDuration(dynamicconfig.ReplicationTaskFetcherErrorRetryWait),
 
-		ReplicationTaskProcessorErrorRetryWait:               dc.GetDurationPropertyFilteredByShardID(dynamicconfig.ReplicationTaskProcessorErrorRetryWait, 1*time.Second),
-		ReplicationTaskProcessorErrorRetryBackoffCoefficient: dc.GetFloat64PropertyFilteredByShardID(dynamicconfig.ReplicationTaskProcessorErrorRetryBackoffCoefficient, 1.2),
-		ReplicationTaskProcessorErrorRetryMaxInterval:        dc.GetDurationPropertyFilteredByShardID(dynamicconfig.ReplicationTaskProcessorErrorRetryMaxInterval, 5*time.Second),
-		ReplicationTaskProcessorErrorRetryMaxAttempts:        dc.GetIntPropertyFilteredByShardID(dynamicconfig.ReplicationTaskProcessorErrorRetryMaxAttempts, 80),
-		ReplicationTaskProcessorErrorRetryExpiration:         dc.GetDurationPropertyFilteredByShardID(dynamicconfig.ReplicationTaskProcessorErrorRetryExpiration, 5*time.Minute),
-		ReplicationTaskProcessorNoTaskRetryWait:              dc.GetDurationPropertyFilteredByShardID(dynamicconfig.ReplicationTaskProcessorNoTaskInitialWait, 2*time.Second),
-		ReplicationTaskProcessorCleanupInterval:              dc.GetDurationPropertyFilteredByShardID(dynamicconfig.ReplicationTaskProcessorCleanupInterval, 1*time.Minute),
-		ReplicationTaskProcessorCleanupJitterCoefficient:     dc.GetFloat64PropertyFilteredByShardID(dynamicconfig.ReplicationTaskProcessorCleanupJitterCoefficient, 0.15),
+		ReplicationTaskProcessorErrorRetryWait:               dc.GetDurationByShardID(dynamicconfig.ReplicationTaskProcessorErrorRetryWait),
+		ReplicationTaskProcessorErrorRetryBackoffCoefficient: dc.GetFloatByShardID(dynamicconfig.ReplicationTaskProcessorErrorRetryBackoffCoefficient),
+		ReplicationTaskProcessorErrorRetryMaxInterval:        dc.GetDurationByShardID(dynamicconfig.ReplicationTaskProcessorErrorRetryMaxInterval),
+		ReplicationTaskProcessorErrorRetryMaxAttempts:        dc.GetIntByShardID(dynamicconfig.ReplicationTaskProcessorErrorRetryMaxAttempts),
+		ReplicationTaskProcessorErrorRetryExpiration:         dc.GetDurationByShardID(dynamicconfig.ReplicationTaskProcessorErrorRetryExpiration),
+		ReplicationTaskProcessorNoTaskRetryWait:              dc.GetDurationByShardID(dynamicconfig.ReplicationTaskProcessorNoTaskInitialWait),
+		ReplicationTaskProcessorCleanupInterval:              dc.GetDurationByShardID(dynamicconfig.ReplicationTaskProcessorCleanupInterval),
+		ReplicationTaskProcessorCleanupJitterCoefficient:     dc.GetFloatByShardID(dynamicconfig.ReplicationTaskProcessorCleanupJitterCoefficient),
 
 		MaxBufferedQueryCount:                 dc.GetInt(dynamicconfig.MaxBufferedQueryCount),
 		MutableStateChecksumGenProbability:    dc.GetIntByNamespace(dynamicconfig.MutableStateChecksumGenProbability),
 		MutableStateChecksumVerifyProbability: dc.GetIntByNamespace(dynamicconfig.MutableStateChecksumVerifyProbability),
-		MutableStateChecksumInvalidateBefore:  dc.GetFloat64(dynamicconfig.MutableStateChecksumInvalidateBefore),
+		MutableStateChecksumInvalidateBefore:  dc.GetFloat(dynamicconfig.MutableStateChecksumInvalidateBefore),
 
 		StandbyTaskReReplicationContextTimeout: dc.GetDurationByNamespaceID(dynamicconfig.StandbyTaskReReplicationContextTimeout),
 
@@ -554,12 +563,12 @@ func NewConfig(
 		VisibilityProcessorMaxPollRPS:                         dc.GetInt(dynamicconfig.VisibilityProcessorMaxPollRPS),
 		VisibilityProcessorMaxPollHostRPS:                     dc.GetInt(dynamicconfig.VisibilityProcessorMaxPollHostRPS),
 		VisibilityProcessorSchedulerWorkerCount:               dc.GetInt(dynamicconfig.VisibilityProcessorSchedulerWorkerCount),
-		VisibilityProcessorSchedulerActiveRoundRobinWeights:   dc.GetMapPropertyFnFilteredByNamespace(dynamicconfig.WithDefault(dynamicconfig.VisibilityProcessorSchedulerActiveRoundRobinWeights, ConvertWeightsToDynamicConfigValue(DefaultActiveTaskPriorityWeight))),
-		VisibilityProcessorSchedulerStandbyRoundRobinWeights:  dc.GetMapPropertyFnFilteredByNamespace(dynamicconfig.WithDefault(dynamicconfig.VisibilityProcessorSchedulerStandbyRoundRobinWeights, ConvertWeightsToDynamicConfigValue(DefaultStandbyTaskPriorityWeight))),
+		VisibilityProcessorSchedulerActiveRoundRobinWeights:   getMapWithDefaultWeights(dynamicconfig.VisibilityProcessorSchedulerActiveRoundRobinWeights, DefaultActiveTaskPriorityWeight),
+		VisibilityProcessorSchedulerStandbyRoundRobinWeights:  getMapWithDefaultWeights(dynamicconfig.VisibilityProcessorSchedulerStandbyRoundRobinWeights, DefaultStandbyTaskPriorityWeight),
 		VisibilityProcessorMaxPollInterval:                    dc.GetDuration(dynamicconfig.VisibilityProcessorMaxPollInterval),
-		VisibilityProcessorMaxPollIntervalJitterCoefficient:   dc.GetFloat64(dynamicconfig.VisibilityProcessorMaxPollIntervalJitterCoefficient),
+		VisibilityProcessorMaxPollIntervalJitterCoefficient:   dc.GetFloat(dynamicconfig.VisibilityProcessorMaxPollIntervalJitterCoefficient),
 		VisibilityProcessorUpdateAckInterval:                  dc.GetDuration(dynamicconfig.VisibilityProcessorUpdateAckInterval),
-		VisibilityProcessorUpdateAckIntervalJitterCoefficient: dc.GetFloat64(dynamicconfig.VisibilityProcessorUpdateAckIntervalJitterCoefficient),
+		VisibilityProcessorUpdateAckIntervalJitterCoefficient: dc.GetFloat(dynamicconfig.VisibilityProcessorUpdateAckIntervalJitterCoefficient),
 		VisibilityProcessorPollBackoffInterval:                dc.GetDuration(dynamicconfig.VisibilityProcessorPollBackoffInterval),
 		VisibilityProcessorEnsureCloseBeforeDelete:            dc.GetBool(dynamicconfig.VisibilityProcessorEnsureCloseBeforeDelete),
 		VisibilityProcessorEnableCloseWorkflowCleanup:         dc.GetBoolByNamespace(dynamicconfig.VisibilityProcessorEnableCloseWorkflowCleanup),
@@ -590,12 +599,12 @@ func NewConfig(
 		ArchivalProcessorMaxPollHostRPS:                     dc.GetInt(dynamicconfig.ArchivalProcessorMaxPollHostRPS),
 		ArchivalProcessorSchedulerWorkerCount:               dc.GetInt(dynamicconfig.ArchivalProcessorSchedulerWorkerCount),
 		ArchivalProcessorMaxPollInterval:                    dc.GetDuration(dynamicconfig.ArchivalProcessorMaxPollInterval),
-		ArchivalProcessorMaxPollIntervalJitterCoefficient:   dc.GetFloat64(dynamicconfig.ArchivalProcessorMaxPollIntervalJitterCoefficient),
+		ArchivalProcessorMaxPollIntervalJitterCoefficient:   dc.GetFloat(dynamicconfig.ArchivalProcessorMaxPollIntervalJitterCoefficient),
 		ArchivalProcessorUpdateAckInterval:                  dc.GetDuration(dynamicconfig.ArchivalProcessorUpdateAckInterval),
-		ArchivalProcessorUpdateAckIntervalJitterCoefficient: dc.GetFloat64(dynamicconfig.ArchivalProcessorUpdateAckIntervalJitterCoefficient),
+		ArchivalProcessorUpdateAckIntervalJitterCoefficient: dc.GetFloat(dynamicconfig.ArchivalProcessorUpdateAckIntervalJitterCoefficient),
 		ArchivalProcessorPollBackoffInterval:                dc.GetDuration(dynamicconfig.ArchivalProcessorPollBackoffInterval),
 		ArchivalProcessorArchiveDelay:                       dc.GetDuration(dynamicconfig.ArchivalProcessorArchiveDelay),
-		ArchivalBackendMaxRPS:                               dc.GetFloat64(dynamicconfig.ArchivalBackendMaxRPS),
+		ArchivalBackendMaxRPS:                               dc.GetFloat(dynamicconfig.ArchivalBackendMaxRPS),
 		ArchivalQueueMaxReaderCount:                         dc.GetInt(dynamicconfig.ArchivalQueueMaxReaderCount),
 
 		// workflow update related
@@ -604,7 +613,7 @@ func NewConfig(
 
 		SendRawWorkflowHistory: dc.GetBoolByNamespace(dynamicconfig.SendRawWorkflowHistory),
 
-		FrontendAccessHistoryFraction: dc.GetFloat64(dynamicconfig.FrontendAccessHistoryFraction),
+		FrontendAccessHistoryFraction: dc.GetFloat(dynamicconfig.FrontendAccessHistoryFraction),
 	}
 
 	return cfg

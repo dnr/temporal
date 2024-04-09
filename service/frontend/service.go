@@ -26,7 +26,6 @@ package frontend
 
 import (
 	"net"
-	"os"
 	"sync"
 	"time"
 
@@ -39,13 +38,11 @@ import (
 	"google.golang.org/grpc/reflection"
 
 	"go.temporal.io/server/api/adminservice/v1"
-	"go.temporal.io/server/common"
 	"go.temporal.io/server/common/dynamicconfig"
 	"go.temporal.io/server/common/log"
 	"go.temporal.io/server/common/log/tag"
 	"go.temporal.io/server/common/membership"
 	"go.temporal.io/server/common/metrics"
-	"go.temporal.io/server/common/namespace"
 	"go.temporal.io/server/common/persistence/client"
 	"go.temporal.io/server/common/persistence/visibility"
 	"go.temporal.io/server/common/persistence/visibility/manager"
@@ -229,17 +226,17 @@ func NewConfig(
 		HistoryMaxPageSize:                  dc.GetIntByNamespace(dynamicconfig.FrontendHistoryMaxPageSize),
 		RPS:                                 dc.GetInt(dynamicconfig.FrontendRPS),
 		GlobalRPS:                           dc.GetInt(dynamicconfig.FrontendGlobalRPS),
-		OperatorRPSRatio:                    dc.GetFloat64(dynamicconfig.OperatorRPSRatio),
+		OperatorRPSRatio:                    dc.GetFloat(dynamicconfig.OperatorRPSRatio),
 		NamespaceReplicationInducingAPIsRPS: dc.GetInt(dynamicconfig.FrontendNamespaceReplicationInducingAPIsRPS),
 
 		MaxNamespaceRPSPerInstance:                                        dc.GetIntByNamespace(dynamicconfig.FrontendMaxNamespaceRPSPerInstance),
-		MaxNamespaceBurstRatioPerInstance:                                 dc.GetFloatPropertyFilteredByNamespace(dynamicconfig.FrontendMaxNamespaceBurstRatioPerInstance, 2),
+		MaxNamespaceBurstRatioPerInstance:                                 dc.GetFloatByNamespace(dynamicconfig.FrontendMaxNamespaceBurstRatioPerInstance),
 		MaxConcurrentLongRunningRequestsPerInstance:                       dc.GetIntByNamespace(dynamicconfig.FrontendMaxConcurrentLongRunningRequestsPerInstance),
 		MaxGlobalConcurrentLongRunningRequests:                            dc.GetIntByNamespace(dynamicconfig.FrontendGlobalMaxConcurrentLongRunningRequests),
 		MaxNamespaceVisibilityRPSPerInstance:                              dc.GetIntByNamespace(dynamicconfig.FrontendMaxNamespaceVisibilityRPSPerInstance),
-		MaxNamespaceVisibilityBurstRatioPerInstance:                       dc.GetFloatPropertyFilteredByNamespace(dynamicconfig.FrontendMaxNamespaceVisibilityBurstRatioPerInstance, 1),
+		MaxNamespaceVisibilityBurstRatioPerInstance:                       dc.GetFloatByNamespace(dynamicconfig.FrontendMaxNamespaceVisibilityBurstRatioPerInstance),
 		MaxNamespaceNamespaceReplicationInducingAPIsRPSPerInstance:        dc.GetIntByNamespace(dynamicconfig.FrontendMaxNamespaceNamespaceReplicationInducingAPIsRPSPerInstance),
-		MaxNamespaceNamespaceReplicationInducingAPIsBurstRatioPerInstance: dc.GetFloatPropertyFilteredByNamespace(dynamicconfig.FrontendMaxNamespaceNamespaceReplicationInducingAPIsBurstRatioPerInstance, 10),
+		MaxNamespaceNamespaceReplicationInducingAPIsBurstRatioPerInstance: dc.GetFloatByNamespace(dynamicconfig.FrontendMaxNamespaceNamespaceReplicationInducingAPIsBurstRatioPerInstance),
 
 		GlobalNamespaceRPS:                     dc.GetIntByNamespace(dynamicconfig.FrontendGlobalNamespaceRPS),
 		InternalFEGlobalNamespaceRPS:           dc.GetIntByNamespace(dynamicconfig.InternalFrontendGlobalNamespaceRPS),
@@ -266,9 +263,9 @@ func NewConfig(
 		VisibilityArchivalQueryMaxPageSize:       dc.GetInt(dynamicconfig.VisibilityArchivalQueryMaxPageSize),
 		DisallowQuery:                            dc.GetBoolByNamespace(dynamicconfig.DisallowQuery),
 		SendRawWorkflowHistory:                   dc.GetBoolByNamespace(dynamicconfig.SendRawWorkflowHistory),
-		DefaultWorkflowRetryPolicy:               dc.GetMapByNamespace(dynamicconfig.DefaultWorkflowRetryPolicy)),
+		DefaultWorkflowRetryPolicy:               dc.GetMapByNamespace(dynamicconfig.DefaultWorkflowRetryPolicy),
 		DefaultWorkflowTaskTimeout:               dc.GetDurationByNamespace(dynamicconfig.DefaultWorkflowTaskTimeout),
-		EnableServerVersionCheck:                 dc.GetBool(dynamicconfig.EnableServerVersionCheck) == ""),
+		EnableServerVersionCheck:                 dc.GetBool(dynamicconfig.EnableServerVersionCheck),
 		EnableTokenNamespaceEnforcement:          dc.GetBool(dynamicconfig.EnableTokenNamespaceEnforcement),
 		KeepAliveMinTime:                         dc.GetDuration(dynamicconfig.KeepAliveMinTime),
 		KeepAlivePermitWithoutStream:             dc.GetBool(dynamicconfig.KeepAlivePermitWithoutStream),
@@ -300,8 +297,8 @@ func NewConfig(
 		EnableWorkerVersioningData:     dc.GetBoolByNamespace(dynamicconfig.FrontendEnableWorkerVersioningDataAPIs),
 		EnableWorkerVersioningWorkflow: dc.GetBoolByNamespace(dynamicconfig.FrontendEnableWorkerVersioningWorkflowAPIs),
 
-		AccessHistoryFraction:            dc.GetFloat64(dynamicconfig.FrontendAccessHistoryFraction),
-		AdminDeleteAccessHistoryFraction: dc.GetFloat64(dynamicconfig.FrontendAdminDeleteAccessHistoryFraction),
+		AccessHistoryFraction:            dc.GetFloat(dynamicconfig.FrontendAccessHistoryFraction),
+		AdminDeleteAccessHistoryFraction: dc.GetFloat(dynamicconfig.FrontendAdminDeleteAccessHistoryFraction),
 
 		EnableNexusAPIs:             dc.GetBool(dynamicconfig.FrontendEnableNexusAPIs),
 		EnableCallbackAttachment:    dc.GetBoolByNamespace(dynamicconfig.FrontendEnableCallbackAttachment),
