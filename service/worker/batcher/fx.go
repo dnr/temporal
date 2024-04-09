@@ -100,7 +100,7 @@ func (s *workerComponent) activities(name namespace.Name, id namespace.ID) *acti
 		activityDeps: s.activityDeps,
 		namespace:    name,
 		namespaceID:  id,
-		rps:          s.dc.GetIntPropertyFilteredByNamespace(dynamicconfig.BatcherRPS, 50),
-		concurrency:  s.dc.GetIntPropertyFilteredByNamespace(dynamicconfig.BatcherConcurrency, 5),
+		rps:          s.dc.GetIntByNamespace(dynamicconfig.BatcherRPS),
+		concurrency:  s.dc.GetIntByNamespace(dynamicconfig.BatcherConcurrency),
 	}
 }

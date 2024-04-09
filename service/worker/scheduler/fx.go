@@ -85,7 +85,7 @@ func NewResult(
 			activityDeps:             params,
 			enabledForNs:             dcCollection.GetBoolByNamespace(dynamicconfig.WorkerEnableScheduler),
 			globalNSStartWorkflowRPS: dcCollection.GetFloatPropertyFilteredByNamespace(dynamicconfig.SchedulerNamespaceStartWorkflowRPS, 30.0),
-			maxBlobSize:              dcCollection.GetIntPropertyFilteredByNamespace(dynamicconfig.BlobSizeLimitError, eventStorageSize),
+			maxBlobSize:              dcCollection.GetIntByNamespace(dynamicconfig.BlobSizeLimitError),
 		},
 	}
 }
