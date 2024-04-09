@@ -42,10 +42,6 @@ const (
 	// BatchWFTypeName is the workflow type
 	BatchWFTypeName   = "temporal-sys-batch-workflow"
 	NamespaceDivision = "TemporalBatcher"
-	// DefaultRPS is the default RPS
-	DefaultRPS = 50
-	// DefaultConcurrency is the default concurrency
-	DefaultConcurrency = 5
 )
 
 type (
@@ -104,7 +100,7 @@ func (s *workerComponent) activities(name namespace.Name, id namespace.ID) *acti
 		activityDeps: s.activityDeps,
 		namespace:    name,
 		namespaceID:  id,
-		rps:          s.dc.GetIntPropertyFilteredByNamespace(dynamicconfig.BatcherRPS, DefaultRPS),
-		concurrency:  s.dc.GetIntPropertyFilteredByNamespace(dynamicconfig.BatcherConcurrency, DefaultConcurrency),
+		rps:          s.dc.GetIntPropertyFilteredByNamespace(dynamicconfig.BatcherRPS, 50),
+		concurrency:  s.dc.GetIntPropertyFilteredByNamespace(dynamicconfig.BatcherConcurrency, 5),
 	}
 }

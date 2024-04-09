@@ -28,6 +28,8 @@ import (
 	"os"
 	"time"
 
+	enumspb "go.temporal.io/api/enums/v1"
+
 	"go.temporal.io/server/common/primitives"
 )
 
@@ -91,22 +93,22 @@ values in system search attributes.`,
 
 	HistoryArchivalState = &StringGlobalSetting{
 		Key:         "system.historyArchivalState",
-		Default:     historyState,
+		Default:     "", // actual default is from static config
 		Description: `HistoryArchivalState is key for the state of history archival`,
 	}
 	EnableReadFromHistoryArchival = &BoolGlobalSetting{
 		Key:         "system.enableReadFromHistoryArchival",
-		Default:     historyReadEnabled,
+		Default:     false, // actual default is from static config
 		Description: `EnableReadFromHistoryArchival is key for enabling reading history from archival store`,
 	}
 	VisibilityArchivalState = &StringGlobalSetting{
 		Key:         "system.visibilityArchivalState",
-		Default:     visibilityState,
+		Default:     "", // actual default is from static config
 		Description: `VisibilityArchivalState is key for the state of visibility archival`,
 	}
 	EnableReadFromVisibilityArchival = &BoolGlobalSetting{
 		Key:         "system.enableReadFromVisibilityArchival",
-		Default:     visibilityReadEnabled,
+		Default:     false, // actual default is from static config
 		Description: `EnableReadFromVisibilityArchival is key for enabling reading visibility from archival store`,
 	}
 	EnableNamespaceNotActiveAutoForwarding = &BoolNamespaceSetting{
@@ -1415,12 +1417,12 @@ If value less or equal to 0, will fall back to HistoryPersistenceNamespaceMaxQPS
 	}
 	TimerProcessorSchedulerActiveRoundRobinWeights = &MapNamespaceSetting{
 		Key:         "history.timerProcessorSchedulerActiveRoundRobinWeights",
-		Default:     ConvertWeightsToDynamicConfigValue(DefaultActiveTaskPriorityWeight),
+		Default:     nil, // actual default is in service/history/configs package
 		Description: `TimerProcessorSchedulerActiveRoundRobinWeights is the priority round robin weights used by timer task scheduler for active namespaces`,
 	}
 	TimerProcessorSchedulerStandbyRoundRobinWeights = &MapNamespaceSetting{
 		Key:         "history.timerProcessorSchedulerStandbyRoundRobinWeights",
-		Default:     ConvertWeightsToDynamicConfigValue(DefaultStandbyTaskPriorityWeight),
+		Default:     nil, // actual default is in service/history/configs package
 		Description: `TimerProcessorSchedulerStandbyRoundRobinWeights is the priority round robin weights used by timer task scheduler for standby namespaces`,
 	}
 	TimerProcessorUpdateAckInterval = &DurationGlobalSetting{
@@ -1502,12 +1504,12 @@ If value less or equal to 0, will fall back to HistoryPersistenceNamespaceMaxQPS
 	}
 	TransferProcessorSchedulerActiveRoundRobinWeights = &MapNamespaceSetting{
 		Key:         "history.transferProcessorSchedulerActiveRoundRobinWeights",
-		Default:     ConvertWeightsToDynamicConfigValue(DefaultActiveTaskPriorityWeight),
+		Default:     nil, // actual default is in service/history/configs package
 		Description: `TransferProcessorSchedulerActiveRoundRobinWeights is the priority round robin weights used by transfer task scheduler for active namespaces`,
 	}
 	TransferProcessorSchedulerStandbyRoundRobinWeights = &MapNamespaceSetting{
 		Key:         "history.transferProcessorSchedulerStandbyRoundRobinWeights",
-		Default:     ConvertWeightsToDynamicConfigValue(DefaultStandbyTaskPriorityWeight),
+		Default:     nil, // actual default is in service/history/configs package
 		Description: `TransferProcessorSchedulerStandbyRoundRobinWeights is the priority round robin weights used by transfer task scheduler for standby namespaces`,
 	}
 	TransferProcessorMaxPollInterval = &DurationGlobalSetting{
@@ -1622,12 +1624,12 @@ If value less or equal to 0, will fall back to HistoryPersistenceNamespaceMaxQPS
 	}
 	VisibilityProcessorSchedulerActiveRoundRobinWeights = &MapNamespaceSetting{
 		Key:         "history.visibilityProcessorSchedulerActiveRoundRobinWeights",
-		Default:     ConvertWeightsToDynamicConfigValue(DefaultActiveTaskPriorityWeight),
+		Default:     nil, // actual default is in service/history/configs package
 		Description: `VisibilityProcessorSchedulerActiveRoundRobinWeights is the priority round robin weights by visibility task scheduler for active namespaces`,
 	}
 	VisibilityProcessorSchedulerStandbyRoundRobinWeights = &MapNamespaceSetting{
 		Key:         "history.visibilityProcessorSchedulerStandbyRoundRobinWeights",
-		Default:     ConvertWeightsToDynamicConfigValue(DefaultStandbyTaskPriorityWeight),
+		Default:     nil, // actual default is in service/history/configs package
 		Description: `VisibilityProcessorSchedulerStandbyRoundRobinWeights is the priority round robin weights by visibility task scheduler for standby namespaces`,
 	}
 	VisibilityProcessorMaxPollInterval = &DurationGlobalSetting{
@@ -1824,7 +1826,7 @@ where the user has set an explicit RetryPolicy, but not specified all the fields
 	}
 	HistoryMaxAutoResetPoints = &IntNamespaceSetting{
 		Key:         "history.historyMaxAutoResetPoints",
-		Default:     DefaultHistoryMaxAutoResetPoints,
+		Default:     primitives.DefaultHistoryMaxAutoResetPoints,
 		Description: `HistoryMaxAutoResetPoints is the key for max number of auto reset points stored in mutableState`,
 	}
 	EnableParentClosePolicy = &BoolNamespaceSetting{
@@ -2198,12 +2200,12 @@ If the service configures with archival feature enabled, update worker.historySc
 	}
 	BatcherRPS = &IntNamespaceSetting{
 		Key:         "worker.batcherRPS",
-		Default:     DefaultRPS,
+		Default:     50,
 		Description: `BatcherRPS controls number the rps of batch operations`,
 	}
 	BatcherConcurrency = &IntNamespaceSetting{
 		Key:         "worker.batcherConcurrency",
-		Default:     DefaultConcurrency,
+		Default:     5,
 		Description: `BatcherConcurrency controls the concurrency of one batch operation`,
 	}
 	WorkerParentCloseMaxConcurrentActivityExecutionSize = &IntGlobalSetting{

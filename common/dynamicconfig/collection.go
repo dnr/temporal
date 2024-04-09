@@ -91,12 +91,6 @@ func (c *Collection) throttleLog() bool {
 	return errCount < errCountLogThreshold || errCount%errCountLogThreshold == 0
 }
 
-// FIXME: remove this
-// // Task queue partitions use a dedicated function to handle defaults.
-// func (c *Collection) GetTaskQueuePartitionsProperty(key Key) IntPropertyFnWithTaskQueueInfoFilters {
-// 	return c.GetIntPropertyFilteredByTaskQueueInfo(key, defaultNumTaskQueuePartitions)
-// }
-
 func (c *Collection) HasKey(key Key) bool {
 	cvs := c.client.GetValue(key)
 	return len(cvs) > 0

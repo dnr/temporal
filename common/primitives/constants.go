@@ -46,3 +46,7 @@ const (
 	// ReadDLQMessagesPageSize is the max page size for read DLQ messages
 	ReadDLQMessagesPageSize = 1000
 )
+
+const (
+	DefaultHistoryMaxAutoResetPoints = 20
+)

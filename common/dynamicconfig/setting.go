@@ -49,3 +49,11 @@ type (
 		GetDescription() string
 	}
 )
+
+// WithDefault can be used to clone a pre-defined Setting while overriding the
+// default value, to allow dynamic defaults (i.e. set at the call site).
+func WithDefault[T any, P any, S ~*Setting[T, P]](setting S, newDefault T) S {
+	newSetting := *setting
+	newSetting.Default = newDefault
+	return &newSetting
+}
