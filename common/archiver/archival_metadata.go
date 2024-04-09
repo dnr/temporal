@@ -95,26 +95,18 @@ func NewArchivalMetadata(
 	visibilityReadEnabled bool,
 	namespaceDefaults *config.ArchivalNamespaceDefaults,
 ) ArchivalMetadata {
-	// Go generics type interference doesn't seem good enough to figure these out, so we have
-	// to cast. Make some aliases to make it easier to read:
-	type (
-		sgs = *dynamicconfig.StringGlobalSetting
-		sgg = *dynamicconfig.Setting[string, func()]
-		bgs = *dynamicconfig.BoolGlobalSetting
-		bgg = *dynamicconfig.Setting[bool, func()]
-	)
 	historyConfig := NewArchivalConfig(
 		historyState,
-		dc.GetString(sgs(dynamicconfig.WithDefault(sgg(dynamicconfig.HistoryArchivalState), historyState))),
-		dc.GetBool(bgs(dynamicconfig.WithDefault(bgg(dynamicconfig.EnableReadFromHistoryArchival), historyReadEnabled))),
+		dc.GetString(dynamicconfig.HistoryArchivalState.WithDefault(historyState)),
+		dc.GetBool(dynamicconfig.EnableReadFromHistoryArchival.WithDefault(historyReadEnabled)),
 		namespaceDefaults.History.State,
 		namespaceDefaults.History.URI,
 	)
 
 	visibilityConfig := NewArchivalConfig(
 		visibilityState,
-		dc.GetString(sgs(dynamicconfig.WithDefault(sgg(dynamicconfig.VisibilityArchivalState), visibilityState))),
-		dc.GetBool(bgs(dynamicconfig.WithDefault(bgg(dynamicconfig.EnableReadFromVisibilityArchival), visibilityReadEnabled))),
+		dc.GetString(dynamicconfig.VisibilityArchivalState.WithDefault(visibilityState)),
+		dc.GetBool(dynamicconfig.EnableReadFromVisibilityArchival.WithDefault(visibilityReadEnabled)),
 		namespaceDefaults.Visibility.State,
 		namespaceDefaults.Visibility.URI,
 	)

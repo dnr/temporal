@@ -65,6 +65,12 @@ func (s *BoolGlobalSetting) GetPrecedence() Precedence { return PrecedenceGlobal
 func (s *BoolGlobalSetting) GetDefault() any           { return s.Default }
 func (s *BoolGlobalSetting) GetDescription() string    { return s.Description }
 
+func (s *BoolGlobalSetting) WithDefault(v bool) *BoolGlobalSetting {
+	newS := *s
+	newS.Default = v
+	return &newS
+}
+
 type BoolPropertyFn func() bool
 
 func (c *Collection) GetBool(s *BoolGlobalSetting) BoolPropertyFn {
@@ -91,6 +97,12 @@ func (s *BoolNamespaceSetting) GetType() Type             { return TypeBool }
 func (s *BoolNamespaceSetting) GetPrecedence() Precedence { return PrecedenceNamespace }
 func (s *BoolNamespaceSetting) GetDefault() any           { return s.Default }
 func (s *BoolNamespaceSetting) GetDescription() string    { return s.Description }
+
+func (s *BoolNamespaceSetting) WithDefault(v bool) *BoolNamespaceSetting {
+	newS := *s
+	newS.Default = v
+	return &newS
+}
 
 type BoolPropertyFnWithNamespaceFilter func(namespace string) bool
 
@@ -119,6 +131,12 @@ func (s *BoolNamespaceIDSetting) GetPrecedence() Precedence { return PrecedenceN
 func (s *BoolNamespaceIDSetting) GetDefault() any           { return s.Default }
 func (s *BoolNamespaceIDSetting) GetDescription() string    { return s.Description }
 
+func (s *BoolNamespaceIDSetting) WithDefault(v bool) *BoolNamespaceIDSetting {
+	newS := *s
+	newS.Default = v
+	return &newS
+}
+
 type BoolPropertyFnWithNamespaceIDFilter func(namespaceID string) bool
 
 func (c *Collection) GetBoolByNamespaceID(s *BoolNamespaceIDSetting) BoolPropertyFnWithNamespaceIDFilter {
@@ -145,6 +163,12 @@ func (s *BoolTaskQueueSetting) GetType() Type             { return TypeBool }
 func (s *BoolTaskQueueSetting) GetPrecedence() Precedence { return PrecedenceTaskQueue }
 func (s *BoolTaskQueueSetting) GetDefault() any           { return s.Default }
 func (s *BoolTaskQueueSetting) GetDescription() string    { return s.Description }
+
+func (s *BoolTaskQueueSetting) WithDefault(v bool) *BoolTaskQueueSetting {
+	newS := *s
+	newS.Default = v
+	return &newS
+}
 
 type BoolPropertyFnWithTaskQueueFilter func(namespace string, taskQueue string, taskQueueType enumspb.TaskQueueType) bool
 
@@ -173,6 +197,12 @@ func (s *BoolShardIDSetting) GetPrecedence() Precedence { return PrecedenceShard
 func (s *BoolShardIDSetting) GetDefault() any           { return s.Default }
 func (s *BoolShardIDSetting) GetDescription() string    { return s.Description }
 
+func (s *BoolShardIDSetting) WithDefault(v bool) *BoolShardIDSetting {
+	newS := *s
+	newS.Default = v
+	return &newS
+}
+
 type BoolPropertyFnWithShardIDFilter func(shardID int32) bool
 
 func (c *Collection) GetBoolByShardID(s *BoolShardIDSetting) BoolPropertyFnWithShardIDFilter {
@@ -199,6 +229,12 @@ func (s *BoolTaskTypeSetting) GetType() Type             { return TypeBool }
 func (s *BoolTaskTypeSetting) GetPrecedence() Precedence { return PrecedenceTaskType }
 func (s *BoolTaskTypeSetting) GetDefault() any           { return s.Default }
 func (s *BoolTaskTypeSetting) GetDescription() string    { return s.Description }
+
+func (s *BoolTaskTypeSetting) WithDefault(v bool) *BoolTaskTypeSetting {
+	newS := *s
+	newS.Default = v
+	return &newS
+}
 
 type BoolPropertyFnWithTaskTypeFilter func(taskType enumsspb.TaskType) bool
 
@@ -227,6 +263,12 @@ func (s *IntGlobalSetting) GetPrecedence() Precedence { return PrecedenceGlobal 
 func (s *IntGlobalSetting) GetDefault() any           { return s.Default }
 func (s *IntGlobalSetting) GetDescription() string    { return s.Description }
 
+func (s *IntGlobalSetting) WithDefault(v int) *IntGlobalSetting {
+	newS := *s
+	newS.Default = v
+	return &newS
+}
+
 type IntPropertyFn func() int
 
 func (c *Collection) GetInt(s *IntGlobalSetting) IntPropertyFn {
@@ -253,6 +295,12 @@ func (s *IntNamespaceSetting) GetType() Type             { return TypeInt }
 func (s *IntNamespaceSetting) GetPrecedence() Precedence { return PrecedenceNamespace }
 func (s *IntNamespaceSetting) GetDefault() any           { return s.Default }
 func (s *IntNamespaceSetting) GetDescription() string    { return s.Description }
+
+func (s *IntNamespaceSetting) WithDefault(v int) *IntNamespaceSetting {
+	newS := *s
+	newS.Default = v
+	return &newS
+}
 
 type IntPropertyFnWithNamespaceFilter func(namespace string) int
 
@@ -281,6 +329,12 @@ func (s *IntNamespaceIDSetting) GetPrecedence() Precedence { return PrecedenceNa
 func (s *IntNamespaceIDSetting) GetDefault() any           { return s.Default }
 func (s *IntNamespaceIDSetting) GetDescription() string    { return s.Description }
 
+func (s *IntNamespaceIDSetting) WithDefault(v int) *IntNamespaceIDSetting {
+	newS := *s
+	newS.Default = v
+	return &newS
+}
+
 type IntPropertyFnWithNamespaceIDFilter func(namespaceID string) int
 
 func (c *Collection) GetIntByNamespaceID(s *IntNamespaceIDSetting) IntPropertyFnWithNamespaceIDFilter {
@@ -307,6 +361,12 @@ func (s *IntTaskQueueSetting) GetType() Type             { return TypeInt }
 func (s *IntTaskQueueSetting) GetPrecedence() Precedence { return PrecedenceTaskQueue }
 func (s *IntTaskQueueSetting) GetDefault() any           { return s.Default }
 func (s *IntTaskQueueSetting) GetDescription() string    { return s.Description }
+
+func (s *IntTaskQueueSetting) WithDefault(v int) *IntTaskQueueSetting {
+	newS := *s
+	newS.Default = v
+	return &newS
+}
 
 type IntPropertyFnWithTaskQueueFilter func(namespace string, taskQueue string, taskQueueType enumspb.TaskQueueType) int
 
@@ -335,6 +395,12 @@ func (s *IntShardIDSetting) GetPrecedence() Precedence { return PrecedenceShardI
 func (s *IntShardIDSetting) GetDefault() any           { return s.Default }
 func (s *IntShardIDSetting) GetDescription() string    { return s.Description }
 
+func (s *IntShardIDSetting) WithDefault(v int) *IntShardIDSetting {
+	newS := *s
+	newS.Default = v
+	return &newS
+}
+
 type IntPropertyFnWithShardIDFilter func(shardID int32) int
 
 func (c *Collection) GetIntByShardID(s *IntShardIDSetting) IntPropertyFnWithShardIDFilter {
@@ -361,6 +427,12 @@ func (s *IntTaskTypeSetting) GetType() Type             { return TypeInt }
 func (s *IntTaskTypeSetting) GetPrecedence() Precedence { return PrecedenceTaskType }
 func (s *IntTaskTypeSetting) GetDefault() any           { return s.Default }
 func (s *IntTaskTypeSetting) GetDescription() string    { return s.Description }
+
+func (s *IntTaskTypeSetting) WithDefault(v int) *IntTaskTypeSetting {
+	newS := *s
+	newS.Default = v
+	return &newS
+}
 
 type IntPropertyFnWithTaskTypeFilter func(taskType enumsspb.TaskType) int
 
@@ -389,6 +461,12 @@ func (s *FloatGlobalSetting) GetPrecedence() Precedence { return PrecedenceGloba
 func (s *FloatGlobalSetting) GetDefault() any           { return s.Default }
 func (s *FloatGlobalSetting) GetDescription() string    { return s.Description }
 
+func (s *FloatGlobalSetting) WithDefault(v float64) *FloatGlobalSetting {
+	newS := *s
+	newS.Default = v
+	return &newS
+}
+
 type FloatPropertyFn func() float64
 
 func (c *Collection) GetFloat(s *FloatGlobalSetting) FloatPropertyFn {
@@ -415,6 +493,12 @@ func (s *FloatNamespaceSetting) GetType() Type             { return TypeFloat }
 func (s *FloatNamespaceSetting) GetPrecedence() Precedence { return PrecedenceNamespace }
 func (s *FloatNamespaceSetting) GetDefault() any           { return s.Default }
 func (s *FloatNamespaceSetting) GetDescription() string    { return s.Description }
+
+func (s *FloatNamespaceSetting) WithDefault(v float64) *FloatNamespaceSetting {
+	newS := *s
+	newS.Default = v
+	return &newS
+}
 
 type FloatPropertyFnWithNamespaceFilter func(namespace string) float64
 
@@ -443,6 +527,12 @@ func (s *FloatNamespaceIDSetting) GetPrecedence() Precedence { return Precedence
 func (s *FloatNamespaceIDSetting) GetDefault() any           { return s.Default }
 func (s *FloatNamespaceIDSetting) GetDescription() string    { return s.Description }
 
+func (s *FloatNamespaceIDSetting) WithDefault(v float64) *FloatNamespaceIDSetting {
+	newS := *s
+	newS.Default = v
+	return &newS
+}
+
 type FloatPropertyFnWithNamespaceIDFilter func(namespaceID string) float64
 
 func (c *Collection) GetFloatByNamespaceID(s *FloatNamespaceIDSetting) FloatPropertyFnWithNamespaceIDFilter {
@@ -469,6 +559,12 @@ func (s *FloatTaskQueueSetting) GetType() Type             { return TypeFloat }
 func (s *FloatTaskQueueSetting) GetPrecedence() Precedence { return PrecedenceTaskQueue }
 func (s *FloatTaskQueueSetting) GetDefault() any           { return s.Default }
 func (s *FloatTaskQueueSetting) GetDescription() string    { return s.Description }
+
+func (s *FloatTaskQueueSetting) WithDefault(v float64) *FloatTaskQueueSetting {
+	newS := *s
+	newS.Default = v
+	return &newS
+}
 
 type FloatPropertyFnWithTaskQueueFilter func(namespace string, taskQueue string, taskQueueType enumspb.TaskQueueType) float64
 
@@ -497,6 +593,12 @@ func (s *FloatShardIDSetting) GetPrecedence() Precedence { return PrecedenceShar
 func (s *FloatShardIDSetting) GetDefault() any           { return s.Default }
 func (s *FloatShardIDSetting) GetDescription() string    { return s.Description }
 
+func (s *FloatShardIDSetting) WithDefault(v float64) *FloatShardIDSetting {
+	newS := *s
+	newS.Default = v
+	return &newS
+}
+
 type FloatPropertyFnWithShardIDFilter func(shardID int32) float64
 
 func (c *Collection) GetFloatByShardID(s *FloatShardIDSetting) FloatPropertyFnWithShardIDFilter {
@@ -523,6 +625,12 @@ func (s *FloatTaskTypeSetting) GetType() Type             { return TypeFloat }
 func (s *FloatTaskTypeSetting) GetPrecedence() Precedence { return PrecedenceTaskType }
 func (s *FloatTaskTypeSetting) GetDefault() any           { return s.Default }
 func (s *FloatTaskTypeSetting) GetDescription() string    { return s.Description }
+
+func (s *FloatTaskTypeSetting) WithDefault(v float64) *FloatTaskTypeSetting {
+	newS := *s
+	newS.Default = v
+	return &newS
+}
 
 type FloatPropertyFnWithTaskTypeFilter func(taskType enumsspb.TaskType) float64
 
@@ -551,6 +659,12 @@ func (s *StringGlobalSetting) GetPrecedence() Precedence { return PrecedenceGlob
 func (s *StringGlobalSetting) GetDefault() any           { return s.Default }
 func (s *StringGlobalSetting) GetDescription() string    { return s.Description }
 
+func (s *StringGlobalSetting) WithDefault(v string) *StringGlobalSetting {
+	newS := *s
+	newS.Default = v
+	return &newS
+}
+
 type StringPropertyFn func() string
 
 func (c *Collection) GetString(s *StringGlobalSetting) StringPropertyFn {
@@ -577,6 +691,12 @@ func (s *StringNamespaceSetting) GetType() Type             { return TypeString 
 func (s *StringNamespaceSetting) GetPrecedence() Precedence { return PrecedenceNamespace }
 func (s *StringNamespaceSetting) GetDefault() any           { return s.Default }
 func (s *StringNamespaceSetting) GetDescription() string    { return s.Description }
+
+func (s *StringNamespaceSetting) WithDefault(v string) *StringNamespaceSetting {
+	newS := *s
+	newS.Default = v
+	return &newS
+}
 
 type StringPropertyFnWithNamespaceFilter func(namespace string) string
 
@@ -605,6 +725,12 @@ func (s *StringNamespaceIDSetting) GetPrecedence() Precedence { return Precedenc
 func (s *StringNamespaceIDSetting) GetDefault() any           { return s.Default }
 func (s *StringNamespaceIDSetting) GetDescription() string    { return s.Description }
 
+func (s *StringNamespaceIDSetting) WithDefault(v string) *StringNamespaceIDSetting {
+	newS := *s
+	newS.Default = v
+	return &newS
+}
+
 type StringPropertyFnWithNamespaceIDFilter func(namespaceID string) string
 
 func (c *Collection) GetStringByNamespaceID(s *StringNamespaceIDSetting) StringPropertyFnWithNamespaceIDFilter {
@@ -631,6 +757,12 @@ func (s *StringTaskQueueSetting) GetType() Type             { return TypeString 
 func (s *StringTaskQueueSetting) GetPrecedence() Precedence { return PrecedenceTaskQueue }
 func (s *StringTaskQueueSetting) GetDefault() any           { return s.Default }
 func (s *StringTaskQueueSetting) GetDescription() string    { return s.Description }
+
+func (s *StringTaskQueueSetting) WithDefault(v string) *StringTaskQueueSetting {
+	newS := *s
+	newS.Default = v
+	return &newS
+}
 
 type StringPropertyFnWithTaskQueueFilter func(namespace string, taskQueue string, taskQueueType enumspb.TaskQueueType) string
 
@@ -659,6 +791,12 @@ func (s *StringShardIDSetting) GetPrecedence() Precedence { return PrecedenceSha
 func (s *StringShardIDSetting) GetDefault() any           { return s.Default }
 func (s *StringShardIDSetting) GetDescription() string    { return s.Description }
 
+func (s *StringShardIDSetting) WithDefault(v string) *StringShardIDSetting {
+	newS := *s
+	newS.Default = v
+	return &newS
+}
+
 type StringPropertyFnWithShardIDFilter func(shardID int32) string
 
 func (c *Collection) GetStringByShardID(s *StringShardIDSetting) StringPropertyFnWithShardIDFilter {
@@ -685,6 +823,12 @@ func (s *StringTaskTypeSetting) GetType() Type             { return TypeString }
 func (s *StringTaskTypeSetting) GetPrecedence() Precedence { return PrecedenceTaskType }
 func (s *StringTaskTypeSetting) GetDefault() any           { return s.Default }
 func (s *StringTaskTypeSetting) GetDescription() string    { return s.Description }
+
+func (s *StringTaskTypeSetting) WithDefault(v string) *StringTaskTypeSetting {
+	newS := *s
+	newS.Default = v
+	return &newS
+}
 
 type StringPropertyFnWithTaskTypeFilter func(taskType enumsspb.TaskType) string
 
@@ -713,6 +857,12 @@ func (s *DurationGlobalSetting) GetPrecedence() Precedence { return PrecedenceGl
 func (s *DurationGlobalSetting) GetDefault() any           { return s.Default }
 func (s *DurationGlobalSetting) GetDescription() string    { return s.Description }
 
+func (s *DurationGlobalSetting) WithDefault(v time.Duration) *DurationGlobalSetting {
+	newS := *s
+	newS.Default = v
+	return &newS
+}
+
 type DurationPropertyFn func() time.Duration
 
 func (c *Collection) GetDuration(s *DurationGlobalSetting) DurationPropertyFn {
@@ -739,6 +889,12 @@ func (s *DurationNamespaceSetting) GetType() Type             { return TypeDurat
 func (s *DurationNamespaceSetting) GetPrecedence() Precedence { return PrecedenceNamespace }
 func (s *DurationNamespaceSetting) GetDefault() any           { return s.Default }
 func (s *DurationNamespaceSetting) GetDescription() string    { return s.Description }
+
+func (s *DurationNamespaceSetting) WithDefault(v time.Duration) *DurationNamespaceSetting {
+	newS := *s
+	newS.Default = v
+	return &newS
+}
 
 type DurationPropertyFnWithNamespaceFilter func(namespace string) time.Duration
 
@@ -767,6 +923,12 @@ func (s *DurationNamespaceIDSetting) GetPrecedence() Precedence { return Precede
 func (s *DurationNamespaceIDSetting) GetDefault() any           { return s.Default }
 func (s *DurationNamespaceIDSetting) GetDescription() string    { return s.Description }
 
+func (s *DurationNamespaceIDSetting) WithDefault(v time.Duration) *DurationNamespaceIDSetting {
+	newS := *s
+	newS.Default = v
+	return &newS
+}
+
 type DurationPropertyFnWithNamespaceIDFilter func(namespaceID string) time.Duration
 
 func (c *Collection) GetDurationByNamespaceID(s *DurationNamespaceIDSetting) DurationPropertyFnWithNamespaceIDFilter {
@@ -793,6 +955,12 @@ func (s *DurationTaskQueueSetting) GetType() Type             { return TypeDurat
 func (s *DurationTaskQueueSetting) GetPrecedence() Precedence { return PrecedenceTaskQueue }
 func (s *DurationTaskQueueSetting) GetDefault() any           { return s.Default }
 func (s *DurationTaskQueueSetting) GetDescription() string    { return s.Description }
+
+func (s *DurationTaskQueueSetting) WithDefault(v time.Duration) *DurationTaskQueueSetting {
+	newS := *s
+	newS.Default = v
+	return &newS
+}
 
 type DurationPropertyFnWithTaskQueueFilter func(namespace string, taskQueue string, taskQueueType enumspb.TaskQueueType) time.Duration
 
@@ -821,6 +989,12 @@ func (s *DurationShardIDSetting) GetPrecedence() Precedence { return PrecedenceS
 func (s *DurationShardIDSetting) GetDefault() any           { return s.Default }
 func (s *DurationShardIDSetting) GetDescription() string    { return s.Description }
 
+func (s *DurationShardIDSetting) WithDefault(v time.Duration) *DurationShardIDSetting {
+	newS := *s
+	newS.Default = v
+	return &newS
+}
+
 type DurationPropertyFnWithShardIDFilter func(shardID int32) time.Duration
 
 func (c *Collection) GetDurationByShardID(s *DurationShardIDSetting) DurationPropertyFnWithShardIDFilter {
@@ -847,6 +1021,12 @@ func (s *DurationTaskTypeSetting) GetType() Type             { return TypeDurati
 func (s *DurationTaskTypeSetting) GetPrecedence() Precedence { return PrecedenceTaskType }
 func (s *DurationTaskTypeSetting) GetDefault() any           { return s.Default }
 func (s *DurationTaskTypeSetting) GetDescription() string    { return s.Description }
+
+func (s *DurationTaskTypeSetting) WithDefault(v time.Duration) *DurationTaskTypeSetting {
+	newS := *s
+	newS.Default = v
+	return &newS
+}
 
 type DurationPropertyFnWithTaskTypeFilter func(taskType enumsspb.TaskType) time.Duration
 
@@ -875,6 +1055,12 @@ func (s *MapGlobalSetting) GetPrecedence() Precedence { return PrecedenceGlobal 
 func (s *MapGlobalSetting) GetDefault() any           { return s.Default }
 func (s *MapGlobalSetting) GetDescription() string    { return s.Description }
 
+func (s *MapGlobalSetting) WithDefault(v map[string]any) *MapGlobalSetting {
+	newS := *s
+	newS.Default = v
+	return &newS
+}
+
 type MapPropertyFn func() map[string]any
 
 func (c *Collection) GetMap(s *MapGlobalSetting) MapPropertyFn {
@@ -901,6 +1087,12 @@ func (s *MapNamespaceSetting) GetType() Type             { return TypeMap }
 func (s *MapNamespaceSetting) GetPrecedence() Precedence { return PrecedenceNamespace }
 func (s *MapNamespaceSetting) GetDefault() any           { return s.Default }
 func (s *MapNamespaceSetting) GetDescription() string    { return s.Description }
+
+func (s *MapNamespaceSetting) WithDefault(v map[string]any) *MapNamespaceSetting {
+	newS := *s
+	newS.Default = v
+	return &newS
+}
 
 type MapPropertyFnWithNamespaceFilter func(namespace string) map[string]any
 
@@ -929,6 +1121,12 @@ func (s *MapNamespaceIDSetting) GetPrecedence() Precedence { return PrecedenceNa
 func (s *MapNamespaceIDSetting) GetDefault() any           { return s.Default }
 func (s *MapNamespaceIDSetting) GetDescription() string    { return s.Description }
 
+func (s *MapNamespaceIDSetting) WithDefault(v map[string]any) *MapNamespaceIDSetting {
+	newS := *s
+	newS.Default = v
+	return &newS
+}
+
 type MapPropertyFnWithNamespaceIDFilter func(namespaceID string) map[string]any
 
 func (c *Collection) GetMapByNamespaceID(s *MapNamespaceIDSetting) MapPropertyFnWithNamespaceIDFilter {
@@ -955,6 +1153,12 @@ func (s *MapTaskQueueSetting) GetType() Type             { return TypeMap }
 func (s *MapTaskQueueSetting) GetPrecedence() Precedence { return PrecedenceTaskQueue }
 func (s *MapTaskQueueSetting) GetDefault() any           { return s.Default }
 func (s *MapTaskQueueSetting) GetDescription() string    { return s.Description }
+
+func (s *MapTaskQueueSetting) WithDefault(v map[string]any) *MapTaskQueueSetting {
+	newS := *s
+	newS.Default = v
+	return &newS
+}
 
 type MapPropertyFnWithTaskQueueFilter func(namespace string, taskQueue string, taskQueueType enumspb.TaskQueueType) map[string]any
 
@@ -983,6 +1187,12 @@ func (s *MapShardIDSetting) GetPrecedence() Precedence { return PrecedenceShardI
 func (s *MapShardIDSetting) GetDefault() any           { return s.Default }
 func (s *MapShardIDSetting) GetDescription() string    { return s.Description }
 
+func (s *MapShardIDSetting) WithDefault(v map[string]any) *MapShardIDSetting {
+	newS := *s
+	newS.Default = v
+	return &newS
+}
+
 type MapPropertyFnWithShardIDFilter func(shardID int32) map[string]any
 
 func (c *Collection) GetMapByShardID(s *MapShardIDSetting) MapPropertyFnWithShardIDFilter {
@@ -1009,6 +1219,12 @@ func (s *MapTaskTypeSetting) GetType() Type             { return TypeMap }
 func (s *MapTaskTypeSetting) GetPrecedence() Precedence { return PrecedenceTaskType }
 func (s *MapTaskTypeSetting) GetDefault() any           { return s.Default }
 func (s *MapTaskTypeSetting) GetDescription() string    { return s.Description }
+
+func (s *MapTaskTypeSetting) WithDefault(v map[string]any) *MapTaskTypeSetting {
+	newS := *s
+	newS.Default = v
+	return &newS
+}
 
 type MapPropertyFnWithTaskTypeFilter func(taskType enumsspb.TaskType) map[string]any
 

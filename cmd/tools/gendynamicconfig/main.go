@@ -140,6 +140,12 @@ func (s *{{.T.Name}}{{.P.Name}}Setting) GetPrecedence() Precedence { return Prec
 func (s *{{.T.Name}}{{.P.Name}}Setting) GetDefault() any           { return s.Default }
 func (s *{{.T.Name}}{{.P.Name}}Setting) GetDescription() string    { return s.Description }
 
+func (s *{{.T.Name}}{{.P.Name}}Setting) WithDefault(v {{.T.GoType}}) *{{.T.Name}}{{.P.Name}}Setting {
+	newS := *s
+	newS.Default = v
+	return &newS
+}
+
 type {{.T.Name}}PropertyFn{{if .NotGlobal}}With{{.P.Name}}Filter{{end}} func{{.P.GoArgs}} {{.T.GoType}}
 
 func (c *Collection) Get{{.T.Name}}{{if .NotGlobal}}By{{.P.Name}}{{end}}(s *{{.T.Name}}{{.P.Name}}Setting) {{.T.Name}}PropertyFn{{if .NotGlobal}}With{{.P.Name}}Filter{{end}} {

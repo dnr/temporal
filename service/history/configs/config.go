@@ -29,7 +29,6 @@ import (
 	"go.temporal.io/server/common/dynamicconfig"
 	"go.temporal.io/server/common/namespace"
 	"go.temporal.io/server/common/persistence/visibility"
-	"go.temporal.io/server/common/tasks"
 )
 
 // Config represents configuration for history service
@@ -340,18 +339,6 @@ func NewConfig(
 	dc *dynamicconfig.Collection,
 	numberOfShards int32,
 ) *Config {
-	// Helper function for casting around WithDefault to make Go happy
-	getMapWithDefaultWeights := func(
-		setting *dynamicconfig.MapNamespaceSetting,
-		defaultWeights map[tasks.Priority]int,
-	) dynamicconfig.MapPropertyFnWithNamespaceFilter {
-		defaultValue := ConvertWeightsToDynamicConfigValue(defaultWeights)
-		genericSetting := (*dynamicconfig.Setting[map[string]any, func(string)])(setting)
-		newSetting := dynamicconfig.WithDefault(genericSetting, defaultValue)
-		newMapNamespaceSetting := (*dynamicconfig.MapNamespaceSetting)(newSetting)
-		return dc.GetMapByNamespace(newMapNamespaceSetting)
-	}
-
 	cfg := &Config{
 		NumberOfShards: numberOfShards,
 
@@ -435,8 +422,8 @@ func NewConfig(
 
 		TimerTaskBatchSize:                               dc.GetInt(dynamicconfig.TimerTaskBatchSize),
 		TimerProcessorSchedulerWorkerCount:               dc.GetInt(dynamicconfig.TimerProcessorSchedulerWorkerCount),
-		TimerProcessorSchedulerActiveRoundRobinWeights:   getMapWithDefaultWeights(dynamicconfig.TimerProcessorSchedulerActiveRoundRobinWeights, DefaultActiveTaskPriorityWeight),
-		TimerProcessorSchedulerStandbyRoundRobinWeights:  getMapWithDefaultWeights(dynamicconfig.TimerProcessorSchedulerStandbyRoundRobinWeights, DefaultStandbyTaskPriorityWeight),
+		TimerProcessorSchedulerActiveRoundRobinWeights:   dc.GetMapByNamespace(dynamicconfig.TimerProcessorSchedulerActiveRoundRobinWeights.WithDefault(ConvertWeightsToDynamicConfigValue(DefaultActiveTaskPriorityWeight))),
+		TimerProcessorSchedulerStandbyRoundRobinWeights:  dc.GetMapByNamespace(dynamicconfig.TimerProcessorSchedulerStandbyRoundRobinWeights.WithDefault(ConvertWeightsToDynamicConfigValue(DefaultStandbyTaskPriorityWeight))),
 		TimerProcessorUpdateAckInterval:                  dc.GetDuration(dynamicconfig.TimerProcessorUpdateAckInterval),
 		TimerProcessorUpdateAckIntervalJitterCoefficient: dc.GetFloat(dynamicconfig.TimerProcessorUpdateAckIntervalJitterCoefficient),
 		TimerProcessorMaxPollRPS:                         dc.GetInt(dynamicconfig.TimerProcessorMaxPollRPS),
@@ -452,8 +439,8 @@ func NewConfig(
 
 		TransferTaskBatchSize:                               dc.GetInt(dynamicconfig.TransferTaskBatchSize),
 		TransferProcessorSchedulerWorkerCount:               dc.GetInt(dynamicconfig.TransferProcessorSchedulerWorkerCount),
-		TransferProcessorSchedulerActiveRoundRobinWeights:   getMapWithDefaultWeights(dynamicconfig.TransferProcessorSchedulerActiveRoundRobinWeights, DefaultActiveTaskPriorityWeight),
-		TransferProcessorSchedulerStandbyRoundRobinWeights:  getMapWithDefaultWeights(dynamicconfig.TransferProcessorSchedulerStandbyRoundRobinWeights, DefaultStandbyTaskPriorityWeight),
+		TransferProcessorSchedulerActiveRoundRobinWeights:   dc.GetMapByNamespace(dynamicconfig.TransferProcessorSchedulerActiveRoundRobinWeights.WithDefault(ConvertWeightsToDynamicConfigValue(DefaultActiveTaskPriorityWeight))),
+		TransferProcessorSchedulerStandbyRoundRobinWeights:  dc.GetMapByNamespace(dynamicconfig.TransferProcessorSchedulerStandbyRoundRobinWeights.WithDefault(ConvertWeightsToDynamicConfigValue(DefaultStandbyTaskPriorityWeight))),
 		TransferProcessorMaxPollRPS:                         dc.GetInt(dynamicconfig.TransferProcessorMaxPollRPS),
 		TransferProcessorMaxPollHostRPS:                     dc.GetInt(dynamicconfig.TransferProcessorMaxPollHostRPS),
 		TransferProcessorMaxPollInterval:                    dc.GetDuration(dynamicconfig.TransferProcessorMaxPollInterval),
@@ -563,8 +550,8 @@ func NewConfig(
 		VisibilityProcessorMaxPollRPS:                         dc.GetInt(dynamicconfig.VisibilityProcessorMaxPollRPS),
 		VisibilityProcessorMaxPollHostRPS:                     dc.GetInt(dynamicconfig.VisibilityProcessorMaxPollHostRPS),
 		VisibilityProcessorSchedulerWorkerCount:               dc.GetInt(dynamicconfig.VisibilityProcessorSchedulerWorkerCount),
-		VisibilityProcessorSchedulerActiveRoundRobinWeights:   getMapWithDefaultWeights(dynamicconfig.VisibilityProcessorSchedulerActiveRoundRobinWeights, DefaultActiveTaskPriorityWeight),
-		VisibilityProcessorSchedulerStandbyRoundRobinWeights:  getMapWithDefaultWeights(dynamicconfig.VisibilityProcessorSchedulerStandbyRoundRobinWeights, DefaultStandbyTaskPriorityWeight),
+		VisibilityProcessorSchedulerActiveRoundRobinWeights:   dc.GetMapByNamespace(dynamicconfig.VisibilityProcessorSchedulerActiveRoundRobinWeights.WithDefault(ConvertWeightsToDynamicConfigValue(DefaultActiveTaskPriorityWeight))),
+		VisibilityProcessorSchedulerStandbyRoundRobinWeights:  dc.GetMapByNamespace(dynamicconfig.VisibilityProcessorSchedulerStandbyRoundRobinWeights.WithDefault(ConvertWeightsToDynamicConfigValue(DefaultStandbyTaskPriorityWeight))),
 		VisibilityProcessorMaxPollInterval:                    dc.GetDuration(dynamicconfig.VisibilityProcessorMaxPollInterval),
 		VisibilityProcessorMaxPollIntervalJitterCoefficient:   dc.GetFloat(dynamicconfig.VisibilityProcessorMaxPollIntervalJitterCoefficient),
 		VisibilityProcessorUpdateAckInterval:                  dc.GetDuration(dynamicconfig.VisibilityProcessorUpdateAckInterval),
