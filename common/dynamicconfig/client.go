@@ -51,13 +51,6 @@ type (
 		GetValue(key Key) []ConstrainedValue
 	}
 
-	// FIXME: maybe do this?
-	// TypedClient interface {
-	// 	GetBoolValue(key Key) []TypedConstrainedValue[bool]
-	// 	GetIntValue(key Key) []TypedConstrainedValue[int]
-	// 	// FIXME: etc.
-	// }
-
 	// Key is a key/property stored in dynamic config. For convenience, it is recommended that
 	// you treat keys as case-insensitive.
 	Key string
