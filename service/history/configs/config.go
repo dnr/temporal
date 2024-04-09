@@ -362,8 +362,8 @@ func NewConfig(
 		ShutdownDrainDuration:                 dc.GetDuration(dynamicconfig.HistoryShutdownDrainDuration),
 		StartupMembershipJoinDelay:            dc.GetDuration(dynamicconfig.HistoryStartupMembershipJoinDelay),
 		MaxAutoResetPoints:                    dc.GetIntByNamespace(dynamicconfig.HistoryMaxAutoResetPoints),
-		DefaultWorkflowTaskTimeout:            dc.GetDurationPropertyFilteredByNamespace(dynamicconfig.DefaultWorkflowTaskTimeout, primitives.DefaultWorkflowTaskTimeout),
-		ContinueAsNewMinInterval:              dc.GetDurationPropertyFilteredByNamespace(dynamicconfig.ContinueAsNewMinInterval, time.Second),
+		DefaultWorkflowTaskTimeout:            dc.GetDurationByNamespace(dynamicconfig.DefaultWorkflowTaskTimeout),
+		ContinueAsNewMinInterval:              dc.GetDurationByNamespace(dynamicconfig.ContinueAsNewMinInterval),
 
 		VisibilityPersistenceMaxReadQPS:       visibility.GetVisibilityPersistenceMaxReadQPS(dc),
 		VisibilityPersistenceMaxWriteQPS:      visibility.GetVisibilityPersistenceMaxWriteQPS(dc),
@@ -490,7 +490,7 @@ func NewConfig(
 
 		// history client: client/history/client.go set the client timeout 30s
 		// TODO: Return this value to the client: go.temporal.io/server/issues/294
-		LongPollExpirationInterval:          dc.GetDurationPropertyFilteredByNamespace(dynamicconfig.HistoryLongPollExpirationInterval, time.Second*20),
+		LongPollExpirationInterval:          dc.GetDurationByNamespace(dynamicconfig.HistoryLongPollExpirationInterval),
 		EventEncodingType:                   dc.GetStringByNamespace(dynamicconfig.DefaultEventEncoding)),
 		EnableParentClosePolicy:             dc.GetBoolByNamespace(dynamicconfig.EnableParentClosePolicy),
 		NumParentClosePolicySystemWorkflows: dc.GetInt(dynamicconfig.NumParentClosePolicySystemWorkflows),
@@ -522,7 +522,7 @@ func NewConfig(
 
 		DefaultActivityRetryPolicy:   dc.GetMapByNamespace(dynamicconfig.DefaultActivityRetryPolicy)),
 		DefaultWorkflowRetryPolicy:   dc.GetMapByNamespace(dynamicconfig.DefaultWorkflowRetryPolicy)),
-		WorkflowTaskHeartbeatTimeout: dc.GetDurationPropertyFilteredByNamespace(dynamicconfig.WorkflowTaskHeartbeatTimeout, time.Minute*30),
+		WorkflowTaskHeartbeatTimeout: dc.GetDurationByNamespace(dynamicconfig.WorkflowTaskHeartbeatTimeout),
 		WorkflowTaskCriticalAttempts: dc.GetInt(dynamicconfig.WorkflowTaskCriticalAttempts),
 		WorkflowTaskRetryMaxInterval: dc.GetDuration(dynamicconfig.WorkflowTaskRetryMaxInterval),
 
@@ -545,7 +545,7 @@ func NewConfig(
 		MutableStateChecksumVerifyProbability: dc.GetIntByNamespace(dynamicconfig.MutableStateChecksumVerifyProbability),
 		MutableStateChecksumInvalidateBefore:  dc.GetFloat64(dynamicconfig.MutableStateChecksumInvalidateBefore),
 
-		StandbyTaskReReplicationContextTimeout: dc.GetDurationPropertyFilteredByNamespaceID(dynamicconfig.StandbyTaskReReplicationContextTimeout, 30*time.Second),
+		StandbyTaskReReplicationContextTimeout: dc.GetDurationByNamespaceID(dynamicconfig.StandbyTaskReReplicationContextTimeout),
 
 		SkipReapplicationByNamespaceID: dc.GetBoolByNamespaceID(dynamicconfig.SkipReapplicationByNamespaceID),
 
