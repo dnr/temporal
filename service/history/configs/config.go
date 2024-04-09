@@ -589,20 +589,18 @@ func NewConfig(
 		NamespaceCacheRefreshInterval: dc.GetDurationProperty(dynamicconfig.NamespaceCacheRefreshInterval, 10*time.Second),
 
 		// Archival related
-		ArchivalTaskBatchSize:                 dc.GetIntProperty(dynamicconfig.ArchivalTaskBatchSize, 100),
-		ArchivalProcessorMaxPollRPS:           dc.GetIntProperty(dynamicconfig.ArchivalProcessorMaxPollRPS, 20),
-		ArchivalProcessorMaxPollHostRPS:       dc.GetIntProperty(dynamicconfig.ArchivalProcessorMaxPollHostRPS, 0),
-		ArchivalProcessorSchedulerWorkerCount: dc.GetIntProperty(dynamicconfig.ArchivalProcessorSchedulerWorkerCount, 512),
-		ArchivalProcessorMaxPollInterval:      dc.GetDurationProperty(dynamicconfig.ArchivalProcessorMaxPollInterval, 5*time.Minute),
-		ArchivalProcessorMaxPollIntervalJitterCoefficient: dc.GetFloat64Property(dynamicconfig.
-			ArchivalProcessorMaxPollIntervalJitterCoefficient, 0.15),
-		ArchivalProcessorUpdateAckInterval: dc.GetDurationProperty(dynamicconfig.ArchivalProcessorUpdateAckInterval, 30*time.Second),
-		ArchivalProcessorUpdateAckIntervalJitterCoefficient: dc.GetFloat64Property(dynamicconfig.
-			ArchivalProcessorUpdateAckIntervalJitterCoefficient, 0.15),
-		ArchivalProcessorPollBackoffInterval: dc.GetDurationProperty(dynamicconfig.ArchivalProcessorPollBackoffInterval, 5*time.Second),
-		ArchivalProcessorArchiveDelay:        dc.GetDurationProperty(dynamicconfig.ArchivalProcessorArchiveDelay, 5*time.Minute),
-		ArchivalBackendMaxRPS:                dc.GetFloat64Property(dynamicconfig.ArchivalBackendMaxRPS, 10000.0),
-		ArchivalQueueMaxReaderCount:          dc.GetIntProperty(dynamicconfig.ArchivalQueueMaxReaderCount, 2),
+		ArchivalTaskBatchSize:                               dc.GetIntProperty(dynamicconfig.ArchivalTaskBatchSize, 100),
+		ArchivalProcessorMaxPollRPS:                         dc.GetIntProperty(dynamicconfig.ArchivalProcessorMaxPollRPS, 20),
+		ArchivalProcessorMaxPollHostRPS:                     dc.GetIntProperty(dynamicconfig.ArchivalProcessorMaxPollHostRPS, 0),
+		ArchivalProcessorSchedulerWorkerCount:               dc.GetIntProperty(dynamicconfig.ArchivalProcessorSchedulerWorkerCount, 512),
+		ArchivalProcessorMaxPollInterval:                    dc.GetDurationProperty(dynamicconfig.ArchivalProcessorMaxPollInterval, 5*time.Minute),
+		ArchivalProcessorMaxPollIntervalJitterCoefficient:   dc.GetFloat64Property(dynamicconfig.ArchivalProcessorMaxPollIntervalJitterCoefficient, 0.15),
+		ArchivalProcessorUpdateAckInterval:                  dc.GetDurationProperty(dynamicconfig.ArchivalProcessorUpdateAckInterval, 30*time.Second),
+		ArchivalProcessorUpdateAckIntervalJitterCoefficient: dc.GetFloat64Property(dynamicconfig.ArchivalProcessorUpdateAckIntervalJitterCoefficient, 0.15),
+		ArchivalProcessorPollBackoffInterval:                dc.GetDurationProperty(dynamicconfig.ArchivalProcessorPollBackoffInterval, 5*time.Second),
+		ArchivalProcessorArchiveDelay:                       dc.GetDurationProperty(dynamicconfig.ArchivalProcessorArchiveDelay, 5*time.Minute),
+		ArchivalBackendMaxRPS:                               dc.GetFloat64Property(dynamicconfig.ArchivalBackendMaxRPS, 10000.0),
+		ArchivalQueueMaxReaderCount:                         dc.GetIntProperty(dynamicconfig.ArchivalQueueMaxReaderCount, 2),
 
 		// workflow update related
 		WorkflowExecutionMaxInFlightUpdates: dc.GetIntPropertyFilteredByNamespace(dynamicconfig.WorkflowExecutionMaxInFlightUpdates, 10),

@@ -222,7 +222,7 @@ func NewConfig(
 		EnableParentClosePolicyWorker:         dc.GetBoolProperty(dynamicconfig.EnableParentClosePolicyWorker, true),
 		PerNamespaceWorkerCount:               dc.GetIntPropertyFilteredByNamespace(dynamicconfig.WorkerPerNamespaceWorkerCount, 1),
 		PerNamespaceWorkerOptions:             dc.GetMapPropertyFnFilteredByNamespace(dynamicconfig.WorkerPerNamespaceWorkerOptions, map[string]any{}),
-		PerNamespaceWorkerStartRate:           dc.GetFloat64Property(dynamicconfig.WorkerPerNamespaceWorkerOptions, 10.0),
+		PerNamespaceWorkerStartRate:           dc.GetFloat64Property(dynamicconfig.WorkerPerNamespaceWorkerStartRate, 10.0),
 		ThrottledLogRPS:                       dc.GetIntProperty(dynamicconfig.WorkerThrottledLogRPS, 20),
 		PersistenceMaxQPS:                     dc.GetIntProperty(dynamicconfig.WorkerPersistenceMaxQPS, 500),
 		PersistenceGlobalMaxQPS:               dc.GetIntProperty(dynamicconfig.WorkerPersistenceGlobalMaxQPS, 0),
