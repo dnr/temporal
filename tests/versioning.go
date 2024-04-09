@@ -72,7 +72,7 @@ const (
 )
 
 func (s *VersioningIntegSuite) SetupSuite() {
-	s.dynamicConfigOverrides = map[dynamicconfig.Key]any{
+	s.dynamicConfigOverrides = SettingsToKeys(map[dynamicconfig.GenericSetting]any{
 		dynamicconfig.FrontendEnableWorkerVersioningDataAPIs:     true,
 		dynamicconfig.FrontendEnableWorkerVersioningWorkflowAPIs: true,
 		dynamicconfig.MatchingForwarderMaxChildrenPerNode:        partitionTreeDegree,
@@ -88,7 +88,7 @@ func (s *VersioningIntegSuite) SetupSuite() {
 		// versioning data "soon", i.e. after a long poll interval. We can reduce the long poll
 		// interval so that we don't have to wait so long.
 		dynamicconfig.MatchingLongPollExpirationInterval: longPollTime,
-	}
+	})
 	s.setupSuite("testdata/es_cluster.yaml")
 }
 
@@ -2050,7 +2050,7 @@ func (s *VersioningIntegSuite) addCompatibleBuildId(ctx context.Context, tq, new
 
 // waitForPropagation waits for all partitions of tq to mention newBuildId in their versioning data (in any position).
 func (s *VersioningIntegSuite) waitForPropagation(ctx context.Context, tq, newBuildId string) {
-	v, ok := s.testCluster.host.dcClient.getRawValue(dynamicconfig.MatchingNumTaskqueueReadPartitions)
+	v, ok := s.testCluster.host.dcClient.getRawValue(dynamicconfig.MatchingNumTaskqueueReadPartitions.Key)
 	s.True(ok, "versioning tests require setting explicit number of partitions")
 	partCount, ok := v.(int)
 	s.True(ok, "partition count is not an int")

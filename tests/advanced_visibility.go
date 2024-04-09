@@ -90,7 +90,7 @@ type AdvancedVisibilitySuite struct {
 
 // This cluster use customized threshold for history config
 func (s *AdvancedVisibilitySuite) SetupSuite() {
-	s.dynamicConfigOverrides = map[dynamicconfig.Key]interface{}{
+	s.dynamicConfigOverrides = SettingsToKeys(map[dynamicconfig.GenericSetting]any{
 		dynamicconfig.VisibilityDisableOrderByClause:             false,
 		dynamicconfig.FrontendEnableWorkerVersioningDataAPIs:     true,
 		dynamicconfig.FrontendEnableWorkerVersioningWorkflowAPIs: true,
@@ -99,7 +99,7 @@ func (s *AdvancedVisibilitySuite) SetupSuite() {
 		dynamicconfig.BuildIdScavengerEnabled:                    true,
 		// Allow the scavenger to remove any build id regardless of when it was last default for a set.
 		dynamicconfig.RemovableBuildIdDurationSinceDefault: time.Microsecond,
-	}
+	})
 
 	if UsingSQLAdvancedVisibility() {
 		s.setupSuite("testdata/cluster.yaml")
