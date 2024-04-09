@@ -40,8 +40,8 @@ import (
 )
 
 // Copied from dynamicconfig to avoid import cycle:
-func GetDurationPropertyFilteredByNamespace(value time.Duration) DurationPropertyFnWithNamespaceFilter {
-	return func(namespace string) time.Duration {
+func GetDurationPropertyFnFilteredByNamespace(value time.Duration) func(string) time.Duration {
+	return func(string) time.Duration {
 		return value
 	}
 }
@@ -217,7 +217,7 @@ func TestOverrideWorkflowTaskTimeout_Infinite(t *testing.T) {
 	taskTimeout := time.Duration(0)
 	runTimeout := time.Duration(100)
 	defaultTimeout := time.Duration(20)
-	defaultTimeoutFn := GetDurationPropertyFilteredByNamespace(defaultTimeout)
+	defaultTimeoutFn := GetDurationPropertyFnFilteredByNamespace(defaultTimeout)
 	require.Equal(t, time.Duration(20), OverrideWorkflowTaskTimeout("random domain", taskTimeout, runTimeout, defaultTimeoutFn))
 
 	taskTimeout = time.Duration(0)
