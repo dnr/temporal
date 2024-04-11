@@ -72,58 +72,58 @@ func (s *collectionSuite) SetupSuite() {
 }
 
 func (s *collectionSuite) TestGetIntProperty() {
-	setting := &IntGlobalSetting{
-		Key:     "testGetIntPropertyKey",
-		Default: 10,
+	setting := IntGlobalSetting{
+		key: "testGetIntPropertyKey",
+		def: 10,
 	}
 	value := s.cln.GetInt(setting)
 	s.Equal(10, value())
-	s.client[setting.Key] = 50
+	s.client[setting.key] = 50
 	s.Equal(50, value())
 }
 
 func (s *collectionSuite) TestGetIntPropertyFilteredByNamespace() {
-	setting := &IntNamespaceSetting{
-		Key:     "testGetIntPropertyFilteredByNamespaceKey",
-		Default: 10,
+	setting := IntNamespaceSetting{
+		key: "testGetIntPropertyFilteredByNamespaceKey",
+		def: 10,
 	}
 	namespace := "testNamespace"
 	value := s.cln.GetIntByNamespace(setting)
 	s.Equal(10, value(namespace))
-	s.client[setting.Key] = 50
+	s.client[setting.key] = 50
 	s.Equal(50, value(namespace))
 }
 
 func (s *collectionSuite) TestGetStringPropertyFnFilteredByNamespace() {
 	namespace := "testNamespace"
 	value := s.cln.GetStringByNamespace(DefaultEventEncoding)
-	s.Equal(DefaultEventEncoding.Default, value(namespace))
-	s.client[DefaultEventEncoding.Key] = "efg"
+	s.Equal(DefaultEventEncoding.def, value(namespace))
+	s.client[DefaultEventEncoding.key] = "efg"
 	s.Equal("efg", value(namespace))
 }
 
 func (s *collectionSuite) TestGetStringPropertyFnFilteredByNamespaceID() {
-	setting := &StringNamespaceIDSetting{
-		Key:     "testGetStringPropertyFilteredByNamespaceIDKey",
-		Default: "abc",
+	setting := StringNamespaceIDSetting{
+		key: "testGetStringPropertyFilteredByNamespaceIDKey",
+		def: "abc",
 	}
 	namespaceID := "testNamespaceID"
 	value := s.cln.GetStringByNamespaceID(setting)
 	s.Equal("abc", value(namespaceID))
-	s.client[setting.Key] = "efg"
+	s.client[setting.key] = "efg"
 	s.Equal("efg", value(namespaceID))
 }
 
 func (s *collectionSuite) TestGetIntPropertyFilteredByTaskQueueInfo() {
-	setting := &IntTaskQueueSetting{
-		Key:     "testGetIntPropertyFilteredByTaskQueueInfoKey",
-		Default: 10,
+	setting := IntTaskQueueSetting{
+		key: "testGetIntPropertyFilteredByTaskQueueInfoKey",
+		def: 10,
 	}
 	namespace := "testNamespace"
 	taskQueue := "testTaskQueue"
 	value := s.cln.GetIntByTaskQueue(setting)
 	s.Equal(10, value(namespace, taskQueue, 0))
-	s.client[setting.Key] = 50
+	s.client[setting.key] = 50
 	s.Equal(50, value(namespace, taskQueue, 0))
 }
 

@@ -2050,7 +2050,7 @@ func (s *VersioningIntegSuite) addCompatibleBuildId(ctx context.Context, tq, new
 
 // waitForPropagation waits for all partitions of tq to mention newBuildId in their versioning data (in any position).
 func (s *VersioningIntegSuite) waitForPropagation(ctx context.Context, tq, newBuildId string) {
-	v, ok := s.testCluster.host.dcClient.getRawValue(dynamicconfig.MatchingNumTaskqueueReadPartitions.Key)
+	v, ok := s.testCluster.host.dcClient.getRawValue(dynamicconfig.MatchingNumTaskqueueReadPartitions.Key())
 	s.True(ok, "versioning tests require setting explicit number of partitions")
 	partCount, ok := v.(int)
 	s.True(ok, "partition count is not an int")

@@ -120,30 +120,30 @@ func findMatch[T any](cvs []ConstrainedValue, defaultCVs []TypedConstrainedValue
 // take a *Collection as an argument.
 func matchAndConvert[T any, P any](
 	c *Collection,
-	s *Setting[T, P],
+	s Setting[T, P],
 	precedence []Constraints,
 	converter func(value any) (T, error),
 ) T {
-	if globalRegistry.query(s.Key) == nil {
+	if globalRegistry.query(s.key) == nil {
 		if c.throttleLog() {
-			c.logger.Warn("query on unregistered dynamic config key", tag.Key(s.Key.String()))
+			c.logger.Warn("query on unregistered dynamic config key", tag.Key(s.key.String()))
 		}
 	}
 
-	cvs := c.client.GetValue(s.Key)
+	cvs := c.client.GetValue(s.key)
 
-	defaultCVs := s.ConstrainedDefault
+	defaultCVs := s.cdef
 	if defaultCVs == nil {
-		defaultCVs = []TypedConstrainedValue[T]{{Value: s.Default}}
+		defaultCVs = []TypedConstrainedValue[T]{{Value: s.def}}
 	}
 
 	val, matchErr := findMatch(cvs, defaultCVs, precedence)
 	if matchErr != nil {
 		if c.throttleLog() {
-			c.logger.Debug("No such key in dynamic config, using default", tag.Key(s.Key.String()), tag.Error(matchErr))
+			c.logger.Debug("No such key in dynamic config, using default", tag.Key(s.key.String()), tag.Error(matchErr))
 		}
 		// couldn't find a constrained match, use default
-		val = s.Default
+		val = s.def
 	}
 
 	typedVal, convertErr := converter(val)
@@ -151,13 +151,13 @@ func matchAndConvert[T any, P any](
 		// We failed to convert the value to the desired type. Try converting the default. note
 		// that if matchErr != nil then val _is_ defaultValue and we don't have to try this again.
 		if c.throttleLog() {
-			c.logger.Warn("Failed to convert value, using default", tag.Key(s.Key.String()), tag.IgnoredValue(val), tag.Error(convertErr))
+			c.logger.Warn("Failed to convert value, using default", tag.Key(s.key.String()), tag.IgnoredValue(val), tag.Error(convertErr))
 		}
-		typedVal, convertErr = converter(s.Default)
+		typedVal, convertErr = converter(s.def)
 	}
 	if convertErr != nil {
 		// If we can't convert the default, that's a bug in our code, use Warn level.
-		c.logger.Warn("Can't convert default value (this is a bug; fix server code)", tag.Key(s.Key.String()), tag.IgnoredValue(s.Default), tag.Error(convertErr))
+		c.logger.Warn("Can't convert default value (this is a bug; fix server code)", tag.Key(s.key.String()), tag.IgnoredValue(s.def), tag.Error(convertErr))
 		// Return typedVal anyway since we have to return something.
 	}
 	return typedVal

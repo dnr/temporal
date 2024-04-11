@@ -87,7 +87,7 @@ func (d *dcClient) GetValue(name dynamicconfig.Key) []dynamicconfig.ConstrainedV
 // OverrideValue overrides a value for the duration of a test. Once the test completes
 // the previous value (if any) will be restored
 func (d *dcClient) OverrideValue(t *testing.T, setting dynamicconfig.GenericSetting, value any) {
-	d.OverrideValueByName(t, setting.GetKey(), value)
+	d.OverrideValueByName(t, setting.Key(), value)
 }
 
 func (d *dcClient) OverrideValueByName(t *testing.T, name dynamicconfig.Key, value any) {
@@ -111,7 +111,7 @@ func (d *dcClient) OverrideValueByName(t *testing.T, name dynamicconfig.Key, val
 func (d *dcClient) RemoveOverride(setting dynamicconfig.GenericSetting) {
 	d.Lock()
 	defer d.Unlock()
-	delete(d.overrides, setting.GetKey())
+	delete(d.overrides, setting.Key())
 }
 
 // newTestDCClient - returns a dynamic config client for functional testing
@@ -125,7 +125,7 @@ func newTestDCClient(fallback dynamicconfig.Client) *dcClient {
 func SettingsToKeys(bySetting map[dynamicconfig.GenericSetting]any) map[dynamicconfig.Key]any {
 	byKey := make(map[dynamicconfig.Key]any, len(bySetting))
 	for k, v := range bySetting {
-		byKey[k.GetKey()] = v
+		byKey[k.Key()] = v
 	}
 	return byKey
 }

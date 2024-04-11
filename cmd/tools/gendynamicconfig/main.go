@@ -134,25 +134,43 @@ func generateType(w io.Writer, tp *settingType, prec *settingPrecedence) {
 	writeTemplatedCode(w, `
 type {{.T.Name}}{{.P.Name}}Setting Setting[{{.T.GoType}}, func{{.P.GoArgs}}]
 
-func (s *{{.T.Name}}{{.P.Name}}Setting) GetKey() Key               { return s.Key }
-func (s *{{.T.Name}}{{.P.Name}}Setting) GetType() Type             { return Type{{.T.Name}} }
-func (s *{{.T.Name}}{{.P.Name}}Setting) GetPrecedence() Precedence { return Precedence{{.P.Name}} }
-func (s *{{.T.Name}}{{.P.Name}}Setting) GetDefault() any           { return s.Default }
-func (s *{{.T.Name}}{{.P.Name}}Setting) GetDescription() string    { return s.Description }
+func New{{.T.Name}}{{.P.Name}}Setting(key Key, def {{.T.GoType}}, description string) {{.T.Name}}{{.P.Name}}Setting {
+	s := {{.T.Name}}{{.P.Name}}Setting{
+		key:         key,
+		def:         def,
+		description: description,
+	}
+	register(s)
+	return s
+}
 
-func (s *{{.T.Name}}{{.P.Name}}Setting) WithDefault(v {{.T.GoType}}) *{{.T.Name}}{{.P.Name}}Setting {
-	newS := *s
-	newS.Default = v
-	return &newS
+func New{{.T.Name}}{{.P.Name}}SettingWithConstrainedDefault(key Key, cdef []TypedConstrainedValue[{{.T.GoType}}], description string) {{.T.Name}}{{.P.Name}}Setting {
+	s := {{.T.Name}}{{.P.Name}}Setting{
+		key:         key,
+		cdef:        cdef,
+		description: description,
+	}
+	register(s)
+	return s
+}
+
+func (s {{.T.Name}}{{.P.Name}}Setting) Key() Key               { return s.key }
+func (s {{.T.Name}}{{.P.Name}}Setting) Type() Type             { return Type{{.T.Name}} }
+func (s {{.T.Name}}{{.P.Name}}Setting) Precedence() Precedence { return Precedence{{.P.Name}} }
+
+func (s {{.T.Name}}{{.P.Name}}Setting) WithDefault(v {{.T.GoType}}) {{.T.Name}}{{.P.Name}}Setting {
+	newS := s
+	newS.def = v
+	return newS
 }
 
 type {{.T.Name}}PropertyFn{{if .NotGlobal}}With{{.P.Name}}Filter{{end}} func{{.P.GoArgs}} {{.T.GoType}}
 
-func (c *Collection) Get{{.T.Name}}{{if .NotGlobal}}By{{.P.Name}}{{end}}(s *{{.T.Name}}{{.P.Name}}Setting) {{.T.Name}}PropertyFn{{if .NotGlobal}}With{{.P.Name}}Filter{{end}} {
+func (c *Collection) Get{{.T.Name}}{{if .NotGlobal}}By{{.P.Name}}{{end}}(s {{.T.Name}}{{.P.Name}}Setting) {{.T.Name}}PropertyFn{{if .NotGlobal}}With{{.P.Name}}Filter{{end}} {
 	return func{{.P.GoArgs}} {{.T.GoType}} {
 		return matchAndConvert(
 			c,
-			(*Setting[{{.T.GoType}}, func{{.P.GoArgs}}])(s),
+			(Setting[{{.T.GoType}}, func{{.P.GoArgs}}])(s),
 			precedence{{.P.Name}}{{.P.GoArgNames}},
 			convert{{.T.Name}},
 		)

@@ -33,19 +33,17 @@ type (
 
 	Setting[T any, P any] struct {
 		// string value of key. case-insensitive.
-		Key Key
-		// default value. ConstrainedDefault is used in preference to Default if non-nil.
-		Default            T
-		ConstrainedDefault []TypedConstrainedValue[T]
+		key Key
+		// default value. cdef is used in preference to def if non-nil.
+		def  T
+		cdef []TypedConstrainedValue[T]
 		// documentation
-		Description string
+		description string
 	}
 
 	GenericSetting interface {
-		GetKey() Key
-		GetType() Type
-		GetPrecedence() Precedence
-		GetDefault() any
-		GetDescription() string
+		Key() Key
+		Type() Type
+		Precedence() Precedence
 	}
 )
