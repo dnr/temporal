@@ -29,7 +29,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
-
+	commonpb "go.temporal.io/api/common/v1"
 	"google.golang.org/protobuf/types/known/durationpb"
 )
 
