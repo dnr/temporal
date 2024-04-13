@@ -423,6 +423,39 @@ FailedPrecondition error.`,
 task queue. Update requests which would cause the versioning data to exceed this number will fail with a
 FailedPrecondition error.`,
 	)
+	AssignmentRuleLimitPerQueue = NewIntNamespaceSetting(
+		"limit.wv.AssignmentRuleLimitPerQueue",
+		100,
+		`AssignmentRuleLimitPerQueue is the max number of Build ID assignment rules allowed to be defined in the
+versioning data for a task queue. Update requests which would cause the versioning data to exceed this number
+will fail with a FailedPrecondition error.`,
+	)
+	RedirectRuleLimitPerQueue = NewIntNamespaceSetting(
+		"limit.wv.RedirectRuleLimitPerQueue",
+		500,
+		`RedirectRuleLimitPerQueue is the max number of compatible redirect rules allowed to be defined
+in the versioning data for a task queue. Update requests which would cause the versioning data to exceed this
+number will fail with a FailedPrecondition error.`,
+	)
+	RedirectRuleChainLimitPerQueue = NewIntNamespaceSetting(
+		"limit.wv.RedirectRuleChainLimitPerQueue",
+		50,
+		`RedirectRuleChainLimitPerQueue is the max number of compatible redirect rules allowed to be connected
+in one chain in the versioning data for a task queue. Update requests which would cause the versioning data
+to exceed this number will fail with a FailedPrecondition error.`,
+	)
+	MatchingDeletedRuleRetentionTime = NewDurationNamespaceSetting(
+		"matching.wv.DeletedRuleRetentionTime",
+		14*24*time.Hour,
+		`MatchingDeletedRuleRetentionTime is the length of time that deleted Version Assignment Rules and
+Deleted Redirect Rules will be kept in the DB (with DeleteTimestamp). After this time, the tombstones are deleted at the next time update of versioning data for the task queue.`,
+	)
+	ReachabilityBuildIdVisibilityGracePeriod = NewDurationNamespaceSetting(
+		"matching.wv.ReachabilityBuildIdVisibilityGracePeriod",
+		3*time.Minute,
+		`ReachabilityBuildIdVisibilityGracePeriod is the time period for which deleted versioning rules are still considered active
+to account for the delay in updating the build id field in visibility.`,
+	)
 	ReachabilityTaskQueueScanLimit = NewIntGlobalSetting(
 		"limit.reachabilityTaskQueueScan",
 		20,
@@ -433,14 +466,14 @@ GetWorkerTaskReachability query.`,
 		"limit.reachabilityQueryBuildIds",
 		5,
 		`ReachabilityQueryBuildIdLimit limits the number of build ids that can be requested in a single call to the
-GetWorkerTaskReachability API.`,
+DescribeTaskQueue API with ReportTaskQueueReachability==true, or to the GetWorkerTaskReachability API.`,
 	)
 	ReachabilityQuerySetDurationSinceDefault = NewDurationGlobalSetting(
 		"frontend.reachabilityQuerySetDurationSinceDefault",
 		5*time.Minute,
 		`ReachabilityQuerySetDurationSinceDefault is the minimum period since a version set was demoted from being the
 queue default before it is considered unreachable by new workflows.
-This setting allows some propogation delay of versioning data for the reachability queries, which may happen for
+This setting allows some propagation delay of versioning data for the reachability queries, which may happen for
 the following reasons:
 1. There are no workflows currently marked as open in the visibility store but a worker for the demoted version
 is currently processing a task.
@@ -499,13 +532,13 @@ is currently processing a task.
 		time.Hour,
 		`RemovableBuildIdDurationSinceDefault is the minimum duration since a build id was last default in its containing
 set for it to be considered for removal, used by the build id scavenger.
-This setting allows some propogation delay of versioning data, which may happen for the following reasons:
+This setting allows some propagation delay of versioning data, which may happen for the following reasons:
 1. There are no workflows currently marked as open in the visibility store but a worker for the demoted version
 is currently processing a task.
 2. There are delays in the visibility task processor (which is asynchronous).
 3. There's propagation delay of the versioning data between matching nodes.`,
 	)
-	BuildIdScavenengerVisibilityRPS = NewFloatGlobalSetting(
+	BuildIdScavengerVisibilityRPS = NewFloatGlobalSetting(
 		"worker.buildIdScavengerVisibilityRPS",
 		1.0,
 		`BuildIdScavengerVisibilityRPS is the rate limit for visibility calls from the build id scavenger`,
@@ -531,7 +564,7 @@ is currently processing a task.
 	FrontendPersistenceGlobalNamespaceMaxQPS = NewIntNamespaceSetting(
 		"frontend.persistenceGlobalNamespaceMaxQPS",
 		0,
-		`FrontendPersistenceNamespaceMaxQPS is the max qps each namespace in frontend cluster can query DB`,
+		`FrontendPersistenceGlobalNamespaceMaxQPS is the max qps each namespace in frontend cluster can query DB`,
 	)
 	FrontendEnablePersistencePriorityRateLimiting = NewBoolGlobalSetting(
 		"frontend.enablePersistencePriorityRateLimiting",
@@ -866,6 +899,11 @@ lifecycle stage. Default value is 'false'.`,
 		"frontend.workerVersioningWorkflowAPIs",
 		false,
 		`FrontendEnableWorkerVersioningWorkflowAPIs enables worker versioning in workflow progress APIs.`,
+	)
+	FrontendEnableWorkerVersioningRuleAPIs = NewBoolNamespaceSetting(
+		"frontend.workerVersioningRuleAPIs",
+		false,
+		`FrontendEnableWorkerVersioningRuleAPIs enables worker versioning in workflow progress APIs.`,
 	)
 
 	DeleteNamespaceDeleteActivityRPS = NewIntGlobalSetting(

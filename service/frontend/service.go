@@ -186,6 +186,7 @@ type Config struct {
 
 	EnableWorkerVersioningData     dynamicconfig.BoolPropertyFnWithNamespaceFilter
 	EnableWorkerVersioningWorkflow dynamicconfig.BoolPropertyFnWithNamespaceFilter
+	EnableWorkerVersioningRules    dynamicconfig.BoolPropertyFnWithNamespaceFilter
 
 	// AccessHistoryFraction are interim flags across 2 minor releases and will be removed once fully enabled.
 	AccessHistoryFraction            dynamicconfig.FloatPropertyFn
@@ -298,6 +299,7 @@ func NewConfig(
 
 		EnableWorkerVersioningData:     dc.GetBoolByNamespace(dynamicconfig.FrontendEnableWorkerVersioningDataAPIs),
 		EnableWorkerVersioningWorkflow: dc.GetBoolByNamespace(dynamicconfig.FrontendEnableWorkerVersioningWorkflowAPIs),
+		EnableWorkerVersioningRules:    dc.GetBoolByNamespace(dynamicconfig.FrontendEnableWorkerVersioningRuleAPIs),
 
 		AccessHistoryFraction:            dc.GetFloat(dynamicconfig.FrontendAccessHistoryFraction),
 		AdminDeleteAccessHistoryFraction: dc.GetFloat(dynamicconfig.FrontendAdminDeleteAccessHistoryFraction),

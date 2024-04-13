@@ -213,7 +213,7 @@ func NewConfig(
 			ExecutionScannerWorkerCount:             dc.GetInt(dynamicconfig.ExecutionScannerWorkerCount),
 			ExecutionScannerHistoryEventIdValidator: dc.GetBool(dynamicconfig.ExecutionScannerHistoryEventIdValidator),
 			RemovableBuildIdDurationSinceDefault:    dc.GetDuration(dynamicconfig.RemovableBuildIdDurationSinceDefault),
-			BuildIdScavengerVisibilityRPS:           dc.GetFloat(dynamicconfig.BuildIdScavenengerVisibilityRPS),
+			BuildIdScavengerVisibilityRPS:           dc.GetFloat(dynamicconfig.BuildIdScavengerVisibilityRPS),
 		},
 		EnableBatcher:                         dc.GetBool(dynamicconfig.EnableBatcherGlobal),
 		BatcherRPS:                            dc.GetIntByNamespace(dynamicconfig.BatcherRPS),

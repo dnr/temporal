@@ -26,15 +26,9 @@ package dynamicconfig
 
 import (
 	"math/rand"
-	"time"
-
-	commonpb "go.temporal.io/api/common/v1"
-	"google.golang.org/protobuf/types/known/durationpb"
 
 	"go.temporal.io/server/common/metrics"
-	"go.temporal.io/server/common/number"
 	"go.temporal.io/server/common/primitives"
-	"go.temporal.io/server/common/primitives/timestamp"
 )
 
 const GlobalDefaultNumTaskQueuePartitions = 4
@@ -133,89 +127,4 @@ func AccessHistory(accessHistoryFraction FloatPropertyFn, metricsHandler metrics
 	}
 	metricsHandler.Counter(metrics.AccessHistoryOld).Record(1)
 	return false
-}
-
-const (
-	defaultInitialInterval            = time.Second
-	defaultMaximumIntervalCoefficient = 100.0
-	defaultBackoffCoefficient         = 2.0
-	defaultMaximumAttempts            = 0
-
-	initialIntervalInSecondsConfigKey   = "InitialIntervalInSeconds"
-	maximumIntervalCoefficientConfigKey = "MaximumIntervalCoefficient"
-	backoffCoefficientConfigKey         = "BackoffCoefficient"
-	maximumAttemptsConfigKey            = "MaximumAttempts"
-)
-
-func GetDefaultRetryPolicyConfigOptions() map[string]any {
-	return map[string]any{
-		initialIntervalInSecondsConfigKey:   int(defaultInitialInterval.Seconds()),
-		maximumIntervalCoefficientConfigKey: defaultMaximumIntervalCoefficient,
-		backoffCoefficientConfigKey:         defaultBackoffCoefficient,
-		maximumAttemptsConfigKey:            defaultMaximumAttempts,
-	}
-}
-
-// DefaultRetrySettings indicates what the "default" retry settings
-// are if it is not specified on an Activity or for any unset fields
-// if a policy is explicitly set on a workflow
-type DefaultRetrySettings struct {
-	InitialInterval            time.Duration
-	MaximumIntervalCoefficient float64
-	BackoffCoefficient         float64
-	MaximumAttempts            int32
-}
-
-func FromConfigToDefaultRetrySettings(options map[string]interface{}) DefaultRetrySettings {
-	defaultSettings := DefaultRetrySettings{
-		InitialInterval: defaultInitialInterval,
-		MaximumAttempts: defaultMaximumAttempts,
-	}
-
-	if seconds, ok := options[initialIntervalInSecondsConfigKey]; ok {
-		defaultSettings.InitialInterval = time.Duration(
-			number.NewNumber(
-				seconds,
-			).GetIntOrDefault(int(defaultInitialInterval.Nanoseconds())),
-		) * time.Second
-	}
-
-	if coefficient, ok := options[maximumIntervalCoefficientConfigKey]; ok {
-		defaultSettings.MaximumIntervalCoefficient = number.NewNumber(
-			coefficient,
-		).GetFloatOrDefault(defaultMaximumIntervalCoefficient)
-	}
-
-	if coefficient, ok := options[backoffCoefficientConfigKey]; ok {
-		defaultSettings.BackoffCoefficient = number.NewNumber(
-			coefficient,
-		).GetFloatOrDefault(defaultBackoffCoefficient)
-	}
-
-	if attempts, ok := options[maximumAttemptsConfigKey]; ok {
-		defaultSettings.MaximumAttempts = int32(number.NewNumber(
-			attempts,
-		).GetIntOrDefault(defaultMaximumAttempts))
-	}
-
-	return defaultSettings
-}
-
-// EnsureRetryPolicyDefaults ensures the policy subfields, if not explicitly set, are set to the specified defaults
-func EnsureRetryPolicyDefaults(originalPolicy *commonpb.RetryPolicy, defaultSettings DefaultRetrySettings) {
-	if originalPolicy.GetMaximumAttempts() == 0 {
-		originalPolicy.MaximumAttempts = defaultSettings.MaximumAttempts
-	}
-
-	if timestamp.DurationValue(originalPolicy.GetInitialInterval()) == 0 {
-		originalPolicy.InitialInterval = durationpb.New(defaultSettings.InitialInterval)
-	}
-
-	if timestamp.DurationValue(originalPolicy.GetMaximumInterval()) == 0 {
-		originalPolicy.MaximumInterval = durationpb.New(time.Duration(defaultSettings.MaximumIntervalCoefficient) * timestamp.DurationValue(originalPolicy.GetInitialInterval()))
-	}
-
-	if originalPolicy.GetBackoffCoefficient() == 0 {
-		originalPolicy.BackoffCoefficient = defaultSettings.BackoffCoefficient
-	}
 }
