@@ -61,7 +61,8 @@ type (
 	// Available filters:
 	//   Namespace func(namespace string)
 	//   NamespaceID func(namespaceID string)
-	//   TaskQueueInfo func(namespace string, taskQueue string, taskType enumspb.TaskQueueType)
+	//   TaskQueue func(namespace string, taskQueue string, taskType enumspb.TaskQueueType)  (matching task queue)
+	//   TaskType func(taskType enumspsb.TaskType)  (history task type)
 	//   ShardID func(shardID int32)
 )
 
