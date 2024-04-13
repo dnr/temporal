@@ -132,9 +132,6 @@ for signal / start / signal with start API if namespace is not active`,
 		false,
 		`DisallowQuery is the key to disallow query for a namespace`,
 	)
-	// FIXME: unused?
-	// // EnableAuthorization is the key to enable authorization for a namespace
-	// EnableAuthorization = "system.enableAuthorization"
 	EnableCrossNamespaceCommands = NewBoolGlobalSetting(
 		"system.enableCrossNamespaceCommands",
 		true,
@@ -226,6 +223,11 @@ these warning are not emitted if the value is set to 0 or less`,
 		0.2,
 		`OperatorRPSRatio is the percentage of the rate limit provided to priority rate limiters that should be used for
 operator API calls (highest priority). Should be >0.0 and <= 1.0 (defaults to 20% if not specified)`,
+	)
+	PersistenceQPSBurstRatio = NewFloatGlobalSetting(
+		"system.persistenceQPSBurstRatio",
+		1.0,
+		`PersistenceQPSBurstRatio is the burst ratio for persistence QPS. This flag controls the burst ratio for all services.`,
 	)
 
 	// deadlock detector
@@ -1232,6 +1234,14 @@ HistoryCacheSizeBasedLimit is set to true.`,
 The feature is used in the hierarchical state machine framework and is considered unstable as the structure may
 change with the pending replication design.`,
 	)
+	EnableWorkflowExecutionTimeoutTimer = NewBoolGlobalSetting(
+		"history.enableWorkflowExecutionTimeoutTimer",
+		false,
+		`EnableWorkflowExecutionTimeoutTimer controls whether to enable the new logic for generating a workflow execution
+timeout timer when execution timeout is specified when starting a workflow.
+For backward compatibility, this feature is disabled by default and should only be enabled after server version
+containing this flag is deployed to all history service nodes in the cluster.`,
+	)
 	HistoryStartupMembershipJoinDelay = NewDurationGlobalSetting(
 		"history.startupMembershipJoinDelay",
 		0*time.Second,
@@ -1573,9 +1583,6 @@ If value less or equal to 0, will fall back to HistoryPersistenceNamespaceMaxQPS
 		0,
 		`OutboundProcessorMaxPollHostRPS is max poll rate per second for all outboundQueueFactory on a host`,
 	)
-	// FIXME: unused?
-	// // OutboundProcessorUpdateShardTaskCount is update shard count for outboundQueueFactory
-	// OutboundProcessorUpdateShardTaskCount = "history.outboundProcessorUpdateShardTaskCount"
 	OutboundProcessorMaxPollInterval = NewDurationGlobalSetting(
 		"history.outboundProcessorMaxPollInterval",
 		1*time.Minute,
@@ -1966,9 +1973,6 @@ the number of children greater than or equal to this threshold`,
 		0.15,
 		`ReplicationTaskProcessorCleanupJitterCoefficient is the jitter for cleanup timer`,
 	)
-	// FIXME: unused?
-	// // ReplicationTaskProcessorStartWait is the wait time before each task processing batch
-	// ReplicationTaskProcessorStartWait = "history.ReplicationTaskProcessorStartWait"
 	ReplicationTaskProcessorHostQPS = NewFloatGlobalSetting(
 		"history.ReplicationTaskProcessorHostQPS",
 		1500,
@@ -2019,9 +2023,6 @@ that task will be sent to DLQ.`,
 		1*time.Second,
 		`ReplicationStreamSyncStatusDuration sync replication status duration`,
 	)
-	// FIXME: unused?
-	// // ReplicationStreamMinReconnectDuration minimal replication stream reconnection duration
-	// ReplicationStreamMinReconnectDuration = "history.ReplicationStreamMinReconnectDuration"
 	ReplicationProcessorSchedulerQueueSize = NewIntGlobalSetting(
 		"history.ReplicationProcessorSchedulerQueueSize",
 		128,

@@ -52,6 +52,7 @@ var (
 		dynamicconfig.ClusterMetadataRefreshInterval:                      100 * time.Millisecond,
 		dynamicconfig.NamespaceCacheRefreshInterval:                       NamespaceCacheRefreshInterval,
 		dynamicconfig.FrontendEnableUpdateWorkflowExecution:               true,
+		dynamicconfig.FrontendEnableUpdateWorkflowExecutionAsyncAccepted:  true,
 		dynamicconfig.FrontendAccessHistoryFraction:                       0.5,
 		dynamicconfig.EnableWorkflowIdConflictPolicy:                      true,
 		dynamicconfig.ReplicationEnableUpdateWithNewTaskMerge:             true,
@@ -61,6 +62,7 @@ var (
 		dynamicconfig.ValidateUTF8FailRPCRequest:                          true,
 		dynamicconfig.ValidateUTF8FailRPCResponse:                         true,
 		dynamicconfig.ValidateUTF8FailPersistence:                         true,
+		dynamicconfig.EnableWorkflowExecutionTimeoutTimer:                 true,
 	})
 )
 

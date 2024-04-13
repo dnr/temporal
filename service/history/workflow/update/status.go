@@ -22,18 +22,48 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-package xdc
+package update
 
 import (
-	"time"
-
-	"go.temporal.io/server/tests"
+	enumspb "go.temporal.io/api/enums/v1"
+	failurepb "go.temporal.io/api/failure/v1"
+	updatepb "go.temporal.io/api/update/v1"
 )
 
-const (
-	numOfRetry           = 100
-	waitTimeInMs         = 400
-	waitForESToSettle    = 4 * time.Second // wait es shards for some time ensure data consistent
-	cacheRefreshInterval = tests.NamespaceCacheRefreshInterval + 5*time.Second
-	testTimeout          = 30 * time.Second
+type (
+	// Status describes current status of update from registry.
+	Status struct {
+		// The most advanced stage reached by update.
+		Stage enumspb.UpdateWorkflowExecutionLifecycleStage
+		// Outcome of update if it is completed or rejected.
+		Outcome *updatepb.Outcome
+	}
 )
+
+func statusAdmitted() *Status {
+	return &Status{
+		Stage: enumspb.UPDATE_WORKFLOW_EXECUTION_LIFECYCLE_STAGE_ADMITTED,
+	}
+}
+
+func statusAccepted() *Status {
+	return &Status{
+		Stage: enumspb.UPDATE_WORKFLOW_EXECUTION_LIFECYCLE_STAGE_ACCEPTED,
+	}
+}
+
+func statusRejected(rejection *failurepb.Failure) *Status {
+	return &Status{
+		Stage: enumspb.UPDATE_WORKFLOW_EXECUTION_LIFECYCLE_STAGE_COMPLETED,
+		Outcome: &updatepb.Outcome{
+			Value: &updatepb.Outcome_Failure{Failure: rejection},
+		},
+	}
+}
+
+func statusCompleted(outcome *updatepb.Outcome) *Status {
+	return &Status{
+		Stage:   enumspb.UPDATE_WORKFLOW_EXECUTION_LIFECYCLE_STAGE_COMPLETED,
+		Outcome: outcome,
+	}
+}

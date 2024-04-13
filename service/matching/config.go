@@ -43,6 +43,7 @@ type (
 		PersistencePerShardNamespaceMaxQPS    dynamicconfig.IntPropertyFnWithNamespaceFilter
 		EnablePersistencePriorityRateLimiting dynamicconfig.BoolPropertyFn
 		PersistenceDynamicRateLimitingParams  dynamicconfig.MapPropertyFn
+		PersistenceQPSBurstRatio              dynamicconfig.FloatPropertyFn
 		SyncMatchWaitDuration                 dynamicconfig.DurationPropertyFnWithTaskQueueFilter
 		TestDisableSyncMatch                  dynamicconfig.BoolPropertyFn
 		RPS                                   dynamicconfig.IntPropertyFn
@@ -160,6 +161,7 @@ func NewConfig(
 		PersistencePerShardNamespaceMaxQPS:    dynamicconfig.DefaultPerShardNamespaceRPSMax,
 		EnablePersistencePriorityRateLimiting: dc.GetBool(dynamicconfig.MatchingEnablePersistencePriorityRateLimiting),
 		PersistenceDynamicRateLimitingParams:  dc.GetMap(dynamicconfig.MatchingPersistenceDynamicRateLimitingParams),
+		PersistenceQPSBurstRatio:              dc.GetFloat64Property(dynamicconfig.PersistenceQPSBurstRatio, 1),
 		SyncMatchWaitDuration:                 dc.GetDurationByTaskQueue(dynamicconfig.MatchingSyncMatchWaitDuration),
 		TestDisableSyncMatch:                  dc.GetBool(dynamicconfig.TestMatchingDisableSyncMatch),
 		LoadUserData:                          dc.GetBoolByTaskQueue(dynamicconfig.MatchingLoadUserData),

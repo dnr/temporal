@@ -810,8 +810,16 @@ func (t *transferQueueActiveTaskExecutor) processStartChildExecution(
 	// - command says to use compatible version
 	// - parent is using versioning
 	var sourceVersionStamp *commonpb.WorkerVersionStamp
-	if attributes.UseCompatibleVersion {
+	if attributes.InheritBuildId {
 		sourceVersionStamp = worker_versioning.StampIfUsingVersioning(mutableState.GetWorkerVersionStamp())
+	}
+
+	executionInfo := mutableState.GetExecutionInfo()
+	rootExecutionInfo := &workflowspb.RootExecutionInfo{
+		Execution: &commonpb.WorkflowExecution{
+			WorkflowId: executionInfo.RootWorkflowId,
+			RunId:      executionInfo.RootRunId,
+		},
 	}
 
 	childRunID, childClock, err := t.startWorkflow(
@@ -822,6 +830,7 @@ func (t *transferQueueActiveTaskExecutor) processStartChildExecution(
 		childInfo.CreateRequestId,
 		attributes,
 		sourceVersionStamp,
+		rootExecutionInfo,
 	)
 	if err != nil {
 		t.logger.Debug("Failed to start child workflow execution", tag.Error(err))
@@ -965,6 +974,7 @@ func (t *transferQueueActiveTaskExecutor) processResetWorkflow(
 			t.shardContext,
 			t.cache,
 			definition.NewWorkflowKey(task.NamespaceID, task.WorkflowID, resetPoint.GetRunId()),
+			workflow.LockPriorityLow,
 		)
 		if err != nil {
 			return err
@@ -1305,6 +1315,7 @@ func (t *transferQueueActiveTaskExecutor) startWorkflow(
 	childRequestID string,
 	attributes *historypb.StartChildWorkflowExecutionInitiatedEventAttributes,
 	sourceVersionStamp *commonpb.WorkerVersionStamp,
+	rootExecutionInfo *workflowspb.RootExecutionInfo,
 ) (string, *clockspb.VectorClock, error) {
 	request := common.CreateHistoryStartWorkflowRequest(
 		task.TargetNamespaceID,
@@ -1338,6 +1349,7 @@ func (t *transferQueueActiveTaskExecutor) startWorkflow(
 			InitiatedVersion: task.Version,
 			Clock:            vclock.NewVectorClock(t.shardContext.GetClusterMetadata().GetClusterID(), t.shardContext.GetShardID(), task.TaskID),
 		},
+		rootExecutionInfo,
 		t.shardContext.GetTimeSource().Now(),
 	)
 

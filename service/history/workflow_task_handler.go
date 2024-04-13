@@ -425,7 +425,7 @@ func (handler *workflowTaskHandlerImpl) handleCommandScheduleActivity(
 	}
 
 	// TODO: relax this restriction after matching can support this
-	if attr.UseCompatibleVersion && attr.TaskQueue.GetName() != "" && attr.TaskQueue.Name != handler.mutableState.GetExecutionInfo().TaskQueue {
+	if attr.UseWorkflowBuildId && attr.TaskQueue.GetName() != "" && attr.TaskQueue.Name != handler.mutableState.GetExecutionInfo().TaskQueue {
 		err := serviceerror.NewInvalidArgument("Activity with UseCompatibleVersion cannot run on different task queue.")
 		return nil, handler.failWorkflowTask(enumspb.WORKFLOW_TASK_FAILED_CAUSE_BAD_SCHEDULE_ACTIVITY_ATTRIBUTES, err)
 	}
@@ -449,10 +449,10 @@ func (handler *workflowTaskHandlerImpl) handleCommandScheduleActivity(
 	// or 2. workflow uses versioning and activity intends to use a compatible version (since a
 	// worker is obviously compatible with itself and we are okay dispatching an eager task knowing that there may be a
 	// newer "default" compatible version).
-	// Note that if `UseCompatibleVersion` is false, it implies that the activity should run on the "default" version
+	// Note that if `UseWorkflowBuildId` is false, it implies that the activity should run on the "default" version
 	// for the task queue.
 	eagerStartActivity := attr.RequestEagerExecution && handler.config.EnableActivityEagerExecution(namespace) &&
-		(!handler.mutableState.GetWorkerVersionStamp().GetUseVersioning() || attr.UseCompatibleVersion)
+		(!handler.mutableState.GetWorkerVersionStamp().GetUseVersioning() || attr.UseWorkflowBuildId)
 
 	_, _, err := handler.mutableState.AddActivityTaskScheduledEvent(
 		handler.workflowTaskCompletedID,
@@ -745,7 +745,7 @@ func (handler *workflowTaskHandlerImpl) handleCommandFailWorkflow(
 
 	// Handle retry or cron
 	if retryBackoff != backoff.NoBackoff {
-		return handler.handleRetry(ctx, retryBackoff, retryState, attr.GetFailure(), newExecutionRunID)
+		return handler.handleRetry(ctx, retryBackoff, attr.GetFailure(), newExecutionRunID)
 	} else if cronBackoff != backoff.NoBackoff {
 		return handler.handleCron(ctx, cronBackoff, nil, attr.GetFailure(), newExecutionRunID)
 	}
@@ -923,7 +923,7 @@ func (handler *workflowTaskHandlerImpl) handleCommandContinueAsNewWorkflow(
 	}
 
 	// TODO: relax this restriction after matching can support this
-	if attr.UseCompatibleVersion && attr.TaskQueue.GetName() != "" && attr.TaskQueue.Name != handler.mutableState.GetExecutionInfo().TaskQueue {
+	if attr.InheritBuildId && attr.TaskQueue.GetName() != "" && attr.TaskQueue.Name != handler.mutableState.GetExecutionInfo().TaskQueue {
 		err := serviceerror.NewInvalidArgument("ContinueAsNew with UseCompatibleVersion cannot run on different task queue.")
 		return handler.failWorkflowTask(enumspb.WORKFLOW_TASK_FAILED_CAUSE_BAD_CONTINUE_AS_NEW_ATTRIBUTES, err)
 	}
@@ -1043,7 +1043,7 @@ func (handler *workflowTaskHandlerImpl) handleCommandStartChildWorkflow(
 	}
 
 	// TODO: relax this restriction after matching can support this
-	if attr.UseCompatibleVersion && attr.TaskQueue.GetName() != "" && attr.TaskQueue.Name != handler.mutableState.GetExecutionInfo().TaskQueue {
+	if attr.InheritBuildId && attr.TaskQueue.GetName() != "" && attr.TaskQueue.Name != handler.mutableState.GetExecutionInfo().TaskQueue {
 		err := serviceerror.NewInvalidArgument("StartChildWorkflowExecution with UseCompatibleVersion cannot run on different task queue.")
 		return handler.failWorkflowTask(enumspb.WORKFLOW_TASK_FAILED_CAUSE_BAD_START_CHILD_EXECUTION_ATTRIBUTES, err)
 	}
@@ -1280,7 +1280,6 @@ func payloadsMapSize(fields map[string]*commonpb.Payload) int {
 func (handler *workflowTaskHandlerImpl) handleRetry(
 	ctx context.Context,
 	backoffInterval time.Duration,
-	retryState enumspb.RetryState,
 	failure *failurepb.Failure,
 	newRunID string,
 ) error {
@@ -1290,7 +1289,7 @@ func (handler *workflowTaskHandlerImpl) handleRetry(
 	}
 	startAttr := startEvent.GetWorkflowExecutionStartedEventAttributes()
 
-	newMutableState := workflow.NewMutableState(
+	newMutableState := workflow.NewMutableStateInChain(
 		handler.shard,
 		handler.shard.GetEventsCache(),
 		handler.shard.GetLogger(),
@@ -1298,6 +1297,7 @@ func (handler *workflowTaskHandlerImpl) handleRetry(
 		handler.mutableState.GetWorkflowKey().WorkflowID,
 		newRunID,
 		handler.shard.GetTimeSource().Now(),
+		handler.mutableState,
 	)
 
 	err = workflow.SetupNewWorkflowForRetryOrCron(
@@ -1345,7 +1345,7 @@ func (handler *workflowTaskHandlerImpl) handleCron(
 		lastCompletionResult = startAttr.LastCompletionResult
 	}
 
-	newMutableState := workflow.NewMutableState(
+	newMutableState := workflow.NewMutableStateInChain(
 		handler.shard,
 		handler.shard.GetEventsCache(),
 		handler.shard.GetLogger(),
@@ -1353,6 +1353,7 @@ func (handler *workflowTaskHandlerImpl) handleCron(
 		handler.mutableState.GetWorkflowKey().WorkflowID,
 		newRunID,
 		handler.shard.GetTimeSource().Now(),
+		handler.mutableState,
 	)
 
 	err = workflow.SetupNewWorkflowForRetryOrCron(

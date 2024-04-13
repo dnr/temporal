@@ -440,7 +440,16 @@ func (wh *WorkflowHandler) StartWorkflowExecution(ctx context.Context, request *
 	}
 	wh.logger.Debug("Start workflow execution request namespaceID.", tag.WorkflowNamespaceID(namespaceID.String()))
 
-	resp, err := wh.historyClient.StartWorkflowExecution(ctx, common.CreateHistoryStartWorkflowRequest(namespaceID.String(), request, nil, time.Now().UTC()))
+	resp, err := wh.historyClient.StartWorkflowExecution(
+		ctx,
+		common.CreateHistoryStartWorkflowRequest(
+			namespaceID.String(),
+			request,
+			nil,
+			nil,
+			time.Now().UTC(),
+		),
+	)
 
 	if err != nil {
 		return nil, err
@@ -2692,7 +2701,16 @@ func (wh *WorkflowHandler) CreateSchedule(ctx context.Context, request *workflow
 		Memo:                     request.Memo,
 		SearchAttributes:         sa,
 	}
-	_, err = wh.historyClient.StartWorkflowExecution(ctx, common.CreateHistoryStartWorkflowRequest(namespaceID.String(), startReq, nil, time.Now().UTC()))
+	_, err = wh.historyClient.StartWorkflowExecution(
+		ctx,
+		common.CreateHistoryStartWorkflowRequest(
+			namespaceID.String(),
+			startReq,
+			nil,
+			nil,
+			time.Now().UTC(),
+		),
+	)
 
 	if err != nil {
 		return nil, err
@@ -3226,6 +3244,13 @@ func (wh *WorkflowHandler) ListSchedules(
 		return nil, errListNotAllowed
 	}
 
+	query := ""
+	if strings.TrimSpace(request.Query) != "" {
+		query = fmt.Sprintf("%s AND (%s)", scheduler.VisibilityBaseListQuery, request.Query)
+	} else {
+		query = scheduler.VisibilityBaseListQuery
+	}
+
 	persistenceResp, err := wh.visibilityMgr.ListWorkflowExecutions(
 		ctx,
 		&manager.ListWorkflowExecutionsRequestV2{
@@ -3233,15 +3258,7 @@ func (wh *WorkflowHandler) ListSchedules(
 			Namespace:     namespaceName,
 			PageSize:      int(request.GetMaximumPageSize()),
 			NextPageToken: request.NextPageToken,
-			Query: fmt.Sprintf(
-				"%s = '%s' AND %s = '%s' AND %s = '%s'",
-				searchattribute.WorkflowType,
-				scheduler.WorkflowType,
-				searchattribute.TemporalNamespaceDivision,
-				scheduler.NamespaceDivision,
-				searchattribute.ExecutionStatus,
-				enumspb.WORKFLOW_EXECUTION_STATUS_RUNNING.String(),
-			),
+			Query:         query,
 		},
 	)
 	if err != nil {
@@ -3306,7 +3323,6 @@ func (wh *WorkflowHandler) UpdateWorkflowExecution(
 	if request.GetWaitPolicy() == nil {
 		request.WaitPolicy = &updatepb.WaitPolicy{}
 	}
-	enums.SetDefaultUpdateWorkflowExecutionLifecycleStage(&request.GetWaitPolicy().LifecycleStage)
 
 	nsID, err := wh.namespaceRegistry.GetNamespaceID(namespace.Name(request.GetNamespace()))
 	if err != nil {
@@ -3315,6 +3331,12 @@ func (wh *WorkflowHandler) UpdateWorkflowExecution(
 
 	if !wh.config.EnableUpdateWorkflowExecution(request.Namespace) {
 		return nil, errUpdateWorkflowExecutionAPINotAllowed
+	}
+
+	enums.SetDefaultUpdateWorkflowExecutionLifecycleStage(&request.GetWaitPolicy().LifecycleStage)
+
+	if request.WaitPolicy.LifecycleStage == enumspb.UPDATE_WORKFLOW_EXECUTION_LIFECYCLE_STAGE_ADMITTED {
+		return nil, errUpdateWorkflowExecutionAsyncAdmittedNotAllowed
 	}
 
 	if request.WaitPolicy.LifecycleStage == enumspb.UPDATE_WORKFLOW_EXECUTION_LIFECYCLE_STAGE_ACCEPTED &&
@@ -3444,6 +3466,14 @@ func (wh *WorkflowHandler) GetWorkerBuildIdCompatibility(ctx context.Context, re
 	}
 
 	return matchingResponse.Response, err
+}
+
+func (wh *WorkflowHandler) UpdateWorkerVersioningRules(ctx context.Context, request *workflowservice.UpdateWorkerVersioningRulesRequest) (_ *workflowservice.UpdateWorkerVersioningRulesResponse, retError error) {
+	return nil, serviceerror.NewUnimplemented("not implemented")
+}
+
+func (wh *WorkflowHandler) GetWorkerVersioningRules(ctx context.Context, request *workflowservice.GetWorkerVersioningRulesRequest) (_ *workflowservice.GetWorkerVersioningRulesResponse, retError error) {
+	return nil, serviceerror.NewUnimplemented("not implemented")
 }
 
 func (wh *WorkflowHandler) GetWorkerTaskReachability(ctx context.Context, request *workflowservice.GetWorkerTaskReachabilityRequest) (_ *workflowservice.GetWorkerTaskReachabilityResponse, retError error) {
@@ -3670,7 +3700,16 @@ func (wh *WorkflowHandler) StartBatchOperation(
 		SearchAttributes:      searchAttributes,
 	}
 
-	_, err = wh.historyClient.StartWorkflowExecution(ctx, common.CreateHistoryStartWorkflowRequest(namespaceID.String(), startReq, nil, time.Now().UTC()))
+	_, err = wh.historyClient.StartWorkflowExecution(
+		ctx,
+		common.CreateHistoryStartWorkflowRequest(
+			namespaceID.String(),
+			startReq,
+			nil,
+			nil,
+			time.Now().UTC(),
+		),
+	)
 	if err != nil {
 		return nil, err
 	}

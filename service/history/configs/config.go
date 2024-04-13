@@ -48,6 +48,7 @@ type Config struct {
 	PersistencePerShardNamespaceMaxQPS    dynamicconfig.IntPropertyFnWithNamespaceFilter
 	EnablePersistencePriorityRateLimiting dynamicconfig.BoolPropertyFn
 	PersistenceDynamicRateLimitingParams  dynamicconfig.MapPropertyFn
+	PersistenceQPSBurstRatio              dynamicconfig.FloatPropertyFn
 
 	VisibilityPersistenceMaxReadQPS       dynamicconfig.IntPropertyFn
 	VisibilityPersistenceMaxWriteQPS      dynamicconfig.IntPropertyFn
@@ -77,6 +78,7 @@ type Config struct {
 	HistoryCacheNonUserContextLockTimeout dynamicconfig.DurationPropertyFn
 	EnableHostLevelHistoryCache           dynamicconfig.BoolPropertyFn
 	EnableMutableStateTransitionHistory   dynamicconfig.BoolPropertyFn
+	EnableWorkflowExecutionTimeoutTimer   dynamicconfig.BoolPropertyFn
 
 	// EventsCache settings
 	// Change of these configs require shard restart
@@ -355,6 +357,7 @@ func NewConfig(
 		PersistencePerShardNamespaceMaxQPS:    dc.GetIntByNamespace(dynamicconfig.HistoryPersistencePerShardNamespaceMaxQPS),
 		EnablePersistencePriorityRateLimiting: dc.GetBool(dynamicconfig.HistoryEnablePersistencePriorityRateLimiting),
 		PersistenceDynamicRateLimitingParams:  dc.GetMap(dynamicconfig.HistoryPersistenceDynamicRateLimitingParams),
+		PersistenceQPSBurstRatio:              dc.GetFloat(dynamicconfig.PersistenceQPSBurstRatio),
 		ShutdownDrainDuration:                 dc.GetDuration(dynamicconfig.HistoryShutdownDrainDuration),
 		StartupMembershipJoinDelay:            dc.GetDuration(dynamicconfig.HistoryStartupMembershipJoinDelay),
 		MaxAutoResetPoints:                    dc.GetIntByNamespace(dynamicconfig.HistoryMaxAutoResetPoints),
@@ -382,6 +385,7 @@ func NewConfig(
 		HistoryCacheNonUserContextLockTimeout: dc.GetDuration(dynamicconfig.HistoryCacheNonUserContextLockTimeout),
 		EnableHostLevelHistoryCache:           dc.GetBool(dynamicconfig.EnableHostHistoryCache),
 		EnableMutableStateTransitionHistory:   dc.GetBool(dynamicconfig.EnableMutableStateTransitionHistory),
+		EnableWorkflowExecutionTimeoutTimer:   dc.GetBool(dynamicconfig.EnableWorkflowExecutionTimeoutTimer),
 
 		EventsShardLevelCacheMaxSizeBytes: dc.GetInt(dynamicconfig.EventsCacheMaxSizeBytes),          // 512KB
 		EventsHostLevelCacheMaxSizeBytes:  dc.GetInt(dynamicconfig.EventsHostLevelCacheMaxSizeBytes), // 256MB
