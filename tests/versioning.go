@@ -74,36 +74,36 @@ const (
 )
 
 func (s *VersioningIntegSuite) SetupSuite() {
-	s.dynamicConfigOverrides = SettingsToKeys(map[dynamicconfig.GenericSetting]any{
-		dynamicconfig.FrontendEnableWorkerVersioningDataAPIs:     true,
-		dynamicconfig.FrontendEnableWorkerVersioningWorkflowAPIs: true,
-		dynamicconfig.FrontendEnableWorkerVersioningRuleAPIs:     true,
-		dynamicconfig.MatchingForwarderMaxChildrenPerNode:        partitionTreeDegree,
-		dynamicconfig.TaskQueuesPerBuildIdLimit:                  3,
+	s.dynamicConfigOverrides = map[dynamicconfig.Key]any{
+		dynamicconfig.FrontendEnableWorkerVersioningDataAPIs.Key():     true,
+		dynamicconfig.FrontendEnableWorkerVersioningWorkflowAPIs.Key(): true,
+		dynamicconfig.FrontendEnableWorkerVersioningRuleAPIs.Key():     true,
+		dynamicconfig.MatchingForwarderMaxChildrenPerNode.Key():        partitionTreeDegree,
+		dynamicconfig.TaskQueuesPerBuildIdLimit.Key():                  3,
 
-		dynamicconfig.AssignmentRuleLimitPerQueue:              10,
-		dynamicconfig.RedirectRuleLimitPerQueue:                10,
-		dynamicconfig.RedirectRuleChainLimitPerQueue:           10,
-		dynamicconfig.MatchingDeletedRuleRetentionTime:         24 * time.Hour,
-		dynamicconfig.ReachabilityBuildIdVisibilityGracePeriod: 3 * time.Minute,
-		dynamicconfig.ReachabilityQueryBuildIdLimit:            4,
+		dynamicconfig.AssignmentRuleLimitPerQueue.Key():              10,
+		dynamicconfig.RedirectRuleLimitPerQueue.Key():                10,
+		dynamicconfig.RedirectRuleChainLimitPerQueue.Key():           10,
+		dynamicconfig.MatchingDeletedRuleRetentionTime.Key():         24 * time.Hour,
+		dynamicconfig.ReachabilityBuildIdVisibilityGracePeriod.Key(): 3 * time.Minute,
+		dynamicconfig.ReachabilityQueryBuildIdLimit.Key():            4,
 
 		// Make sure we don't hit the rate limiter in tests
-		dynamicconfig.FrontendGlobalNamespaceNamespaceReplicationInducingAPIsRPS:                1000,
-		dynamicconfig.FrontendMaxNamespaceNamespaceReplicationInducingAPIsBurstRatioPerInstance: 1,
-		dynamicconfig.FrontendNamespaceReplicationInducingAPIsRPS:                               1000,
+		dynamicconfig.FrontendGlobalNamespaceNamespaceReplicationInducingAPIsRPS.Key():                1000,
+		dynamicconfig.FrontendMaxNamespaceNamespaceReplicationInducingAPIsBurstRatioPerInstance.Key(): 1,
+		dynamicconfig.FrontendNamespaceReplicationInducingAPIsRPS.Key():                               1000,
 
 		// The dispatch tests below rely on being able to see the effects of changing
 		// versioning data relatively quickly. In general, we only promise to act on new
 		// versioning data "soon", i.e. after a long poll interval. We can reduce the long poll
 		// interval so that we don't have to wait so long.
 		// TODO: update this comment. it may be outdated and/or misleading.
-		dynamicconfig.MatchingLongPollExpirationInterval: longPollTime,
+		dynamicconfig.MatchingLongPollExpirationInterval.Key(): longPollTime,
 
 		// this is overridden for tests using testWithMatchingBehavior
-		dynamicconfig.MatchingNumTaskqueueReadPartitions:  4,
-		dynamicconfig.MatchingNumTaskqueueWritePartitions: 4,
-	})
+		dynamicconfig.MatchingNumTaskqueueReadPartitions.Key():  4,
+		dynamicconfig.MatchingNumTaskqueueWritePartitions.Key(): 4,
+	}
 	s.setupSuite("testdata/es_cluster.yaml")
 }
 

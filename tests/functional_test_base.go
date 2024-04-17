@@ -123,13 +123,13 @@ func (s *FunctionalTestBase) setupSuite(defaultClusterConfigFile string, options
 	if clusterConfig.DynamicConfigOverrides == nil {
 		clusterConfig.DynamicConfigOverrides = make(map[dynamicconfig.Key]interface{})
 	}
-	maps.Copy(clusterConfig.DynamicConfigOverrides, SettingsToKeys(map[dynamicconfig.GenericSetting]any{
-		dynamicconfig.HistoryScannerEnabled:    false,
-		dynamicconfig.TaskQueueScannerEnabled:  false,
-		dynamicconfig.ExecutionsScannerEnabled: false,
-		dynamicconfig.BuildIdScavengerEnabled:  false,
-		dynamicconfig.FrontendEnableNexusAPIs:  true,
-	}))
+	maps.Copy(clusterConfig.DynamicConfigOverrides, map[dynamicconfig.Key]any{
+		dynamicconfig.HistoryScannerEnabled.Key():    false,
+		dynamicconfig.TaskQueueScannerEnabled.Key():  false,
+		dynamicconfig.ExecutionsScannerEnabled.Key(): false,
+		dynamicconfig.BuildIdScavengerEnabled.Key():  false,
+		dynamicconfig.FrontendEnableNexusAPIs.Key():  true,
+	})
 	maps.Copy(clusterConfig.DynamicConfigOverrides, s.dynamicConfigOverrides)
 	clusterConfig.ServiceFxOptions = params.ServiceOptions
 	clusterConfig.EnableMetricsCapture = true
