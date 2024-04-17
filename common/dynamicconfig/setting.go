@@ -1,6 +1,8 @@
 // The MIT License
 //
-// Copyright (c) 2024 Temporal Technologies Inc.  All rights reserved.
+// Copyright (c) 2020 Temporal Technologies Inc.  All rights reserved.
+//
+// Copyright (c) 2020 Uber Technologies, Inc.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -20,26 +22,28 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-package callbacks
+//go:generate go run ../../cmd/tools/gendynamicconfig
 
-import (
-	"time"
+package dynamicconfig
 
-	"go.temporal.io/server/common/dynamicconfig"
-)
+type (
+	Type int
 
-var InvocationTaskTimeout = dynamicconfig.NewDurationGlobalSetting(
-	"plugin.callback.invocation.taskTimeout",
-	time.Second*10,
-	`InvocationTaskTimeout is the timeout for executing a single callback invocation task.`,
-)
+	Precedence int
 
-type Config struct {
-	InvocationTaskTimeout dynamicconfig.DurationPropertyFn
-}
-
-func ConfigProvider(dc *dynamicconfig.Collection) *Config {
-	return &Config{
-		InvocationTaskTimeout: dc.GetDuration(InvocationTaskTimeout),
+	Setting[T any, P any] struct {
+		// string value of key. case-insensitive.
+		key Key
+		// default value. cdef is used in preference to def if non-nil.
+		def  T
+		cdef []TypedConstrainedValue[T]
+		// documentation
+		description string
 	}
-}
+
+	GenericSetting interface {
+		Key() Key
+		Type() Type
+		Precedence() Precedence
+	}
+)

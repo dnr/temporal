@@ -171,10 +171,10 @@ func TestHistoryReplicationDLQSuite(t *testing.T) {
 }
 
 func (s *historyReplicationDLQSuite) SetupSuite() {
-	s.dynamicConfigOverrides = map[dynamicconfig.Key]interface{}{
+	s.dynamicConfigOverrides = tests.SettingsToKeys(map[dynamicconfig.GenericSetting]any{
 		dynamicconfig.EnableReplicationStream:       s.enableReplicationStream,
 		dynamicconfig.EnableHistoryReplicationDLQV2: s.enableQueueV2,
-	}
+	})
 
 	// We don't know how many messages these channels are actually going to produce, and we may not read them all, so we
 	// need to buffer them by a good amount.

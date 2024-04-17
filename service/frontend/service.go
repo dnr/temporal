@@ -26,7 +26,6 @@ package frontend
 
 import (
 	"net"
-	"os"
 	"sync"
 	"time"
 
@@ -39,7 +38,6 @@ import (
 	"google.golang.org/grpc/reflection"
 
 	"go.temporal.io/server/api/adminservice/v1"
-	"go.temporal.io/server/common"
 	"go.temporal.io/server/common/dynamicconfig"
 	"go.temporal.io/server/common/log"
 	"go.temporal.io/server/common/log/tag"
@@ -48,8 +46,6 @@ import (
 	"go.temporal.io/server/common/persistence/client"
 	"go.temporal.io/server/common/persistence/visibility"
 	"go.temporal.io/server/common/persistence/visibility/manager"
-	"go.temporal.io/server/common/primitives"
-	"go.temporal.io/server/common/retrypolicy"
 )
 
 // Config represents configuration for frontend service
@@ -211,104 +207,104 @@ func NewConfig(
 ) *Config {
 	return &Config{
 		NumHistoryShards:                      numHistoryShards,
-		PersistenceMaxQPS:                     dc.GetIntProperty(dynamicconfig.FrontendPersistenceMaxQPS, 2000),
-		PersistenceGlobalMaxQPS:               dc.GetIntProperty(dynamicconfig.FrontendPersistenceGlobalMaxQPS, 0),
-		PersistenceNamespaceMaxQPS:            dc.GetIntPropertyFilteredByNamespace(dynamicconfig.FrontendPersistenceNamespaceMaxQPS, 0),
-		PersistenceGlobalNamespaceMaxQPS:      dc.GetIntPropertyFilteredByNamespace(dynamicconfig.FrontendPersistenceGlobalNamespaceMaxQPS, 0),
+		PersistenceMaxQPS:                     dc.GetInt(dynamicconfig.FrontendPersistenceMaxQPS),
+		PersistenceGlobalMaxQPS:               dc.GetInt(dynamicconfig.FrontendPersistenceGlobalMaxQPS),
+		PersistenceNamespaceMaxQPS:            dc.GetIntByNamespace(dynamicconfig.FrontendPersistenceNamespaceMaxQPS),
+		PersistenceGlobalNamespaceMaxQPS:      dc.GetIntByNamespace(dynamicconfig.FrontendPersistenceGlobalNamespaceMaxQPS),
 		PersistencePerShardNamespaceMaxQPS:    dynamicconfig.DefaultPerShardNamespaceRPSMax,
-		EnablePersistencePriorityRateLimiting: dc.GetBoolProperty(dynamicconfig.FrontendEnablePersistencePriorityRateLimiting, true),
-		PersistenceDynamicRateLimitingParams:  dc.GetMapProperty(dynamicconfig.FrontendPersistenceDynamicRateLimitingParams, dynamicconfig.DefaultDynamicRateLimitingParams),
-		PersistenceQPSBurstRatio:              dc.GetFloat64Property(dynamicconfig.PersistenceQPSBurstRatio, 1),
+		EnablePersistencePriorityRateLimiting: dc.GetBool(dynamicconfig.FrontendEnablePersistencePriorityRateLimiting),
+		PersistenceDynamicRateLimitingParams:  dc.GetMap(dynamicconfig.FrontendPersistenceDynamicRateLimitingParams),
+		PersistenceQPSBurstRatio:              dc.GetFloat(dynamicconfig.PersistenceQPSBurstRatio),
 
 		VisibilityPersistenceMaxReadQPS:       visibility.GetVisibilityPersistenceMaxReadQPS(dc),
 		VisibilityPersistenceMaxWriteQPS:      visibility.GetVisibilityPersistenceMaxWriteQPS(dc),
-		VisibilityMaxPageSize:                 dc.GetIntPropertyFilteredByNamespace(dynamicconfig.FrontendVisibilityMaxPageSize, 1000),
+		VisibilityMaxPageSize:                 dc.GetIntByNamespace(dynamicconfig.FrontendVisibilityMaxPageSize),
 		EnableReadFromSecondaryVisibility:     visibility.GetEnableReadFromSecondaryVisibilityConfig(dc),
-		VisibilityDisableOrderByClause:        dc.GetBoolPropertyFnWithNamespaceFilter(dynamicconfig.VisibilityDisableOrderByClause, true),
-		VisibilityEnableManualPagination:      dc.GetBoolPropertyFnWithNamespaceFilter(dynamicconfig.VisibilityEnableManualPagination, true),
-		VisibilityAllowList:                   dc.GetBoolPropertyFnWithNamespaceFilter(dynamicconfig.VisibilityAllowList, true),
-		SuppressErrorSetSystemSearchAttribute: dc.GetBoolPropertyFnWithNamespaceFilter(dynamicconfig.SuppressErrorSetSystemSearchAttribute, false),
+		VisibilityDisableOrderByClause:        dc.GetBoolByNamespace(dynamicconfig.VisibilityDisableOrderByClause),
+		VisibilityEnableManualPagination:      dc.GetBoolByNamespace(dynamicconfig.VisibilityEnableManualPagination),
+		VisibilityAllowList:                   dc.GetBoolByNamespace(dynamicconfig.VisibilityAllowList),
+		SuppressErrorSetSystemSearchAttribute: dc.GetBoolByNamespace(dynamicconfig.SuppressErrorSetSystemSearchAttribute),
 
-		HistoryMaxPageSize:                  dc.GetIntPropertyFilteredByNamespace(dynamicconfig.FrontendHistoryMaxPageSize, primitives.GetHistoryMaxPageSize),
-		RPS:                                 dc.GetIntProperty(dynamicconfig.FrontendRPS, 2400),
-		GlobalRPS:                           dc.GetIntProperty(dynamicconfig.FrontendGlobalRPS, 0),
-		OperatorRPSRatio:                    dc.GetFloat64Property(dynamicconfig.OperatorRPSRatio, common.DefaultOperatorRPSRatio),
-		NamespaceReplicationInducingAPIsRPS: dc.GetIntProperty(dynamicconfig.FrontendNamespaceReplicationInducingAPIsRPS, 20),
+		HistoryMaxPageSize:                  dc.GetIntByNamespace(dynamicconfig.FrontendHistoryMaxPageSize),
+		RPS:                                 dc.GetInt(dynamicconfig.FrontendRPS),
+		GlobalRPS:                           dc.GetInt(dynamicconfig.FrontendGlobalRPS),
+		OperatorRPSRatio:                    dc.GetFloat(dynamicconfig.OperatorRPSRatio),
+		NamespaceReplicationInducingAPIsRPS: dc.GetInt(dynamicconfig.FrontendNamespaceReplicationInducingAPIsRPS),
 
-		MaxNamespaceRPSPerInstance:                                        dc.GetIntPropertyFilteredByNamespace(dynamicconfig.FrontendMaxNamespaceRPSPerInstance, 2400),
-		MaxNamespaceBurstRatioPerInstance:                                 dc.GetFloatPropertyFilteredByNamespace(dynamicconfig.FrontendMaxNamespaceBurstRatioPerInstance, 2),
-		MaxConcurrentLongRunningRequestsPerInstance:                       dc.GetIntPropertyFilteredByNamespace(dynamicconfig.FrontendMaxConcurrentLongRunningRequestsPerInstance, 1200),
-		MaxGlobalConcurrentLongRunningRequests:                            dc.GetIntPropertyFilteredByNamespace(dynamicconfig.FrontendGlobalMaxConcurrentLongRunningRequests, 0),
-		MaxNamespaceVisibilityRPSPerInstance:                              dc.GetIntPropertyFilteredByNamespace(dynamicconfig.FrontendMaxNamespaceVisibilityRPSPerInstance, 10),
-		MaxNamespaceVisibilityBurstRatioPerInstance:                       dc.GetFloatPropertyFilteredByNamespace(dynamicconfig.FrontendMaxNamespaceVisibilityBurstRatioPerInstance, 1),
-		MaxNamespaceNamespaceReplicationInducingAPIsRPSPerInstance:        dc.GetIntPropertyFilteredByNamespace(dynamicconfig.FrontendMaxNamespaceNamespaceReplicationInducingAPIsRPSPerInstance, 1),
-		MaxNamespaceNamespaceReplicationInducingAPIsBurstRatioPerInstance: dc.GetFloatPropertyFilteredByNamespace(dynamicconfig.FrontendMaxNamespaceNamespaceReplicationInducingAPIsBurstRatioPerInstance, 10),
+		MaxNamespaceRPSPerInstance:                                        dc.GetIntByNamespace(dynamicconfig.FrontendMaxNamespaceRPSPerInstance),
+		MaxNamespaceBurstRatioPerInstance:                                 dc.GetFloatByNamespace(dynamicconfig.FrontendMaxNamespaceBurstRatioPerInstance),
+		MaxConcurrentLongRunningRequestsPerInstance:                       dc.GetIntByNamespace(dynamicconfig.FrontendMaxConcurrentLongRunningRequestsPerInstance),
+		MaxGlobalConcurrentLongRunningRequests:                            dc.GetIntByNamespace(dynamicconfig.FrontendGlobalMaxConcurrentLongRunningRequests),
+		MaxNamespaceVisibilityRPSPerInstance:                              dc.GetIntByNamespace(dynamicconfig.FrontendMaxNamespaceVisibilityRPSPerInstance),
+		MaxNamespaceVisibilityBurstRatioPerInstance:                       dc.GetFloatByNamespace(dynamicconfig.FrontendMaxNamespaceVisibilityBurstRatioPerInstance),
+		MaxNamespaceNamespaceReplicationInducingAPIsRPSPerInstance:        dc.GetIntByNamespace(dynamicconfig.FrontendMaxNamespaceNamespaceReplicationInducingAPIsRPSPerInstance),
+		MaxNamespaceNamespaceReplicationInducingAPIsBurstRatioPerInstance: dc.GetFloatByNamespace(dynamicconfig.FrontendMaxNamespaceNamespaceReplicationInducingAPIsBurstRatioPerInstance),
 
-		GlobalNamespaceRPS:                     dc.GetIntPropertyFilteredByNamespace(dynamicconfig.FrontendGlobalNamespaceRPS, 0),
-		InternalFEGlobalNamespaceRPS:           dc.GetIntPropertyFilteredByNamespace(dynamicconfig.InternalFrontendGlobalNamespaceRPS, 0),
-		GlobalNamespaceVisibilityRPS:           dc.GetIntPropertyFilteredByNamespace(dynamicconfig.FrontendGlobalNamespaceVisibilityRPS, 0),
-		InternalFEGlobalNamespaceVisibilityRPS: dc.GetIntPropertyFilteredByNamespace(dynamicconfig.InternalFrontendGlobalNamespaceVisibilityRPS, 0),
+		GlobalNamespaceRPS:                     dc.GetIntByNamespace(dynamicconfig.FrontendGlobalNamespaceRPS),
+		InternalFEGlobalNamespaceRPS:           dc.GetIntByNamespace(dynamicconfig.InternalFrontendGlobalNamespaceRPS),
+		GlobalNamespaceVisibilityRPS:           dc.GetIntByNamespace(dynamicconfig.FrontendGlobalNamespaceVisibilityRPS),
+		InternalFEGlobalNamespaceVisibilityRPS: dc.GetIntByNamespace(dynamicconfig.InternalFrontendGlobalNamespaceVisibilityRPS),
 		// Overshoot since these low rate limits don't work well in an uncoordinated global limiter.
-		GlobalNamespaceNamespaceReplicationInducingAPIsRPS: dc.GetIntPropertyFilteredByNamespace(dynamicconfig.FrontendGlobalNamespaceNamespaceReplicationInducingAPIsRPS, 10),
-		MaxIDLengthLimit:                         dc.GetIntProperty(dynamicconfig.MaxIDLengthLimit, 1000),
-		WorkerBuildIdSizeLimit:                   dc.GetIntProperty(dynamicconfig.WorkerBuildIdSizeLimit, 255),
-		ReachabilityTaskQueueScanLimit:           dc.GetIntProperty(dynamicconfig.ReachabilityTaskQueueScanLimit, 20),
-		ReachabilityQueryBuildIdLimit:            dc.GetIntProperty(dynamicconfig.ReachabilityQueryBuildIdLimit, 5),
-		ReachabilityQuerySetDurationSinceDefault: dc.GetDurationProperty(dynamicconfig.ReachabilityQuerySetDurationSinceDefault, 5*time.Minute),
-		MaxBadBinaries:                           dc.GetIntPropertyFilteredByNamespace(dynamicconfig.FrontendMaxBadBinaries, 10),
-		DisableListVisibilityByFilter:            dc.GetBoolPropertyFnWithNamespaceFilter(dynamicconfig.DisableListVisibilityByFilter, false),
-		BlobSizeLimitError:                       dc.GetIntPropertyFilteredByNamespace(dynamicconfig.BlobSizeLimitError, 2*1024*1024),
-		BlobSizeLimitWarn:                        dc.GetIntPropertyFilteredByNamespace(dynamicconfig.BlobSizeLimitWarn, 256*1024),
-		ThrottledLogRPS:                          dc.GetIntProperty(dynamicconfig.FrontendThrottledLogRPS, 20),
-		ShutdownDrainDuration:                    dc.GetDurationProperty(dynamicconfig.FrontendShutdownDrainDuration, 0*time.Second),
-		ShutdownFailHealthCheckDuration:          dc.GetDurationProperty(dynamicconfig.FrontendShutdownFailHealthCheckDuration, 0*time.Second),
-		EnableNamespaceNotActiveAutoForwarding:   dc.GetBoolPropertyFnWithNamespaceFilter(dynamicconfig.EnableNamespaceNotActiveAutoForwarding, true),
-		SearchAttributesNumberOfKeysLimit:        dc.GetIntPropertyFilteredByNamespace(dynamicconfig.SearchAttributesNumberOfKeysLimit, 100),
-		SearchAttributesSizeOfValueLimit:         dc.GetIntPropertyFilteredByNamespace(dynamicconfig.SearchAttributesSizeOfValueLimit, 2*1024),
-		SearchAttributesTotalSizeLimit:           dc.GetIntPropertyFilteredByNamespace(dynamicconfig.SearchAttributesTotalSizeLimit, 40*1024),
-		VisibilityArchivalQueryMaxPageSize:       dc.GetIntProperty(dynamicconfig.VisibilityArchivalQueryMaxPageSize, 10000),
-		DisallowQuery:                            dc.GetBoolPropertyFnWithNamespaceFilter(dynamicconfig.DisallowQuery, false),
-		SendRawWorkflowHistory:                   dc.GetBoolPropertyFnWithNamespaceFilter(dynamicconfig.SendRawWorkflowHistory, false),
-		DefaultWorkflowRetryPolicy:               dc.GetMapPropertyFnWithNamespaceFilter(dynamicconfig.DefaultWorkflowRetryPolicy, retrypolicy.GetDefault()),
-		DefaultWorkflowTaskTimeout:               dc.GetDurationPropertyFilteredByNamespace(dynamicconfig.DefaultWorkflowTaskTimeout, primitives.DefaultWorkflowTaskTimeout),
-		EnableServerVersionCheck:                 dc.GetBoolProperty(dynamicconfig.EnableServerVersionCheck, os.Getenv("TEMPORAL_VERSION_CHECK_DISABLED") == ""),
-		EnableTokenNamespaceEnforcement:          dc.GetBoolProperty(dynamicconfig.EnableTokenNamespaceEnforcement, true),
-		KeepAliveMinTime:                         dc.GetDurationProperty(dynamicconfig.KeepAliveMinTime, 10*time.Second),
-		KeepAlivePermitWithoutStream:             dc.GetBoolProperty(dynamicconfig.KeepAlivePermitWithoutStream, true),
-		KeepAliveMaxConnectionIdle:               dc.GetDurationProperty(dynamicconfig.KeepAliveMaxConnectionIdle, 2*time.Minute),
-		KeepAliveMaxConnectionAge:                dc.GetDurationProperty(dynamicconfig.KeepAliveMaxConnectionAge, 5*time.Minute),
-		KeepAliveMaxConnectionAgeGrace:           dc.GetDurationProperty(dynamicconfig.KeepAliveMaxConnectionAgeGrace, 70*time.Second),
-		KeepAliveTime:                            dc.GetDurationProperty(dynamicconfig.KeepAliveTime, 1*time.Minute),
-		KeepAliveTimeout:                         dc.GetDurationProperty(dynamicconfig.KeepAliveTimeout, 10*time.Second),
+		GlobalNamespaceNamespaceReplicationInducingAPIsRPS: dc.GetIntByNamespace(dynamicconfig.FrontendGlobalNamespaceNamespaceReplicationInducingAPIsRPS),
+		MaxIDLengthLimit:                         dc.GetInt(dynamicconfig.MaxIDLengthLimit),
+		WorkerBuildIdSizeLimit:                   dc.GetInt(dynamicconfig.WorkerBuildIdSizeLimit),
+		ReachabilityTaskQueueScanLimit:           dc.GetInt(dynamicconfig.ReachabilityTaskQueueScanLimit),
+		ReachabilityQueryBuildIdLimit:            dc.GetInt(dynamicconfig.ReachabilityQueryBuildIdLimit),
+		ReachabilityQuerySetDurationSinceDefault: dc.GetDuration(dynamicconfig.ReachabilityQuerySetDurationSinceDefault),
+		MaxBadBinaries:                           dc.GetIntByNamespace(dynamicconfig.FrontendMaxBadBinaries),
+		DisableListVisibilityByFilter:            dc.GetBoolByNamespace(dynamicconfig.DisableListVisibilityByFilter),
+		BlobSizeLimitError:                       dc.GetIntByNamespace(dynamicconfig.BlobSizeLimitError),
+		BlobSizeLimitWarn:                        dc.GetIntByNamespace(dynamicconfig.BlobSizeLimitWarn),
+		ThrottledLogRPS:                          dc.GetInt(dynamicconfig.FrontendThrottledLogRPS),
+		ShutdownDrainDuration:                    dc.GetDuration(dynamicconfig.FrontendShutdownDrainDuration),
+		ShutdownFailHealthCheckDuration:          dc.GetDuration(dynamicconfig.FrontendShutdownFailHealthCheckDuration),
+		EnableNamespaceNotActiveAutoForwarding:   dc.GetBoolByNamespace(dynamicconfig.EnableNamespaceNotActiveAutoForwarding),
+		SearchAttributesNumberOfKeysLimit:        dc.GetIntByNamespace(dynamicconfig.SearchAttributesNumberOfKeysLimit),
+		SearchAttributesSizeOfValueLimit:         dc.GetIntByNamespace(dynamicconfig.SearchAttributesSizeOfValueLimit),
+		SearchAttributesTotalSizeLimit:           dc.GetIntByNamespace(dynamicconfig.SearchAttributesTotalSizeLimit),
+		VisibilityArchivalQueryMaxPageSize:       dc.GetInt(dynamicconfig.VisibilityArchivalQueryMaxPageSize),
+		DisallowQuery:                            dc.GetBoolByNamespace(dynamicconfig.DisallowQuery),
+		SendRawWorkflowHistory:                   dc.GetBoolByNamespace(dynamicconfig.SendRawWorkflowHistory),
+		DefaultWorkflowRetryPolicy:               dc.GetMapByNamespace(dynamicconfig.DefaultWorkflowRetryPolicy),
+		DefaultWorkflowTaskTimeout:               dc.GetDurationByNamespace(dynamicconfig.DefaultWorkflowTaskTimeout),
+		EnableServerVersionCheck:                 dc.GetBool(dynamicconfig.EnableServerVersionCheck),
+		EnableTokenNamespaceEnforcement:          dc.GetBool(dynamicconfig.EnableTokenNamespaceEnforcement),
+		KeepAliveMinTime:                         dc.GetDuration(dynamicconfig.KeepAliveMinTime),
+		KeepAlivePermitWithoutStream:             dc.GetBool(dynamicconfig.KeepAlivePermitWithoutStream),
+		KeepAliveMaxConnectionIdle:               dc.GetDuration(dynamicconfig.KeepAliveMaxConnectionIdle),
+		KeepAliveMaxConnectionAge:                dc.GetDuration(dynamicconfig.KeepAliveMaxConnectionAge),
+		KeepAliveMaxConnectionAgeGrace:           dc.GetDuration(dynamicconfig.KeepAliveMaxConnectionAgeGrace),
+		KeepAliveTime:                            dc.GetDuration(dynamicconfig.KeepAliveTime),
+		KeepAliveTimeout:                         dc.GetDuration(dynamicconfig.KeepAliveTimeout),
 
-		DeleteNamespaceDeleteActivityRPS:                    dc.GetIntProperty(dynamicconfig.DeleteNamespaceDeleteActivityRPS, 100),
-		DeleteNamespacePageSize:                             dc.GetIntProperty(dynamicconfig.DeleteNamespacePageSize, 1000),
-		DeleteNamespacePagesPerExecution:                    dc.GetIntProperty(dynamicconfig.DeleteNamespacePagesPerExecution, 256),
-		DeleteNamespaceConcurrentDeleteExecutionsActivities: dc.GetIntProperty(dynamicconfig.DeleteNamespaceConcurrentDeleteExecutionsActivities, 4),
-		DeleteNamespaceNamespaceDeleteDelay:                 dc.GetDurationProperty(dynamicconfig.DeleteNamespaceNamespaceDeleteDelay, 0*time.Hour),
+		DeleteNamespaceDeleteActivityRPS:                    dc.GetInt(dynamicconfig.DeleteNamespaceDeleteActivityRPS),
+		DeleteNamespacePageSize:                             dc.GetInt(dynamicconfig.DeleteNamespacePageSize),
+		DeleteNamespacePagesPerExecution:                    dc.GetInt(dynamicconfig.DeleteNamespacePagesPerExecution),
+		DeleteNamespaceConcurrentDeleteExecutionsActivities: dc.GetInt(dynamicconfig.DeleteNamespaceConcurrentDeleteExecutionsActivities),
+		DeleteNamespaceNamespaceDeleteDelay:                 dc.GetDuration(dynamicconfig.DeleteNamespaceNamespaceDeleteDelay),
 
-		EnableSchedules: dc.GetBoolPropertyFnWithNamespaceFilter(dynamicconfig.FrontendEnableSchedules, true),
+		EnableSchedules: dc.GetBoolByNamespace(dynamicconfig.FrontendEnableSchedules),
 
-		EnableBatcher:                   dc.GetBoolPropertyFnWithNamespaceFilter(dynamicconfig.FrontendEnableBatcher, true),
-		MaxConcurrentBatchOperation:     dc.GetIntPropertyFilteredByNamespace(dynamicconfig.FrontendMaxConcurrentBatchOperationPerNamespace, 1),
-		MaxExecutionCountBatchOperation: dc.GetIntPropertyFilteredByNamespace(dynamicconfig.FrontendMaxExecutionCountBatchOperationPerNamespace, 1000),
+		EnableBatcher:                   dc.GetBoolByNamespace(dynamicconfig.FrontendEnableBatcher),
+		MaxConcurrentBatchOperation:     dc.GetIntByNamespace(dynamicconfig.FrontendMaxConcurrentBatchOperationPerNamespace),
+		MaxExecutionCountBatchOperation: dc.GetIntByNamespace(dynamicconfig.FrontendMaxExecutionCountBatchOperationPerNamespace),
 
-		EnableExecuteMultiOperation: dc.GetBoolPropertyFnWithNamespaceFilter(dynamicconfig.FrontendEnableExecuteMultiOperation, false),
+		EnableExecuteMultiOperation: dc.GetBoolByNamespace(dynamicconfig.FrontendEnableExecuteMultiOperation),
 
-		EnableUpdateWorkflowExecution:              dc.GetBoolPropertyFnWithNamespaceFilter(dynamicconfig.FrontendEnableUpdateWorkflowExecution, false),
-		EnableUpdateWorkflowExecutionAsyncAccepted: dc.GetBoolPropertyFnWithNamespaceFilter(dynamicconfig.FrontendEnableUpdateWorkflowExecutionAsyncAccepted, false),
+		EnableUpdateWorkflowExecution:              dc.GetBoolByNamespace(dynamicconfig.FrontendEnableUpdateWorkflowExecution),
+		EnableUpdateWorkflowExecutionAsyncAccepted: dc.GetBoolByNamespace(dynamicconfig.FrontendEnableUpdateWorkflowExecutionAsyncAccepted),
 
-		EnableWorkerVersioningData:     dc.GetBoolPropertyFnWithNamespaceFilter(dynamicconfig.FrontendEnableWorkerVersioningDataAPIs, false),
-		EnableWorkerVersioningWorkflow: dc.GetBoolPropertyFnWithNamespaceFilter(dynamicconfig.FrontendEnableWorkerVersioningWorkflowAPIs, false),
-		EnableWorkerVersioningRules:    dc.GetBoolPropertyFnWithNamespaceFilter(dynamicconfig.FrontendEnableWorkerVersioningRuleAPIs, false),
+		EnableWorkerVersioningData:     dc.GetBoolByNamespace(dynamicconfig.FrontendEnableWorkerVersioningDataAPIs),
+		EnableWorkerVersioningWorkflow: dc.GetBoolByNamespace(dynamicconfig.FrontendEnableWorkerVersioningWorkflowAPIs),
+		EnableWorkerVersioningRules:    dc.GetBoolByNamespace(dynamicconfig.FrontendEnableWorkerVersioningRuleAPIs),
 
-		AccessHistoryFraction:            dc.GetFloat64Property(dynamicconfig.FrontendAccessHistoryFraction, 0.0),
-		AdminDeleteAccessHistoryFraction: dc.GetFloat64Property(dynamicconfig.FrontendAdminDeleteAccessHistoryFraction, 0.0),
+		AccessHistoryFraction:            dc.GetFloat(dynamicconfig.FrontendAccessHistoryFraction),
+		AdminDeleteAccessHistoryFraction: dc.GetFloat(dynamicconfig.FrontendAdminDeleteAccessHistoryFraction),
 
-		EnableNexusAPIs:             dc.GetBoolProperty(dynamicconfig.FrontendEnableNexusAPIs, false),
-		EnableCallbackAttachment:    dc.GetBoolPropertyFnWithNamespaceFilter(dynamicconfig.FrontendEnableCallbackAttachment, false),
-		CallbackURLMaxLength:        dc.GetIntPropertyFilteredByNamespace(dynamicconfig.FrontendCallbackURLMaxLength, 1000),
-		AdminEnableListHistoryTasks: dc.GetBoolProperty(dynamicconfig.AdminEnableListHistoryTasks, true),
+		EnableNexusAPIs:             dc.GetBool(dynamicconfig.FrontendEnableNexusAPIs),
+		EnableCallbackAttachment:    dc.GetBoolByNamespace(dynamicconfig.FrontendEnableCallbackAttachment),
+		CallbackURLMaxLength:        dc.GetIntByNamespace(dynamicconfig.FrontendCallbackURLMaxLength),
+		AdminEnableListHistoryTasks: dc.GetBool(dynamicconfig.AdminEnableListHistoryTasks),
 	}
 }
 

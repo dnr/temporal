@@ -39,7 +39,7 @@ const NamespaceCacheRefreshInterval = time.Second
 
 var (
 	// Override values for dynamic configs
-	staticOverrides = map[dynamicconfig.Key]any{
+	staticOverrides = SettingsToKeys(map[dynamicconfig.GenericSetting]any{
 		dynamicconfig.FrontendRPS:                                         3000,
 		dynamicconfig.FrontendMaxNamespaceVisibilityRPSPerInstance:        50,
 		dynamicconfig.FrontendMaxNamespaceVisibilityBurstRatioPerInstance: 1,
@@ -62,7 +62,7 @@ var (
 		dynamicconfig.ValidateUTF8FailRPCResponse:                         true,
 		dynamicconfig.ValidateUTF8FailPersistence:                         true,
 		dynamicconfig.EnableWorkflowExecutionTimeoutTimer:                 true,
-	}
+	})
 )
 
 type dcClient struct {
@@ -87,7 +87,11 @@ func (d *dcClient) GetValue(name dynamicconfig.Key) []dynamicconfig.ConstrainedV
 
 // OverrideValue overrides a value for the duration of a test. Once the test completes
 // the previous value (if any) will be restored
-func (d *dcClient) OverrideValue(t *testing.T, name dynamicconfig.Key, value any) {
+func (d *dcClient) OverrideValue(t *testing.T, setting dynamicconfig.GenericSetting, value any) {
+	d.OverrideValueByKey(t, setting.Key(), value)
+}
+
+func (d *dcClient) OverrideValueByKey(t *testing.T, name dynamicconfig.Key, value any) {
 	d.Lock()
 	defer d.Unlock()
 	priorValue, existed := d.overrides[name]
@@ -105,10 +109,10 @@ func (d *dcClient) OverrideValue(t *testing.T, name dynamicconfig.Key, value any
 	})
 }
 
-func (d *dcClient) RemoveOverride(name dynamicconfig.Key) {
+func (d *dcClient) RemoveOverride(setting dynamicconfig.GenericSetting) {
 	d.Lock()
 	defer d.Unlock()
-	delete(d.overrides, name)
+	delete(d.overrides, setting.Key())
 }
 
 // newTestDCClient - returns a dynamic config client for functional testing
@@ -117,4 +121,12 @@ func newTestDCClient(fallback dynamicconfig.Client) *dcClient {
 		overrides: maps.Clone(staticOverrides),
 		fallback:  fallback,
 	}
+}
+
+func SettingsToKeys(bySetting map[dynamicconfig.GenericSetting]any) map[dynamicconfig.Key]any {
+	byKey := make(map[dynamicconfig.Key]any, len(bySetting))
+	for k, v := range bySetting {
+		byKey[k.Key()] = v
+	}
+	return byKey
 }

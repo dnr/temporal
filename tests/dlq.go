@@ -116,9 +116,9 @@ const (
 
 func (s *DLQSuite) SetupSuite() {
 	s.setAssertions()
-	s.dynamicConfigOverrides = map[dynamicconfig.Key]interface{}{
+	s.dynamicConfigOverrides = SettingsToKeys(map[dynamicconfig.GenericSetting]any{
 		dynamicconfig.HistoryTaskDLQEnabled: true,
-	}
+	})
 	s.dlqTasks = make(chan tasks.Task)
 	s.failingWorkflowIDPrefix.Store("dlq-test-terminal-wfts-")
 	s.setupSuite(

@@ -36,9 +36,9 @@ import (
 func TestArchivalSuite(t *testing.T) {
 	flag.Parse()
 	s := new(ArchivalSuite)
-	s.dynamicConfigOverrides = map[dynamicconfig.Key]interface{}{
+	s.dynamicConfigOverrides = SettingsToKeys(map[dynamicconfig.GenericSetting]any{
 		dynamicconfig.RetentionTimerJitterDuration:  time.Second,
 		dynamicconfig.ArchivalProcessorArchiveDelay: time.Duration(0),
-	}
+	})
 	suite.Run(t, s)
 }

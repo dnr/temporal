@@ -26,10 +26,8 @@ package worker
 
 import (
 	"context"
-	"time"
 
 	"go.temporal.io/api/serviceerror"
-	"go.temporal.io/server/common"
 
 	"go.temporal.io/server/api/matchingservice/v1"
 	"go.temporal.io/server/client"
@@ -189,156 +187,57 @@ func NewConfig(
 ) *Config {
 	config := &Config{
 		ParentCloseCfg: &parentclosepolicy.Config{
-			MaxConcurrentActivityExecutionSize: dc.GetIntProperty(
-				dynamicconfig.WorkerParentCloseMaxConcurrentActivityExecutionSize,
-				1000,
-			),
-			MaxConcurrentWorkflowTaskExecutionSize: dc.GetIntProperty(
-				dynamicconfig.WorkerParentCloseMaxConcurrentWorkflowTaskExecutionSize,
-				1000,
-			),
-			MaxConcurrentActivityTaskPollers: dc.GetIntProperty(
-				dynamicconfig.WorkerParentCloseMaxConcurrentActivityTaskPollers,
-				4,
-			),
-			MaxConcurrentWorkflowTaskPollers: dc.GetIntProperty(
-				dynamicconfig.WorkerParentCloseMaxConcurrentWorkflowTaskPollers,
-				4,
-			),
-			NumParentClosePolicySystemWorkflows: dc.GetIntProperty(
-				dynamicconfig.NumParentClosePolicySystemWorkflows,
-				10,
-			),
+			MaxConcurrentActivityExecutionSize:     dc.GetInt(dynamicconfig.WorkerParentCloseMaxConcurrentActivityExecutionSize),
+			MaxConcurrentWorkflowTaskExecutionSize: dc.GetInt(dynamicconfig.WorkerParentCloseMaxConcurrentWorkflowTaskExecutionSize),
+			MaxConcurrentActivityTaskPollers:       dc.GetInt(dynamicconfig.WorkerParentCloseMaxConcurrentActivityTaskPollers),
+			MaxConcurrentWorkflowTaskPollers:       dc.GetInt(dynamicconfig.WorkerParentCloseMaxConcurrentWorkflowTaskPollers),
+			NumParentClosePolicySystemWorkflows:    dc.GetInt(dynamicconfig.NumParentClosePolicySystemWorkflows),
 		},
 		ScannerCfg: &scanner.Config{
-			MaxConcurrentActivityExecutionSize: dc.GetIntProperty(
-				dynamicconfig.WorkerScannerMaxConcurrentActivityExecutionSize,
-				10,
-			),
-			MaxConcurrentWorkflowTaskExecutionSize: dc.GetIntProperty(
-				dynamicconfig.WorkerScannerMaxConcurrentWorkflowTaskExecutionSize,
-				10,
-			),
-			MaxConcurrentActivityTaskPollers: dc.GetIntProperty(
-				dynamicconfig.WorkerScannerMaxConcurrentActivityTaskPollers,
-				8,
-			),
-			MaxConcurrentWorkflowTaskPollers: dc.GetIntProperty(
-				dynamicconfig.WorkerScannerMaxConcurrentWorkflowTaskPollers,
-				8,
-			),
+			MaxConcurrentActivityExecutionSize:     dc.GetInt(dynamicconfig.WorkerScannerMaxConcurrentActivityExecutionSize),
+			MaxConcurrentWorkflowTaskExecutionSize: dc.GetInt(dynamicconfig.WorkerScannerMaxConcurrentWorkflowTaskExecutionSize),
+			MaxConcurrentActivityTaskPollers:       dc.GetInt(dynamicconfig.WorkerScannerMaxConcurrentActivityTaskPollers),
+			MaxConcurrentWorkflowTaskPollers:       dc.GetInt(dynamicconfig.WorkerScannerMaxConcurrentWorkflowTaskPollers),
 
-			PersistenceMaxQPS: dc.GetIntProperty(
-				dynamicconfig.ScannerPersistenceMaxQPS,
-				100,
-			),
-			Persistence: persistenceConfig,
-			TaskQueueScannerEnabled: dc.GetBoolProperty(
-				dynamicconfig.TaskQueueScannerEnabled,
-				true,
-			),
-			BuildIdScavengerEnabled: dc.GetBoolProperty(
-				dynamicconfig.BuildIdScavengerEnabled,
-				false,
-			),
-			HistoryScannerEnabled: dc.GetBoolProperty(
-				dynamicconfig.HistoryScannerEnabled,
-				true,
-			),
-			ExecutionsScannerEnabled: dc.GetBoolProperty(
-				dynamicconfig.ExecutionsScannerEnabled,
-				false,
-			),
-			HistoryScannerDataMinAge: dc.GetDurationProperty(
-				dynamicconfig.HistoryScannerDataMinAge,
-				60*24*time.Hour,
-			),
-			HistoryScannerVerifyRetention: dc.GetBoolProperty(
-				dynamicconfig.HistoryScannerVerifyRetention,
-				true,
-			),
-			ExecutionScannerPerHostQPS: dc.GetIntProperty(
-				dynamicconfig.ExecutionScannerPerHostQPS,
-				10,
-			),
-			ExecutionScannerPerShardQPS: dc.GetIntProperty(
-				dynamicconfig.ExecutionScannerPerShardQPS,
-				1,
-			),
-			ExecutionDataDurationBuffer: dc.GetDurationProperty(
-				dynamicconfig.ExecutionDataDurationBuffer,
-				time.Hour*24*90,
-			),
-			ExecutionScannerWorkerCount: dc.GetIntProperty(
-				dynamicconfig.ExecutionScannerWorkerCount,
-				8,
-			),
-			ExecutionScannerHistoryEventIdValidator: dc.GetBoolProperty(
-				dynamicconfig.ExecutionScannerHistoryEventIdValidator,
-				true,
-			),
-			RemovableBuildIdDurationSinceDefault: dc.GetDurationProperty(
-				dynamicconfig.RemovableBuildIdDurationSinceDefault,
-				time.Hour,
-			),
-			BuildIdScavengerVisibilityRPS: dc.GetFloat64Property(
-				dynamicconfig.BuildIdScavengerVisibilityRPS,
-				1.0,
-			),
+			PersistenceMaxQPS:                       dc.GetInt(dynamicconfig.ScannerPersistenceMaxQPS),
+			Persistence:                             persistenceConfig,
+			TaskQueueScannerEnabled:                 dc.GetBool(dynamicconfig.TaskQueueScannerEnabled),
+			BuildIdScavengerEnabled:                 dc.GetBool(dynamicconfig.BuildIdScavengerEnabled),
+			HistoryScannerEnabled:                   dc.GetBool(dynamicconfig.HistoryScannerEnabled),
+			ExecutionsScannerEnabled:                dc.GetBool(dynamicconfig.ExecutionsScannerEnabled),
+			HistoryScannerDataMinAge:                dc.GetDuration(dynamicconfig.HistoryScannerDataMinAge),
+			HistoryScannerVerifyRetention:           dc.GetBool(dynamicconfig.HistoryScannerVerifyRetention),
+			ExecutionScannerPerHostQPS:              dc.GetInt(dynamicconfig.ExecutionScannerPerHostQPS),
+			ExecutionScannerPerShardQPS:             dc.GetInt(dynamicconfig.ExecutionScannerPerShardQPS),
+			ExecutionDataDurationBuffer:             dc.GetDuration(dynamicconfig.ExecutionDataDurationBuffer),
+			ExecutionScannerWorkerCount:             dc.GetInt(dynamicconfig.ExecutionScannerWorkerCount),
+			ExecutionScannerHistoryEventIdValidator: dc.GetBool(dynamicconfig.ExecutionScannerHistoryEventIdValidator),
+			RemovableBuildIdDurationSinceDefault:    dc.GetDuration(dynamicconfig.RemovableBuildIdDurationSinceDefault),
+			BuildIdScavengerVisibilityRPS:           dc.GetFloat(dynamicconfig.BuildIdScavengerVisibilityRPS),
 		},
-		EnableBatcher:      dc.GetBoolProperty(dynamicconfig.EnableBatcher, true),
-		BatcherRPS:         dc.GetIntPropertyFilteredByNamespace(dynamicconfig.BatcherRPS, batcher.DefaultRPS),
-		BatcherConcurrency: dc.GetIntPropertyFilteredByNamespace(dynamicconfig.BatcherConcurrency, batcher.DefaultConcurrency),
-		EnableParentClosePolicyWorker: dc.GetBoolProperty(
-			dynamicconfig.EnableParentClosePolicyWorker,
-			true,
-		),
-		PerNamespaceWorkerCount: dc.GetIntPropertyFilteredByNamespace(
-			dynamicconfig.WorkerPerNamespaceWorkerCount,
-			1,
-		),
-		PerNamespaceWorkerOptions: dc.GetMapPropertyFnWithNamespaceFilter(
-			dynamicconfig.WorkerPerNamespaceWorkerOptions,
-			map[string]any{},
-		),
-		PerNamespaceWorkerStartRate: dc.GetFloat64Property(
-			dynamicconfig.WorkerPerNamespaceWorkerOptions,
-			10.0,
-		),
-		ThrottledLogRPS: dc.GetIntProperty(
-			dynamicconfig.WorkerThrottledLogRPS,
-			20,
-		),
-		PersistenceMaxQPS: dc.GetIntProperty(
-			dynamicconfig.WorkerPersistenceMaxQPS,
-			500,
-		),
-		PersistenceGlobalMaxQPS: dc.GetIntProperty(
-			dynamicconfig.WorkerPersistenceGlobalMaxQPS,
-			0,
-		),
-		PersistenceNamespaceMaxQPS: dc.GetIntPropertyFilteredByNamespace(
-			dynamicconfig.WorkerPersistenceNamespaceMaxQPS,
-			0,
-		),
-		PersistenceGlobalNamespaceMaxQPS: dc.GetIntPropertyFilteredByNamespace(
-			dynamicconfig.WorkerPersistenceGlobalNamespaceMaxQPS,
-			0,
-		),
-		PersistencePerShardNamespaceMaxQPS: dynamicconfig.DefaultPerShardNamespaceRPSMax,
-		EnablePersistencePriorityRateLimiting: dc.GetBoolProperty(
-			dynamicconfig.WorkerEnablePersistencePriorityRateLimiting,
-			true,
-		),
-		PersistenceDynamicRateLimitingParams: dc.GetMapProperty(dynamicconfig.WorkerPersistenceDynamicRateLimitingParams, dynamicconfig.DefaultDynamicRateLimitingParams),
-		PersistenceQPSBurstRatio:             dc.GetFloat64Property(dynamicconfig.PersistenceQPSBurstRatio, 1),
-		OperatorRPSRatio:                     dc.GetFloat64Property(dynamicconfig.OperatorRPSRatio, common.DefaultOperatorRPSRatio),
+		EnableBatcher:                         dc.GetBool(dynamicconfig.EnableBatcherGlobal),
+		BatcherRPS:                            dc.GetIntByNamespace(dynamicconfig.BatcherRPS),
+		BatcherConcurrency:                    dc.GetIntByNamespace(dynamicconfig.BatcherConcurrency),
+		EnableParentClosePolicyWorker:         dc.GetBool(dynamicconfig.EnableParentClosePolicyWorker),
+		PerNamespaceWorkerCount:               dc.GetIntByNamespace(dynamicconfig.WorkerPerNamespaceWorkerCount),
+		PerNamespaceWorkerOptions:             dc.GetMapByNamespace(dynamicconfig.WorkerPerNamespaceWorkerOptions),
+		PerNamespaceWorkerStartRate:           dc.GetFloat(dynamicconfig.WorkerPerNamespaceWorkerStartRate),
+		ThrottledLogRPS:                       dc.GetInt(dynamicconfig.WorkerThrottledLogRPS),
+		PersistenceMaxQPS:                     dc.GetInt(dynamicconfig.WorkerPersistenceMaxQPS),
+		PersistenceGlobalMaxQPS:               dc.GetInt(dynamicconfig.WorkerPersistenceGlobalMaxQPS),
+		PersistenceNamespaceMaxQPS:            dc.GetIntByNamespace(dynamicconfig.WorkerPersistenceNamespaceMaxQPS),
+		PersistenceGlobalNamespaceMaxQPS:      dc.GetIntByNamespace(dynamicconfig.WorkerPersistenceGlobalNamespaceMaxQPS),
+		PersistencePerShardNamespaceMaxQPS:    dynamicconfig.DefaultPerShardNamespaceRPSMax,
+		EnablePersistencePriorityRateLimiting: dc.GetBool(dynamicconfig.WorkerEnablePersistencePriorityRateLimiting),
+		PersistenceDynamicRateLimitingParams:  dc.GetMap(dynamicconfig.WorkerPersistenceDynamicRateLimitingParams),
+		PersistenceQPSBurstRatio:              dc.GetFloat(dynamicconfig.PersistenceQPSBurstRatio),
+		OperatorRPSRatio:                      dc.GetFloat(dynamicconfig.OperatorRPSRatio),
 
 		VisibilityPersistenceMaxReadQPS:   visibility.GetVisibilityPersistenceMaxReadQPS(dc),
 		VisibilityPersistenceMaxWriteQPS:  visibility.GetVisibilityPersistenceMaxWriteQPS(dc),
 		EnableReadFromSecondaryVisibility: visibility.GetEnableReadFromSecondaryVisibilityConfig(dc),
-		VisibilityDisableOrderByClause:    dc.GetBoolPropertyFnWithNamespaceFilter(dynamicconfig.VisibilityDisableOrderByClause, true),
-		VisibilityEnableManualPagination:  dc.GetBoolPropertyFnWithNamespaceFilter(dynamicconfig.VisibilityEnableManualPagination, true),
+		VisibilityDisableOrderByClause:    dc.GetBoolByNamespace(dynamicconfig.VisibilityDisableOrderByClause),
+		VisibilityEnableManualPagination:  dc.GetBoolByNamespace(dynamicconfig.VisibilityEnableManualPagination),
 	}
 	return config
 }

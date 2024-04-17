@@ -74,7 +74,7 @@ const (
 )
 
 func (s *VersioningIntegSuite) SetupSuite() {
-	s.dynamicConfigOverrides = map[dynamicconfig.Key]any{
+	s.dynamicConfigOverrides = SettingsToKeys(map[dynamicconfig.GenericSetting]any{
 		dynamicconfig.FrontendEnableWorkerVersioningDataAPIs:     true,
 		dynamicconfig.FrontendEnableWorkerVersioningWorkflowAPIs: true,
 		dynamicconfig.FrontendEnableWorkerVersioningRuleAPIs:     true,
@@ -103,7 +103,7 @@ func (s *VersioningIntegSuite) SetupSuite() {
 		// this is overridden for tests using testWithMatchingBehavior
 		dynamicconfig.MatchingNumTaskqueueReadPartitions:  4,
 		dynamicconfig.MatchingNumTaskqueueWritePartitions: 4,
-	}
+	})
 	s.setupSuite("testdata/es_cluster.yaml")
 }
 
@@ -3983,7 +3983,7 @@ func (s *VersioningIntegSuite) waitForPropagation(
 	taskQueue string,
 	condition func(data *persistencespb.VersioningData) bool,
 ) {
-	v, ok := s.testCluster.host.dcClient.getRawValue(dynamicconfig.MatchingNumTaskqueueReadPartitions)
+	v, ok := s.testCluster.host.dcClient.getRawValue(dynamicconfig.MatchingNumTaskqueueReadPartitions.Key())
 	s.True(ok, "versioning tests require setting explicit number of partitions")
 	partCount, ok := v.(int)
 	s.True(ok, "partition count is not an int")
