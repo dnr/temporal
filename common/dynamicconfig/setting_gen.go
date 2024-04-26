@@ -57,7 +57,7 @@ const PrecedenceShardID Precedence = 4
 
 const PrecedenceTaskType Precedence = 5
 
-type GlobalBoolSetting Setting[bool, func()]
+type GlobalBoolSetting setting[bool, func()]
 
 func NewGlobalBoolSetting(key Key, def bool, description string) GlobalBoolSetting {
 	s := GlobalBoolSetting{
@@ -93,7 +93,7 @@ func (s GlobalBoolSetting) Get(c *Collection) BoolPropertyFn {
 	return func() bool {
 		return matchAndConvert(
 			c,
-			(Setting[bool, func()])(s),
+			(setting[bool, func()])(s),
 			precedenceGlobal(),
 			convertBool,
 		)
@@ -106,7 +106,7 @@ func GetBoolPropertyFn(value bool) BoolPropertyFn {
 	}
 }
 
-type NamespaceBoolSetting Setting[bool, func(namespace string)]
+type NamespaceBoolSetting setting[bool, func(namespace string)]
 
 func NewNamespaceBoolSetting(key Key, def bool, description string) NamespaceBoolSetting {
 	s := NamespaceBoolSetting{
@@ -142,7 +142,7 @@ func (s NamespaceBoolSetting) Get(c *Collection) BoolPropertyFnWithNamespaceFilt
 	return func(namespace string) bool {
 		return matchAndConvert(
 			c,
-			(Setting[bool, func(namespace string)])(s),
+			(setting[bool, func(namespace string)])(s),
 			precedenceNamespace(namespace),
 			convertBool,
 		)
@@ -155,7 +155,7 @@ func GetBoolPropertyFnFilteredByNamespace(value bool) BoolPropertyFnWithNamespac
 	}
 }
 
-type NamespaceIDBoolSetting Setting[bool, func(namespaceID string)]
+type NamespaceIDBoolSetting setting[bool, func(namespaceID string)]
 
 func NewNamespaceIDBoolSetting(key Key, def bool, description string) NamespaceIDBoolSetting {
 	s := NamespaceIDBoolSetting{
@@ -191,7 +191,7 @@ func (s NamespaceIDBoolSetting) Get(c *Collection) BoolPropertyFnWithNamespaceID
 	return func(namespaceID string) bool {
 		return matchAndConvert(
 			c,
-			(Setting[bool, func(namespaceID string)])(s),
+			(setting[bool, func(namespaceID string)])(s),
 			precedenceNamespaceID(namespaceID),
 			convertBool,
 		)
@@ -204,7 +204,7 @@ func GetBoolPropertyFnFilteredByNamespaceID(value bool) BoolPropertyFnWithNamesp
 	}
 }
 
-type TaskQueueBoolSetting Setting[bool, func(namespace string, taskQueue string, taskQueueType enumspb.TaskQueueType)]
+type TaskQueueBoolSetting setting[bool, func(namespace string, taskQueue string, taskQueueType enumspb.TaskQueueType)]
 
 func NewTaskQueueBoolSetting(key Key, def bool, description string) TaskQueueBoolSetting {
 	s := TaskQueueBoolSetting{
@@ -240,7 +240,7 @@ func (s TaskQueueBoolSetting) Get(c *Collection) BoolPropertyFnWithTaskQueueFilt
 	return func(namespace string, taskQueue string, taskQueueType enumspb.TaskQueueType) bool {
 		return matchAndConvert(
 			c,
-			(Setting[bool, func(namespace string, taskQueue string, taskQueueType enumspb.TaskQueueType)])(s),
+			(setting[bool, func(namespace string, taskQueue string, taskQueueType enumspb.TaskQueueType)])(s),
 			precedenceTaskQueue(namespace, taskQueue, taskQueueType),
 			convertBool,
 		)
@@ -253,7 +253,7 @@ func GetBoolPropertyFnFilteredByTaskQueue(value bool) BoolPropertyFnWithTaskQueu
 	}
 }
 
-type ShardIDBoolSetting Setting[bool, func(shardID int32)]
+type ShardIDBoolSetting setting[bool, func(shardID int32)]
 
 func NewShardIDBoolSetting(key Key, def bool, description string) ShardIDBoolSetting {
 	s := ShardIDBoolSetting{
@@ -289,7 +289,7 @@ func (s ShardIDBoolSetting) Get(c *Collection) BoolPropertyFnWithShardIDFilter {
 	return func(shardID int32) bool {
 		return matchAndConvert(
 			c,
-			(Setting[bool, func(shardID int32)])(s),
+			(setting[bool, func(shardID int32)])(s),
 			precedenceShardID(shardID),
 			convertBool,
 		)
@@ -302,7 +302,7 @@ func GetBoolPropertyFnFilteredByShardID(value bool) BoolPropertyFnWithShardIDFil
 	}
 }
 
-type TaskTypeBoolSetting Setting[bool, func(taskType enumsspb.TaskType)]
+type TaskTypeBoolSetting setting[bool, func(taskType enumsspb.TaskType)]
 
 func NewTaskTypeBoolSetting(key Key, def bool, description string) TaskTypeBoolSetting {
 	s := TaskTypeBoolSetting{
@@ -338,7 +338,7 @@ func (s TaskTypeBoolSetting) Get(c *Collection) BoolPropertyFnWithTaskTypeFilter
 	return func(taskType enumsspb.TaskType) bool {
 		return matchAndConvert(
 			c,
-			(Setting[bool, func(taskType enumsspb.TaskType)])(s),
+			(setting[bool, func(taskType enumsspb.TaskType)])(s),
 			precedenceTaskType(taskType),
 			convertBool,
 		)
@@ -351,7 +351,7 @@ func GetBoolPropertyFnFilteredByTaskType(value bool) BoolPropertyFnWithTaskTypeF
 	}
 }
 
-type GlobalIntSetting Setting[int, func()]
+type GlobalIntSetting setting[int, func()]
 
 func NewGlobalIntSetting(key Key, def int, description string) GlobalIntSetting {
 	s := GlobalIntSetting{
@@ -387,7 +387,7 @@ func (s GlobalIntSetting) Get(c *Collection) IntPropertyFn {
 	return func() int {
 		return matchAndConvert(
 			c,
-			(Setting[int, func()])(s),
+			(setting[int, func()])(s),
 			precedenceGlobal(),
 			convertInt,
 		)
@@ -400,7 +400,7 @@ func GetIntPropertyFn(value int) IntPropertyFn {
 	}
 }
 
-type NamespaceIntSetting Setting[int, func(namespace string)]
+type NamespaceIntSetting setting[int, func(namespace string)]
 
 func NewNamespaceIntSetting(key Key, def int, description string) NamespaceIntSetting {
 	s := NamespaceIntSetting{
@@ -436,7 +436,7 @@ func (s NamespaceIntSetting) Get(c *Collection) IntPropertyFnWithNamespaceFilter
 	return func(namespace string) int {
 		return matchAndConvert(
 			c,
-			(Setting[int, func(namespace string)])(s),
+			(setting[int, func(namespace string)])(s),
 			precedenceNamespace(namespace),
 			convertInt,
 		)
@@ -449,7 +449,7 @@ func GetIntPropertyFnFilteredByNamespace(value int) IntPropertyFnWithNamespaceFi
 	}
 }
 
-type NamespaceIDIntSetting Setting[int, func(namespaceID string)]
+type NamespaceIDIntSetting setting[int, func(namespaceID string)]
 
 func NewNamespaceIDIntSetting(key Key, def int, description string) NamespaceIDIntSetting {
 	s := NamespaceIDIntSetting{
@@ -485,7 +485,7 @@ func (s NamespaceIDIntSetting) Get(c *Collection) IntPropertyFnWithNamespaceIDFi
 	return func(namespaceID string) int {
 		return matchAndConvert(
 			c,
-			(Setting[int, func(namespaceID string)])(s),
+			(setting[int, func(namespaceID string)])(s),
 			precedenceNamespaceID(namespaceID),
 			convertInt,
 		)
@@ -498,7 +498,7 @@ func GetIntPropertyFnFilteredByNamespaceID(value int) IntPropertyFnWithNamespace
 	}
 }
 
-type TaskQueueIntSetting Setting[int, func(namespace string, taskQueue string, taskQueueType enumspb.TaskQueueType)]
+type TaskQueueIntSetting setting[int, func(namespace string, taskQueue string, taskQueueType enumspb.TaskQueueType)]
 
 func NewTaskQueueIntSetting(key Key, def int, description string) TaskQueueIntSetting {
 	s := TaskQueueIntSetting{
@@ -534,7 +534,7 @@ func (s TaskQueueIntSetting) Get(c *Collection) IntPropertyFnWithTaskQueueFilter
 	return func(namespace string, taskQueue string, taskQueueType enumspb.TaskQueueType) int {
 		return matchAndConvert(
 			c,
-			(Setting[int, func(namespace string, taskQueue string, taskQueueType enumspb.TaskQueueType)])(s),
+			(setting[int, func(namespace string, taskQueue string, taskQueueType enumspb.TaskQueueType)])(s),
 			precedenceTaskQueue(namespace, taskQueue, taskQueueType),
 			convertInt,
 		)
@@ -547,7 +547,7 @@ func GetIntPropertyFnFilteredByTaskQueue(value int) IntPropertyFnWithTaskQueueFi
 	}
 }
 
-type ShardIDIntSetting Setting[int, func(shardID int32)]
+type ShardIDIntSetting setting[int, func(shardID int32)]
 
 func NewShardIDIntSetting(key Key, def int, description string) ShardIDIntSetting {
 	s := ShardIDIntSetting{
@@ -583,7 +583,7 @@ func (s ShardIDIntSetting) Get(c *Collection) IntPropertyFnWithShardIDFilter {
 	return func(shardID int32) int {
 		return matchAndConvert(
 			c,
-			(Setting[int, func(shardID int32)])(s),
+			(setting[int, func(shardID int32)])(s),
 			precedenceShardID(shardID),
 			convertInt,
 		)
@@ -596,7 +596,7 @@ func GetIntPropertyFnFilteredByShardID(value int) IntPropertyFnWithShardIDFilter
 	}
 }
 
-type TaskTypeIntSetting Setting[int, func(taskType enumsspb.TaskType)]
+type TaskTypeIntSetting setting[int, func(taskType enumsspb.TaskType)]
 
 func NewTaskTypeIntSetting(key Key, def int, description string) TaskTypeIntSetting {
 	s := TaskTypeIntSetting{
@@ -632,7 +632,7 @@ func (s TaskTypeIntSetting) Get(c *Collection) IntPropertyFnWithTaskTypeFilter {
 	return func(taskType enumsspb.TaskType) int {
 		return matchAndConvert(
 			c,
-			(Setting[int, func(taskType enumsspb.TaskType)])(s),
+			(setting[int, func(taskType enumsspb.TaskType)])(s),
 			precedenceTaskType(taskType),
 			convertInt,
 		)
@@ -645,7 +645,7 @@ func GetIntPropertyFnFilteredByTaskType(value int) IntPropertyFnWithTaskTypeFilt
 	}
 }
 
-type GlobalFloatSetting Setting[float64, func()]
+type GlobalFloatSetting setting[float64, func()]
 
 func NewGlobalFloatSetting(key Key, def float64, description string) GlobalFloatSetting {
 	s := GlobalFloatSetting{
@@ -681,7 +681,7 @@ func (s GlobalFloatSetting) Get(c *Collection) FloatPropertyFn {
 	return func() float64 {
 		return matchAndConvert(
 			c,
-			(Setting[float64, func()])(s),
+			(setting[float64, func()])(s),
 			precedenceGlobal(),
 			convertFloat,
 		)
@@ -694,7 +694,7 @@ func GetFloatPropertyFn(value float64) FloatPropertyFn {
 	}
 }
 
-type NamespaceFloatSetting Setting[float64, func(namespace string)]
+type NamespaceFloatSetting setting[float64, func(namespace string)]
 
 func NewNamespaceFloatSetting(key Key, def float64, description string) NamespaceFloatSetting {
 	s := NamespaceFloatSetting{
@@ -730,7 +730,7 @@ func (s NamespaceFloatSetting) Get(c *Collection) FloatPropertyFnWithNamespaceFi
 	return func(namespace string) float64 {
 		return matchAndConvert(
 			c,
-			(Setting[float64, func(namespace string)])(s),
+			(setting[float64, func(namespace string)])(s),
 			precedenceNamespace(namespace),
 			convertFloat,
 		)
@@ -743,7 +743,7 @@ func GetFloatPropertyFnFilteredByNamespace(value float64) FloatPropertyFnWithNam
 	}
 }
 
-type NamespaceIDFloatSetting Setting[float64, func(namespaceID string)]
+type NamespaceIDFloatSetting setting[float64, func(namespaceID string)]
 
 func NewNamespaceIDFloatSetting(key Key, def float64, description string) NamespaceIDFloatSetting {
 	s := NamespaceIDFloatSetting{
@@ -779,7 +779,7 @@ func (s NamespaceIDFloatSetting) Get(c *Collection) FloatPropertyFnWithNamespace
 	return func(namespaceID string) float64 {
 		return matchAndConvert(
 			c,
-			(Setting[float64, func(namespaceID string)])(s),
+			(setting[float64, func(namespaceID string)])(s),
 			precedenceNamespaceID(namespaceID),
 			convertFloat,
 		)
@@ -792,7 +792,7 @@ func GetFloatPropertyFnFilteredByNamespaceID(value float64) FloatPropertyFnWithN
 	}
 }
 
-type TaskQueueFloatSetting Setting[float64, func(namespace string, taskQueue string, taskQueueType enumspb.TaskQueueType)]
+type TaskQueueFloatSetting setting[float64, func(namespace string, taskQueue string, taskQueueType enumspb.TaskQueueType)]
 
 func NewTaskQueueFloatSetting(key Key, def float64, description string) TaskQueueFloatSetting {
 	s := TaskQueueFloatSetting{
@@ -828,7 +828,7 @@ func (s TaskQueueFloatSetting) Get(c *Collection) FloatPropertyFnWithTaskQueueFi
 	return func(namespace string, taskQueue string, taskQueueType enumspb.TaskQueueType) float64 {
 		return matchAndConvert(
 			c,
-			(Setting[float64, func(namespace string, taskQueue string, taskQueueType enumspb.TaskQueueType)])(s),
+			(setting[float64, func(namespace string, taskQueue string, taskQueueType enumspb.TaskQueueType)])(s),
 			precedenceTaskQueue(namespace, taskQueue, taskQueueType),
 			convertFloat,
 		)
@@ -841,7 +841,7 @@ func GetFloatPropertyFnFilteredByTaskQueue(value float64) FloatPropertyFnWithTas
 	}
 }
 
-type ShardIDFloatSetting Setting[float64, func(shardID int32)]
+type ShardIDFloatSetting setting[float64, func(shardID int32)]
 
 func NewShardIDFloatSetting(key Key, def float64, description string) ShardIDFloatSetting {
 	s := ShardIDFloatSetting{
@@ -877,7 +877,7 @@ func (s ShardIDFloatSetting) Get(c *Collection) FloatPropertyFnWithShardIDFilter
 	return func(shardID int32) float64 {
 		return matchAndConvert(
 			c,
-			(Setting[float64, func(shardID int32)])(s),
+			(setting[float64, func(shardID int32)])(s),
 			precedenceShardID(shardID),
 			convertFloat,
 		)
@@ -890,7 +890,7 @@ func GetFloatPropertyFnFilteredByShardID(value float64) FloatPropertyFnWithShard
 	}
 }
 
-type TaskTypeFloatSetting Setting[float64, func(taskType enumsspb.TaskType)]
+type TaskTypeFloatSetting setting[float64, func(taskType enumsspb.TaskType)]
 
 func NewTaskTypeFloatSetting(key Key, def float64, description string) TaskTypeFloatSetting {
 	s := TaskTypeFloatSetting{
@@ -926,7 +926,7 @@ func (s TaskTypeFloatSetting) Get(c *Collection) FloatPropertyFnWithTaskTypeFilt
 	return func(taskType enumsspb.TaskType) float64 {
 		return matchAndConvert(
 			c,
-			(Setting[float64, func(taskType enumsspb.TaskType)])(s),
+			(setting[float64, func(taskType enumsspb.TaskType)])(s),
 			precedenceTaskType(taskType),
 			convertFloat,
 		)
@@ -939,7 +939,7 @@ func GetFloatPropertyFnFilteredByTaskType(value float64) FloatPropertyFnWithTask
 	}
 }
 
-type GlobalStringSetting Setting[string, func()]
+type GlobalStringSetting setting[string, func()]
 
 func NewGlobalStringSetting(key Key, def string, description string) GlobalStringSetting {
 	s := GlobalStringSetting{
@@ -975,7 +975,7 @@ func (s GlobalStringSetting) Get(c *Collection) StringPropertyFn {
 	return func() string {
 		return matchAndConvert(
 			c,
-			(Setting[string, func()])(s),
+			(setting[string, func()])(s),
 			precedenceGlobal(),
 			convertString,
 		)
@@ -988,7 +988,7 @@ func GetStringPropertyFn(value string) StringPropertyFn {
 	}
 }
 
-type NamespaceStringSetting Setting[string, func(namespace string)]
+type NamespaceStringSetting setting[string, func(namespace string)]
 
 func NewNamespaceStringSetting(key Key, def string, description string) NamespaceStringSetting {
 	s := NamespaceStringSetting{
@@ -1024,7 +1024,7 @@ func (s NamespaceStringSetting) Get(c *Collection) StringPropertyFnWithNamespace
 	return func(namespace string) string {
 		return matchAndConvert(
 			c,
-			(Setting[string, func(namespace string)])(s),
+			(setting[string, func(namespace string)])(s),
 			precedenceNamespace(namespace),
 			convertString,
 		)
@@ -1037,7 +1037,7 @@ func GetStringPropertyFnFilteredByNamespace(value string) StringPropertyFnWithNa
 	}
 }
 
-type NamespaceIDStringSetting Setting[string, func(namespaceID string)]
+type NamespaceIDStringSetting setting[string, func(namespaceID string)]
 
 func NewNamespaceIDStringSetting(key Key, def string, description string) NamespaceIDStringSetting {
 	s := NamespaceIDStringSetting{
@@ -1073,7 +1073,7 @@ func (s NamespaceIDStringSetting) Get(c *Collection) StringPropertyFnWithNamespa
 	return func(namespaceID string) string {
 		return matchAndConvert(
 			c,
-			(Setting[string, func(namespaceID string)])(s),
+			(setting[string, func(namespaceID string)])(s),
 			precedenceNamespaceID(namespaceID),
 			convertString,
 		)
@@ -1086,7 +1086,7 @@ func GetStringPropertyFnFilteredByNamespaceID(value string) StringPropertyFnWith
 	}
 }
 
-type TaskQueueStringSetting Setting[string, func(namespace string, taskQueue string, taskQueueType enumspb.TaskQueueType)]
+type TaskQueueStringSetting setting[string, func(namespace string, taskQueue string, taskQueueType enumspb.TaskQueueType)]
 
 func NewTaskQueueStringSetting(key Key, def string, description string) TaskQueueStringSetting {
 	s := TaskQueueStringSetting{
@@ -1122,7 +1122,7 @@ func (s TaskQueueStringSetting) Get(c *Collection) StringPropertyFnWithTaskQueue
 	return func(namespace string, taskQueue string, taskQueueType enumspb.TaskQueueType) string {
 		return matchAndConvert(
 			c,
-			(Setting[string, func(namespace string, taskQueue string, taskQueueType enumspb.TaskQueueType)])(s),
+			(setting[string, func(namespace string, taskQueue string, taskQueueType enumspb.TaskQueueType)])(s),
 			precedenceTaskQueue(namespace, taskQueue, taskQueueType),
 			convertString,
 		)
@@ -1135,7 +1135,7 @@ func GetStringPropertyFnFilteredByTaskQueue(value string) StringPropertyFnWithTa
 	}
 }
 
-type ShardIDStringSetting Setting[string, func(shardID int32)]
+type ShardIDStringSetting setting[string, func(shardID int32)]
 
 func NewShardIDStringSetting(key Key, def string, description string) ShardIDStringSetting {
 	s := ShardIDStringSetting{
@@ -1171,7 +1171,7 @@ func (s ShardIDStringSetting) Get(c *Collection) StringPropertyFnWithShardIDFilt
 	return func(shardID int32) string {
 		return matchAndConvert(
 			c,
-			(Setting[string, func(shardID int32)])(s),
+			(setting[string, func(shardID int32)])(s),
 			precedenceShardID(shardID),
 			convertString,
 		)
@@ -1184,7 +1184,7 @@ func GetStringPropertyFnFilteredByShardID(value string) StringPropertyFnWithShar
 	}
 }
 
-type TaskTypeStringSetting Setting[string, func(taskType enumsspb.TaskType)]
+type TaskTypeStringSetting setting[string, func(taskType enumsspb.TaskType)]
 
 func NewTaskTypeStringSetting(key Key, def string, description string) TaskTypeStringSetting {
 	s := TaskTypeStringSetting{
@@ -1220,7 +1220,7 @@ func (s TaskTypeStringSetting) Get(c *Collection) StringPropertyFnWithTaskTypeFi
 	return func(taskType enumsspb.TaskType) string {
 		return matchAndConvert(
 			c,
-			(Setting[string, func(taskType enumsspb.TaskType)])(s),
+			(setting[string, func(taskType enumsspb.TaskType)])(s),
 			precedenceTaskType(taskType),
 			convertString,
 		)
@@ -1233,7 +1233,7 @@ func GetStringPropertyFnFilteredByTaskType(value string) StringPropertyFnWithTas
 	}
 }
 
-type GlobalDurationSetting Setting[time.Duration, func()]
+type GlobalDurationSetting setting[time.Duration, func()]
 
 func NewGlobalDurationSetting(key Key, def time.Duration, description string) GlobalDurationSetting {
 	s := GlobalDurationSetting{
@@ -1269,7 +1269,7 @@ func (s GlobalDurationSetting) Get(c *Collection) DurationPropertyFn {
 	return func() time.Duration {
 		return matchAndConvert(
 			c,
-			(Setting[time.Duration, func()])(s),
+			(setting[time.Duration, func()])(s),
 			precedenceGlobal(),
 			convertDuration,
 		)
@@ -1282,7 +1282,7 @@ func GetDurationPropertyFn(value time.Duration) DurationPropertyFn {
 	}
 }
 
-type NamespaceDurationSetting Setting[time.Duration, func(namespace string)]
+type NamespaceDurationSetting setting[time.Duration, func(namespace string)]
 
 func NewNamespaceDurationSetting(key Key, def time.Duration, description string) NamespaceDurationSetting {
 	s := NamespaceDurationSetting{
@@ -1318,7 +1318,7 @@ func (s NamespaceDurationSetting) Get(c *Collection) DurationPropertyFnWithNames
 	return func(namespace string) time.Duration {
 		return matchAndConvert(
 			c,
-			(Setting[time.Duration, func(namespace string)])(s),
+			(setting[time.Duration, func(namespace string)])(s),
 			precedenceNamespace(namespace),
 			convertDuration,
 		)
@@ -1331,7 +1331,7 @@ func GetDurationPropertyFnFilteredByNamespace(value time.Duration) DurationPrope
 	}
 }
 
-type NamespaceIDDurationSetting Setting[time.Duration, func(namespaceID string)]
+type NamespaceIDDurationSetting setting[time.Duration, func(namespaceID string)]
 
 func NewNamespaceIDDurationSetting(key Key, def time.Duration, description string) NamespaceIDDurationSetting {
 	s := NamespaceIDDurationSetting{
@@ -1367,7 +1367,7 @@ func (s NamespaceIDDurationSetting) Get(c *Collection) DurationPropertyFnWithNam
 	return func(namespaceID string) time.Duration {
 		return matchAndConvert(
 			c,
-			(Setting[time.Duration, func(namespaceID string)])(s),
+			(setting[time.Duration, func(namespaceID string)])(s),
 			precedenceNamespaceID(namespaceID),
 			convertDuration,
 		)
@@ -1380,7 +1380,7 @@ func GetDurationPropertyFnFilteredByNamespaceID(value time.Duration) DurationPro
 	}
 }
 
-type TaskQueueDurationSetting Setting[time.Duration, func(namespace string, taskQueue string, taskQueueType enumspb.TaskQueueType)]
+type TaskQueueDurationSetting setting[time.Duration, func(namespace string, taskQueue string, taskQueueType enumspb.TaskQueueType)]
 
 func NewTaskQueueDurationSetting(key Key, def time.Duration, description string) TaskQueueDurationSetting {
 	s := TaskQueueDurationSetting{
@@ -1416,7 +1416,7 @@ func (s TaskQueueDurationSetting) Get(c *Collection) DurationPropertyFnWithTaskQ
 	return func(namespace string, taskQueue string, taskQueueType enumspb.TaskQueueType) time.Duration {
 		return matchAndConvert(
 			c,
-			(Setting[time.Duration, func(namespace string, taskQueue string, taskQueueType enumspb.TaskQueueType)])(s),
+			(setting[time.Duration, func(namespace string, taskQueue string, taskQueueType enumspb.TaskQueueType)])(s),
 			precedenceTaskQueue(namespace, taskQueue, taskQueueType),
 			convertDuration,
 		)
@@ -1429,7 +1429,7 @@ func GetDurationPropertyFnFilteredByTaskQueue(value time.Duration) DurationPrope
 	}
 }
 
-type ShardIDDurationSetting Setting[time.Duration, func(shardID int32)]
+type ShardIDDurationSetting setting[time.Duration, func(shardID int32)]
 
 func NewShardIDDurationSetting(key Key, def time.Duration, description string) ShardIDDurationSetting {
 	s := ShardIDDurationSetting{
@@ -1465,7 +1465,7 @@ func (s ShardIDDurationSetting) Get(c *Collection) DurationPropertyFnWithShardID
 	return func(shardID int32) time.Duration {
 		return matchAndConvert(
 			c,
-			(Setting[time.Duration, func(shardID int32)])(s),
+			(setting[time.Duration, func(shardID int32)])(s),
 			precedenceShardID(shardID),
 			convertDuration,
 		)
@@ -1478,7 +1478,7 @@ func GetDurationPropertyFnFilteredByShardID(value time.Duration) DurationPropert
 	}
 }
 
-type TaskTypeDurationSetting Setting[time.Duration, func(taskType enumsspb.TaskType)]
+type TaskTypeDurationSetting setting[time.Duration, func(taskType enumsspb.TaskType)]
 
 func NewTaskTypeDurationSetting(key Key, def time.Duration, description string) TaskTypeDurationSetting {
 	s := TaskTypeDurationSetting{
@@ -1514,7 +1514,7 @@ func (s TaskTypeDurationSetting) Get(c *Collection) DurationPropertyFnWithTaskTy
 	return func(taskType enumsspb.TaskType) time.Duration {
 		return matchAndConvert(
 			c,
-			(Setting[time.Duration, func(taskType enumsspb.TaskType)])(s),
+			(setting[time.Duration, func(taskType enumsspb.TaskType)])(s),
 			precedenceTaskType(taskType),
 			convertDuration,
 		)
@@ -1527,7 +1527,7 @@ func GetDurationPropertyFnFilteredByTaskType(value time.Duration) DurationProper
 	}
 }
 
-type GlobalMapSetting Setting[map[string]any, func()]
+type GlobalMapSetting setting[map[string]any, func()]
 
 func NewGlobalMapSetting(key Key, def map[string]any, description string) GlobalMapSetting {
 	s := GlobalMapSetting{
@@ -1563,7 +1563,7 @@ func (s GlobalMapSetting) Get(c *Collection) MapPropertyFn {
 	return func() map[string]any {
 		return matchAndConvert(
 			c,
-			(Setting[map[string]any, func()])(s),
+			(setting[map[string]any, func()])(s),
 			precedenceGlobal(),
 			convertMap,
 		)
@@ -1576,7 +1576,7 @@ func GetMapPropertyFn(value map[string]any) MapPropertyFn {
 	}
 }
 
-type NamespaceMapSetting Setting[map[string]any, func(namespace string)]
+type NamespaceMapSetting setting[map[string]any, func(namespace string)]
 
 func NewNamespaceMapSetting(key Key, def map[string]any, description string) NamespaceMapSetting {
 	s := NamespaceMapSetting{
@@ -1612,7 +1612,7 @@ func (s NamespaceMapSetting) Get(c *Collection) MapPropertyFnWithNamespaceFilter
 	return func(namespace string) map[string]any {
 		return matchAndConvert(
 			c,
-			(Setting[map[string]any, func(namespace string)])(s),
+			(setting[map[string]any, func(namespace string)])(s),
 			precedenceNamespace(namespace),
 			convertMap,
 		)
@@ -1625,7 +1625,7 @@ func GetMapPropertyFnFilteredByNamespace(value map[string]any) MapPropertyFnWith
 	}
 }
 
-type NamespaceIDMapSetting Setting[map[string]any, func(namespaceID string)]
+type NamespaceIDMapSetting setting[map[string]any, func(namespaceID string)]
 
 func NewNamespaceIDMapSetting(key Key, def map[string]any, description string) NamespaceIDMapSetting {
 	s := NamespaceIDMapSetting{
@@ -1661,7 +1661,7 @@ func (s NamespaceIDMapSetting) Get(c *Collection) MapPropertyFnWithNamespaceIDFi
 	return func(namespaceID string) map[string]any {
 		return matchAndConvert(
 			c,
-			(Setting[map[string]any, func(namespaceID string)])(s),
+			(setting[map[string]any, func(namespaceID string)])(s),
 			precedenceNamespaceID(namespaceID),
 			convertMap,
 		)
@@ -1674,7 +1674,7 @@ func GetMapPropertyFnFilteredByNamespaceID(value map[string]any) MapPropertyFnWi
 	}
 }
 
-type TaskQueueMapSetting Setting[map[string]any, func(namespace string, taskQueue string, taskQueueType enumspb.TaskQueueType)]
+type TaskQueueMapSetting setting[map[string]any, func(namespace string, taskQueue string, taskQueueType enumspb.TaskQueueType)]
 
 func NewTaskQueueMapSetting(key Key, def map[string]any, description string) TaskQueueMapSetting {
 	s := TaskQueueMapSetting{
@@ -1710,7 +1710,7 @@ func (s TaskQueueMapSetting) Get(c *Collection) MapPropertyFnWithTaskQueueFilter
 	return func(namespace string, taskQueue string, taskQueueType enumspb.TaskQueueType) map[string]any {
 		return matchAndConvert(
 			c,
-			(Setting[map[string]any, func(namespace string, taskQueue string, taskQueueType enumspb.TaskQueueType)])(s),
+			(setting[map[string]any, func(namespace string, taskQueue string, taskQueueType enumspb.TaskQueueType)])(s),
 			precedenceTaskQueue(namespace, taskQueue, taskQueueType),
 			convertMap,
 		)
@@ -1723,7 +1723,7 @@ func GetMapPropertyFnFilteredByTaskQueue(value map[string]any) MapPropertyFnWith
 	}
 }
 
-type ShardIDMapSetting Setting[map[string]any, func(shardID int32)]
+type ShardIDMapSetting setting[map[string]any, func(shardID int32)]
 
 func NewShardIDMapSetting(key Key, def map[string]any, description string) ShardIDMapSetting {
 	s := ShardIDMapSetting{
@@ -1759,7 +1759,7 @@ func (s ShardIDMapSetting) Get(c *Collection) MapPropertyFnWithShardIDFilter {
 	return func(shardID int32) map[string]any {
 		return matchAndConvert(
 			c,
-			(Setting[map[string]any, func(shardID int32)])(s),
+			(setting[map[string]any, func(shardID int32)])(s),
 			precedenceShardID(shardID),
 			convertMap,
 		)
@@ -1772,7 +1772,7 @@ func GetMapPropertyFnFilteredByShardID(value map[string]any) MapPropertyFnWithSh
 	}
 }
 
-type TaskTypeMapSetting Setting[map[string]any, func(taskType enumsspb.TaskType)]
+type TaskTypeMapSetting setting[map[string]any, func(taskType enumsspb.TaskType)]
 
 func NewTaskTypeMapSetting(key Key, def map[string]any, description string) TaskTypeMapSetting {
 	s := TaskTypeMapSetting{
@@ -1808,7 +1808,7 @@ func (s TaskTypeMapSetting) Get(c *Collection) MapPropertyFnWithTaskTypeFilter {
 	return func(taskType enumsspb.TaskType) map[string]any {
 		return matchAndConvert(
 			c,
-			(Setting[map[string]any, func(taskType enumsspb.TaskType)])(s),
+			(setting[map[string]any, func(taskType enumsspb.TaskType)])(s),
 			precedenceTaskType(taskType),
 			convertMap,
 		)

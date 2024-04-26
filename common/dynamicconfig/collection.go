@@ -121,7 +121,7 @@ func findMatch[T any](cvs []ConstrainedValue, defaultCVs []TypedConstrainedValue
 // take a *Collection as an argument.
 func matchAndConvert[T any, P any](
 	c *Collection,
-	s Setting[T, P],
+	s setting[T, P],
 	precedence []Constraints,
 	converter func(value any) (T, error),
 ) T {

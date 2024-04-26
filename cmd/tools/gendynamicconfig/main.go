@@ -135,7 +135,7 @@ const Precedence{{.Name}} Precedence = {{.Index}}
 
 func generateType(w io.Writer, tp *settingType, prec *settingPrecedence) {
 	writeTemplatedCode(w, `
-type {{.P.Name}}{{.T.Name}}Setting Setting[{{.T.GoType}}, func{{.P.GoArgs}}]
+type {{.P.Name}}{{.T.Name}}Setting setting[{{.T.GoType}}, func{{.P.GoArgs}}]
 
 func New{{.P.Name}}{{.T.Name}}Setting(key Key, def {{.T.GoType}}, description string) {{.P.Name}}{{.T.Name}}Setting {
 	s := {{.P.Name}}{{.T.Name}}Setting{
@@ -179,7 +179,7 @@ func (s {{.P.Name}}{{.T.Name}}Setting) Get(c *Collection) {{.T.Name}}PropertyFnW
 	return func{{.P.GoArgs}} {{.T.GoType}} {
 		return matchAndConvert(
 			c,
-			(Setting[{{.T.GoType}}, func{{.P.GoArgs}}])(s),
+			(setting[{{.T.GoType}}, func{{.P.GoArgs}}])(s),
 			precedence{{.P.Name}}{{.P.GoArgNames}},
 			convert{{.T.Name}},
 		)
