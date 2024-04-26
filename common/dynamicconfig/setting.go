@@ -27,10 +27,18 @@
 package dynamicconfig
 
 type (
+	// Type is an enum for the data type of a dynamic config setting.
 	Type int
 
+	// Precedence is an enum for the search order precedence of a dynamic config setting.
+	// E.g., use the global value, check namespace then global, check task queue then
+	// namespace then global, etc.
 	Precedence int
 
+	// Setting is one dynamic config setting. Setting should not be used or created directly,
+	// but use one of the generated constructors in setting_gen.go, e.g. NewBoolNamespaceSetting.
+	// T is the data type of the setting. P is a go type representing the precedence, which is
+	// just used to make the types more unique.
 	Setting[T any, P any] struct {
 		// string value of key. case-insensitive.
 		key Key
@@ -41,6 +49,9 @@ type (
 		description string
 	}
 
+	// GenericSetting is an interface that all instances of Setting implement (by generated
+	// code in setting_gen.go). It can be used to refer to settings of any type and deal with
+	// them generically..
 	GenericSetting interface {
 		Key() Key
 		Type() Type

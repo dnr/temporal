@@ -72,11 +72,11 @@ func TestStreamBasedReplicationTestSuite(t *testing.T) {
 
 func (s *streamBasedReplicationTestSuite) SetupSuite() {
 	s.controller = gomock.NewController(s.T())
-	s.dynamicConfigOverrides = tests.SettingsToKeys(map[dynamicconfig.GenericSetting]any{
-		dynamicconfig.EnableReplicationStream:       true,
-		dynamicconfig.EnableEagerNamespaceRefresher: true,
-		dynamicconfig.EnableReplicationTaskBatching: true,
-	})
+	s.dynamicConfigOverrides = map[dynamicconfig.Key]any{
+		dynamicconfig.EnableReplicationStream.Key():       true,
+		dynamicconfig.EnableEagerNamespaceRefresher.Key(): true,
+		dynamicconfig.EnableReplicationTaskBatching.Key(): true,
+	}
 	s.logger = log.NewNoopLogger()
 	s.serializer = serialization.NewSerializer()
 	s.setupSuite(
