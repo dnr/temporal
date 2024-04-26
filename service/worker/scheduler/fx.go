@@ -99,9 +99,9 @@ func NewResult(
 		Component: &workerComponent{
 			specBuilder:              specBuilder,
 			activityDeps:             params,
-			enabledForNs:             dcCollection.GetBoolByNamespace(dynamicconfig.WorkerEnableScheduler),
-			globalNSStartWorkflowRPS: dcCollection.GetFloatByNamespace(dynamicconfig.SchedulerNamespaceStartWorkflowRPS),
-			maxBlobSize:              dcCollection.GetIntByNamespace(dynamicconfig.BlobSizeLimitError),
+			enabledForNs:             dynamicconfig.WorkerEnableScheduler.Get(dcCollection),
+			globalNSStartWorkflowRPS: dynamicconfig.SchedulerNamespaceStartWorkflowRPS.Get(dcCollection),
+			maxBlobSize:              dynamicconfig.BlobSizeLimitError.Get(dcCollection),
 		},
 	}
 }

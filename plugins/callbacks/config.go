@@ -28,7 +28,7 @@ import (
 	"go.temporal.io/server/common/dynamicconfig"
 )
 
-var InvocationTaskTimeout = dynamicconfig.NewDurationGlobalSetting(
+var InvocationTaskTimeout = dynamicconfig.NewGlobalDurationSetting(
 	"plugin.callback.invocation.taskTimeout",
 	time.Second*10,
 	`InvocationTaskTimeout is the timeout for executing a single callback invocation task.`,
@@ -40,6 +40,6 @@ type Config struct {
 
 func ConfigProvider(dc *dynamicconfig.Collection) *Config {
 	return &Config{
-		InvocationTaskTimeout: dc.GetDuration(InvocationTaskTimeout),
+		InvocationTaskTimeout: InvocationTaskTimeout.Get(dc),
 	}
 }

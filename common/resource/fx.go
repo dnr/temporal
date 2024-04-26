@@ -189,7 +189,7 @@ func SearchAttributeProviderProvider(
 	return searchattribute.NewManager(
 		timeSource,
 		cmMgr,
-		dynamicCollection.GetBool(dynamicconfig.ForceSearchAttributesCacheRefreshOnRead))
+		dynamicconfig.ForceSearchAttributesCacheRefreshOnRead.Get(dynamicCollection))
 }
 
 func SearchAttributeManagerProvider(
@@ -200,7 +200,7 @@ func SearchAttributeManagerProvider(
 	return searchattribute.NewManager(
 		timeSource,
 		cmMgr,
-		dynamicCollection.GetBool(dynamicconfig.ForceSearchAttributesCacheRefreshOnRead))
+		dynamicconfig.ForceSearchAttributesCacheRefreshOnRead.Get(dynamicCollection))
 }
 
 func NamespaceRegistryProvider(
@@ -213,8 +213,8 @@ func NamespaceRegistryProvider(
 	return namespace.NewRegistry(
 		metadataManager,
 		clusterMetadata.IsGlobalNamespaceEnabled(),
-		dynamicCollection.GetDuration(dynamicconfig.NamespaceCacheRefreshInterval),
-		dynamicCollection.GetBool(dynamicconfig.ForceSearchAttributesCacheRefreshOnRead),
+		dynamicconfig.NamespaceCacheRefreshInterval.Get(dynamicCollection),
+		dynamicconfig.ForceSearchAttributesCacheRefreshOnRead.Get(dynamicCollection),
 		metricsHandler,
 		logger,
 	)
@@ -338,7 +338,7 @@ func MatchingClientProvider(matchingRawClient MatchingRawClient) MatchingClient 
 }
 
 func PersistenceConfigProvider(persistenceConfig config.Persistence, dc *dynamicconfig.Collection) *config.Persistence {
-	persistenceConfig.TransactionSizeLimit = dc.GetInt(dynamicconfig.TransactionSizeLimit)
+	persistenceConfig.TransactionSizeLimit = dynamicconfig.TransactionSizeLimit.Get(dc)
 	return &persistenceConfig
 }
 
@@ -374,7 +374,7 @@ func SdkClientFactoryProvider(
 		frontendTLSConfig,
 		metricsHandler,
 		logger,
-		dc.GetInt(dynamicconfig.WorkerStickyCacheSize),
+		dynamicconfig.WorkerStickyCacheSize.Get(dc),
 	), nil
 }
 

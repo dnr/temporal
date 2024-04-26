@@ -84,7 +84,7 @@ func NewClient(
 	connections := newConnectionPool(historyServiceResolver, rpcFactory)
 
 	var redirector redirector
-	if dc.GetBool(dynamicconfig.HistoryClientOwnershipCachingEnabled)() {
+	if dynamicconfig.HistoryClientOwnershipCachingEnabled.Get(dc)() {
 		logger.Info("historyClient: ownership caching enabled")
 		redirector = newCachingRedirector(connections, historyServiceResolver, logger)
 	} else {

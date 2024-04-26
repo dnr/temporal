@@ -960,6 +960,6 @@ func sdkClientFactoryProvider(
 		tlsConfig,
 		metricsHandler,
 		logger,
-		dc.GetInt(dynamicconfig.WorkerStickyCacheSize),
+		dynamicconfig.WorkerStickyCacheSize.Get(dc),
 	)
 }

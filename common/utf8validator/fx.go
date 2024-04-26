@@ -44,11 +44,11 @@ func utf8ValidatorProvider(
 	return newValidator(
 		logger,
 		metrics,
-		col.GetFloat(dynamicconfig.ValidateUTF8SampleRPCRequest),
-		col.GetFloat(dynamicconfig.ValidateUTF8SampleRPCResponse),
-		col.GetFloat(dynamicconfig.ValidateUTF8SamplePersistence),
-		col.GetBool(dynamicconfig.ValidateUTF8FailRPCRequest),
-		col.GetBool(dynamicconfig.ValidateUTF8FailRPCResponse),
-		col.GetBool(dynamicconfig.ValidateUTF8FailPersistence),
+		dynamicconfig.ValidateUTF8SampleRPCRequest.Get(col),
+		dynamicconfig.ValidateUTF8SampleRPCResponse.Get(col),
+		dynamicconfig.ValidateUTF8SamplePersistence.Get(col),
+		dynamicconfig.ValidateUTF8FailRPCRequest.Get(col),
+		dynamicconfig.ValidateUTF8FailRPCResponse.Get(col),
+		dynamicconfig.ValidateUTF8FailPersistence.Get(col),
 	)
 }

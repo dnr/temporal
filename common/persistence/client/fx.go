@@ -91,7 +91,7 @@ func EventBlobCacheProvider(
 	dc *dynamicconfig.Collection,
 ) persistence.XDCCache {
 	return persistence.NewEventsBlobCache(
-		dc.GetInt(dynamicconfig.XDCCacheMaxSizeBytes)(),
+		dynamicconfig.XDCCacheMaxSizeBytes.Get(dc)(),
 		20*time.Second,
 	)
 }
@@ -145,14 +145,14 @@ func HealthSignalAggregatorProvider(
 	metricsHandler metrics.Handler,
 	logger log.ThrottledLogger,
 ) persistence.HealthSignalAggregator {
-	if dynamicCollection.GetBool(dynamicconfig.PersistenceHealthSignalMetricsEnabled)() {
+	if dynamicconfig.PersistenceHealthSignalMetricsEnabled.Get(dynamicCollection)() {
 		return persistence.NewHealthSignalAggregatorImpl(
-			dynamicCollection.GetBool(dynamicconfig.PersistenceHealthSignalAggregationEnabled)(),
-			dynamicCollection.GetDuration(dynamicconfig.PersistenceHealthSignalWindowSize)(),
-			dynamicCollection.GetInt(dynamicconfig.PersistenceHealthSignalBufferSize)(),
+			dynamicconfig.PersistenceHealthSignalAggregationEnabled.Get(dynamicCollection)(),
+			dynamicconfig.PersistenceHealthSignalWindowSize.Get(dynamicCollection)(),
+			dynamicconfig.PersistenceHealthSignalBufferSize.Get(dynamicCollection)(),
 			metricsHandler,
-			dynamicCollection.GetInt(dynamicconfig.ShardRPSWarnLimit),
-			dynamicCollection.GetFloat(dynamicconfig.ShardPerNsRPSWarnPercent),
+			dynamicconfig.ShardRPSWarnLimit.Get(dynamicCollection),
+			dynamicconfig.ShardPerNsRPSWarnPercent.Get(dynamicCollection),
 			logger,
 		)
 	}

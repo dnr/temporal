@@ -135,10 +135,10 @@ const Precedence{{.Name}} Precedence = {{.Index}}
 
 func generateType(w io.Writer, tp *settingType, prec *settingPrecedence) {
 	writeTemplatedCode(w, `
-type {{.T.Name}}{{.P.Name}}Setting Setting[{{.T.GoType}}, func{{.P.GoArgs}}]
+type {{.P.Name}}{{.T.Name}}Setting Setting[{{.T.GoType}}, func{{.P.GoArgs}}]
 
-func New{{.T.Name}}{{.P.Name}}Setting(key Key, def {{.T.GoType}}, description string) {{.T.Name}}{{.P.Name}}Setting {
-	s := {{.T.Name}}{{.P.Name}}Setting{
+func New{{.P.Name}}{{.T.Name}}Setting(key Key, def {{.T.GoType}}, description string) {{.P.Name}}{{.T.Name}}Setting {
+	s := {{.P.Name}}{{.T.Name}}Setting{
 		key:         key,
 		def:         def,
 		description: description,
@@ -146,8 +146,8 @@ func New{{.T.Name}}{{.P.Name}}Setting(key Key, def {{.T.GoType}}, description st
 	return s
 }
 
-func New{{.T.Name}}{{.P.Name}}SettingWithConstrainedDefault(key Key, cdef []TypedConstrainedValue[{{.T.GoType}}], description string) {{.T.Name}}{{.P.Name}}Setting {
-	s := {{.T.Name}}{{.P.Name}}Setting{
+func New{{.P.Name}}{{.T.Name}}SettingWithConstrainedDefault(key Key, cdef []TypedConstrainedValue[{{.T.GoType}}], description string) {{.P.Name}}{{.T.Name}}Setting {
+	s := {{.P.Name}}{{.T.Name}}Setting{
 		key:         key,
 		cdef:        cdef,
 		description: description,
@@ -155,11 +155,11 @@ func New{{.T.Name}}{{.P.Name}}SettingWithConstrainedDefault(key Key, cdef []Type
 	return s
 }
 
-func (s {{.T.Name}}{{.P.Name}}Setting) Key() Key               { return s.key }
-func (s {{.T.Name}}{{.P.Name}}Setting) Type() Type             { return Type{{.T.Name}} }
-func (s {{.T.Name}}{{.P.Name}}Setting) Precedence() Precedence { return Precedence{{.P.Name}} }
+func (s {{.P.Name}}{{.T.Name}}Setting) Key() Key               { return s.key }
+func (s {{.P.Name}}{{.T.Name}}Setting) Type() Type             { return Type{{.T.Name}} }
+func (s {{.P.Name}}{{.T.Name}}Setting) Precedence() Precedence { return Precedence{{.P.Name}} }
 
-func (s {{.T.Name}}{{.P.Name}}Setting) WithDefault(v {{.T.GoType}}) {{.T.Name}}{{.P.Name}}Setting {
+func (s {{.P.Name}}{{.T.Name}}Setting) WithDefault(v {{.T.GoType}}) {{.P.Name}}{{.T.Name}}Setting {
 	newS := s
 	newS.def = v
 	return newS
@@ -172,9 +172,9 @@ type {{.T.Name}}PropertyFnWith{{.P.Name}}Filter func{{.P.GoArgs}} {{.T.GoType}}
 {{- end}}
 
 {{if eq .P.Name "Global" -}}
-func (c *Collection) Get{{.T.Name}}(s {{.T.Name}}{{.P.Name}}Setting) {{.T.Name}}PropertyFn {
+func (s {{.P.Name}}{{.T.Name}}Setting) Get(c *Collection) {{.T.Name}}PropertyFn {
 {{- else -}}
-func (c *Collection) Get{{.T.Name}}By{{.P.Name}}(s {{.T.Name}}{{.P.Name}}Setting) {{.T.Name}}PropertyFnWith{{.P.Name}}Filter {
+func (s {{.P.Name}}{{.T.Name}}Setting) Get(c *Collection) {{.T.Name}}PropertyFnWith{{.P.Name}}Filter {
 {{- end}}
 	return func{{.P.GoArgs}} {{.T.GoType}} {
 		return matchAndConvert(

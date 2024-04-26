@@ -74,10 +74,10 @@ type (
 
 func NewIncomingServiceRegistryConfig(dc *dynamicconfig.Collection) *IncomingServiceRegistryConfig {
 	config := &IncomingServiceRegistryConfig{
-		nexusAPIsEnabled:       dc.GetBool(dynamicconfig.FrontendEnableNexusAPIs),
-		refreshLongPollTimeout: dc.GetDuration(dynamicconfig.FrontendRefreshNexusIncomingServicesLongPollTimeout),
-		refreshPageSize:        dc.GetInt(dynamicconfig.NexusIncomingServiceListDefaultPageSize),
-		refreshMinWait:         dc.GetDuration(dynamicconfig.FrontendRefreshNexusIncomingServicesLongPollTimeout),
+		nexusAPIsEnabled:       dynamicconfig.FrontendEnableNexusAPIs.Get(dc),
+		refreshLongPollTimeout: dynamicconfig.FrontendRefreshNexusIncomingServicesLongPollTimeout.Get(dc),
+		refreshPageSize:        dynamicconfig.NexusIncomingServiceListDefaultPageSize.Get(dc),
+		refreshMinWait:         dynamicconfig.FrontendRefreshNexusIncomingServicesLongPollTimeout.Get(dc),
 	}
 	config.refreshRetryPolicy = backoff.NewExponentialRetryPolicy(config.refreshMinWait()).WithMaximumInterval(config.refreshLongPollTimeout())
 	return config

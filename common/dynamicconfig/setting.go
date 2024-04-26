@@ -36,7 +36,7 @@ type (
 	Precedence int
 
 	// Setting is one dynamic config setting. Setting should not be used or created directly,
-	// but use one of the generated constructors in setting_gen.go, e.g. NewBoolNamespaceSetting.
+	// but use one of the generated constructors in setting_gen.go, e.g. NewNamespaceBoolSetting.
 	// T is the data type of the setting. P is a go type representing the precedence, which is
 	// just used to make the types more unique.
 	Setting[T any, P any] struct {

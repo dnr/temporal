@@ -134,7 +134,7 @@ func (factory *factory) getMonitor() *monitor {
 
 		// Empirically, ringpop updates usually propagate in under a second even in relatively large clusters.
 		// 3 seconds is an over-estimate to be safer.
-		maxPropagationTime := factory.DC.GetDuration(dynamicconfig.RingpopApproximateMaxPropagationTime)()
+		maxPropagationTime := dynamicconfig.RingpopApproximateMaxPropagationTime.Get(factory.DC)()
 
 		factory.monitor = newMonitor(
 			factory.ServiceName,
@@ -156,7 +156,7 @@ func (factory *factory) getJoinTime(maxPropagationTime time.Duration) time.Time 
 	var alignTime time.Duration
 	switch factory.ServiceName {
 	case primitives.MatchingService:
-		alignTime = factory.DC.GetDuration(dynamicconfig.MatchingAlignMembershipChange)()
+		alignTime = dynamicconfig.MatchingAlignMembershipChange.Get(factory.DC)()
 	}
 	if alignTime == 0 {
 		return time.Time{}
@@ -172,7 +172,7 @@ func (factory *factory) getTChannel() *tchannel.Channel {
 	factory.chOnce.Do(func() {
 		ringpopServiceName := fmt.Sprintf("%v-ringpop", factory.ServiceName)
 		ringpopHostAddress := net.JoinHostPort(factory.getListenIP().String(), convert.IntToString(factory.RPCConfig.MembershipPort))
-		enableTLS := factory.DC.GetBool(dynamicconfig.EnableRingpopTLS)()
+		enableTLS := dynamicconfig.EnableRingpopTLS.Get(factory.DC)()
 
 		var tChannel *tchannel.Channel
 		if enableTLS {

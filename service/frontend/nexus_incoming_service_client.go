@@ -71,11 +71,11 @@ type (
 
 func newNexusIncomingServiceClientConfig(dc *dynamicconfig.Collection) *nexusIncomingServiceClientConfig {
 	return &nexusIncomingServiceClientConfig{
-		maxNameLength:       dc.GetInt(dynamicconfig.NexusIncomingServiceNameMaxLength),
-		maxTaskQueueLength:  dc.GetInt(dynamicconfig.MaxIDLengthLimit),
-		maxSize:             dc.GetInt(dynamicconfig.NexusIncomingServiceMaxSize),
-		listDefaultPageSize: dc.GetInt(dynamicconfig.NexusIncomingServiceListDefaultPageSize),
-		listMaxPageSize:     dc.GetInt(dynamicconfig.NexusIncomingServiceListMaxPageSize),
+		maxNameLength:       dynamicconfig.NexusIncomingServiceNameMaxLength.Get(dc),
+		maxTaskQueueLength:  dynamicconfig.MaxIDLengthLimit.Get(dc),
+		maxSize:             dynamicconfig.NexusIncomingServiceMaxSize.Get(dc),
+		listDefaultPageSize: dynamicconfig.NexusIncomingServiceListDefaultPageSize.Get(dc),
+		listMaxPageSize:     dynamicconfig.NexusIncomingServiceListMaxPageSize.Get(dc),
 	}
 }
 

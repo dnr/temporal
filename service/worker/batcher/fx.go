@@ -77,7 +77,7 @@ func NewResult(
 		Component: &workerComponent{
 			activityDeps:   params,
 			dc:             dc,
-			enabledFeature: dc.GetBoolByNamespace(dynamicconfig.EnableBatcherNamespace),
+			enabledFeature: dynamicconfig.EnableBatcherNamespace.Get(dc),
 		},
 	}
 }
@@ -100,7 +100,7 @@ func (s *workerComponent) activities(name namespace.Name, id namespace.ID) *acti
 		activityDeps: s.activityDeps,
 		namespace:    name,
 		namespaceID:  id,
-		rps:          s.dc.GetIntByNamespace(dynamicconfig.BatcherRPS),
-		concurrency:  s.dc.GetIntByNamespace(dynamicconfig.BatcherConcurrency),
+		rps:          dynamicconfig.BatcherRPS.Get(s.dc),
+		concurrency:  dynamicconfig.BatcherConcurrency.Get(s.dc),
 	}
 }
