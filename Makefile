@@ -20,9 +20,6 @@ clean: clean-bins clean-test-results
 
 # Recompile proto files.
 proto: clean-proto lint-protos lint-api protoc service-clients goimports-proto proto-mocks copyright-proto
-
-# Update proto submodule from remote and recompile proto files.
-update-proto: update-proto-submodule proto gomodtidy
 ########################################################################
 
 .PHONY: proto proto-mocks protoc install bins ci-build-misc clean
@@ -74,7 +71,6 @@ PROTO_ROOT := proto
 PROTO_FILES = $(shell find ./$(PROTO_ROOT)/internal -name "*.proto")
 PROTO_DIRS = $(sort $(dir $(PROTO_FILES)))
 PROTO_IMPORTS = -I=$(PROTO_ROOT)/internal -I=$(PROTO_ROOT)/api -I=$(PROTO_ROOT)/dependencies
-PROTO_OPTS = paths=source_relative:$(PROTO_OUT)
 PROTO_OUT := api
 PROTO_ENUMS := $(shell grep -R '^enum ' $(PROTO_ROOT) | cut -d ' ' -f2)
 PROTO_PATHS = paths=source_relative:$(PROTO_OUT)
@@ -233,22 +229,16 @@ $(PROTO_OUT):
 clean-proto: gomodtidy
 	@rm -rf $(PROTO_OUT)/*
 
-update-proto-submodule:
-	@printf $(COLOR) "Update proto submodule from remote..."
-	git submodule update --force --remote $(PROTO_ROOT)/api
-
-install-proto-submodule:
-	@printf $(COLOR) "Install proto submodule..."
-	git submodule update --init $(PROTO_ROOT)/api
-
 protoc: clean-proto $(PROTO_OUT) $(PROTOGEN) $(PROTOC_GEN_GO) $(PROTOC_GEN_GO_GRPC) $(PROTOC_GEN_GO_HELPERS)
+	@./cmd/tools/getproto/generate.sh
+	@protodepstmp=$(go run ./cmd/tools/getproto)
 	@$(PROTOGEN) \
-		-I=proto/api \
-		-I=proto/dependencies \
+		-I="${protodepstmp}" \
 		--root=proto/internal \
 		--rewrite-enum=BuildId_State:BuildId \
 		-p go-grpc_out=$(PROTO_PATHS) \
 		-p go-helpers_out=$(PROTO_PATHS)
+	@rm -rf "${protodepstmp}"
 	@mv -f "$(PROTO_OUT)/temporal/server/api/"* "$(PROTO_OUT)"
 
 # All gRPC generated service files paths relative to PROTO_OUT.
