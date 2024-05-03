@@ -40,7 +40,6 @@ func checkImports(files map[string]protoreflect.FileDescriptor) {
 			if strings.HasPrefix(imp, "temporal/api/") || strings.HasPrefix(imp, "google/") {
 				if _, ok := files[imp]; !ok {
 					missing[imp] = struct{}{}
-					fmt.Fprintln(os.Stdout, "MISSING", imp)
 				}
 			}
 		}
