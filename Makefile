@@ -230,7 +230,7 @@ clean-proto: gomodtidy
 	@rm -rf $(PROTO_OUT)/*
 
 protoc: clean-proto $(PROTO_OUT) $(PROTOGEN) $(PROTOC_GEN_GO) $(PROTOC_GEN_GO_GRPC) $(PROTOC_GEN_GO_HELPERS)
-	$(eval protodepstmp := $(shell go run ./cmd/tools/getprotogen && go run ./cmd/tools/getproto))
+	$(eval protodepstmp := $(shell ./cmd/tools/getproto/run.sh))
 	@$(PROTOGEN) \
 		-I="$(protodepstmp)" \
 		--root=proto/internal \
@@ -326,7 +326,7 @@ lint: lint-code lint-actions lint-api lint-protos
 
 lint-api: $(API_LINTER)
 	@printf $(COLOR) "Linting proto API..."
-	$(eval protodepstmp := $(shell go run ./cmd/tools/getprotogen && go run ./cmd/tools/getproto))
+	$(eval protodepstmp := $(shell ./cmd/tools/getproto/run.sh))
 	$(call silent_exec, $(API_LINTER) --set-exit-status $(PROTO_IMPORTS) -I=$(protodepstmp) --config=$(PROTO_ROOT)/api-linter.yaml $(PROTO_FILES))
 	@rm -rf "$(protodepstmp)"
 

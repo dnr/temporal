@@ -122,9 +122,10 @@ service MatchingService {
     // (-- api-linter: core::0131::http-uri-name=disabled
     //     aip.dev/not-precedent: GetWorkerVersioningRulesRequest RPC doesn't follow Google API format. --)
     rpc GetWorkerVersioningRules (GetWorkerVersioningRulesRequest) returns (GetWorkerVersioningRulesResponse) {
-        option (google.api.http) = {
-            get: "/api/v1/namespaces/{namespace}/task-queues/{task_queue}/worker-versioning-rules"
-        };
+        // FIXME: why is this here?
+        //option (google.api.http) = {
+        //    get: "/api/v1/namespaces/{namespace}/task-queues/{task_queue}/worker-versioning-rules"
+        //};
     }
 
     // Apply a user data replication event.

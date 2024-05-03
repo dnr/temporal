@@ -130,6 +130,9 @@ func (w *protoWriter) writeEnums(enums protoreflect.EnumDescriptors) {
 func (w *protoWriter) writeMessages(messages protoreflect.MessageDescriptors) {
 	for i := 0; i < messages.Len(); i++ {
 		m := messages.Get(i)
+		if m.IsMapEntry() {
+			continue
+		}
 
 		w.writeLine("message %s {\n", m.Name())
 
