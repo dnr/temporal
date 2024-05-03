@@ -37,7 +37,7 @@ func findProtoImports() []string {
 				if match := matchImport.FindStringSubmatch(line); len(match) > 0 {
 					i := match[1]
 					if strings.HasPrefix(i, "temporal/api/") ||
-						strings.HasPrefix(i, "google/") && i != "google/api/annotations.proto" {
+						strings.HasPrefix(i, "google/") /* FIXME && i != "google/api/annotations.proto" */ {
 						importMap[i] = struct{}{}
 					}
 				}

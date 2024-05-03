@@ -69,6 +69,10 @@ func (w *protoWriter) writeImports(imports protoreflect.FileImports) {
 	num := imports.Len()
 	for i := 0; i < num; i++ {
 		imp := imports.Get(i)
+		// FIXME
+		// if imp == "google/api/annotations.proto" {
+		// 	continue
+		// }
 		w.writeLine("import \"%s\";\n", imp.Path())
 	}
 }
@@ -88,13 +92,15 @@ func (w *protoWriter) writeEnums(enums protoreflect.EnumDescriptors) {
 		reservedNames := e.ReservedNames()
 		for j := 0; j < reservedNames.Len(); j++ {
 			reservedName := reservedNames.Get(j)
-			w.writeLine("reserved %s;\n", reservedName)
+			w.writeLine("reserved \"%s\";\n", reservedName)
 		}
 
 		reservedRanges := e.ReservedRanges()
 		for j := 0; j < reservedRanges.Len(); j++ {
 			reservedRange := reservedRanges.Get(j)
-			w.writeLine("reserved %d-%d;\n", reservedRange[0], reservedRange[1])
+			for r := reservedRange[0]; r < reservedRange[1]; r++ {
+				w.writeLine("reserved %d;\n", r)
+			}
 		}
 
 		w.writeLine("}\n\n")
@@ -124,13 +130,15 @@ func (w *protoWriter) writeMessages(messages protoreflect.MessageDescriptors) {
 		reservedNames := m.ReservedNames()
 		for j := 0; j < reservedNames.Len(); j++ {
 			reservedName := reservedNames.Get(j)
-			w.writeLine("reserved %s;\n", reservedName)
+			w.writeLine("reserved \"%s\";\n", reservedName)
 		}
 
 		reservedRanges := m.ReservedRanges()
 		for j := 0; j < reservedRanges.Len(); j++ {
 			reservedRange := reservedRanges.Get(j)
-			w.writeLine("reserved %d-%d;\n", reservedRange[0], reservedRange[1])
+			for r := reservedRange[0]; r < reservedRange[1]; r++ {
+				w.writeLine("reserved %d;\n", r)
+			}
 		}
 
 		w.writeLine("}\n\n")

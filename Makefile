@@ -70,7 +70,7 @@ TEST_TIMEOUT := 30m
 PROTO_ROOT := proto
 PROTO_FILES = $(shell find ./$(PROTO_ROOT)/internal -name "*.proto")
 PROTO_DIRS = $(sort $(dir $(PROTO_FILES)))
-PROTO_IMPORTS = -I=$(PROTO_ROOT)/internal -I=$(PROTO_ROOT)/api -I=$(PROTO_ROOT)/dependencies
+PROTO_IMPORTS = -I=$(PROTO_ROOT)/internal
 PROTO_OUT := api
 PROTO_ENUMS := $(shell grep -R '^enum ' $(PROTO_ROOT) | cut -d ' ' -f2)
 PROTO_PATHS = paths=source_relative:$(PROTO_OUT)
@@ -230,15 +230,14 @@ clean-proto: gomodtidy
 	@rm -rf $(PROTO_OUT)/*
 
 protoc: clean-proto $(PROTO_OUT) $(PROTOGEN) $(PROTOC_GEN_GO) $(PROTOC_GEN_GO_GRPC) $(PROTOC_GEN_GO_HELPERS)
-	@go run ./cmd/tools/getprotogen
-	@protodepstmp=$(go run ./cmd/tools/getproto)
+	$(eval protodepstmp := $(shell go run ./cmd/tools/getprotogen && go run ./cmd/tools/getproto))
 	@$(PROTOGEN) \
-		-I="${protodepstmp}" \
+		-I="$(protodepstmp)" \
 		--root=proto/internal \
 		--rewrite-enum=BuildId_State:BuildId \
 		-p go-grpc_out=$(PROTO_PATHS) \
 		-p go-helpers_out=$(PROTO_PATHS)
-	@rm -rf "${protodepstmp}"
+	@rm -rf "$(protodepstmp)"
 	@mv -f "$(PROTO_OUT)/temporal/server/api/"* "$(PROTO_OUT)"
 
 # All gRPC generated service files paths relative to PROTO_OUT.
@@ -327,7 +326,9 @@ lint: lint-code lint-actions lint-api lint-protos
 
 lint-api: $(API_LINTER)
 	@printf $(COLOR) "Linting proto API..."
-	$(call silent_exec, $(API_LINTER) --set-exit-status $(PROTO_IMPORTS) --config=$(PROTO_ROOT)/api-linter.yaml $(PROTO_FILES))
+	$(eval protodepstmp := $(shell go run ./cmd/tools/getprotogen && go run ./cmd/tools/getproto))
+	$(call silent_exec, $(API_LINTER) --set-exit-status $(PROTO_IMPORTS) -I=$(protodepstmp) --config=$(PROTO_ROOT)/api-linter.yaml $(PROTO_FILES))
+	@rm -rf "$(protodepstmp)"
 
 lint-protos: $(BUF)
 	@printf $(COLOR) "Linting proto definitions..."
