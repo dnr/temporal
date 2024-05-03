@@ -178,18 +178,20 @@ func getKind(f protoreflect.FieldDescriptor) string {
 }
 
 func (w *protoWriter) writeServices(services protoreflect.ServiceDescriptors) {
+	// This function is not used, just here for completeness. We don't import or depend on
+	// service definitions.
 	for i := 0; i < services.Len(); i++ {
 		s := services.Get(i)
-		_ = s
+		w.writeLine("service %s {\n", s.Name())
+		methods := s.Methods()
+		for j := 0; j < methods.Len(); j++ {
+			m := methods.Get(j)
+			w.writeLine("rpc %s (%s) returns (%s) {\n", m.Name(), m.Input().FullName(), m.Output().FullName())
+			// options would go here
+			w.writeLine("}\n")
+		}
+		w.writeLine("}\n\n")
 	}
-	// service WorkflowService {
-	// rpc RegisterNamespace (RegisterNamespaceRequest) returns (RegisterNamespaceResponse) {
-	// option (google.api.http) = {
-	// post: "/api/v1/namespaces"
-	// body: "*"
-	// };
-	// }
-
 }
 
 func (w *protoWriter) writeExtensions(exts protoreflect.ExtensionDescriptors) {
