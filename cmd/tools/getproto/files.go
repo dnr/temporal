@@ -4,46 +4,10 @@ package main
 
 import (
 	"google.golang.org/protobuf/reflect/protoreflect"
-
-	common "go.temporal.io/api/common/v1"
-	enums "go.temporal.io/api/enums/v1"
-	failure "go.temporal.io/api/failure/v1"
-	history "go.temporal.io/api/history/v1"
-	namespace "go.temporal.io/api/namespace/v1"
-	nexus "go.temporal.io/api/nexus/v1"
-	protocol "go.temporal.io/api/protocol/v1"
-	query "go.temporal.io/api/query/v1"
-	replication "go.temporal.io/api/replication/v1"
-	schedule "go.temporal.io/api/schedule/v1"
-	taskqueue "go.temporal.io/api/taskqueue/v1"
-	version "go.temporal.io/api/version/v1"
-	workflow "go.temporal.io/api/workflow/v1"
-	workflowservice "go.temporal.io/api/workflowservice/v1"
-	durationpb "google.golang.org/protobuf/types/known/durationpb"
-	emptypb "google.golang.org/protobuf/types/known/emptypb"
-	timestamppb "google.golang.org/protobuf/types/known/timestamppb"
 )
 
+func forEachInternalFile(f func(string, protoreflect.FileDescriptor)) {
+}
+
 func forEachFile(f func(string, protoreflect.FileDescriptor)) {
-	f("google/protobuf/duration.proto", durationpb.File_google_protobuf_duration_proto)
-	f("google/protobuf/empty.proto", emptypb.File_google_protobuf_empty_proto)
-	f("google/protobuf/timestamp.proto", timestamppb.File_google_protobuf_timestamp_proto)
-	f("temporal/api/common/v1/message.proto", common.File_temporal_api_common_v1_message_proto)
-	f("temporal/api/enums/v1/common.proto", enums.File_temporal_api_enums_v1_common_proto)
-	f("temporal/api/enums/v1/namespace.proto", enums.File_temporal_api_enums_v1_namespace_proto)
-	f("temporal/api/enums/v1/schedule.proto", enums.File_temporal_api_enums_v1_schedule_proto)
-	f("temporal/api/enums/v1/task_queue.proto", enums.File_temporal_api_enums_v1_task_queue_proto)
-	f("temporal/api/enums/v1/workflow.proto", enums.File_temporal_api_enums_v1_workflow_proto)
-	f("temporal/api/failure/v1/message.proto", failure.File_temporal_api_failure_v1_message_proto)
-	f("temporal/api/history/v1/message.proto", history.File_temporal_api_history_v1_message_proto)
-	f("temporal/api/namespace/v1/message.proto", namespace.File_temporal_api_namespace_v1_message_proto)
-	f("temporal/api/nexus/v1/message.proto", nexus.File_temporal_api_nexus_v1_message_proto)
-	f("temporal/api/protocol/v1/message.proto", protocol.File_temporal_api_protocol_v1_message_proto)
-	f("temporal/api/query/v1/message.proto", query.File_temporal_api_query_v1_message_proto)
-	f("temporal/api/replication/v1/message.proto", replication.File_temporal_api_replication_v1_message_proto)
-	f("temporal/api/schedule/v1/message.proto", schedule.File_temporal_api_schedule_v1_message_proto)
-	f("temporal/api/taskqueue/v1/message.proto", taskqueue.File_temporal_api_taskqueue_v1_message_proto)
-	f("temporal/api/version/v1/message.proto", version.File_temporal_api_version_v1_message_proto)
-	f("temporal/api/workflow/v1/message.proto", workflow.File_temporal_api_workflow_v1_message_proto)
-	f("temporal/api/workflowservice/v1/request_response.proto", workflowservice.File_temporal_api_workflowservice_v1_request_response_proto)
 }

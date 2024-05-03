@@ -41,9 +41,7 @@ func checkImports(files map[string]protoreflect.FileDescriptor) {
 		}
 	}
 	if len(missing) > 0 {
-		addImports(maps.Keys(missing))
-		fmt.Println("<rerun>")
-		os.Exit(0)
+		addImports(maps.Keys(missing)) // doesn't return
 	}
 }
 
@@ -228,9 +226,15 @@ func (w *protoWriter) writeExtensions(exts protoreflect.ExtensionDescriptors) {
 
 func main() {
 	files := make(map[string]protoreflect.FileDescriptor)
+	forEachInternalFile(func(path string, fd protoreflect.FileDescriptor) {
+		files[path] = fd
+	})
 	forEachFile(func(path string, fd protoreflect.FileDescriptor) {
 		files[path] = fd
 	})
+	if len(files) == 0 {
+		initSeeds() // doesn't return
+	}
 	checkImports(files)
 
 	baseDir, err := os.MkdirTemp("", "protofiles")
