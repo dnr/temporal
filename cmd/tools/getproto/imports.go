@@ -2,8 +2,6 @@ package main
 
 import (
 	"fmt"
-	"io/fs"
-	"log"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -18,37 +16,31 @@ var (
 	versionSuffix = regexp.MustCompile(`^(.*)/v\d+$`)
 )
 
-func fatalIfErr(err error) {
-	if err != nil {
-		log.Fatal(err)
-	}
-}
-
-func findProtoImports() []string {
-	importMap := make(map[string]struct{})
-	fatalIfErr(filepath.WalkDir("proto/internal", func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if d.Type().IsRegular() && strings.HasSuffix(path, ".proto") {
-			protoFile, err := os.ReadFile(path)
-			fatalIfErr(err)
-			for _, line := range strings.Split(string(protoFile), "\n") {
-				if match := matchImport.FindStringSubmatch(line); len(match) > 0 {
-					i := match[1]
-					if strings.HasPrefix(i, "temporal/api/") ||
-						strings.HasPrefix(i, "google/") /* FIXME && i != "google/api/annotations.proto" */ {
-						importMap[i] = struct{}{}
-					}
-				}
-			}
-		}
-		return nil
-	}))
-	imports := maps.Keys(importMap)
-	sort.Strings(imports)
-	return imports
-}
+// func findProtoImports() []string {
+// 	importMap := make(map[string]struct{})
+// 	fatalIfErr(filepath.WalkDir("proto/internal", func(path string, d fs.DirEntry, err error) error {
+// 		if err != nil {
+// 			return err
+// 		}
+// 		if d.Type().IsRegular() && strings.HasSuffix(path, ".proto") {
+// 			protoFile, err := os.ReadFile(path)
+// 			fatalIfErr(err)
+// 			for _, line := range strings.Split(string(protoFile), "\n") {
+// 				if match := matchImport.FindStringSubmatch(line); len(match) > 0 {
+// 					i := match[1]
+// 					if strings.HasPrefix(i, "temporal/api/") ||
+// 						strings.HasPrefix(i, "google/") /* FIXME && i != "google/api/annotations.proto" */ {
+// 						importMap[i] = struct{}{}
+// 					}
+// 				}
+// 			}
+// 		}
+// 		return nil
+// 	}))
+// 	imports := maps.Keys(importMap)
+// 	sort.Strings(imports)
+// 	return imports
+// }
 
 func getImportName(i string) string {
 	withoutV := i
@@ -63,9 +55,7 @@ func mangle(p string) string {
 	return "File_" + strings.ReplaceAll(mangled, ".", "_")
 }
 
-func main() {
-	protoImports := findProtoImports()
-
+func genFileList(protoImports []string) {
 	goImportsMap := make(map[string]string)
 	protoToPackage := make(map[string]string)
 
@@ -101,4 +91,28 @@ func main() {
 		fmt.Fprintf(out, "\tf(%q, %s.%s)\n", i, protoToPackage[i], mangle(i))
 	}
 	out.WriteString("}\n")
+}
+
+func addImports(missing []string) {
+	have, err := os.ReadFile("cmd/tools/getproto/protoimports.txt")
+	fatalIfErr(err)
+
+	importMap := make(map[string]struct{})
+	for _, i := range strings.Split(string(have), "\n") {
+		if i = strings.TrimSpace(i); len(i) > 0 {
+			importMap[i] = struct{}{}
+		}
+	}
+	for _, i := range missing {
+		importMap[i] = struct{}{}
+	}
+
+	imports := maps.Keys(importMap)
+	sort.Strings(imports)
+	data := []byte(strings.Join(imports, "\n") + "\n")
+
+	err = os.WriteFile("cmd/tools/getproto/protoimports.txt", data, 0644)
+	fatalIfErr(err)
+
+	genFileList(imports)
 }

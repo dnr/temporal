@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"golang.org/x/exp/maps"
 	"google.golang.org/protobuf/reflect/protoreflect"
 	"google.golang.org/protobuf/types/descriptorpb"
 )
@@ -26,17 +27,23 @@ func fatalIfErr(err error) {
 }
 
 func checkImports(files map[string]protoreflect.FileDescriptor) {
-	for file, fd := range files {
+	missing := make(map[string]struct{})
+	for _, fd := range files {
 		imports := fd.Imports()
 		num := imports.Len()
 		for i := 0; i < num; i++ {
 			imp := imports.Get(i).Path()
 			if strings.HasPrefix(imp, "temporal/api/") || strings.HasPrefix(imp, "google/") {
 				if _, ok := files[imp]; !ok {
-					fatalIfErr(fmt.Errorf("missing import! %s -> %s", file, imp))
+					missing[imp] = struct{}{}
 				}
 			}
 		}
+	}
+	if len(missing) > 0 {
+		addImports(maps.Keys(missing))
+		fmt.Println("<rerun>")
+		os.Exit(0)
 	}
 }
 
