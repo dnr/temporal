@@ -230,7 +230,7 @@ clean-proto: gomodtidy
 	@rm -rf $(PROTO_OUT)/*
 
 protoc: clean-proto $(PROTO_OUT) $(PROTOGEN) $(PROTOC_GEN_GO) $(PROTOC_GEN_GO_GRPC) $(PROTOC_GEN_GO_HELPERS)
-	@./cmd/tools/getproto/generate.sh
+	@go run ./cmd/tools/getprotogen
 	@protodepstmp=$(go run ./cmd/tools/getproto)
 	@$(PROTOGEN) \
 		-I="${protodepstmp}" \
