@@ -70,7 +70,9 @@ TEST_TIMEOUT := 30m
 PROTO_ROOT := proto
 PROTO_FILES = $(shell find ./$(PROTO_ROOT)/internal -name "*.proto")
 PROTO_DIRS = $(sort $(dir $(PROTO_FILES)))
-PROTO_IMPORTS = -I=$(PROTO_ROOT)/internal
+# API_PROTO_ROOT is not in the repo, it's generated from the api-go import as needed
+API_PROTO_ROOT := $(PROTO_ROOT)/api
+PROTO_IMPORTS = -I=$(PROTO_ROOT)/internal -I=$(API_PROTO_ROOT)
 PROTO_OUT := api
 PROTO_ENUMS := $(shell grep -R '^enum ' $(PROTO_ROOT) | cut -d ' ' -f2)
 PROTO_PATHS = paths=source_relative:$(PROTO_OUT)
@@ -230,14 +232,14 @@ clean-proto: gomodtidy
 	@rm -rf $(PROTO_OUT)/*
 
 protoc: clean-proto $(PROTO_OUT) $(PROTOGEN) $(PROTOC_GEN_GO) $(PROTOC_GEN_GO_GRPC) $(PROTOC_GEN_GO_HELPERS)
-	$(eval protodepstmp := $(shell ./cmd/tools/getproto/run.sh))
+	@./cmd/tools/getproto/run.sh --out $(API_PROTO_ROOT)
 	@$(PROTOGEN) \
-		-I="$(protodepstmp)" \
+		-I=$(API_PROTO_ROOT) \
 		--root=proto/internal \
 		--rewrite-enum=BuildId_State:BuildId \
 		-p go-grpc_out=$(PROTO_PATHS) \
 		-p go-helpers_out=$(PROTO_PATHS)
-	@rm -rf "$(protodepstmp)"
+	@rm -rf $(API_PROTO_ROOT)
 	@mv -f "$(PROTO_OUT)/temporal/server/api/"* "$(PROTO_OUT)"
 
 # All gRPC generated service files paths relative to PROTO_OUT.
@@ -326,21 +328,27 @@ lint: lint-code lint-actions lint-api lint-protos
 
 lint-api: $(API_LINTER)
 	@printf $(COLOR) "Linting proto API..."
-	$(eval protodepstmp := $(shell ./cmd/tools/getproto/run.sh))
-	$(call silent_exec, $(API_LINTER) --set-exit-status $(PROTO_IMPORTS) -I=$(protodepstmp) --config=$(PROTO_ROOT)/api-linter.yaml $(PROTO_FILES))
-	@rm -rf "$(protodepstmp)"
+	@./cmd/tools/getproto/run.sh --out $(API_PROTO_ROOT)
+	$(call silent_exec, $(API_LINTER) --set-exit-status $(PROTO_IMPORTS) --config=$(PROTO_ROOT)/api-linter.yaml $(PROTO_FILES))
+	@rm -rf $(API_PROTO_ROOT)
 
 lint-protos: $(BUF)
 	@printf $(COLOR) "Linting proto definitions..."
+	@./cmd/tools/getproto/run.sh --out $(API_PROTO_ROOT)
 	@(cd $(PROTO_ROOT) && $(ROOT)/$(BUF) lint)
+	@rm -rf $(API_PROTO_ROOT)
 
 buf-build: $(BUF)
 	@printf $(COLOR) "Build image.bin with buf..."
+	@./cmd/tools/getproto/run.sh --out $(API_PROTO_ROOT)
 	@(cd $(PROTO_ROOT) && $(ROOT)/$(BUF) build -o image.bin)
+	@rm -rf $(API_PROTO_ROOT)
 
 buf-breaking: $(BUF)
 	@printf $(COLOR) "Run buf breaking changes check against image.bin..."
+	@./cmd/tools/getproto/run.sh --out $(API_PROTO_ROOT)
 	@(cd $(PROTO_ROOT) && $(ROOT)/$(BUF) check breaking --against image.bin)
+	@rm -rf $(API_PROTO_ROOT)
 
 shell-check:
 	@printf $(COLOR) "Run shellcheck for script files..."

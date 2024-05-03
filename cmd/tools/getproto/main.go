@@ -1,6 +1,7 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"log"
 	"os"
@@ -17,12 +18,6 @@ type protoWriter struct {
 	out     *os.File
 	level   int
 }
-
-var (
-	pw *protoWriter
-
-	importMap map[string]protoreflect.FileDescriptor
-)
 
 func fatalIfErr(err error) {
 	if err != nil {
@@ -88,12 +83,7 @@ func (w *protoWriter) writeFile(relPath string, fd protoreflect.FileDescriptor) 
 func (w *protoWriter) writeImports(imports protoreflect.FileImports) {
 	num := imports.Len()
 	for i := 0; i < num; i++ {
-		imp := imports.Get(i)
-		// FIXME
-		// if imp == "google/api/annotations.proto" {
-		// 	continue
-		// }
-		w.writeLine("import \"%s\";\n", imp.Path())
+		w.writeLine("import \"%s\";\n", imports.Get(i).Path())
 	}
 }
 
@@ -232,17 +222,38 @@ func (w *protoWriter) writeExtensions(exts protoreflect.ExtensionDescriptors) {
 }
 
 func main() {
+	out := flag.String("out", "", "base directory to put proto files")
+	flag.Parse()
+
+	if *out == "" {
+		flag.Usage()
+		os.Exit(1)
+	}
+
 	if len(importMap) == 0 {
 		initSeeds() // doesn't return
 	}
 
-	checkImports(importMap)
+	checkImports(importMap) // doesn't return if any errors
 
-	baseDir, err := os.MkdirTemp("", "protofiles")
+	err := os.MkdirAll(*out, 0755)
 	fatalIfErr(err)
-	pw = &protoWriter{baseDir: baseDir}
+	pw := &protoWriter{baseDir: *out}
 	for relPath, fd := range importMap {
 		pw.writeFile(relPath, fd)
 	}
-	fmt.Println(baseDir)
+	// Minimal buf.yaml file to exclude google protos from linting.
+	// The real linting of these files happens in the api repo, we don't need to do it again here.
+	fatalIfErr(os.WriteFile(filepath.Join(*out, "buf.yaml"), []byte(`
+version: v1
+build:
+  excludes:
+    - google
+breaking:
+  ignore:
+    - google
+lint:
+  ignore:
+    - google
+`), 0644))
 }

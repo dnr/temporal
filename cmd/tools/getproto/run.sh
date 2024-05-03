@@ -1,16 +1,11 @@
-#!/usr/bin/env bash
+#!/bin/sh
 
 set -e
 
 while :; do
-	out=$(go run ./cmd/tools/getproto)
-	if [[ $out = "<rerun>" ]]; then
-		continue
-	elif [[ -d $out ]]; then
-		echo "$out"
-		break
-	else
-		echo "getproto error: $out" 1>&2
-		exit 1
+	out=$(go run ./cmd/tools/getproto "$@")
+	ret=$?
+	if [ "$out" != "<rerun>" ]; then
+		exit $ret
 	fi
 done
