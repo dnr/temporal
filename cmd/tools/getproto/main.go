@@ -18,7 +18,11 @@ type protoWriter struct {
 	level   int
 }
 
-var pw *protoWriter
+var (
+	pw *protoWriter
+
+	importMap map[string]protoreflect.FileDescriptor
+)
 
 func fatalIfErr(err error) {
 	if err != nil {
@@ -36,6 +40,7 @@ func checkImports(files map[string]protoreflect.FileDescriptor) {
 			if strings.HasPrefix(imp, "temporal/api/") || strings.HasPrefix(imp, "google/") {
 				if _, ok := files[imp]; !ok {
 					missing[imp] = struct{}{}
+					fmt.Fprintln(os.Stdout, "MISSING", imp)
 				}
 			}
 		}
@@ -225,19 +230,16 @@ func (w *protoWriter) writeExtensions(exts protoreflect.ExtensionDescriptors) {
 }
 
 func main() {
-	files := make(map[string]protoreflect.FileDescriptor)
-	forEachFile(func(path string, fd protoreflect.FileDescriptor) {
-		files[path] = fd
-	})
-	if len(files) == 0 {
+	if len(importMap) == 0 {
 		initSeeds() // doesn't return
 	}
-	checkImports(files)
+
+	checkImports(importMap)
 
 	baseDir, err := os.MkdirTemp("", "protofiles")
 	fatalIfErr(err)
 	pw = &protoWriter{baseDir: baseDir}
-	for relPath, fd := range files {
+	for relPath, fd := range importMap {
 		pw.writeFile(relPath, fd)
 	}
 	fmt.Println(baseDir)
