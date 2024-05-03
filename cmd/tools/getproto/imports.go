@@ -17,6 +17,32 @@ var (
 	versionSuffix = regexp.MustCompile(`^(.*)/v\d+$`)
 )
 
+func findProtoImports() []string {
+	importMap := make(map[string]struct{})
+	fatalIfErr(filepath.WalkDir("proto/internal", func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.Type().IsRegular() && strings.HasSuffix(path, ".proto") {
+			protoFile, err := os.ReadFile(path)
+			fatalIfErr(err)
+			for _, line := range strings.Split(string(protoFile), "\n") {
+				if match := matchImport.FindStringSubmatch(line); len(match) > 0 {
+					i := match[1]
+					if strings.HasPrefix(i, "temporal/api/") ||
+						strings.HasPrefix(i, "google/") /* FIXME && i != "google/api/annotations.proto" */ {
+						importMap[i] = struct{}{}
+					}
+				}
+			}
+		}
+		return nil
+	}))
+	imports := maps.Keys(importMap)
+	sort.Strings(imports)
+	return imports
+}
+
 func getImportName(i string) string {
 	withoutV := i
 	if match := versionSuffix.FindStringSubmatch(i); match != nil {
@@ -71,18 +97,9 @@ func genFileList(protoImports []string) {
 	out.WriteString(")\n\n")
 	out.WriteString("func forEachFile(f func(string, protoreflect.FileDescriptor)) {\n")
 	for _, i := range protoImports {
-		if !strings.HasPrefix(i, "proto/internal/temporal") {
-			fmt.Fprintf(out, "\tf(%q, %s.%s)\n", i, protoToPackage[i], mangle(i))
-		}
+		fmt.Fprintf(out, "\tf(%q, %s.%s)\n", i, protoToPackage[i], mangle(i))
 	}
 	out.WriteString("}\n\n")
-	out.WriteString("func forEachInternalFile(f func(string, protoreflect.FileDescriptor)) {\n")
-	for _, i := range protoImports {
-		if strings.HasPrefix(i, "proto/internal/temporal") {
-			withoutProtoInternal := strings.TrimPrefix(i, "proto/internal/")
-			fmt.Fprintf(out, "\tf(%q, %s.%s)\n", i, protoToPackage[i], mangle(withoutProtoInternal))
-		}
-	}
 	out.WriteString("}\n")
 }
 
@@ -90,17 +107,17 @@ func addImports(missing []string) {
 	have, err := os.ReadFile("cmd/tools/getproto/protofiles.txt")
 	fatalIfErr(err)
 
-	fileMap := make(map[string]struct{})
+	importMap := make(map[string]struct{})
 	for _, i := range strings.Split(string(have), "\n") {
 		if i = strings.TrimSpace(i); len(i) > 0 {
-			fileMap[i] = struct{}{}
+			importMap[i] = struct{}{}
 		}
 	}
 	for _, i := range missing {
-		fileMap[i] = struct{}{}
+		importMap[i] = struct{}{}
 	}
 
-	files := maps.Keys(fileMap)
+	files := maps.Keys(importMap)
 	sort.Strings(files)
 	data := []byte(strings.Join(files, "\n") + "\n")
 
@@ -114,20 +131,13 @@ func addImports(missing []string) {
 }
 
 func initSeeds() {
-	var files []string
-	fatalIfErr(filepath.WalkDir("proto/internal/temporal", func(path string, d fs.DirEntry, err error) error {
-		if d.Type().IsRegular() && strings.HasSuffix(path, ".proto") {
-			files = append(files, path)
-		}
-		return nil
-	}))
-	sort.Strings(files)
+	imports := findProtoImports()
 
-	data := []byte(strings.Join(files, "\n") + "\n")
+	data := []byte(strings.Join(imports, "\n") + "\n")
 	err := os.WriteFile("cmd/tools/getproto/protofiles.txt", data, 0644)
 	fatalIfErr(err)
 
-	genFileList(files)
+	genFileList(imports)
 
 	fmt.Println("<rerun>")
 	os.Exit(0)

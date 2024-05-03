@@ -226,9 +226,6 @@ func (w *protoWriter) writeExtensions(exts protoreflect.ExtensionDescriptors) {
 
 func main() {
 	files := make(map[string]protoreflect.FileDescriptor)
-	forEachInternalFile(func(path string, fd protoreflect.FileDescriptor) {
-		files[path] = fd
-	})
 	forEachFile(func(path string, fd protoreflect.FileDescriptor) {
 		files[path] = fd
 	})

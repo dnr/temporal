@@ -6,8 +6,5 @@ import (
 	"google.golang.org/protobuf/reflect/protoreflect"
 )
 
-func forEachInternalFile(f func(string, protoreflect.FileDescriptor)) {
-}
-
 func forEachFile(f func(string, protoreflect.FileDescriptor)) {
 }
