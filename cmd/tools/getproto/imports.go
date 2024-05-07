@@ -15,7 +15,6 @@ import (
 
 var (
 	matchImport   = regexp.MustCompile(`^\s*import\s+"([^"]+\.proto)"\s*;\s*$`)
-	matchMap      = regexp.MustCompile(`importMap\["([^"]+)"\] = `)
 	versionSuffix = regexp.MustCompile(`^(.*)/v\d+$`)
 
 	// set by files.go if present
@@ -108,18 +107,15 @@ func init() {
 }
 
 func addImports(missing []string) {
-	existing, err := os.ReadFile("cmd/tools/getproto/files.go")
-	fatalIfErr(err)
-
-	importMap := make(map[string]struct{})
-	for _, matches := range matchMap.FindAllStringSubmatch(string(existing), -1) {
-		importMap[matches[1]] = struct{}{}
+	newImportMap := make(map[string]struct{})
+	for i, _ := range importMap {
+		newImportMap[i] = struct{}{}
 	}
 	for _, i := range missing {
-		importMap[i] = struct{}{}
+		newImportMap[i] = struct{}{}
 	}
 
-	genFileList(maps.Keys(importMap))
+	genFileList(maps.Keys(newImportMap))
 	fmt.Println("<rerun>")
 	os.Exit(0)
 }
