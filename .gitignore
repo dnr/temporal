@@ -27,9 +27,6 @@
 # Buf proto image
 /proto/image.bin
 
-# Public proto files regenerated from go code
-/proto/api
-
 # Goreleaser
 /dist
 
