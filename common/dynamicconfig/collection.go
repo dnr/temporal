@@ -100,17 +100,12 @@ func (c *Collection) HasKey(key Key) bool {
 	return len(cvs) > 0
 }
 
-func findMatch[T any](cvs []ConstrainedValue, defaultCVs []TypedConstrainedValue[T], precedence []Constraints) (any, error) {
-	if len(cvs)+len(defaultCVs) == 0 {
+func findMatch(cvs []ConstrainedValue, precedence []Constraints) (any, error) {
+	if len(cvs) == 0 {
 		return nil, errKeyNotPresent
 	}
 	for _, m := range precedence {
 		for _, cv := range cvs {
-			if m == cv.Constraints {
-				return cv.Value, nil
-			}
-		}
-		for _, cv := range defaultCVs {
 			if m == cv.Constraints {
 				return cv.Value, nil
 			}
@@ -126,41 +121,98 @@ func matchAndConvert[T any](
 	c *Collection,
 	key Key,
 	def T,
+	convert func(value any) (T, error),
+	precedence []Constraints,
+) T {
+	cvs := c.client.GetValue(key)
+	val, err := findMatch(cvs, precedence)
+	if err != nil {
+		if c.throttleLog() {
+			c.logger.Debug("No such key in dynamic config, using default", tag.Key(key.String()), tag.Error(err))
+		}
+		return def
+	}
+	typedVal, err := convert(val)
+	if err != nil {
+		// We failed to convert the value to the desired type. Use the default.
+		if c.throttleLog() {
+			c.logger.Warn("Failed to convert value, using default", tag.Key(key.String()), tag.IgnoredValue(val), tag.Error(err))
+		}
+		return def
+	}
+	return typedVal
+}
+
+// Returns matched value out of cvs, matched default out of defaultCVs, and also the priorities
+// of each of the matches (lower matched first). For no match, order will be 0.
+func findMatchWithConstrainedDefaults[T any](cvs []ConstrainedValue, defaultCVs []TypedConstrainedValue[T], precedence []Constraints) (
+	matchedValue any,
+	matchedDefault T,
+	valueOrder int,
+	defaultOrder int,
+) {
+	order := 0
+	for _, m := range precedence {
+		for _, cv := range cvs {
+			order++
+			if m == cv.Constraints {
+				if valueOrder == 0 {
+					valueOrder = order
+					matchedValue = cv.Value
+				}
+			}
+		}
+		for _, cv := range defaultCVs {
+			order++
+			if m == cv.Constraints {
+				if defaultOrder == 0 {
+					defaultOrder = order
+					matchedDefault = cv.Value
+				}
+			}
+		}
+	}
+	return
+}
+
+// matchAndConvertWithConstrainedDefault can't be a method of Collection because methods can't be generic, but we can
+// take a *Collection as an argument.
+func matchAndConvertWithConstrainedDefault[T any](
+	c *Collection,
+	key Key,
 	cdef []TypedConstrainedValue[T],
 	convert func(value any) (T, error),
 	precedence []Constraints,
 ) T {
 	cvs := c.client.GetValue(key)
-
-	defaultCVs := cdef
-	if defaultCVs == nil {
-		defaultCVs = []TypedConstrainedValue[T]{{Value: def}}
+	val, defVal, valOrder, defOrder := findMatchWithConstrainedDefaults(cvs, cdef, precedence)
+	if defOrder == 0 {
+		// This is a server bug: all precedence lists must end with no-constraints, and all
+		// constrained defaults must have a no-constraints value, so we should have gotten a match.
+		c.logger.Warn("Constrained defaults had no match (this is a bug; fix server code)", tag.Key(key.String()))
+		// leave defVal as the zero value, that's the best we can do
 	}
-
-	val, matchErr := findMatch(cvs, defaultCVs, precedence)
-	if matchErr != nil {
+	if valOrder == 0 {
 		if c.throttleLog() {
-			c.logger.Debug("No such key in dynamic config, using default", tag.Key(key.String()), tag.Error(matchErr))
+			c.logger.Debug("No such key in dynamic config, using default", tag.Key(key.String()))
 		}
-		// couldn't find a constrained match, use default
-		val = def
+		return defVal
 	}
-
-	typedVal, convertErr := convert(val)
-	if convertErr != nil && matchErr == nil {
-		// We failed to convert the value to the desired type. Try converting the default. note
-		// that if matchErr != nil then val _is_ defaultValue and we don't have to try this again.
+	if defOrder < valOrder {
+		// value was present but constrained default took precedence
+		return defVal
+	}
+	typedVal, err := convert(val)
+	if err != nil {
+		// We failed to convert the value to the desired type. Use the default.
 		if c.throttleLog() {
-			c.logger.Warn("Failed to convert value, using default", tag.Key(key.String()), tag.IgnoredValue(val), tag.Error(convertErr))
+			c.logger.Warn("Failed to convert value, using default", tag.Key(key.String()), tag.IgnoredValue(val), tag.Error(err))
 		}
-		typedVal, convertErr = convert(def)
-	}
-	if convertErr != nil {
-		// If we can't convert the default, that's a bug in our code, use Warn level.
-		c.logger.Warn("Can't convert default value (this is a bug; fix server code)", tag.Key(key.String()), tag.IgnoredValue(def), tag.Error(convertErr))
-		// Return typedVal anyway since we have to return something.
+		// if haveDef == false, this will be the zero value, but that's the best we can do
+		return defVal
 	}
 	return typedVal
+
 }
 
 func precedenceGlobal() []Constraints {
