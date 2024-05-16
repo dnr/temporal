@@ -143,22 +143,17 @@ func matchAndConvert[T any](
 			c.logger.Debug("No such key in dynamic config, using default", tag.Key(key.String()), tag.Error(matchErr))
 		}
 		// couldn't find a constrained match, use default
-		val = def
+		return def
 	}
 
 	typedVal, convertErr := convert(val)
-	if convertErr != nil && matchErr == nil {
+	if convertErr != nil {
 		// We failed to convert the value to the desired type. Try converting the default. note
 		// that if matchErr != nil then val _is_ defaultValue and we don't have to try this again.
 		if c.throttleLog() {
 			c.logger.Warn("Failed to convert value, using default", tag.Key(key.String()), tag.IgnoredValue(val), tag.Error(convertErr))
 		}
-		typedVal, convertErr = convert(def)
-	}
-	if convertErr != nil {
-		// If we can't convert the default, that's a bug in our code, use Warn level.
-		c.logger.Warn("Can't convert default value (this is a bug; fix server code)", tag.Key(key.String()), tag.IgnoredValue(def), tag.Error(convertErr))
-		// Return typedVal anyway since we have to return something.
+		return def
 	}
 	return typedVal
 }
