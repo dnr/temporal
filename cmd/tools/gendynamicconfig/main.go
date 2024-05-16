@@ -184,7 +184,6 @@ func (s {{.P.Name}}TypedSetting[T]) Get(c *Collection) TypedPropertyFnWith{{.P.N
 			c,
 			s.key,
 			s.def,
-			s.cdef,
 			s.convert,
 			precedence{{.P.Name}}({{.P.GoArgNames}}),
 		)
@@ -202,6 +201,7 @@ func GetTypedPropertyFnFilteredBy{{.P.Name}}[T any](value T) TypedPropertyFnWith
 }
 {{- else -}}
 type {{.P.Name}}{{.T.Name}}Setting setting[{{.T.GoType}}, func({{.P.GoArgs}})]
+type {{.P.Name}}{{.T.Name}}ConstrainedDefaultSetting constrainedDefaultSetting[{{.T.GoType}}, func({{.P.GoArgs}})]
 
 func New{{.P.Name}}{{.T.Name}}Setting(key Key, def {{.T.GoType}}, description string) {{.P.Name}}{{.T.Name}}Setting {
 	s := {{.P.Name}}{{.T.Name}}Setting{
@@ -213,8 +213,8 @@ func New{{.P.Name}}{{.T.Name}}Setting(key Key, def {{.T.GoType}}, description st
 	return s
 }
 
-func New{{.P.Name}}{{.T.Name}}SettingWithConstrainedDefault(key Key, cdef []TypedConstrainedValue[{{.T.GoType}}], description string) {{.P.Name}}{{.T.Name}}Setting {
-	s := {{.P.Name}}{{.T.Name}}Setting{
+func New{{.P.Name}}{{.T.Name}}SettingWithConstrainedDefault(key Key, cdef []TypedConstrainedValue[{{.T.GoType}}], description string) {{.P.Name}}{{.T.Name}}ConstrainedDefaultSetting {
+	s := {{.P.Name}}{{.T.Name}}ConstrainedDefaultSetting{
 		key:         key,
 		cdef:        cdef,
 		convert:     convert{{.T.Name}},
@@ -248,6 +248,21 @@ func (s {{.P.Name}}{{.T.Name}}Setting) Get(c *Collection) {{.T.Name}}PropertyFnW
 			c,
 			s.key,
 			s.def,
+			s.convert,
+			precedence{{.P.Name}}({{.P.GoArgNames}}),
+		)
+	}
+}
+
+{{if eq .P.Name "Global" -}}
+func (s {{.P.Name}}{{.T.Name}}ConstrainedDefaultSetting) Get(c *Collection) {{.T.Name}}PropertyFn {
+{{- else -}}
+func (s {{.P.Name}}{{.T.Name}}ConstrainedDefaultSetting) Get(c *Collection) {{.T.Name}}PropertyFnWith{{.P.Name}}Filter {
+{{- end}}
+	return func({{.P.GoArgs}}) {{.T.GoType}} {
+		return matchAndConvertWithConstrainedDefault(
+			c,
+			s.key,
 			s.cdef,
 			s.convert,
 			precedence{{.P.Name}}({{.P.GoArgNames}}),
