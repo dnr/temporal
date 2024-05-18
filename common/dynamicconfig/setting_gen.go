@@ -33,19 +33,21 @@ import (
 	enumsspb "go.temporal.io/server/api/enums/v1"
 )
 
-const PrecedenceGlobal Precedence = 0
+const PrecedenceUnknown Precedence = 0
 
-const PrecedenceNamespace Precedence = 1
+const PrecedenceGlobal Precedence = 1
 
-const PrecedenceNamespaceID Precedence = 2
+const PrecedenceNamespace Precedence = 2
 
-const PrecedenceTaskQueue Precedence = 3
+const PrecedenceNamespaceID Precedence = 3
 
-const PrecedenceShardID Precedence = 4
+const PrecedenceTaskQueue Precedence = 4
 
-const PrecedenceTaskType Precedence = 5
+const PrecedenceShardID Precedence = 5
 
-const PrecedenceDestination Precedence = 6
+const PrecedenceTaskType Precedence = 6
+
+const PrecedenceDestination Precedence = 7
 
 type GlobalBoolSetting setting[bool, func()]
 
@@ -56,6 +58,7 @@ func NewGlobalBoolSetting(key Key, def bool, description string) GlobalBoolSetti
 		convert:     convertBool,
 		description: description,
 	}
+	register(s)
 	return s
 }
 
@@ -66,11 +69,16 @@ func NewGlobalBoolSettingWithConstrainedDefault(key Key, cdef []TypedConstrained
 		convert:     convertBool,
 		description: description,
 	}
+	register(s)
 	return s
 }
 
 func (s GlobalBoolSetting) Key() Key               { return s.key }
 func (s GlobalBoolSetting) Precedence() Precedence { return PrecedenceGlobal }
+func (s GlobalBoolSetting) Validate(v any) error {
+	_, err := s.convert(v)
+	return err
+}
 
 func (s GlobalBoolSetting) WithDefault(v bool) GlobalBoolSetting {
 	newS := s
@@ -108,6 +116,7 @@ func NewNamespaceBoolSetting(key Key, def bool, description string) NamespaceBoo
 		convert:     convertBool,
 		description: description,
 	}
+	register(s)
 	return s
 }
 
@@ -118,11 +127,16 @@ func NewNamespaceBoolSettingWithConstrainedDefault(key Key, cdef []TypedConstrai
 		convert:     convertBool,
 		description: description,
 	}
+	register(s)
 	return s
 }
 
 func (s NamespaceBoolSetting) Key() Key               { return s.key }
 func (s NamespaceBoolSetting) Precedence() Precedence { return PrecedenceNamespace }
+func (s NamespaceBoolSetting) Validate(v any) error {
+	_, err := s.convert(v)
+	return err
+}
 
 func (s NamespaceBoolSetting) WithDefault(v bool) NamespaceBoolSetting {
 	newS := s
@@ -160,6 +174,7 @@ func NewNamespaceIDBoolSetting(key Key, def bool, description string) NamespaceI
 		convert:     convertBool,
 		description: description,
 	}
+	register(s)
 	return s
 }
 
@@ -170,11 +185,16 @@ func NewNamespaceIDBoolSettingWithConstrainedDefault(key Key, cdef []TypedConstr
 		convert:     convertBool,
 		description: description,
 	}
+	register(s)
 	return s
 }
 
 func (s NamespaceIDBoolSetting) Key() Key               { return s.key }
 func (s NamespaceIDBoolSetting) Precedence() Precedence { return PrecedenceNamespaceID }
+func (s NamespaceIDBoolSetting) Validate(v any) error {
+	_, err := s.convert(v)
+	return err
+}
 
 func (s NamespaceIDBoolSetting) WithDefault(v bool) NamespaceIDBoolSetting {
 	newS := s
@@ -212,6 +232,7 @@ func NewTaskQueueBoolSetting(key Key, def bool, description string) TaskQueueBoo
 		convert:     convertBool,
 		description: description,
 	}
+	register(s)
 	return s
 }
 
@@ -222,11 +243,16 @@ func NewTaskQueueBoolSettingWithConstrainedDefault(key Key, cdef []TypedConstrai
 		convert:     convertBool,
 		description: description,
 	}
+	register(s)
 	return s
 }
 
 func (s TaskQueueBoolSetting) Key() Key               { return s.key }
 func (s TaskQueueBoolSetting) Precedence() Precedence { return PrecedenceTaskQueue }
+func (s TaskQueueBoolSetting) Validate(v any) error {
+	_, err := s.convert(v)
+	return err
+}
 
 func (s TaskQueueBoolSetting) WithDefault(v bool) TaskQueueBoolSetting {
 	newS := s
@@ -264,6 +290,7 @@ func NewShardIDBoolSetting(key Key, def bool, description string) ShardIDBoolSet
 		convert:     convertBool,
 		description: description,
 	}
+	register(s)
 	return s
 }
 
@@ -274,11 +301,16 @@ func NewShardIDBoolSettingWithConstrainedDefault(key Key, cdef []TypedConstraine
 		convert:     convertBool,
 		description: description,
 	}
+	register(s)
 	return s
 }
 
 func (s ShardIDBoolSetting) Key() Key               { return s.key }
 func (s ShardIDBoolSetting) Precedence() Precedence { return PrecedenceShardID }
+func (s ShardIDBoolSetting) Validate(v any) error {
+	_, err := s.convert(v)
+	return err
+}
 
 func (s ShardIDBoolSetting) WithDefault(v bool) ShardIDBoolSetting {
 	newS := s
@@ -316,6 +348,7 @@ func NewTaskTypeBoolSetting(key Key, def bool, description string) TaskTypeBoolS
 		convert:     convertBool,
 		description: description,
 	}
+	register(s)
 	return s
 }
 
@@ -326,11 +359,16 @@ func NewTaskTypeBoolSettingWithConstrainedDefault(key Key, cdef []TypedConstrain
 		convert:     convertBool,
 		description: description,
 	}
+	register(s)
 	return s
 }
 
 func (s TaskTypeBoolSetting) Key() Key               { return s.key }
 func (s TaskTypeBoolSetting) Precedence() Precedence { return PrecedenceTaskType }
+func (s TaskTypeBoolSetting) Validate(v any) error {
+	_, err := s.convert(v)
+	return err
+}
 
 func (s TaskTypeBoolSetting) WithDefault(v bool) TaskTypeBoolSetting {
 	newS := s
@@ -368,6 +406,7 @@ func NewDestinationBoolSetting(key Key, def bool, description string) Destinatio
 		convert:     convertBool,
 		description: description,
 	}
+	register(s)
 	return s
 }
 
@@ -378,11 +417,16 @@ func NewDestinationBoolSettingWithConstrainedDefault(key Key, cdef []TypedConstr
 		convert:     convertBool,
 		description: description,
 	}
+	register(s)
 	return s
 }
 
 func (s DestinationBoolSetting) Key() Key               { return s.key }
 func (s DestinationBoolSetting) Precedence() Precedence { return PrecedenceDestination }
+func (s DestinationBoolSetting) Validate(v any) error {
+	_, err := s.convert(v)
+	return err
+}
 
 func (s DestinationBoolSetting) WithDefault(v bool) DestinationBoolSetting {
 	newS := s
@@ -420,6 +464,7 @@ func NewGlobalIntSetting(key Key, def int, description string) GlobalIntSetting 
 		convert:     convertInt,
 		description: description,
 	}
+	register(s)
 	return s
 }
 
@@ -430,11 +475,16 @@ func NewGlobalIntSettingWithConstrainedDefault(key Key, cdef []TypedConstrainedV
 		convert:     convertInt,
 		description: description,
 	}
+	register(s)
 	return s
 }
 
 func (s GlobalIntSetting) Key() Key               { return s.key }
 func (s GlobalIntSetting) Precedence() Precedence { return PrecedenceGlobal }
+func (s GlobalIntSetting) Validate(v any) error {
+	_, err := s.convert(v)
+	return err
+}
 
 func (s GlobalIntSetting) WithDefault(v int) GlobalIntSetting {
 	newS := s
@@ -472,6 +522,7 @@ func NewNamespaceIntSetting(key Key, def int, description string) NamespaceIntSe
 		convert:     convertInt,
 		description: description,
 	}
+	register(s)
 	return s
 }
 
@@ -482,11 +533,16 @@ func NewNamespaceIntSettingWithConstrainedDefault(key Key, cdef []TypedConstrain
 		convert:     convertInt,
 		description: description,
 	}
+	register(s)
 	return s
 }
 
 func (s NamespaceIntSetting) Key() Key               { return s.key }
 func (s NamespaceIntSetting) Precedence() Precedence { return PrecedenceNamespace }
+func (s NamespaceIntSetting) Validate(v any) error {
+	_, err := s.convert(v)
+	return err
+}
 
 func (s NamespaceIntSetting) WithDefault(v int) NamespaceIntSetting {
 	newS := s
@@ -524,6 +580,7 @@ func NewNamespaceIDIntSetting(key Key, def int, description string) NamespaceIDI
 		convert:     convertInt,
 		description: description,
 	}
+	register(s)
 	return s
 }
 
@@ -534,11 +591,16 @@ func NewNamespaceIDIntSettingWithConstrainedDefault(key Key, cdef []TypedConstra
 		convert:     convertInt,
 		description: description,
 	}
+	register(s)
 	return s
 }
 
 func (s NamespaceIDIntSetting) Key() Key               { return s.key }
 func (s NamespaceIDIntSetting) Precedence() Precedence { return PrecedenceNamespaceID }
+func (s NamespaceIDIntSetting) Validate(v any) error {
+	_, err := s.convert(v)
+	return err
+}
 
 func (s NamespaceIDIntSetting) WithDefault(v int) NamespaceIDIntSetting {
 	newS := s
@@ -576,6 +638,7 @@ func NewTaskQueueIntSetting(key Key, def int, description string) TaskQueueIntSe
 		convert:     convertInt,
 		description: description,
 	}
+	register(s)
 	return s
 }
 
@@ -586,11 +649,16 @@ func NewTaskQueueIntSettingWithConstrainedDefault(key Key, cdef []TypedConstrain
 		convert:     convertInt,
 		description: description,
 	}
+	register(s)
 	return s
 }
 
 func (s TaskQueueIntSetting) Key() Key               { return s.key }
 func (s TaskQueueIntSetting) Precedence() Precedence { return PrecedenceTaskQueue }
+func (s TaskQueueIntSetting) Validate(v any) error {
+	_, err := s.convert(v)
+	return err
+}
 
 func (s TaskQueueIntSetting) WithDefault(v int) TaskQueueIntSetting {
 	newS := s
@@ -628,6 +696,7 @@ func NewShardIDIntSetting(key Key, def int, description string) ShardIDIntSettin
 		convert:     convertInt,
 		description: description,
 	}
+	register(s)
 	return s
 }
 
@@ -638,11 +707,16 @@ func NewShardIDIntSettingWithConstrainedDefault(key Key, cdef []TypedConstrained
 		convert:     convertInt,
 		description: description,
 	}
+	register(s)
 	return s
 }
 
 func (s ShardIDIntSetting) Key() Key               { return s.key }
 func (s ShardIDIntSetting) Precedence() Precedence { return PrecedenceShardID }
+func (s ShardIDIntSetting) Validate(v any) error {
+	_, err := s.convert(v)
+	return err
+}
 
 func (s ShardIDIntSetting) WithDefault(v int) ShardIDIntSetting {
 	newS := s
@@ -680,6 +754,7 @@ func NewTaskTypeIntSetting(key Key, def int, description string) TaskTypeIntSett
 		convert:     convertInt,
 		description: description,
 	}
+	register(s)
 	return s
 }
 
@@ -690,11 +765,16 @@ func NewTaskTypeIntSettingWithConstrainedDefault(key Key, cdef []TypedConstraine
 		convert:     convertInt,
 		description: description,
 	}
+	register(s)
 	return s
 }
 
 func (s TaskTypeIntSetting) Key() Key               { return s.key }
 func (s TaskTypeIntSetting) Precedence() Precedence { return PrecedenceTaskType }
+func (s TaskTypeIntSetting) Validate(v any) error {
+	_, err := s.convert(v)
+	return err
+}
 
 func (s TaskTypeIntSetting) WithDefault(v int) TaskTypeIntSetting {
 	newS := s
@@ -732,6 +812,7 @@ func NewDestinationIntSetting(key Key, def int, description string) DestinationI
 		convert:     convertInt,
 		description: description,
 	}
+	register(s)
 	return s
 }
 
@@ -742,11 +823,16 @@ func NewDestinationIntSettingWithConstrainedDefault(key Key, cdef []TypedConstra
 		convert:     convertInt,
 		description: description,
 	}
+	register(s)
 	return s
 }
 
 func (s DestinationIntSetting) Key() Key               { return s.key }
 func (s DestinationIntSetting) Precedence() Precedence { return PrecedenceDestination }
+func (s DestinationIntSetting) Validate(v any) error {
+	_, err := s.convert(v)
+	return err
+}
 
 func (s DestinationIntSetting) WithDefault(v int) DestinationIntSetting {
 	newS := s
@@ -784,6 +870,7 @@ func NewGlobalFloatSetting(key Key, def float64, description string) GlobalFloat
 		convert:     convertFloat,
 		description: description,
 	}
+	register(s)
 	return s
 }
 
@@ -794,11 +881,16 @@ func NewGlobalFloatSettingWithConstrainedDefault(key Key, cdef []TypedConstraine
 		convert:     convertFloat,
 		description: description,
 	}
+	register(s)
 	return s
 }
 
 func (s GlobalFloatSetting) Key() Key               { return s.key }
 func (s GlobalFloatSetting) Precedence() Precedence { return PrecedenceGlobal }
+func (s GlobalFloatSetting) Validate(v any) error {
+	_, err := s.convert(v)
+	return err
+}
 
 func (s GlobalFloatSetting) WithDefault(v float64) GlobalFloatSetting {
 	newS := s
@@ -836,6 +928,7 @@ func NewNamespaceFloatSetting(key Key, def float64, description string) Namespac
 		convert:     convertFloat,
 		description: description,
 	}
+	register(s)
 	return s
 }
 
@@ -846,11 +939,16 @@ func NewNamespaceFloatSettingWithConstrainedDefault(key Key, cdef []TypedConstra
 		convert:     convertFloat,
 		description: description,
 	}
+	register(s)
 	return s
 }
 
 func (s NamespaceFloatSetting) Key() Key               { return s.key }
 func (s NamespaceFloatSetting) Precedence() Precedence { return PrecedenceNamespace }
+func (s NamespaceFloatSetting) Validate(v any) error {
+	_, err := s.convert(v)
+	return err
+}
 
 func (s NamespaceFloatSetting) WithDefault(v float64) NamespaceFloatSetting {
 	newS := s
@@ -888,6 +986,7 @@ func NewNamespaceIDFloatSetting(key Key, def float64, description string) Namesp
 		convert:     convertFloat,
 		description: description,
 	}
+	register(s)
 	return s
 }
 
@@ -898,11 +997,16 @@ func NewNamespaceIDFloatSettingWithConstrainedDefault(key Key, cdef []TypedConst
 		convert:     convertFloat,
 		description: description,
 	}
+	register(s)
 	return s
 }
 
 func (s NamespaceIDFloatSetting) Key() Key               { return s.key }
 func (s NamespaceIDFloatSetting) Precedence() Precedence { return PrecedenceNamespaceID }
+func (s NamespaceIDFloatSetting) Validate(v any) error {
+	_, err := s.convert(v)
+	return err
+}
 
 func (s NamespaceIDFloatSetting) WithDefault(v float64) NamespaceIDFloatSetting {
 	newS := s
@@ -940,6 +1044,7 @@ func NewTaskQueueFloatSetting(key Key, def float64, description string) TaskQueu
 		convert:     convertFloat,
 		description: description,
 	}
+	register(s)
 	return s
 }
 
@@ -950,11 +1055,16 @@ func NewTaskQueueFloatSettingWithConstrainedDefault(key Key, cdef []TypedConstra
 		convert:     convertFloat,
 		description: description,
 	}
+	register(s)
 	return s
 }
 
 func (s TaskQueueFloatSetting) Key() Key               { return s.key }
 func (s TaskQueueFloatSetting) Precedence() Precedence { return PrecedenceTaskQueue }
+func (s TaskQueueFloatSetting) Validate(v any) error {
+	_, err := s.convert(v)
+	return err
+}
 
 func (s TaskQueueFloatSetting) WithDefault(v float64) TaskQueueFloatSetting {
 	newS := s
@@ -992,6 +1102,7 @@ func NewShardIDFloatSetting(key Key, def float64, description string) ShardIDFlo
 		convert:     convertFloat,
 		description: description,
 	}
+	register(s)
 	return s
 }
 
@@ -1002,11 +1113,16 @@ func NewShardIDFloatSettingWithConstrainedDefault(key Key, cdef []TypedConstrain
 		convert:     convertFloat,
 		description: description,
 	}
+	register(s)
 	return s
 }
 
 func (s ShardIDFloatSetting) Key() Key               { return s.key }
 func (s ShardIDFloatSetting) Precedence() Precedence { return PrecedenceShardID }
+func (s ShardIDFloatSetting) Validate(v any) error {
+	_, err := s.convert(v)
+	return err
+}
 
 func (s ShardIDFloatSetting) WithDefault(v float64) ShardIDFloatSetting {
 	newS := s
@@ -1044,6 +1160,7 @@ func NewTaskTypeFloatSetting(key Key, def float64, description string) TaskTypeF
 		convert:     convertFloat,
 		description: description,
 	}
+	register(s)
 	return s
 }
 
@@ -1054,11 +1171,16 @@ func NewTaskTypeFloatSettingWithConstrainedDefault(key Key, cdef []TypedConstrai
 		convert:     convertFloat,
 		description: description,
 	}
+	register(s)
 	return s
 }
 
 func (s TaskTypeFloatSetting) Key() Key               { return s.key }
 func (s TaskTypeFloatSetting) Precedence() Precedence { return PrecedenceTaskType }
+func (s TaskTypeFloatSetting) Validate(v any) error {
+	_, err := s.convert(v)
+	return err
+}
 
 func (s TaskTypeFloatSetting) WithDefault(v float64) TaskTypeFloatSetting {
 	newS := s
@@ -1096,6 +1218,7 @@ func NewDestinationFloatSetting(key Key, def float64, description string) Destin
 		convert:     convertFloat,
 		description: description,
 	}
+	register(s)
 	return s
 }
 
@@ -1106,11 +1229,16 @@ func NewDestinationFloatSettingWithConstrainedDefault(key Key, cdef []TypedConst
 		convert:     convertFloat,
 		description: description,
 	}
+	register(s)
 	return s
 }
 
 func (s DestinationFloatSetting) Key() Key               { return s.key }
 func (s DestinationFloatSetting) Precedence() Precedence { return PrecedenceDestination }
+func (s DestinationFloatSetting) Validate(v any) error {
+	_, err := s.convert(v)
+	return err
+}
 
 func (s DestinationFloatSetting) WithDefault(v float64) DestinationFloatSetting {
 	newS := s
@@ -1148,6 +1276,7 @@ func NewGlobalStringSetting(key Key, def string, description string) GlobalStrin
 		convert:     convertString,
 		description: description,
 	}
+	register(s)
 	return s
 }
 
@@ -1158,11 +1287,16 @@ func NewGlobalStringSettingWithConstrainedDefault(key Key, cdef []TypedConstrain
 		convert:     convertString,
 		description: description,
 	}
+	register(s)
 	return s
 }
 
 func (s GlobalStringSetting) Key() Key               { return s.key }
 func (s GlobalStringSetting) Precedence() Precedence { return PrecedenceGlobal }
+func (s GlobalStringSetting) Validate(v any) error {
+	_, err := s.convert(v)
+	return err
+}
 
 func (s GlobalStringSetting) WithDefault(v string) GlobalStringSetting {
 	newS := s
@@ -1200,6 +1334,7 @@ func NewNamespaceStringSetting(key Key, def string, description string) Namespac
 		convert:     convertString,
 		description: description,
 	}
+	register(s)
 	return s
 }
 
@@ -1210,11 +1345,16 @@ func NewNamespaceStringSettingWithConstrainedDefault(key Key, cdef []TypedConstr
 		convert:     convertString,
 		description: description,
 	}
+	register(s)
 	return s
 }
 
 func (s NamespaceStringSetting) Key() Key               { return s.key }
 func (s NamespaceStringSetting) Precedence() Precedence { return PrecedenceNamespace }
+func (s NamespaceStringSetting) Validate(v any) error {
+	_, err := s.convert(v)
+	return err
+}
 
 func (s NamespaceStringSetting) WithDefault(v string) NamespaceStringSetting {
 	newS := s
@@ -1252,6 +1392,7 @@ func NewNamespaceIDStringSetting(key Key, def string, description string) Namesp
 		convert:     convertString,
 		description: description,
 	}
+	register(s)
 	return s
 }
 
@@ -1262,11 +1403,16 @@ func NewNamespaceIDStringSettingWithConstrainedDefault(key Key, cdef []TypedCons
 		convert:     convertString,
 		description: description,
 	}
+	register(s)
 	return s
 }
 
 func (s NamespaceIDStringSetting) Key() Key               { return s.key }
 func (s NamespaceIDStringSetting) Precedence() Precedence { return PrecedenceNamespaceID }
+func (s NamespaceIDStringSetting) Validate(v any) error {
+	_, err := s.convert(v)
+	return err
+}
 
 func (s NamespaceIDStringSetting) WithDefault(v string) NamespaceIDStringSetting {
 	newS := s
@@ -1304,6 +1450,7 @@ func NewTaskQueueStringSetting(key Key, def string, description string) TaskQueu
 		convert:     convertString,
 		description: description,
 	}
+	register(s)
 	return s
 }
 
@@ -1314,11 +1461,16 @@ func NewTaskQueueStringSettingWithConstrainedDefault(key Key, cdef []TypedConstr
 		convert:     convertString,
 		description: description,
 	}
+	register(s)
 	return s
 }
 
 func (s TaskQueueStringSetting) Key() Key               { return s.key }
 func (s TaskQueueStringSetting) Precedence() Precedence { return PrecedenceTaskQueue }
+func (s TaskQueueStringSetting) Validate(v any) error {
+	_, err := s.convert(v)
+	return err
+}
 
 func (s TaskQueueStringSetting) WithDefault(v string) TaskQueueStringSetting {
 	newS := s
@@ -1356,6 +1508,7 @@ func NewShardIDStringSetting(key Key, def string, description string) ShardIDStr
 		convert:     convertString,
 		description: description,
 	}
+	register(s)
 	return s
 }
 
@@ -1366,11 +1519,16 @@ func NewShardIDStringSettingWithConstrainedDefault(key Key, cdef []TypedConstrai
 		convert:     convertString,
 		description: description,
 	}
+	register(s)
 	return s
 }
 
 func (s ShardIDStringSetting) Key() Key               { return s.key }
 func (s ShardIDStringSetting) Precedence() Precedence { return PrecedenceShardID }
+func (s ShardIDStringSetting) Validate(v any) error {
+	_, err := s.convert(v)
+	return err
+}
 
 func (s ShardIDStringSetting) WithDefault(v string) ShardIDStringSetting {
 	newS := s
@@ -1408,6 +1566,7 @@ func NewTaskTypeStringSetting(key Key, def string, description string) TaskTypeS
 		convert:     convertString,
 		description: description,
 	}
+	register(s)
 	return s
 }
 
@@ -1418,11 +1577,16 @@ func NewTaskTypeStringSettingWithConstrainedDefault(key Key, cdef []TypedConstra
 		convert:     convertString,
 		description: description,
 	}
+	register(s)
 	return s
 }
 
 func (s TaskTypeStringSetting) Key() Key               { return s.key }
 func (s TaskTypeStringSetting) Precedence() Precedence { return PrecedenceTaskType }
+func (s TaskTypeStringSetting) Validate(v any) error {
+	_, err := s.convert(v)
+	return err
+}
 
 func (s TaskTypeStringSetting) WithDefault(v string) TaskTypeStringSetting {
 	newS := s
@@ -1460,6 +1624,7 @@ func NewDestinationStringSetting(key Key, def string, description string) Destin
 		convert:     convertString,
 		description: description,
 	}
+	register(s)
 	return s
 }
 
@@ -1470,11 +1635,16 @@ func NewDestinationStringSettingWithConstrainedDefault(key Key, cdef []TypedCons
 		convert:     convertString,
 		description: description,
 	}
+	register(s)
 	return s
 }
 
 func (s DestinationStringSetting) Key() Key               { return s.key }
 func (s DestinationStringSetting) Precedence() Precedence { return PrecedenceDestination }
+func (s DestinationStringSetting) Validate(v any) error {
+	_, err := s.convert(v)
+	return err
+}
 
 func (s DestinationStringSetting) WithDefault(v string) DestinationStringSetting {
 	newS := s
@@ -1512,6 +1682,7 @@ func NewGlobalDurationSetting(key Key, def time.Duration, description string) Gl
 		convert:     convertDuration,
 		description: description,
 	}
+	register(s)
 	return s
 }
 
@@ -1522,11 +1693,16 @@ func NewGlobalDurationSettingWithConstrainedDefault(key Key, cdef []TypedConstra
 		convert:     convertDuration,
 		description: description,
 	}
+	register(s)
 	return s
 }
 
 func (s GlobalDurationSetting) Key() Key               { return s.key }
 func (s GlobalDurationSetting) Precedence() Precedence { return PrecedenceGlobal }
+func (s GlobalDurationSetting) Validate(v any) error {
+	_, err := s.convert(v)
+	return err
+}
 
 func (s GlobalDurationSetting) WithDefault(v time.Duration) GlobalDurationSetting {
 	newS := s
@@ -1564,6 +1740,7 @@ func NewNamespaceDurationSetting(key Key, def time.Duration, description string)
 		convert:     convertDuration,
 		description: description,
 	}
+	register(s)
 	return s
 }
 
@@ -1574,11 +1751,16 @@ func NewNamespaceDurationSettingWithConstrainedDefault(key Key, cdef []TypedCons
 		convert:     convertDuration,
 		description: description,
 	}
+	register(s)
 	return s
 }
 
 func (s NamespaceDurationSetting) Key() Key               { return s.key }
 func (s NamespaceDurationSetting) Precedence() Precedence { return PrecedenceNamespace }
+func (s NamespaceDurationSetting) Validate(v any) error {
+	_, err := s.convert(v)
+	return err
+}
 
 func (s NamespaceDurationSetting) WithDefault(v time.Duration) NamespaceDurationSetting {
 	newS := s
@@ -1616,6 +1798,7 @@ func NewNamespaceIDDurationSetting(key Key, def time.Duration, description strin
 		convert:     convertDuration,
 		description: description,
 	}
+	register(s)
 	return s
 }
 
@@ -1626,11 +1809,16 @@ func NewNamespaceIDDurationSettingWithConstrainedDefault(key Key, cdef []TypedCo
 		convert:     convertDuration,
 		description: description,
 	}
+	register(s)
 	return s
 }
 
 func (s NamespaceIDDurationSetting) Key() Key               { return s.key }
 func (s NamespaceIDDurationSetting) Precedence() Precedence { return PrecedenceNamespaceID }
+func (s NamespaceIDDurationSetting) Validate(v any) error {
+	_, err := s.convert(v)
+	return err
+}
 
 func (s NamespaceIDDurationSetting) WithDefault(v time.Duration) NamespaceIDDurationSetting {
 	newS := s
@@ -1668,6 +1856,7 @@ func NewTaskQueueDurationSetting(key Key, def time.Duration, description string)
 		convert:     convertDuration,
 		description: description,
 	}
+	register(s)
 	return s
 }
 
@@ -1678,11 +1867,16 @@ func NewTaskQueueDurationSettingWithConstrainedDefault(key Key, cdef []TypedCons
 		convert:     convertDuration,
 		description: description,
 	}
+	register(s)
 	return s
 }
 
 func (s TaskQueueDurationSetting) Key() Key               { return s.key }
 func (s TaskQueueDurationSetting) Precedence() Precedence { return PrecedenceTaskQueue }
+func (s TaskQueueDurationSetting) Validate(v any) error {
+	_, err := s.convert(v)
+	return err
+}
 
 func (s TaskQueueDurationSetting) WithDefault(v time.Duration) TaskQueueDurationSetting {
 	newS := s
@@ -1720,6 +1914,7 @@ func NewShardIDDurationSetting(key Key, def time.Duration, description string) S
 		convert:     convertDuration,
 		description: description,
 	}
+	register(s)
 	return s
 }
 
@@ -1730,11 +1925,16 @@ func NewShardIDDurationSettingWithConstrainedDefault(key Key, cdef []TypedConstr
 		convert:     convertDuration,
 		description: description,
 	}
+	register(s)
 	return s
 }
 
 func (s ShardIDDurationSetting) Key() Key               { return s.key }
 func (s ShardIDDurationSetting) Precedence() Precedence { return PrecedenceShardID }
+func (s ShardIDDurationSetting) Validate(v any) error {
+	_, err := s.convert(v)
+	return err
+}
 
 func (s ShardIDDurationSetting) WithDefault(v time.Duration) ShardIDDurationSetting {
 	newS := s
@@ -1772,6 +1972,7 @@ func NewTaskTypeDurationSetting(key Key, def time.Duration, description string) 
 		convert:     convertDuration,
 		description: description,
 	}
+	register(s)
 	return s
 }
 
@@ -1782,11 +1983,16 @@ func NewTaskTypeDurationSettingWithConstrainedDefault(key Key, cdef []TypedConst
 		convert:     convertDuration,
 		description: description,
 	}
+	register(s)
 	return s
 }
 
 func (s TaskTypeDurationSetting) Key() Key               { return s.key }
 func (s TaskTypeDurationSetting) Precedence() Precedence { return PrecedenceTaskType }
+func (s TaskTypeDurationSetting) Validate(v any) error {
+	_, err := s.convert(v)
+	return err
+}
 
 func (s TaskTypeDurationSetting) WithDefault(v time.Duration) TaskTypeDurationSetting {
 	newS := s
@@ -1824,6 +2030,7 @@ func NewDestinationDurationSetting(key Key, def time.Duration, description strin
 		convert:     convertDuration,
 		description: description,
 	}
+	register(s)
 	return s
 }
 
@@ -1834,11 +2041,16 @@ func NewDestinationDurationSettingWithConstrainedDefault(key Key, cdef []TypedCo
 		convert:     convertDuration,
 		description: description,
 	}
+	register(s)
 	return s
 }
 
 func (s DestinationDurationSetting) Key() Key               { return s.key }
 func (s DestinationDurationSetting) Precedence() Precedence { return PrecedenceDestination }
+func (s DestinationDurationSetting) Validate(v any) error {
+	_, err := s.convert(v)
+	return err
+}
 
 func (s DestinationDurationSetting) WithDefault(v time.Duration) DestinationDurationSetting {
 	newS := s
@@ -1876,6 +2088,7 @@ func NewGlobalMapSetting(key Key, def map[string]any, description string) Global
 		convert:     convertMap,
 		description: description,
 	}
+	register(s)
 	return s
 }
 
@@ -1886,11 +2099,16 @@ func NewGlobalMapSettingWithConstrainedDefault(key Key, cdef []TypedConstrainedV
 		convert:     convertMap,
 		description: description,
 	}
+	register(s)
 	return s
 }
 
 func (s GlobalMapSetting) Key() Key               { return s.key }
 func (s GlobalMapSetting) Precedence() Precedence { return PrecedenceGlobal }
+func (s GlobalMapSetting) Validate(v any) error {
+	_, err := s.convert(v)
+	return err
+}
 
 func (s GlobalMapSetting) WithDefault(v map[string]any) GlobalMapSetting {
 	newS := s
@@ -1928,6 +2146,7 @@ func NewNamespaceMapSetting(key Key, def map[string]any, description string) Nam
 		convert:     convertMap,
 		description: description,
 	}
+	register(s)
 	return s
 }
 
@@ -1938,11 +2157,16 @@ func NewNamespaceMapSettingWithConstrainedDefault(key Key, cdef []TypedConstrain
 		convert:     convertMap,
 		description: description,
 	}
+	register(s)
 	return s
 }
 
 func (s NamespaceMapSetting) Key() Key               { return s.key }
 func (s NamespaceMapSetting) Precedence() Precedence { return PrecedenceNamespace }
+func (s NamespaceMapSetting) Validate(v any) error {
+	_, err := s.convert(v)
+	return err
+}
 
 func (s NamespaceMapSetting) WithDefault(v map[string]any) NamespaceMapSetting {
 	newS := s
@@ -1980,6 +2204,7 @@ func NewNamespaceIDMapSetting(key Key, def map[string]any, description string) N
 		convert:     convertMap,
 		description: description,
 	}
+	register(s)
 	return s
 }
 
@@ -1990,11 +2215,16 @@ func NewNamespaceIDMapSettingWithConstrainedDefault(key Key, cdef []TypedConstra
 		convert:     convertMap,
 		description: description,
 	}
+	register(s)
 	return s
 }
 
 func (s NamespaceIDMapSetting) Key() Key               { return s.key }
 func (s NamespaceIDMapSetting) Precedence() Precedence { return PrecedenceNamespaceID }
+func (s NamespaceIDMapSetting) Validate(v any) error {
+	_, err := s.convert(v)
+	return err
+}
 
 func (s NamespaceIDMapSetting) WithDefault(v map[string]any) NamespaceIDMapSetting {
 	newS := s
@@ -2032,6 +2262,7 @@ func NewTaskQueueMapSetting(key Key, def map[string]any, description string) Tas
 		convert:     convertMap,
 		description: description,
 	}
+	register(s)
 	return s
 }
 
@@ -2042,11 +2273,16 @@ func NewTaskQueueMapSettingWithConstrainedDefault(key Key, cdef []TypedConstrain
 		convert:     convertMap,
 		description: description,
 	}
+	register(s)
 	return s
 }
 
 func (s TaskQueueMapSetting) Key() Key               { return s.key }
 func (s TaskQueueMapSetting) Precedence() Precedence { return PrecedenceTaskQueue }
+func (s TaskQueueMapSetting) Validate(v any) error {
+	_, err := s.convert(v)
+	return err
+}
 
 func (s TaskQueueMapSetting) WithDefault(v map[string]any) TaskQueueMapSetting {
 	newS := s
@@ -2084,6 +2320,7 @@ func NewShardIDMapSetting(key Key, def map[string]any, description string) Shard
 		convert:     convertMap,
 		description: description,
 	}
+	register(s)
 	return s
 }
 
@@ -2094,11 +2331,16 @@ func NewShardIDMapSettingWithConstrainedDefault(key Key, cdef []TypedConstrained
 		convert:     convertMap,
 		description: description,
 	}
+	register(s)
 	return s
 }
 
 func (s ShardIDMapSetting) Key() Key               { return s.key }
 func (s ShardIDMapSetting) Precedence() Precedence { return PrecedenceShardID }
+func (s ShardIDMapSetting) Validate(v any) error {
+	_, err := s.convert(v)
+	return err
+}
 
 func (s ShardIDMapSetting) WithDefault(v map[string]any) ShardIDMapSetting {
 	newS := s
@@ -2136,6 +2378,7 @@ func NewTaskTypeMapSetting(key Key, def map[string]any, description string) Task
 		convert:     convertMap,
 		description: description,
 	}
+	register(s)
 	return s
 }
 
@@ -2146,11 +2389,16 @@ func NewTaskTypeMapSettingWithConstrainedDefault(key Key, cdef []TypedConstraine
 		convert:     convertMap,
 		description: description,
 	}
+	register(s)
 	return s
 }
 
 func (s TaskTypeMapSetting) Key() Key               { return s.key }
 func (s TaskTypeMapSetting) Precedence() Precedence { return PrecedenceTaskType }
+func (s TaskTypeMapSetting) Validate(v any) error {
+	_, err := s.convert(v)
+	return err
+}
 
 func (s TaskTypeMapSetting) WithDefault(v map[string]any) TaskTypeMapSetting {
 	newS := s
@@ -2188,6 +2436,7 @@ func NewDestinationMapSetting(key Key, def map[string]any, description string) D
 		convert:     convertMap,
 		description: description,
 	}
+	register(s)
 	return s
 }
 
@@ -2198,11 +2447,16 @@ func NewDestinationMapSettingWithConstrainedDefault(key Key, cdef []TypedConstra
 		convert:     convertMap,
 		description: description,
 	}
+	register(s)
 	return s
 }
 
 func (s DestinationMapSetting) Key() Key               { return s.key }
 func (s DestinationMapSetting) Precedence() Precedence { return PrecedenceDestination }
+func (s DestinationMapSetting) Validate(v any) error {
+	_, err := s.convert(v)
+	return err
+}
 
 func (s DestinationMapSetting) WithDefault(v map[string]any) DestinationMapSetting {
 	newS := s
@@ -2243,6 +2497,7 @@ func NewGlobalTypedSetting[T any](key Key, def T, description string) GlobalType
 		convert:     ConvertStructure[T](def),
 		description: description,
 	}
+	register(s)
 	return s
 }
 
@@ -2254,11 +2509,16 @@ func NewGlobalTypedSettingWithConverter[T any](key Key, convert func(any) (T, er
 		convert:     convert,
 		description: description,
 	}
+	register(s)
 	return s
 }
 
 func (s GlobalTypedSetting[T]) Key() Key               { return s.key }
 func (s GlobalTypedSetting[T]) Precedence() Precedence { return PrecedenceGlobal }
+func (s GlobalTypedSetting[T]) Validate(v any) error {
+	_, err := s.convert(v)
+	return err
+}
 
 func (s GlobalTypedSetting[T]) WithDefault(v T) GlobalTypedSetting[T] {
 	newS := s
@@ -2291,6 +2551,7 @@ func NewNamespaceTypedSetting[T any](key Key, def T, description string) Namespa
 		convert:     ConvertStructure[T](def),
 		description: description,
 	}
+	register(s)
 	return s
 }
 
@@ -2302,11 +2563,16 @@ func NewNamespaceTypedSettingWithConverter[T any](key Key, convert func(any) (T,
 		convert:     convert,
 		description: description,
 	}
+	register(s)
 	return s
 }
 
 func (s NamespaceTypedSetting[T]) Key() Key               { return s.key }
 func (s NamespaceTypedSetting[T]) Precedence() Precedence { return PrecedenceNamespace }
+func (s NamespaceTypedSetting[T]) Validate(v any) error {
+	_, err := s.convert(v)
+	return err
+}
 
 func (s NamespaceTypedSetting[T]) WithDefault(v T) NamespaceTypedSetting[T] {
 	newS := s
@@ -2339,6 +2605,7 @@ func NewNamespaceIDTypedSetting[T any](key Key, def T, description string) Names
 		convert:     ConvertStructure[T](def),
 		description: description,
 	}
+	register(s)
 	return s
 }
 
@@ -2350,11 +2617,16 @@ func NewNamespaceIDTypedSettingWithConverter[T any](key Key, convert func(any) (
 		convert:     convert,
 		description: description,
 	}
+	register(s)
 	return s
 }
 
 func (s NamespaceIDTypedSetting[T]) Key() Key               { return s.key }
 func (s NamespaceIDTypedSetting[T]) Precedence() Precedence { return PrecedenceNamespaceID }
+func (s NamespaceIDTypedSetting[T]) Validate(v any) error {
+	_, err := s.convert(v)
+	return err
+}
 
 func (s NamespaceIDTypedSetting[T]) WithDefault(v T) NamespaceIDTypedSetting[T] {
 	newS := s
@@ -2387,6 +2659,7 @@ func NewTaskQueueTypedSetting[T any](key Key, def T, description string) TaskQue
 		convert:     ConvertStructure[T](def),
 		description: description,
 	}
+	register(s)
 	return s
 }
 
@@ -2398,11 +2671,16 @@ func NewTaskQueueTypedSettingWithConverter[T any](key Key, convert func(any) (T,
 		convert:     convert,
 		description: description,
 	}
+	register(s)
 	return s
 }
 
 func (s TaskQueueTypedSetting[T]) Key() Key               { return s.key }
 func (s TaskQueueTypedSetting[T]) Precedence() Precedence { return PrecedenceTaskQueue }
+func (s TaskQueueTypedSetting[T]) Validate(v any) error {
+	_, err := s.convert(v)
+	return err
+}
 
 func (s TaskQueueTypedSetting[T]) WithDefault(v T) TaskQueueTypedSetting[T] {
 	newS := s
@@ -2435,6 +2713,7 @@ func NewShardIDTypedSetting[T any](key Key, def T, description string) ShardIDTy
 		convert:     ConvertStructure[T](def),
 		description: description,
 	}
+	register(s)
 	return s
 }
 
@@ -2446,11 +2725,16 @@ func NewShardIDTypedSettingWithConverter[T any](key Key, convert func(any) (T, e
 		convert:     convert,
 		description: description,
 	}
+	register(s)
 	return s
 }
 
 func (s ShardIDTypedSetting[T]) Key() Key               { return s.key }
 func (s ShardIDTypedSetting[T]) Precedence() Precedence { return PrecedenceShardID }
+func (s ShardIDTypedSetting[T]) Validate(v any) error {
+	_, err := s.convert(v)
+	return err
+}
 
 func (s ShardIDTypedSetting[T]) WithDefault(v T) ShardIDTypedSetting[T] {
 	newS := s
@@ -2483,6 +2767,7 @@ func NewTaskTypeTypedSetting[T any](key Key, def T, description string) TaskType
 		convert:     ConvertStructure[T](def),
 		description: description,
 	}
+	register(s)
 	return s
 }
 
@@ -2494,11 +2779,16 @@ func NewTaskTypeTypedSettingWithConverter[T any](key Key, convert func(any) (T, 
 		convert:     convert,
 		description: description,
 	}
+	register(s)
 	return s
 }
 
 func (s TaskTypeTypedSetting[T]) Key() Key               { return s.key }
 func (s TaskTypeTypedSetting[T]) Precedence() Precedence { return PrecedenceTaskType }
+func (s TaskTypeTypedSetting[T]) Validate(v any) error {
+	_, err := s.convert(v)
+	return err
+}
 
 func (s TaskTypeTypedSetting[T]) WithDefault(v T) TaskTypeTypedSetting[T] {
 	newS := s
@@ -2531,6 +2821,7 @@ func NewDestinationTypedSetting[T any](key Key, def T, description string) Desti
 		convert:     ConvertStructure[T](def),
 		description: description,
 	}
+	register(s)
 	return s
 }
 
@@ -2542,11 +2833,16 @@ func NewDestinationTypedSettingWithConverter[T any](key Key, convert func(any) (
 		convert:     convert,
 		description: description,
 	}
+	register(s)
 	return s
 }
 
 func (s DestinationTypedSetting[T]) Key() Key               { return s.key }
 func (s DestinationTypedSetting[T]) Precedence() Precedence { return PrecedenceDestination }
+func (s DestinationTypedSetting[T]) Validate(v any) error {
+	_, err := s.convert(v)
+	return err
+}
 
 func (s DestinationTypedSetting[T]) WithDefault(v T) DestinationTypedSetting[T] {
 	newS := s
