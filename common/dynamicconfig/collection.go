@@ -51,14 +51,19 @@ type (
 		logger   log.Logger
 		errCount int64
 
+		cancelClientSubscription func()
+
 		subscriptionLock sync.Mutex
-		subscriptions    map[GenericSetting]map[int]subscription
+		subscriptions    map[GenericSetting]map[int]any // final "any" is *subscription[T]
 		subscriptionIdx  int
+
+		callbackCh chan func()
 	}
 
-	subscription struct {
-		prec []Constraints
-		f    any
+	subscription[T any] struct {
+		prec []Constraints // constant
+		f    func(T)       // constant
+		prev T             // protected by subscriptionLock in Collection
 	}
 
 	// These function types follow a similar pattern:
@@ -90,48 +95,75 @@ var (
 
 // NewCollection creates a new collection
 func NewCollection(client Client, logger log.Logger) *Collection {
-	col := &Collection{
+	c := &Collection{
 		client:        client,
 		logger:        logger,
 		errCount:      -1,
-		subscriptions: make(map[GenericSetting]map[int]subscription),
+		subscriptions: make(map[GenericSetting]map[int]any),
+		callbackCh:    make(chan func()),
 	}
 	if subcli, ok := client.(SubscribableClient); ok {
-		subcli.Subscribe(col, col.keyChanged)
+		c.cancelClientSubscription = subcli.Subscribe(c.keysChanged)
+	} else {
+		// FIXME: start goroutine to fake subscriptions
 	}
-	return col
+	// FIXME: 10?
+	for i := 0; i < 10; i++ {
+		go c.callCallbacks()
+	}
+	return c
 }
 
 func (c *Collection) Stop() {
-	if subcli, ok := c.client.(SubscribableClient); ok {
-		subcli.CancelSubscribe(col, col.keyChanged)
+	if c.cancelClientSubscription != nil {
+		c.cancelClientSubscription()
+	}
+	c.subscriptionLock.Lock()
+	defer c.subscriptionLock.Unlock()
+	close(c.callbackCh)
+}
+
+func (c *Collection) callCallbacks() {
+	for f := range c.callbackCh {
+		f()
 	}
 }
 
-func (c *Collection) keyChanged(key Key, cv *ConstrainedValue) {
-	s.subscriptionLock.Lock()
-	defer s.subscriptionLock.Unlock()
+func (c *Collection) keysChanged(changed map[Key][]ConstrainedValue) {
+	c.subscriptionLock.Lock()
+	defer c.subscriptionLock.Unlock()
 
-	for _, sub := range s.subscriptions[setting] {
+	for key, cvs := range changed {
+		setting := queryRegistry(key)
+		if setting == nil {
+			continue
+		}
 
+		for _, sub := range c.subscriptions[setting] {
+			setting.dispatchUpdate(c, sub, cvs)
+		}
 	}
 }
 
-func (c *Collection) subscribe(s GenericSetting, prec []Constraints, f any) (cancel func()) {
-	s.subscriptionLock.Lock()
-	defer s.subscriptionLock.Unlock()
-	subscriptionIdx++
-	id := subscriptionIdx
+func (c *Collection) subscribe(s GenericSetting, sub any) (cancel func()) {
+	c.subscriptionLock.Lock()
+	defer c.subscriptionLock.Unlock()
 
-	if s.subscriptions[s] == nil {
-		s.subscriptions[s] = make(map[int]subscription)
+	c.subscriptionIdx++
+	id := c.subscriptionIdx
+
+	if c.subscriptions[s] == nil {
+		c.subscriptions[s] = make(map[int]any)
 	}
-	s.subscriptions[s][id] = subscription{prec: prec, f: f}
+	c.subscriptions[s][id] = sub
+
+	// send one update immediately
+	s.dispatchUpdate(c, sub, c.client.GetValue(s.Key()))
 
 	return func() {
-		s.subscriptionLock.Lock()
-		defer s.subscriptionLock.Unlock()
-		delete(s.subscriptions[s][id])
+		c.subscriptionLock.Lock()
+		defer c.subscriptionLock.Unlock()
+		delete(c.subscriptions[s], id)
 	}
 }
 
@@ -174,7 +206,18 @@ func matchAndConvert[T any](
 	precedence []Constraints,
 ) T {
 	cvs := c.client.GetValue(key)
+	return matchAndConvertCvs(c, key, def, cdef, convert, precedence, cvs)
+}
 
+func matchAndConvertCvs[T any](
+	c *Collection,
+	key Key,
+	def T,
+	cdef []TypedConstrainedValue[T],
+	convert func(value any) (T, error),
+	precedence []Constraints,
+	cvs []ConstrainedValue,
+) T {
 	defaultCVs := cdef
 	if defaultCVs == nil {
 		defaultCVs = []TypedConstrainedValue[T]{{Value: def}}
@@ -204,6 +247,23 @@ func matchAndConvert[T any](
 		// Return typedVal anyway since we have to return something.
 	}
 	return typedVal
+}
+
+// called with subscriptionLock
+func dispatchUpdate[T any](
+	c *Collection,
+	key Key,
+	def T,
+	cdef []TypedConstrainedValue[T],
+	convert func(value any) (T, error),
+	sub *subscription[T],
+	cvs []ConstrainedValue,
+) {
+	newVal := matchAndConvertCvs(c, key, def, cdef, convert, sub.prec, cvs)
+	if !reflect.DeepEqual(sub.prev, newVal) {
+		sub.prev = newVal
+		c.callbackCh <- func() { sub.f(newVal) }
+	}
 }
 
 func precedenceGlobal() []Constraints {

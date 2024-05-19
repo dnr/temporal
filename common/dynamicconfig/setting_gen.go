@@ -101,6 +101,22 @@ func (s GlobalBoolSetting) Get(c *Collection) BoolPropertyFn {
 	}
 }
 
+func (s GlobalBoolSetting) Subscribe(c *Collection, f func(bool)) (cancel func()) {
+	return c.subscribe(s, &subscription[bool]{prec: precedenceGlobal(), f: f})
+}
+
+func (s GlobalBoolSetting) dispatchUpdate(c *Collection, sub any, cvs []ConstrainedValue) {
+	dispatchUpdate(
+		c,
+		s.key,
+		s.def,
+		s.cdef,
+		s.convert,
+		sub.(*subscription[bool]),
+		cvs,
+	)
+}
+
 func GetBoolPropertyFn(value bool) BoolPropertyFn {
 	return func() bool {
 		return value
@@ -157,6 +173,22 @@ func (s NamespaceBoolSetting) Get(c *Collection) BoolPropertyFnWithNamespaceFilt
 			precedenceNamespace(namespace),
 		)
 	}
+}
+
+func (s NamespaceBoolSetting) Subscribe(c *Collection, namespace string, f func(bool)) (cancel func()) {
+	return c.subscribe(s, &subscription[bool]{prec: precedenceNamespace(namespace), f: f})
+}
+
+func (s NamespaceBoolSetting) dispatchUpdate(c *Collection, sub any, cvs []ConstrainedValue) {
+	dispatchUpdate(
+		c,
+		s.key,
+		s.def,
+		s.cdef,
+		s.convert,
+		sub.(*subscription[bool]),
+		cvs,
+	)
 }
 
 func GetBoolPropertyFnFilteredByNamespace(value bool) BoolPropertyFnWithNamespaceFilter {
@@ -217,6 +249,22 @@ func (s NamespaceIDBoolSetting) Get(c *Collection) BoolPropertyFnWithNamespaceID
 	}
 }
 
+func (s NamespaceIDBoolSetting) Subscribe(c *Collection, namespaceID string, f func(bool)) (cancel func()) {
+	return c.subscribe(s, &subscription[bool]{prec: precedenceNamespaceID(namespaceID), f: f})
+}
+
+func (s NamespaceIDBoolSetting) dispatchUpdate(c *Collection, sub any, cvs []ConstrainedValue) {
+	dispatchUpdate(
+		c,
+		s.key,
+		s.def,
+		s.cdef,
+		s.convert,
+		sub.(*subscription[bool]),
+		cvs,
+	)
+}
+
 func GetBoolPropertyFnFilteredByNamespaceID(value bool) BoolPropertyFnWithNamespaceIDFilter {
 	return func(namespaceID string) bool {
 		return value
@@ -273,6 +321,22 @@ func (s TaskQueueBoolSetting) Get(c *Collection) BoolPropertyFnWithTaskQueueFilt
 			precedenceTaskQueue(namespace, taskQueue, taskQueueType),
 		)
 	}
+}
+
+func (s TaskQueueBoolSetting) Subscribe(c *Collection, namespace string, taskQueue string, taskQueueType enumspb.TaskQueueType, f func(bool)) (cancel func()) {
+	return c.subscribe(s, &subscription[bool]{prec: precedenceTaskQueue(namespace, taskQueue, taskQueueType), f: f})
+}
+
+func (s TaskQueueBoolSetting) dispatchUpdate(c *Collection, sub any, cvs []ConstrainedValue) {
+	dispatchUpdate(
+		c,
+		s.key,
+		s.def,
+		s.cdef,
+		s.convert,
+		sub.(*subscription[bool]),
+		cvs,
+	)
 }
 
 func GetBoolPropertyFnFilteredByTaskQueue(value bool) BoolPropertyFnWithTaskQueueFilter {
@@ -333,6 +397,22 @@ func (s ShardIDBoolSetting) Get(c *Collection) BoolPropertyFnWithShardIDFilter {
 	}
 }
 
+func (s ShardIDBoolSetting) Subscribe(c *Collection, shardID int32, f func(bool)) (cancel func()) {
+	return c.subscribe(s, &subscription[bool]{prec: precedenceShardID(shardID), f: f})
+}
+
+func (s ShardIDBoolSetting) dispatchUpdate(c *Collection, sub any, cvs []ConstrainedValue) {
+	dispatchUpdate(
+		c,
+		s.key,
+		s.def,
+		s.cdef,
+		s.convert,
+		sub.(*subscription[bool]),
+		cvs,
+	)
+}
+
 func GetBoolPropertyFnFilteredByShardID(value bool) BoolPropertyFnWithShardIDFilter {
 	return func(shardID int32) bool {
 		return value
@@ -389,6 +469,22 @@ func (s TaskTypeBoolSetting) Get(c *Collection) BoolPropertyFnWithTaskTypeFilter
 			precedenceTaskType(taskType),
 		)
 	}
+}
+
+func (s TaskTypeBoolSetting) Subscribe(c *Collection, taskType enumsspb.TaskType, f func(bool)) (cancel func()) {
+	return c.subscribe(s, &subscription[bool]{prec: precedenceTaskType(taskType), f: f})
+}
+
+func (s TaskTypeBoolSetting) dispatchUpdate(c *Collection, sub any, cvs []ConstrainedValue) {
+	dispatchUpdate(
+		c,
+		s.key,
+		s.def,
+		s.cdef,
+		s.convert,
+		sub.(*subscription[bool]),
+		cvs,
+	)
 }
 
 func GetBoolPropertyFnFilteredByTaskType(value bool) BoolPropertyFnWithTaskTypeFilter {
@@ -449,6 +545,22 @@ func (s DestinationBoolSetting) Get(c *Collection) BoolPropertyFnWithDestination
 	}
 }
 
+func (s DestinationBoolSetting) Subscribe(c *Collection, namespace string, destination string, f func(bool)) (cancel func()) {
+	return c.subscribe(s, &subscription[bool]{prec: precedenceDestination(namespace, destination), f: f})
+}
+
+func (s DestinationBoolSetting) dispatchUpdate(c *Collection, sub any, cvs []ConstrainedValue) {
+	dispatchUpdate(
+		c,
+		s.key,
+		s.def,
+		s.cdef,
+		s.convert,
+		sub.(*subscription[bool]),
+		cvs,
+	)
+}
+
 func GetBoolPropertyFnFilteredByDestination(value bool) BoolPropertyFnWithDestinationFilter {
 	return func(namespace string, destination string) bool {
 		return value
@@ -505,6 +617,22 @@ func (s GlobalIntSetting) Get(c *Collection) IntPropertyFn {
 			precedenceGlobal(),
 		)
 	}
+}
+
+func (s GlobalIntSetting) Subscribe(c *Collection, f func(int)) (cancel func()) {
+	return c.subscribe(s, &subscription[int]{prec: precedenceGlobal(), f: f})
+}
+
+func (s GlobalIntSetting) dispatchUpdate(c *Collection, sub any, cvs []ConstrainedValue) {
+	dispatchUpdate(
+		c,
+		s.key,
+		s.def,
+		s.cdef,
+		s.convert,
+		sub.(*subscription[int]),
+		cvs,
+	)
 }
 
 func GetIntPropertyFn(value int) IntPropertyFn {
@@ -565,6 +693,22 @@ func (s NamespaceIntSetting) Get(c *Collection) IntPropertyFnWithNamespaceFilter
 	}
 }
 
+func (s NamespaceIntSetting) Subscribe(c *Collection, namespace string, f func(int)) (cancel func()) {
+	return c.subscribe(s, &subscription[int]{prec: precedenceNamespace(namespace), f: f})
+}
+
+func (s NamespaceIntSetting) dispatchUpdate(c *Collection, sub any, cvs []ConstrainedValue) {
+	dispatchUpdate(
+		c,
+		s.key,
+		s.def,
+		s.cdef,
+		s.convert,
+		sub.(*subscription[int]),
+		cvs,
+	)
+}
+
 func GetIntPropertyFnFilteredByNamespace(value int) IntPropertyFnWithNamespaceFilter {
 	return func(namespace string) int {
 		return value
@@ -621,6 +765,22 @@ func (s NamespaceIDIntSetting) Get(c *Collection) IntPropertyFnWithNamespaceIDFi
 			precedenceNamespaceID(namespaceID),
 		)
 	}
+}
+
+func (s NamespaceIDIntSetting) Subscribe(c *Collection, namespaceID string, f func(int)) (cancel func()) {
+	return c.subscribe(s, &subscription[int]{prec: precedenceNamespaceID(namespaceID), f: f})
+}
+
+func (s NamespaceIDIntSetting) dispatchUpdate(c *Collection, sub any, cvs []ConstrainedValue) {
+	dispatchUpdate(
+		c,
+		s.key,
+		s.def,
+		s.cdef,
+		s.convert,
+		sub.(*subscription[int]),
+		cvs,
+	)
 }
 
 func GetIntPropertyFnFilteredByNamespaceID(value int) IntPropertyFnWithNamespaceIDFilter {
@@ -681,6 +841,22 @@ func (s TaskQueueIntSetting) Get(c *Collection) IntPropertyFnWithTaskQueueFilter
 	}
 }
 
+func (s TaskQueueIntSetting) Subscribe(c *Collection, namespace string, taskQueue string, taskQueueType enumspb.TaskQueueType, f func(int)) (cancel func()) {
+	return c.subscribe(s, &subscription[int]{prec: precedenceTaskQueue(namespace, taskQueue, taskQueueType), f: f})
+}
+
+func (s TaskQueueIntSetting) dispatchUpdate(c *Collection, sub any, cvs []ConstrainedValue) {
+	dispatchUpdate(
+		c,
+		s.key,
+		s.def,
+		s.cdef,
+		s.convert,
+		sub.(*subscription[int]),
+		cvs,
+	)
+}
+
 func GetIntPropertyFnFilteredByTaskQueue(value int) IntPropertyFnWithTaskQueueFilter {
 	return func(namespace string, taskQueue string, taskQueueType enumspb.TaskQueueType) int {
 		return value
@@ -737,6 +913,22 @@ func (s ShardIDIntSetting) Get(c *Collection) IntPropertyFnWithShardIDFilter {
 			precedenceShardID(shardID),
 		)
 	}
+}
+
+func (s ShardIDIntSetting) Subscribe(c *Collection, shardID int32, f func(int)) (cancel func()) {
+	return c.subscribe(s, &subscription[int]{prec: precedenceShardID(shardID), f: f})
+}
+
+func (s ShardIDIntSetting) dispatchUpdate(c *Collection, sub any, cvs []ConstrainedValue) {
+	dispatchUpdate(
+		c,
+		s.key,
+		s.def,
+		s.cdef,
+		s.convert,
+		sub.(*subscription[int]),
+		cvs,
+	)
 }
 
 func GetIntPropertyFnFilteredByShardID(value int) IntPropertyFnWithShardIDFilter {
@@ -797,6 +989,22 @@ func (s TaskTypeIntSetting) Get(c *Collection) IntPropertyFnWithTaskTypeFilter {
 	}
 }
 
+func (s TaskTypeIntSetting) Subscribe(c *Collection, taskType enumsspb.TaskType, f func(int)) (cancel func()) {
+	return c.subscribe(s, &subscription[int]{prec: precedenceTaskType(taskType), f: f})
+}
+
+func (s TaskTypeIntSetting) dispatchUpdate(c *Collection, sub any, cvs []ConstrainedValue) {
+	dispatchUpdate(
+		c,
+		s.key,
+		s.def,
+		s.cdef,
+		s.convert,
+		sub.(*subscription[int]),
+		cvs,
+	)
+}
+
 func GetIntPropertyFnFilteredByTaskType(value int) IntPropertyFnWithTaskTypeFilter {
 	return func(taskType enumsspb.TaskType) int {
 		return value
@@ -853,6 +1061,22 @@ func (s DestinationIntSetting) Get(c *Collection) IntPropertyFnWithDestinationFi
 			precedenceDestination(namespace, destination),
 		)
 	}
+}
+
+func (s DestinationIntSetting) Subscribe(c *Collection, namespace string, destination string, f func(int)) (cancel func()) {
+	return c.subscribe(s, &subscription[int]{prec: precedenceDestination(namespace, destination), f: f})
+}
+
+func (s DestinationIntSetting) dispatchUpdate(c *Collection, sub any, cvs []ConstrainedValue) {
+	dispatchUpdate(
+		c,
+		s.key,
+		s.def,
+		s.cdef,
+		s.convert,
+		sub.(*subscription[int]),
+		cvs,
+	)
 }
 
 func GetIntPropertyFnFilteredByDestination(value int) IntPropertyFnWithDestinationFilter {
@@ -913,6 +1137,22 @@ func (s GlobalFloatSetting) Get(c *Collection) FloatPropertyFn {
 	}
 }
 
+func (s GlobalFloatSetting) Subscribe(c *Collection, f func(float64)) (cancel func()) {
+	return c.subscribe(s, &subscription[float64]{prec: precedenceGlobal(), f: f})
+}
+
+func (s GlobalFloatSetting) dispatchUpdate(c *Collection, sub any, cvs []ConstrainedValue) {
+	dispatchUpdate(
+		c,
+		s.key,
+		s.def,
+		s.cdef,
+		s.convert,
+		sub.(*subscription[float64]),
+		cvs,
+	)
+}
+
 func GetFloatPropertyFn(value float64) FloatPropertyFn {
 	return func() float64 {
 		return value
@@ -969,6 +1209,22 @@ func (s NamespaceFloatSetting) Get(c *Collection) FloatPropertyFnWithNamespaceFi
 			precedenceNamespace(namespace),
 		)
 	}
+}
+
+func (s NamespaceFloatSetting) Subscribe(c *Collection, namespace string, f func(float64)) (cancel func()) {
+	return c.subscribe(s, &subscription[float64]{prec: precedenceNamespace(namespace), f: f})
+}
+
+func (s NamespaceFloatSetting) dispatchUpdate(c *Collection, sub any, cvs []ConstrainedValue) {
+	dispatchUpdate(
+		c,
+		s.key,
+		s.def,
+		s.cdef,
+		s.convert,
+		sub.(*subscription[float64]),
+		cvs,
+	)
 }
 
 func GetFloatPropertyFnFilteredByNamespace(value float64) FloatPropertyFnWithNamespaceFilter {
@@ -1029,6 +1285,22 @@ func (s NamespaceIDFloatSetting) Get(c *Collection) FloatPropertyFnWithNamespace
 	}
 }
 
+func (s NamespaceIDFloatSetting) Subscribe(c *Collection, namespaceID string, f func(float64)) (cancel func()) {
+	return c.subscribe(s, &subscription[float64]{prec: precedenceNamespaceID(namespaceID), f: f})
+}
+
+func (s NamespaceIDFloatSetting) dispatchUpdate(c *Collection, sub any, cvs []ConstrainedValue) {
+	dispatchUpdate(
+		c,
+		s.key,
+		s.def,
+		s.cdef,
+		s.convert,
+		sub.(*subscription[float64]),
+		cvs,
+	)
+}
+
 func GetFloatPropertyFnFilteredByNamespaceID(value float64) FloatPropertyFnWithNamespaceIDFilter {
 	return func(namespaceID string) float64 {
 		return value
@@ -1085,6 +1357,22 @@ func (s TaskQueueFloatSetting) Get(c *Collection) FloatPropertyFnWithTaskQueueFi
 			precedenceTaskQueue(namespace, taskQueue, taskQueueType),
 		)
 	}
+}
+
+func (s TaskQueueFloatSetting) Subscribe(c *Collection, namespace string, taskQueue string, taskQueueType enumspb.TaskQueueType, f func(float64)) (cancel func()) {
+	return c.subscribe(s, &subscription[float64]{prec: precedenceTaskQueue(namespace, taskQueue, taskQueueType), f: f})
+}
+
+func (s TaskQueueFloatSetting) dispatchUpdate(c *Collection, sub any, cvs []ConstrainedValue) {
+	dispatchUpdate(
+		c,
+		s.key,
+		s.def,
+		s.cdef,
+		s.convert,
+		sub.(*subscription[float64]),
+		cvs,
+	)
 }
 
 func GetFloatPropertyFnFilteredByTaskQueue(value float64) FloatPropertyFnWithTaskQueueFilter {
@@ -1145,6 +1433,22 @@ func (s ShardIDFloatSetting) Get(c *Collection) FloatPropertyFnWithShardIDFilter
 	}
 }
 
+func (s ShardIDFloatSetting) Subscribe(c *Collection, shardID int32, f func(float64)) (cancel func()) {
+	return c.subscribe(s, &subscription[float64]{prec: precedenceShardID(shardID), f: f})
+}
+
+func (s ShardIDFloatSetting) dispatchUpdate(c *Collection, sub any, cvs []ConstrainedValue) {
+	dispatchUpdate(
+		c,
+		s.key,
+		s.def,
+		s.cdef,
+		s.convert,
+		sub.(*subscription[float64]),
+		cvs,
+	)
+}
+
 func GetFloatPropertyFnFilteredByShardID(value float64) FloatPropertyFnWithShardIDFilter {
 	return func(shardID int32) float64 {
 		return value
@@ -1201,6 +1505,22 @@ func (s TaskTypeFloatSetting) Get(c *Collection) FloatPropertyFnWithTaskTypeFilt
 			precedenceTaskType(taskType),
 		)
 	}
+}
+
+func (s TaskTypeFloatSetting) Subscribe(c *Collection, taskType enumsspb.TaskType, f func(float64)) (cancel func()) {
+	return c.subscribe(s, &subscription[float64]{prec: precedenceTaskType(taskType), f: f})
+}
+
+func (s TaskTypeFloatSetting) dispatchUpdate(c *Collection, sub any, cvs []ConstrainedValue) {
+	dispatchUpdate(
+		c,
+		s.key,
+		s.def,
+		s.cdef,
+		s.convert,
+		sub.(*subscription[float64]),
+		cvs,
+	)
 }
 
 func GetFloatPropertyFnFilteredByTaskType(value float64) FloatPropertyFnWithTaskTypeFilter {
@@ -1261,6 +1581,22 @@ func (s DestinationFloatSetting) Get(c *Collection) FloatPropertyFnWithDestinati
 	}
 }
 
+func (s DestinationFloatSetting) Subscribe(c *Collection, namespace string, destination string, f func(float64)) (cancel func()) {
+	return c.subscribe(s, &subscription[float64]{prec: precedenceDestination(namespace, destination), f: f})
+}
+
+func (s DestinationFloatSetting) dispatchUpdate(c *Collection, sub any, cvs []ConstrainedValue) {
+	dispatchUpdate(
+		c,
+		s.key,
+		s.def,
+		s.cdef,
+		s.convert,
+		sub.(*subscription[float64]),
+		cvs,
+	)
+}
+
 func GetFloatPropertyFnFilteredByDestination(value float64) FloatPropertyFnWithDestinationFilter {
 	return func(namespace string, destination string) float64 {
 		return value
@@ -1317,6 +1653,22 @@ func (s GlobalStringSetting) Get(c *Collection) StringPropertyFn {
 			precedenceGlobal(),
 		)
 	}
+}
+
+func (s GlobalStringSetting) Subscribe(c *Collection, f func(string)) (cancel func()) {
+	return c.subscribe(s, &subscription[string]{prec: precedenceGlobal(), f: f})
+}
+
+func (s GlobalStringSetting) dispatchUpdate(c *Collection, sub any, cvs []ConstrainedValue) {
+	dispatchUpdate(
+		c,
+		s.key,
+		s.def,
+		s.cdef,
+		s.convert,
+		sub.(*subscription[string]),
+		cvs,
+	)
 }
 
 func GetStringPropertyFn(value string) StringPropertyFn {
@@ -1377,6 +1729,22 @@ func (s NamespaceStringSetting) Get(c *Collection) StringPropertyFnWithNamespace
 	}
 }
 
+func (s NamespaceStringSetting) Subscribe(c *Collection, namespace string, f func(string)) (cancel func()) {
+	return c.subscribe(s, &subscription[string]{prec: precedenceNamespace(namespace), f: f})
+}
+
+func (s NamespaceStringSetting) dispatchUpdate(c *Collection, sub any, cvs []ConstrainedValue) {
+	dispatchUpdate(
+		c,
+		s.key,
+		s.def,
+		s.cdef,
+		s.convert,
+		sub.(*subscription[string]),
+		cvs,
+	)
+}
+
 func GetStringPropertyFnFilteredByNamespace(value string) StringPropertyFnWithNamespaceFilter {
 	return func(namespace string) string {
 		return value
@@ -1433,6 +1801,22 @@ func (s NamespaceIDStringSetting) Get(c *Collection) StringPropertyFnWithNamespa
 			precedenceNamespaceID(namespaceID),
 		)
 	}
+}
+
+func (s NamespaceIDStringSetting) Subscribe(c *Collection, namespaceID string, f func(string)) (cancel func()) {
+	return c.subscribe(s, &subscription[string]{prec: precedenceNamespaceID(namespaceID), f: f})
+}
+
+func (s NamespaceIDStringSetting) dispatchUpdate(c *Collection, sub any, cvs []ConstrainedValue) {
+	dispatchUpdate(
+		c,
+		s.key,
+		s.def,
+		s.cdef,
+		s.convert,
+		sub.(*subscription[string]),
+		cvs,
+	)
 }
 
 func GetStringPropertyFnFilteredByNamespaceID(value string) StringPropertyFnWithNamespaceIDFilter {
@@ -1493,6 +1877,22 @@ func (s TaskQueueStringSetting) Get(c *Collection) StringPropertyFnWithTaskQueue
 	}
 }
 
+func (s TaskQueueStringSetting) Subscribe(c *Collection, namespace string, taskQueue string, taskQueueType enumspb.TaskQueueType, f func(string)) (cancel func()) {
+	return c.subscribe(s, &subscription[string]{prec: precedenceTaskQueue(namespace, taskQueue, taskQueueType), f: f})
+}
+
+func (s TaskQueueStringSetting) dispatchUpdate(c *Collection, sub any, cvs []ConstrainedValue) {
+	dispatchUpdate(
+		c,
+		s.key,
+		s.def,
+		s.cdef,
+		s.convert,
+		sub.(*subscription[string]),
+		cvs,
+	)
+}
+
 func GetStringPropertyFnFilteredByTaskQueue(value string) StringPropertyFnWithTaskQueueFilter {
 	return func(namespace string, taskQueue string, taskQueueType enumspb.TaskQueueType) string {
 		return value
@@ -1549,6 +1949,22 @@ func (s ShardIDStringSetting) Get(c *Collection) StringPropertyFnWithShardIDFilt
 			precedenceShardID(shardID),
 		)
 	}
+}
+
+func (s ShardIDStringSetting) Subscribe(c *Collection, shardID int32, f func(string)) (cancel func()) {
+	return c.subscribe(s, &subscription[string]{prec: precedenceShardID(shardID), f: f})
+}
+
+func (s ShardIDStringSetting) dispatchUpdate(c *Collection, sub any, cvs []ConstrainedValue) {
+	dispatchUpdate(
+		c,
+		s.key,
+		s.def,
+		s.cdef,
+		s.convert,
+		sub.(*subscription[string]),
+		cvs,
+	)
 }
 
 func GetStringPropertyFnFilteredByShardID(value string) StringPropertyFnWithShardIDFilter {
@@ -1609,6 +2025,22 @@ func (s TaskTypeStringSetting) Get(c *Collection) StringPropertyFnWithTaskTypeFi
 	}
 }
 
+func (s TaskTypeStringSetting) Subscribe(c *Collection, taskType enumsspb.TaskType, f func(string)) (cancel func()) {
+	return c.subscribe(s, &subscription[string]{prec: precedenceTaskType(taskType), f: f})
+}
+
+func (s TaskTypeStringSetting) dispatchUpdate(c *Collection, sub any, cvs []ConstrainedValue) {
+	dispatchUpdate(
+		c,
+		s.key,
+		s.def,
+		s.cdef,
+		s.convert,
+		sub.(*subscription[string]),
+		cvs,
+	)
+}
+
 func GetStringPropertyFnFilteredByTaskType(value string) StringPropertyFnWithTaskTypeFilter {
 	return func(taskType enumsspb.TaskType) string {
 		return value
@@ -1665,6 +2097,22 @@ func (s DestinationStringSetting) Get(c *Collection) StringPropertyFnWithDestina
 			precedenceDestination(namespace, destination),
 		)
 	}
+}
+
+func (s DestinationStringSetting) Subscribe(c *Collection, namespace string, destination string, f func(string)) (cancel func()) {
+	return c.subscribe(s, &subscription[string]{prec: precedenceDestination(namespace, destination), f: f})
+}
+
+func (s DestinationStringSetting) dispatchUpdate(c *Collection, sub any, cvs []ConstrainedValue) {
+	dispatchUpdate(
+		c,
+		s.key,
+		s.def,
+		s.cdef,
+		s.convert,
+		sub.(*subscription[string]),
+		cvs,
+	)
 }
 
 func GetStringPropertyFnFilteredByDestination(value string) StringPropertyFnWithDestinationFilter {
@@ -1725,6 +2173,22 @@ func (s GlobalDurationSetting) Get(c *Collection) DurationPropertyFn {
 	}
 }
 
+func (s GlobalDurationSetting) Subscribe(c *Collection, f func(time.Duration)) (cancel func()) {
+	return c.subscribe(s, &subscription[time.Duration]{prec: precedenceGlobal(), f: f})
+}
+
+func (s GlobalDurationSetting) dispatchUpdate(c *Collection, sub any, cvs []ConstrainedValue) {
+	dispatchUpdate(
+		c,
+		s.key,
+		s.def,
+		s.cdef,
+		s.convert,
+		sub.(*subscription[time.Duration]),
+		cvs,
+	)
+}
+
 func GetDurationPropertyFn(value time.Duration) DurationPropertyFn {
 	return func() time.Duration {
 		return value
@@ -1781,6 +2245,22 @@ func (s NamespaceDurationSetting) Get(c *Collection) DurationPropertyFnWithNames
 			precedenceNamespace(namespace),
 		)
 	}
+}
+
+func (s NamespaceDurationSetting) Subscribe(c *Collection, namespace string, f func(time.Duration)) (cancel func()) {
+	return c.subscribe(s, &subscription[time.Duration]{prec: precedenceNamespace(namespace), f: f})
+}
+
+func (s NamespaceDurationSetting) dispatchUpdate(c *Collection, sub any, cvs []ConstrainedValue) {
+	dispatchUpdate(
+		c,
+		s.key,
+		s.def,
+		s.cdef,
+		s.convert,
+		sub.(*subscription[time.Duration]),
+		cvs,
+	)
 }
 
 func GetDurationPropertyFnFilteredByNamespace(value time.Duration) DurationPropertyFnWithNamespaceFilter {
@@ -1841,6 +2321,22 @@ func (s NamespaceIDDurationSetting) Get(c *Collection) DurationPropertyFnWithNam
 	}
 }
 
+func (s NamespaceIDDurationSetting) Subscribe(c *Collection, namespaceID string, f func(time.Duration)) (cancel func()) {
+	return c.subscribe(s, &subscription[time.Duration]{prec: precedenceNamespaceID(namespaceID), f: f})
+}
+
+func (s NamespaceIDDurationSetting) dispatchUpdate(c *Collection, sub any, cvs []ConstrainedValue) {
+	dispatchUpdate(
+		c,
+		s.key,
+		s.def,
+		s.cdef,
+		s.convert,
+		sub.(*subscription[time.Duration]),
+		cvs,
+	)
+}
+
 func GetDurationPropertyFnFilteredByNamespaceID(value time.Duration) DurationPropertyFnWithNamespaceIDFilter {
 	return func(namespaceID string) time.Duration {
 		return value
@@ -1897,6 +2393,22 @@ func (s TaskQueueDurationSetting) Get(c *Collection) DurationPropertyFnWithTaskQ
 			precedenceTaskQueue(namespace, taskQueue, taskQueueType),
 		)
 	}
+}
+
+func (s TaskQueueDurationSetting) Subscribe(c *Collection, namespace string, taskQueue string, taskQueueType enumspb.TaskQueueType, f func(time.Duration)) (cancel func()) {
+	return c.subscribe(s, &subscription[time.Duration]{prec: precedenceTaskQueue(namespace, taskQueue, taskQueueType), f: f})
+}
+
+func (s TaskQueueDurationSetting) dispatchUpdate(c *Collection, sub any, cvs []ConstrainedValue) {
+	dispatchUpdate(
+		c,
+		s.key,
+		s.def,
+		s.cdef,
+		s.convert,
+		sub.(*subscription[time.Duration]),
+		cvs,
+	)
 }
 
 func GetDurationPropertyFnFilteredByTaskQueue(value time.Duration) DurationPropertyFnWithTaskQueueFilter {
@@ -1957,6 +2469,22 @@ func (s ShardIDDurationSetting) Get(c *Collection) DurationPropertyFnWithShardID
 	}
 }
 
+func (s ShardIDDurationSetting) Subscribe(c *Collection, shardID int32, f func(time.Duration)) (cancel func()) {
+	return c.subscribe(s, &subscription[time.Duration]{prec: precedenceShardID(shardID), f: f})
+}
+
+func (s ShardIDDurationSetting) dispatchUpdate(c *Collection, sub any, cvs []ConstrainedValue) {
+	dispatchUpdate(
+		c,
+		s.key,
+		s.def,
+		s.cdef,
+		s.convert,
+		sub.(*subscription[time.Duration]),
+		cvs,
+	)
+}
+
 func GetDurationPropertyFnFilteredByShardID(value time.Duration) DurationPropertyFnWithShardIDFilter {
 	return func(shardID int32) time.Duration {
 		return value
@@ -2013,6 +2541,22 @@ func (s TaskTypeDurationSetting) Get(c *Collection) DurationPropertyFnWithTaskTy
 			precedenceTaskType(taskType),
 		)
 	}
+}
+
+func (s TaskTypeDurationSetting) Subscribe(c *Collection, taskType enumsspb.TaskType, f func(time.Duration)) (cancel func()) {
+	return c.subscribe(s, &subscription[time.Duration]{prec: precedenceTaskType(taskType), f: f})
+}
+
+func (s TaskTypeDurationSetting) dispatchUpdate(c *Collection, sub any, cvs []ConstrainedValue) {
+	dispatchUpdate(
+		c,
+		s.key,
+		s.def,
+		s.cdef,
+		s.convert,
+		sub.(*subscription[time.Duration]),
+		cvs,
+	)
 }
 
 func GetDurationPropertyFnFilteredByTaskType(value time.Duration) DurationPropertyFnWithTaskTypeFilter {
@@ -2073,6 +2617,22 @@ func (s DestinationDurationSetting) Get(c *Collection) DurationPropertyFnWithDes
 	}
 }
 
+func (s DestinationDurationSetting) Subscribe(c *Collection, namespace string, destination string, f func(time.Duration)) (cancel func()) {
+	return c.subscribe(s, &subscription[time.Duration]{prec: precedenceDestination(namespace, destination), f: f})
+}
+
+func (s DestinationDurationSetting) dispatchUpdate(c *Collection, sub any, cvs []ConstrainedValue) {
+	dispatchUpdate(
+		c,
+		s.key,
+		s.def,
+		s.cdef,
+		s.convert,
+		sub.(*subscription[time.Duration]),
+		cvs,
+	)
+}
+
 func GetDurationPropertyFnFilteredByDestination(value time.Duration) DurationPropertyFnWithDestinationFilter {
 	return func(namespace string, destination string) time.Duration {
 		return value
@@ -2129,6 +2689,22 @@ func (s GlobalMapSetting) Get(c *Collection) MapPropertyFn {
 			precedenceGlobal(),
 		)
 	}
+}
+
+func (s GlobalMapSetting) Subscribe(c *Collection, f func(map[string]any)) (cancel func()) {
+	return c.subscribe(s, &subscription[map[string]any]{prec: precedenceGlobal(), f: f})
+}
+
+func (s GlobalMapSetting) dispatchUpdate(c *Collection, sub any, cvs []ConstrainedValue) {
+	dispatchUpdate(
+		c,
+		s.key,
+		s.def,
+		s.cdef,
+		s.convert,
+		sub.(*subscription[map[string]any]),
+		cvs,
+	)
 }
 
 func GetMapPropertyFn(value map[string]any) MapPropertyFn {
@@ -2189,6 +2765,22 @@ func (s NamespaceMapSetting) Get(c *Collection) MapPropertyFnWithNamespaceFilter
 	}
 }
 
+func (s NamespaceMapSetting) Subscribe(c *Collection, namespace string, f func(map[string]any)) (cancel func()) {
+	return c.subscribe(s, &subscription[map[string]any]{prec: precedenceNamespace(namespace), f: f})
+}
+
+func (s NamespaceMapSetting) dispatchUpdate(c *Collection, sub any, cvs []ConstrainedValue) {
+	dispatchUpdate(
+		c,
+		s.key,
+		s.def,
+		s.cdef,
+		s.convert,
+		sub.(*subscription[map[string]any]),
+		cvs,
+	)
+}
+
 func GetMapPropertyFnFilteredByNamespace(value map[string]any) MapPropertyFnWithNamespaceFilter {
 	return func(namespace string) map[string]any {
 		return value
@@ -2245,6 +2837,22 @@ func (s NamespaceIDMapSetting) Get(c *Collection) MapPropertyFnWithNamespaceIDFi
 			precedenceNamespaceID(namespaceID),
 		)
 	}
+}
+
+func (s NamespaceIDMapSetting) Subscribe(c *Collection, namespaceID string, f func(map[string]any)) (cancel func()) {
+	return c.subscribe(s, &subscription[map[string]any]{prec: precedenceNamespaceID(namespaceID), f: f})
+}
+
+func (s NamespaceIDMapSetting) dispatchUpdate(c *Collection, sub any, cvs []ConstrainedValue) {
+	dispatchUpdate(
+		c,
+		s.key,
+		s.def,
+		s.cdef,
+		s.convert,
+		sub.(*subscription[map[string]any]),
+		cvs,
+	)
 }
 
 func GetMapPropertyFnFilteredByNamespaceID(value map[string]any) MapPropertyFnWithNamespaceIDFilter {
@@ -2305,6 +2913,22 @@ func (s TaskQueueMapSetting) Get(c *Collection) MapPropertyFnWithTaskQueueFilter
 	}
 }
 
+func (s TaskQueueMapSetting) Subscribe(c *Collection, namespace string, taskQueue string, taskQueueType enumspb.TaskQueueType, f func(map[string]any)) (cancel func()) {
+	return c.subscribe(s, &subscription[map[string]any]{prec: precedenceTaskQueue(namespace, taskQueue, taskQueueType), f: f})
+}
+
+func (s TaskQueueMapSetting) dispatchUpdate(c *Collection, sub any, cvs []ConstrainedValue) {
+	dispatchUpdate(
+		c,
+		s.key,
+		s.def,
+		s.cdef,
+		s.convert,
+		sub.(*subscription[map[string]any]),
+		cvs,
+	)
+}
+
 func GetMapPropertyFnFilteredByTaskQueue(value map[string]any) MapPropertyFnWithTaskQueueFilter {
 	return func(namespace string, taskQueue string, taskQueueType enumspb.TaskQueueType) map[string]any {
 		return value
@@ -2361,6 +2985,22 @@ func (s ShardIDMapSetting) Get(c *Collection) MapPropertyFnWithShardIDFilter {
 			precedenceShardID(shardID),
 		)
 	}
+}
+
+func (s ShardIDMapSetting) Subscribe(c *Collection, shardID int32, f func(map[string]any)) (cancel func()) {
+	return c.subscribe(s, &subscription[map[string]any]{prec: precedenceShardID(shardID), f: f})
+}
+
+func (s ShardIDMapSetting) dispatchUpdate(c *Collection, sub any, cvs []ConstrainedValue) {
+	dispatchUpdate(
+		c,
+		s.key,
+		s.def,
+		s.cdef,
+		s.convert,
+		sub.(*subscription[map[string]any]),
+		cvs,
+	)
 }
 
 func GetMapPropertyFnFilteredByShardID(value map[string]any) MapPropertyFnWithShardIDFilter {
@@ -2421,6 +3061,22 @@ func (s TaskTypeMapSetting) Get(c *Collection) MapPropertyFnWithTaskTypeFilter {
 	}
 }
 
+func (s TaskTypeMapSetting) Subscribe(c *Collection, taskType enumsspb.TaskType, f func(map[string]any)) (cancel func()) {
+	return c.subscribe(s, &subscription[map[string]any]{prec: precedenceTaskType(taskType), f: f})
+}
+
+func (s TaskTypeMapSetting) dispatchUpdate(c *Collection, sub any, cvs []ConstrainedValue) {
+	dispatchUpdate(
+		c,
+		s.key,
+		s.def,
+		s.cdef,
+		s.convert,
+		sub.(*subscription[map[string]any]),
+		cvs,
+	)
+}
+
 func GetMapPropertyFnFilteredByTaskType(value map[string]any) MapPropertyFnWithTaskTypeFilter {
 	return func(taskType enumsspb.TaskType) map[string]any {
 		return value
@@ -2477,6 +3133,22 @@ func (s DestinationMapSetting) Get(c *Collection) MapPropertyFnWithDestinationFi
 			precedenceDestination(namespace, destination),
 		)
 	}
+}
+
+func (s DestinationMapSetting) Subscribe(c *Collection, namespace string, destination string, f func(map[string]any)) (cancel func()) {
+	return c.subscribe(s, &subscription[map[string]any]{prec: precedenceDestination(namespace, destination), f: f})
+}
+
+func (s DestinationMapSetting) dispatchUpdate(c *Collection, sub any, cvs []ConstrainedValue) {
+	dispatchUpdate(
+		c,
+		s.key,
+		s.def,
+		s.cdef,
+		s.convert,
+		sub.(*subscription[map[string]any]),
+		cvs,
+	)
 }
 
 func GetMapPropertyFnFilteredByDestination(value map[string]any) MapPropertyFnWithDestinationFilter {
@@ -2539,6 +3211,22 @@ func (s GlobalTypedSetting[T]) Get(c *Collection) func() T {
 	}
 }
 
+func (s GlobalTypedSetting[T]) Subscribe(c *Collection, f func(T)) (cancel func()) {
+	return c.subscribe(s, &subscription[T]{prec: precedenceGlobal(), f: f})
+}
+
+func (s GlobalTypedSetting[T]) dispatchUpdate(c *Collection, sub any, cvs []ConstrainedValue) {
+	dispatchUpdate(
+		c,
+		s.key,
+		s.def,
+		s.cdef,
+		s.convert,
+		sub.(*subscription[T]),
+		cvs,
+	)
+}
+
 type NamespaceTypedSetting[T any] setting[T, func(namespace string)]
 
 // NewNamespaceTypedSetting creates a setting that uses mapstructure to handle complex structured
@@ -2591,6 +3279,22 @@ func (s NamespaceTypedSetting[T]) Get(c *Collection) func(namespace string) T {
 			precedenceNamespace(namespace),
 		)
 	}
+}
+
+func (s NamespaceTypedSetting[T]) Subscribe(c *Collection, namespace string, f func(T)) (cancel func()) {
+	return c.subscribe(s, &subscription[T]{prec: precedenceNamespace(namespace), f: f})
+}
+
+func (s NamespaceTypedSetting[T]) dispatchUpdate(c *Collection, sub any, cvs []ConstrainedValue) {
+	dispatchUpdate(
+		c,
+		s.key,
+		s.def,
+		s.cdef,
+		s.convert,
+		sub.(*subscription[T]),
+		cvs,
+	)
 }
 
 type NamespaceIDTypedSetting[T any] setting[T, func(namespaceID string)]
@@ -2647,6 +3351,22 @@ func (s NamespaceIDTypedSetting[T]) Get(c *Collection) func(namespaceID string) 
 	}
 }
 
+func (s NamespaceIDTypedSetting[T]) Subscribe(c *Collection, namespaceID string, f func(T)) (cancel func()) {
+	return c.subscribe(s, &subscription[T]{prec: precedenceNamespaceID(namespaceID), f: f})
+}
+
+func (s NamespaceIDTypedSetting[T]) dispatchUpdate(c *Collection, sub any, cvs []ConstrainedValue) {
+	dispatchUpdate(
+		c,
+		s.key,
+		s.def,
+		s.cdef,
+		s.convert,
+		sub.(*subscription[T]),
+		cvs,
+	)
+}
+
 type TaskQueueTypedSetting[T any] setting[T, func(namespace string, taskQueue string, taskQueueType enumspb.TaskQueueType)]
 
 // NewTaskQueueTypedSetting creates a setting that uses mapstructure to handle complex structured
@@ -2699,6 +3419,22 @@ func (s TaskQueueTypedSetting[T]) Get(c *Collection) func(namespace string, task
 			precedenceTaskQueue(namespace, taskQueue, taskQueueType),
 		)
 	}
+}
+
+func (s TaskQueueTypedSetting[T]) Subscribe(c *Collection, namespace string, taskQueue string, taskQueueType enumspb.TaskQueueType, f func(T)) (cancel func()) {
+	return c.subscribe(s, &subscription[T]{prec: precedenceTaskQueue(namespace, taskQueue, taskQueueType), f: f})
+}
+
+func (s TaskQueueTypedSetting[T]) dispatchUpdate(c *Collection, sub any, cvs []ConstrainedValue) {
+	dispatchUpdate(
+		c,
+		s.key,
+		s.def,
+		s.cdef,
+		s.convert,
+		sub.(*subscription[T]),
+		cvs,
+	)
 }
 
 type ShardIDTypedSetting[T any] setting[T, func(shardID int32)]
@@ -2755,6 +3491,22 @@ func (s ShardIDTypedSetting[T]) Get(c *Collection) func(shardID int32) T {
 	}
 }
 
+func (s ShardIDTypedSetting[T]) Subscribe(c *Collection, shardID int32, f func(T)) (cancel func()) {
+	return c.subscribe(s, &subscription[T]{prec: precedenceShardID(shardID), f: f})
+}
+
+func (s ShardIDTypedSetting[T]) dispatchUpdate(c *Collection, sub any, cvs []ConstrainedValue) {
+	dispatchUpdate(
+		c,
+		s.key,
+		s.def,
+		s.cdef,
+		s.convert,
+		sub.(*subscription[T]),
+		cvs,
+	)
+}
+
 type TaskTypeTypedSetting[T any] setting[T, func(taskType enumsspb.TaskType)]
 
 // NewTaskTypeTypedSetting creates a setting that uses mapstructure to handle complex structured
@@ -2809,6 +3561,22 @@ func (s TaskTypeTypedSetting[T]) Get(c *Collection) func(taskType enumsspb.TaskT
 	}
 }
 
+func (s TaskTypeTypedSetting[T]) Subscribe(c *Collection, taskType enumsspb.TaskType, f func(T)) (cancel func()) {
+	return c.subscribe(s, &subscription[T]{prec: precedenceTaskType(taskType), f: f})
+}
+
+func (s TaskTypeTypedSetting[T]) dispatchUpdate(c *Collection, sub any, cvs []ConstrainedValue) {
+	dispatchUpdate(
+		c,
+		s.key,
+		s.def,
+		s.cdef,
+		s.convert,
+		sub.(*subscription[T]),
+		cvs,
+	)
+}
+
 type DestinationTypedSetting[T any] setting[T, func(namespace string, destination string)]
 
 // NewDestinationTypedSetting creates a setting that uses mapstructure to handle complex structured
@@ -2861,4 +3629,20 @@ func (s DestinationTypedSetting[T]) Get(c *Collection) func(namespace string, de
 			precedenceDestination(namespace, destination),
 		)
 	}
+}
+
+func (s DestinationTypedSetting[T]) Subscribe(c *Collection, namespace string, destination string, f func(T)) (cancel func()) {
+	return c.subscribe(s, &subscription[T]{prec: precedenceDestination(namespace, destination), f: f})
+}
+
+func (s DestinationTypedSetting[T]) dispatchUpdate(c *Collection, sub any, cvs []ConstrainedValue) {
+	dispatchUpdate(
+		c,
+		s.key,
+		s.def,
+		s.cdef,
+		s.convert,
+		sub.(*subscription[T]),
+		cvs,
+	)
 }

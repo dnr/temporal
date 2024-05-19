@@ -77,7 +77,8 @@ type (
 		doneCh          <-chan interface{}
 
 		subscriptionLock sync.Mutex
-		subscriptions    map[any]ClientUpdateFunc
+		subscriptionIdx  int
+		subscriptions    map[int]ClientUpdateFunc
 	}
 
 	osReader struct {
@@ -123,16 +124,19 @@ func (fc *fileBasedClient) GetValue(key Key) []ConstrainedValue {
 	return values[strings.ToLower(key.String())]
 }
 
-func (fc *fileBasedClient) Subscribe(subscriptionKey any, f ClientUpdateFunc) {
+func (fc *fileBasedClient) Subscribe(subscriptionKey any, f ClientUpdateFunc) (cancel func()) {
 	fc.subscriptionLock.Lock()
 	defer fc.subscriptionLock.Unlock()
-	fc.subscriptions[subscriptionKey] = f
-}
 
-func (fc *fileBasedClient) CancelSubscribe(subscriptionKey any) {
-	fc.subscriptionLock.Lock()
-	defer fc.subscriptionLock.Unlock()
-	delete(fc.subscriptions, subscriptionKey)
+	fc.subscriptionIdx++
+	id := fc.subscriptionIdx
+	fc.subscriptions[id] = f
+
+	return func() {
+		fc.subscriptionLock.Lock()
+		defer fc.subscriptionLock.Unlock()
+		delete(fc.subscriptions, id)
+	}
 }
 
 func (fc *fileBasedClient) init() error {
@@ -189,13 +193,16 @@ func (fc *fileBasedClient) update() error {
 
 	prev := fc.values.Swap(newValues)
 	oldValues, _ := prev.(configValueMap)
+	changedMap := fc.diffAndLog(oldValues, newValues)
+	fc.logger.Info("Updated dynamic config")
 
 	fc.subscriptionLock.Lock()
 	subscriptions := maps.Values(fc.subscriptions)
 	fc.subscriptionLock.Unlock()
 
-	fc.diffAndLog(oldValues, newValues, subscriptions)
-	fc.logger.Info("Updated dynamic config")
+	for _, update := range subscriptions {
+		update(changedMap)
+	}
 
 	return nil
 }
@@ -257,17 +264,23 @@ func (fc *fileBasedClient) validateStaticConfig(config *FileBasedClientConfig) e
 	return nil
 }
 
-func (fc *fileBasedClient) diffAndLog(old configValueMap, new configValueMap, fs []ClientUpdateFunc) {
+func (fc *fileBasedClient) diffAndLog(old configValueMap, new configValueMap) map[Key][]ConstrainedValue {
+	changedMap := make(map[Key][]ConstrainedValue)
+
 	for key, newValues := range new {
 		oldValues, ok := old[key]
 		if !ok {
 			for _, newValue := range newValues {
 				// new key added
-				fc.diffAndLogValue(key, nil, &newValue, fs)
+				fc.diffAndLogValue(key, nil, &newValue)
 			}
+			changedMap[Key(key)] = newValues
 		} else {
 			// compare existing keys
-			fc.diffAndLogConstraints(key, oldValues, newValues, fs)
+			changed := fc.diffAndLogConstraints(key, oldValues, newValues)
+			if changed {
+				changedMap[Key(key)] = newValues
+			}
 		}
 	}
 
@@ -275,25 +288,31 @@ func (fc *fileBasedClient) diffAndLog(old configValueMap, new configValueMap, fs
 	for key, oldValues := range old {
 		if _, ok := new[key]; !ok {
 			for _, oldValue := range oldValues {
-				fc.diffAndLogValue(key, &oldValue, nil, fs)
+				fc.diffAndLogValue(key, &oldValue, nil)
 			}
+			changedMap[Key(key)] = nil
 		}
 	}
+
+	return changedMap
 }
 
-func (fc *fileBasedClient) diffAndLogConstraints(key string, oldValues []ConstrainedValue, newValues []ConstrainedValue, fs []ClientUpdateFunc) {
+func (fc *fileBasedClient) diffAndLogConstraints(key string, oldValues []ConstrainedValue, newValues []ConstrainedValue) bool {
+	changed := false
 	for _, oldValue := range oldValues {
 		matchFound := false
 		for _, newValue := range newValues {
 			if oldValue.Constraints == newValue.Constraints {
 				matchFound = true
 				if !reflect.DeepEqual(oldValue.Value, newValue.Value) {
-					fc.diffAndLogValue(key, &oldValue, &newValue, fs)
+					fc.diffAndLogValue(key, &oldValue, &newValue)
+					changed = true
 				}
 			}
 		}
 		if !matchFound {
-			fc.diffAndLogValue(key, &oldValue, nil, fs)
+			fc.diffAndLogValue(key, &oldValue, nil)
+			changed = true
 		}
 	}
 
@@ -305,12 +324,14 @@ func (fc *fileBasedClient) diffAndLogConstraints(key string, oldValues []Constra
 			}
 		}
 		if !matchFound {
-			fc.diffAndLogValue(key, nil, &newValue, fs)
+			fc.diffAndLogValue(key, nil, &newValue)
+			changed = true
 		}
 	}
+	return changed
 }
 
-func (fc *fileBasedClient) diffAndLogValue(key string, oldValue *ConstrainedValue, newValue *ConstrainedValue, fs []ClientUpdateFunc) {
+func (fc *fileBasedClient) diffAndLogValue(key string, oldValue *ConstrainedValue, newValue *ConstrainedValue) {
 	logLine := &strings.Builder{}
 	logLine.Grow(128)
 	logLine.WriteString("dynamic config changed for the key: ")
@@ -320,10 +341,6 @@ func (fc *fileBasedClient) diffAndLogValue(key string, oldValue *ConstrainedValu
 	logLine.WriteString(" newValue: ")
 	fc.appendConstrainedValue(logLine, newValue)
 	fc.logger.Info(logLine.String())
-	// call subscriptions
-	for _, f := range fs {
-		f(Key(key), newValue)
-	}
 }
 
 func (fc *fileBasedClient) appendConstrainedValue(logLine *strings.Builder, value *ConstrainedValue) {

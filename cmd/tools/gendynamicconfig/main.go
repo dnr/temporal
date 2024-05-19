@@ -187,8 +187,24 @@ func (s {{.P.Name}}TypedSetting[T]) Get(c *Collection) func({{.P.GoArgs}}) T {
 	}
 }
 
+{{if eq .P.Name "Global" -}}
+func (s {{.P.Name}}TypedSetting[T]) Subscribe(c *Collection, f func(T)) (cancel func()) {
+{{- else -}}
 func (s {{.P.Name}}TypedSetting[T]) Subscribe(c *Collection, {{.P.GoArgs}}, f func(T)) (cancel func()) {
-	return c.subscribe(s, precedence{{.P.Name}}({{.P.GoArgNames}}), f)
+{{- end}}
+	return c.subscribe(s, &subscription[T]{prec: precedence{{.P.Name}}({{.P.GoArgNames}}), f: f})
+}
+
+func (s {{.P.Name}}TypedSetting[T]) dispatchUpdate(c *Collection, sub any, cvs []ConstrainedValue) {
+	dispatchUpdate(
+		c,
+		s.key,
+		s.def,
+		s.cdef,
+		s.convert,
+		sub.(*subscription[T]),
+		cvs,
+	)
 }
 {{- else -}}
 type {{.P.Name}}{{.T.Name}}Setting setting[{{.T.GoType}}, func({{.P.GoArgs}})]
@@ -251,8 +267,24 @@ func (s {{.P.Name}}{{.T.Name}}Setting) Get(c *Collection) {{.T.Name}}PropertyFnW
 	}
 }
 
-func (s {{.P.Name}}{{.T.Name}}Setting) Subscribe(c *Collection, {{.P.GoArgs}}, func(T)) (cancel func()) {
-	return c.subscribe(s, precedence{{.P.Name}}({{.P.GoArgNames}}), f)
+{{if eq .P.Name "Global" -}}
+func (s {{.P.Name}}{{.T.Name}}Setting) Subscribe(c *Collection, f func({{.T.GoType}})) (cancel func()) {
+{{- else -}}
+func (s {{.P.Name}}{{.T.Name}}Setting) Subscribe(c *Collection, {{.P.GoArgs}}, f func({{.T.GoType}})) (cancel func()) {
+{{- end}}
+	return c.subscribe(s, &subscription[{{.T.GoType}}]{prec: precedence{{.P.Name}}({{.P.GoArgNames}}), f: f})
+}
+
+func (s {{.P.Name}}{{.T.Name}}Setting) dispatchUpdate(c *Collection, sub any, cvs []ConstrainedValue) {
+	dispatchUpdate(
+		c,
+		s.key,
+		s.def,
+		s.cdef,
+		s.convert,
+		sub.(*subscription[{{.T.GoType}}]),
+		cvs,
+	)
 }
 
 {{if eq .P.Name "Global" -}}
