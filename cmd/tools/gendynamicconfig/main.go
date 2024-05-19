@@ -186,6 +186,10 @@ func (s {{.P.Name}}TypedSetting[T]) Get(c *Collection) func({{.P.GoArgs}}) T {
 		)
 	}
 }
+
+func (s {{.P.Name}}TypedSetting[T]) Subscribe(c *Collection, {{.P.GoArgs}}, f func(T)) (cancel func()) {
+	return c.subscribe(s, precedence{{.P.Name}}({{.P.GoArgNames}}), f)
+}
 {{- else -}}
 type {{.P.Name}}{{.T.Name}}Setting setting[{{.T.GoType}}, func({{.P.GoArgs}})]
 
@@ -245,6 +249,10 @@ func (s {{.P.Name}}{{.T.Name}}Setting) Get(c *Collection) {{.T.Name}}PropertyFnW
 			precedence{{.P.Name}}({{.P.GoArgNames}}),
 		)
 	}
+}
+
+func (s {{.P.Name}}{{.T.Name}}Setting) Subscribe(c *Collection, {{.P.GoArgs}}, func(T)) (cancel func()) {
+	return c.subscribe(s, precedence{{.P.Name}}({{.P.GoArgNames}}), f)
 }
 
 {{if eq .P.Name "Global" -}}

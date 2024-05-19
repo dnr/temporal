@@ -28,6 +28,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -49,6 +50,15 @@ type (
 		client   Client
 		logger   log.Logger
 		errCount int64
+
+		subscriptionLock sync.Mutex
+		subscriptions    map[GenericSetting]map[int]subscription
+		subscriptionIdx  int
+	}
+
+	subscription struct {
+		prec []Constraints
+		f    any
 	}
 
 	// These function types follow a similar pattern:
@@ -80,10 +90,48 @@ var (
 
 // NewCollection creates a new collection
 func NewCollection(client Client, logger log.Logger) *Collection {
-	return &Collection{
-		client:   client,
-		logger:   logger,
-		errCount: -1,
+	col := &Collection{
+		client:        client,
+		logger:        logger,
+		errCount:      -1,
+		subscriptions: make(map[GenericSetting]map[int]subscription),
+	}
+	if subcli, ok := client.(SubscribableClient); ok {
+		subcli.Subscribe(col, col.keyChanged)
+	}
+	return col
+}
+
+func (c *Collection) Stop() {
+	if subcli, ok := c.client.(SubscribableClient); ok {
+		subcli.CancelSubscribe(col, col.keyChanged)
+	}
+}
+
+func (c *Collection) keyChanged(key Key, cv *ConstrainedValue) {
+	s.subscriptionLock.Lock()
+	defer s.subscriptionLock.Unlock()
+
+	for _, sub := range s.subscriptions[setting] {
+
+	}
+}
+
+func (c *Collection) subscribe(s GenericSetting, prec []Constraints, f any) (cancel func()) {
+	s.subscriptionLock.Lock()
+	defer s.subscriptionLock.Unlock()
+	subscriptionIdx++
+	id := subscriptionIdx
+
+	if s.subscriptions[s] == nil {
+		s.subscriptions[s] = make(map[int]subscription)
+	}
+	s.subscriptions[s][id] = subscription{prec: prec, f: f}
+
+	return func() {
+		s.subscriptionLock.Lock()
+		defer s.subscriptionLock.Unlock()
+		delete(s.subscriptions[s][id])
 	}
 }
 
@@ -93,11 +141,6 @@ func (c *Collection) throttleLog() bool {
 	errCount := atomic.AddInt64(&c.errCount, 1)
 	// log only the first x errors and then one every x after that to reduce log noise
 	return errCount < errCountLogThreshold || errCount%errCountLogThreshold == 0
-}
-
-func (c *Collection) HasKey(key Key) bool {
-	cvs := c.client.GetValue(key)
-	return len(cvs) > 0
 }
 
 func findMatch[T any](cvs []ConstrainedValue, defaultCVs []TypedConstrainedValue[T], precedence []Constraints) (any, error) {
