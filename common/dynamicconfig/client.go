@@ -51,6 +51,15 @@ type (
 		GetValue(key Key) []ConstrainedValue
 	}
 
+	SubscribableClient interface {
+		Subscribe(subscriptionKey any, update ClientUpdateFunc)
+		CancelSubscribe(subscriptionKey any, update ClientUpdateFunc)
+	}
+
+	// Called with modified key on any change to the current value set.
+	// Deleted keys/constraints will get a nil value.
+	ClientUpdateFunc func(Key, *ConstrainedValue)
+
 	// Key is a key/property stored in dynamic config. For convenience, it is recommended that
 	// you treat keys as case-insensitive.
 	Key string
