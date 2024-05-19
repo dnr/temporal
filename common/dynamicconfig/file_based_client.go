@@ -214,7 +214,7 @@ func loadFile(contents []byte) (configValueMap, *LoadResult) {
 	newValues := make(configValueMap, len(yamlValues))
 	for key, yamlCV := range yamlValues {
 		precedence := PrecedenceUnknown
-		setting := globalRegistry.query(Key(key))
+		setting := queryRegistry(Key(key))
 		if setting == nil {
 			lr.warnf("unregistered key %q", key)
 		} else {

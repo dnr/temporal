@@ -55,7 +55,7 @@ func register(s GenericSetting) {
 	globalRegistry.settings[keyStr] = s
 }
 
-func (r *registry) query(k Key) GenericSetting {
+func queryRegistry(k Key) GenericSetting {
 	if !globalRegistry.queried.Load() {
 		globalRegistry.queried.Store(true)
 	}
