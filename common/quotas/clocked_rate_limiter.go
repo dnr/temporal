@@ -54,6 +54,14 @@ func NewClockedRateLimiter(rateLimiter *rate.Limiter, timeSource clock.TimeSourc
 	}
 }
 
+func (l ClockedRateLimiter) Limit() float64 {
+	return float64(l.rateLimiter.Limit())
+}
+
+func (l ClockedRateLimiter) Burst() int {
+	return l.rateLimiter.Burst()
+}
+
 func (l ClockedRateLimiter) Allow() bool {
 	return l.AllowN(l.timeSource.Now(), 1)
 }

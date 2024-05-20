@@ -178,8 +178,9 @@ func (rl *HealthRequestRateLimiterImpl) refreshRate() {
 	}
 	rl.curRateMultiplier.Store(&curRateMultiplier)
 	// Always set rate to pickup changes to underlying rate limit dynamic config
-	rl.rateLimiter.SetRPS(curRateMultiplier * rl.rateBurst.Rate())
-	rl.rateLimiter.SetBurst(int(curRateMultiplier * float64(rl.rateBurst.Burst())))
+	rl.rateLimiter.SetRateBurst(
+		curRateMultiplier*rl.rateBurst.Rate(),
+		int(curRateMultiplier*float64(rl.rateBurst.Burst())))
 }
 
 func (rl *HealthRequestRateLimiterImpl) refreshDynamicParams() {
