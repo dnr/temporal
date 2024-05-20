@@ -46,12 +46,10 @@ var _ RateLimiter = (*RateLimiterImpl)(nil)
 func NewRateLimiter(newRPS float64, newBurst int) *RateLimiterImpl {
 	limiter := rate.NewLimiter(rate.Limit(newRPS), newBurst)
 	ts := clock.NewRealTimeSource()
-	rl := &RateLimiterImpl{
+	return &RateLimiterImpl{
 		timeSource:         ts,
 		ClockedRateLimiter: NewClockedRateLimiter(limiter, ts),
 	}
-
-	return rl
 }
 
 func (rl *RateLimiterImpl) Reserve() Reservation {
@@ -62,11 +60,32 @@ func (rl *RateLimiterImpl) ReserveN(now time.Time, n int) Reservation {
 	return rl.ClockedRateLimiter.ReserveN(now, n)
 }
 
-// SetRateBurst set the rps & burst of the rate limiter
+func (rl *RateLimiterImpl) SetRate(rps float64) {
+	now := rl.timeSource.Now()
+	rl.SetLimitAt(now, rate.Limit(rps))
+	// FIXME: ugh, need to set burst if from ratio
+}
+
+func (rl *RateLimiterImpl) SetBurst(burst int) {
+	now := rl.timeSource.Now()
+	rl.SetBurstAt(now, burst)
+}
+
+func (rl *RateLimiterImpl) SetBurstRatio(burstRatio float64) {
+	now := rl.timeSource.Now()
+	rl.SetBurstAt(now, int(rl.Rate()*burst))
+}
+
 func (rl *RateLimiterImpl) SetRateBurst(rps float64, burst int) {
 	now := rl.timeSource.Now()
 	rl.SetLimitAt(now, rate.Limit(rps))
 	rl.SetBurstAt(now, burst)
+}
+
+func (rl *RateLimiterImpl) SetRateBurstRatio(rps float64, burstRatio float64) {
+	now := rl.timeSource.Now()
+	rl.SetLimitAt(now, rate.Limit(rps))
+	rl.SetBurstAt(now, int(rps*burst))
 }
 
 // Rate returns the rps for this rate limiter
