@@ -164,12 +164,15 @@ func (fc *fileBasedClient) Update() error {
 	}
 
 	newValues, lr := loadFile(contents)
-	if len(lr.Errors) > 0 {
-		return fmt.Errorf("loading dynamic config failed: %d errors, %d warnings: %w",
-			len(lr.Errors), len(lr.Warnings), errors.Join(lr.Errors...))
+	for _, e := range lr.Errors {
+		fc.logger.Warn("dynamic config error", tag.Error(e))
 	}
 	for _, w := range lr.Warnings {
-		fc.logger.Warn("dynamic config warning: %w", tag.Error(w))
+		fc.logger.Warn("dynamic config warning", tag.Error(w))
+	}
+	if len(lr.Errors) > 0 {
+		return fmt.Errorf("loading dynamic config failed: %d errors, %d warnings",
+			len(lr.Errors), len(lr.Warnings))
 	}
 
 	prev := fc.values.Swap(newValues)
@@ -203,19 +206,23 @@ func loadFile(contents []byte) (configValueMap, *LoadResult) {
 
 		cvs := make([]ConstrainedValue, len(yamlCV))
 		for i, cv := range yamlCV {
-			// yaml will unmarshal map into map[any]any instead of map[string]any
-			// manually convert key type to string for all values here
-			val := convertKeyTypeToString(cv.Value, lr)
-			cvs[i].Value = val
-
 			// try validating if known setting
 			if setting != nil {
-				if valErr := setting.Validate(val); valErr != nil {
+				if valErr := setting.Validate(cv.Value); valErr != nil {
 					// TODO: raise this to error level
-					lr.warnf("validation failed: key %q value %v: %w", key, val, valErr)
+					lr.warnf("validation failed: key %q value %v: %w", key, cv.Value, valErr)
 				}
 			}
 
+			// For maps, apply strict validation to match previous behavior.
+			// TODO: remove this when the Validate above is at error level.
+			if _, ok := cv.Value.(map[any]any); ok {
+				if _, err := convertMap(cv.Value); err != nil {
+					lr.error(err)
+				}
+			}
+
+			cvs[i].Value = cv.Value
 			cvs[i].Constraints = convertYamlConstraints(key, cv.Constraints, precedence, lr)
 		}
 		newValues[strings.ToLower(key)] = cvs
@@ -330,37 +337,6 @@ func (fc *fileBasedClient) appendConstrainedValue(logLine *strings.Builder, valu
 		}
 		logLine.WriteString(fmt.Sprint("} value: ", value.Value, " }"))
 	}
-}
-
-func convertKeyTypeToString(v any, lr *LoadResult) any {
-	switch v := v.(type) {
-	case map[any]any:
-		return convertKeyTypeToStringMap(v, lr)
-	case []any:
-		return convertKeyTypeToStringSlice(v, lr)
-	default:
-		return v
-	}
-}
-
-func convertKeyTypeToStringMap(m map[any]any, lr *LoadResult) map[string]any {
-	stringKeyMap := make(map[string]any, len(m))
-	for key, value := range m {
-		if stringKey, ok := key.(string); !ok {
-			lr.errorf("type of key %v is not string", key)
-		} else {
-			stringKeyMap[stringKey] = convertKeyTypeToString(value, lr)
-		}
-	}
-	return stringKeyMap
-}
-
-func convertKeyTypeToStringSlice(s []any, lr *LoadResult) []any {
-	stringKeySlice := make([]any, len(s))
-	for idx, value := range s {
-		stringKeySlice[idx] = convertKeyTypeToString(value, lr)
-	}
-	return stringKeySlice
 }
 
 func convertYamlConstraints(key string, m map[string]any, precedence Precedence, lr *LoadResult) Constraints {
