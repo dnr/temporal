@@ -559,3 +559,96 @@ testGetFloat64PropertyKey:
 	s.NoError(err)
 	close(doneCh)
 }
+
+func (s *fileBasedClientSuite) TestWarnUnregisteredKey() {
+	dynamicconfig.NewGlobalIntSetting(testGetIntPropertyKey, 0, "")
+
+	lr := dynamicconfig.ValidateFile([]byte(`
+testGetIntPropertyKey:
+- value: 2000
+testGetFloat64PropertyKey:
+- value: 22.222
+`))
+	s.Empty(lr.Errors)
+	s.Equal(1, len(lr.Warnings))
+	s.ErrorContains(lr.Warnings[0], `unregistered key "testGetFloat64PropertyKey"`)
+}
+
+func (s *fileBasedClientSuite) TestWarnValidationInt() {
+	dynamicconfig.NewGlobalIntSetting(testGetIntPropertyKey, 0, "")
+
+	lr := dynamicconfig.ValidateFile([]byte(`
+testGetIntPropertyKey:
+- value: not a number
+`))
+	s.Empty(lr.Errors)
+	s.Equal(1, len(lr.Warnings))
+	s.ErrorContains(lr.Warnings[0], `validation failed: key "testGetIntPropertyKey" value not a number: value type is not int`)
+}
+
+func (s *fileBasedClientSuite) TestWarnConstraint() {
+	dynamicconfig.NewGlobalIntSetting(testGetIntPropertyKey, 0, "")
+
+	lr := dynamicconfig.ValidateFile([]byte(`
+testGetIntPropertyKey:
+- value: 5005
+  constraints:
+    namespace: samples-namespace
+`))
+	s.Empty(lr.Errors)
+	s.Equal(1, len(lr.Warnings))
+	s.ErrorContains(lr.Warnings[0], `constraint "namespace" isn't valid for dynamic config key "testGetIntPropertyKey"`)
+}
+
+func (s *fileBasedClientSuite) TestWarnMultiple() {
+	dynamicconfig.NewGlobalIntSetting(testGetIntPropertyKey, 0, "")
+
+	lr := dynamicconfig.ValidateFile([]byte(`
+unknownKey:
+- value: "5d"
+testGetIntPropertyKey:
+- value: not a number
+  constraints:
+    namespace: samples-namespace
+`))
+	s.Empty(lr.Errors)
+	s.Equal(3, len(lr.Warnings))
+}
+
+func (s *fileBasedClientSuite) TestErrorYamlDecode() {
+	lr := dynamicconfig.ValidateFile([]byte(`}}}}}}}}}`))
+	s.Equal(1, len(lr.Errors))
+	s.ErrorContains(lr.Errors[0], "decode error")
+}
+
+func (s *fileBasedClientSuite) TestErrorBadConstraint() {
+	dynamicconfig.NewNamespaceBoolSetting(testGetBoolPropertyKey, true, "")
+
+	lr := dynamicconfig.ValidateFile([]byte(`
+testGetBoolPropertyKey:
+- value: false
+  constraints:
+    namespace: 35
+`))
+	s.Equal(1, len(lr.Errors))
+	s.ErrorContains(lr.Errors[0], "namespace constraint must be string")
+}
+
+func (s *fileBasedClientSuite) TestErrorBadConstraints() {
+	dynamicconfig.NewTaskQueueBoolSetting(testGetBoolPropertyKey, true, "")
+
+	lr := dynamicconfig.ValidateFile([]byte(`
+testGetBoolPropertyKey:
+- value: false
+  constraints:
+    taskQueueName: 22
+    taskType: invalid
+- value: true
+  constraints:
+    color: blue
+`))
+	s.Equal(3, len(lr.Errors))
+	s.ErrorContains(lr.Errors[0], "taskQueueName constraint must be string")
+	s.ErrorContains(lr.Errors[1], "invalid value for taskType")
+	s.ErrorContains(lr.Errors[2], `unknown constraint type "color"`)
+}
