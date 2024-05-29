@@ -296,10 +296,23 @@ func convertBool(val any) (bool, error) {
 }
 
 func convertMap(val any) (map[string]any, error) {
-	if mapVal, ok := val.(map[string]any); ok {
-		return mapVal, nil
+	switch val := val.(type) {
+	case map[string]any:
+		return val, nil
+	case map[any]any:
+		// convert keys to strings
+		out := make(map[string]any, len(val))
+		for k, v := range val {
+			if kStr, ok := k.(string); ok {
+				out[kStr] = v
+			} else {
+				return nil, fmt.Errorf("type of map key %v is not string", k)
+			}
+		}
+		return out, nil
+	default:
+		return nil, errors.New("value type is not map")
 	}
-	return nil, errors.New("value type is not map")
 }
 
 // ConvertStructure can be used as a conversion function for New*TypedSettingWithConverter.

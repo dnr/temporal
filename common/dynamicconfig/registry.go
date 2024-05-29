@@ -61,3 +61,9 @@ func queryRegistry(k Key) GenericSetting {
 	}
 	return globalRegistry.settings[strings.ToLower(k.String())]
 }
+
+// For testing only; do not call from regular code!
+func ResetRegistryForTest() {
+	globalRegistry.settings = nil
+	globalRegistry.queried.Store(false)
+}
