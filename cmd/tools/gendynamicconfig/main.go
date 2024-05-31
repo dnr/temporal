@@ -164,13 +164,25 @@ func New{{.P.Name}}TypedSettingWithConverter[T any](key Key, convert func(any) (
 func (s {{.P.Name}}TypedSetting[T]) Key() Key               { return s.key }
 func (s {{.P.Name}}TypedSetting[T]) Precedence() Precedence { return Precedence{{.P.Name}} }
 func (s {{.P.Name}}TypedSetting[T]) Validate(v any) error {
-	_, err := s.convert(v)
+	tv, err := s.convert(v)
+	if err != nil {
+		return err
+	}
+	if s.validate != nil {
+		return s.validate(tv)
+	}
 	return err
 }
 
 func (s {{.P.Name}}TypedSetting[T]) WithDefault(v T) {{.P.Name}}TypedSetting[T] {
 	newS := s
 	newS.def = v
+	return newS
+}
+
+func (s {{.P.Name}}TypedSetting[T]) WithValidator(f func(T) error) {{.P.Name}}TypedSetting[T] {
+	newS := s
+	newS.validate = f
 	return newS
 }
 
@@ -191,6 +203,7 @@ func (s {{.P.Name}}TypedSetting[T]) Get(c *Collection) TypedPropertyFnWith{{.P.N
 			s.key,
 			s.def,
 			s.convert,
+			s.validate,
 			precedence{{.P.Name}}({{.P.GoArgNames}}),
 		)
 	}
@@ -234,7 +247,13 @@ func New{{.P.Name}}{{.T.Name}}SettingWithConstrainedDefault(key Key, cdef []Type
 func (s {{.P.Name}}{{.T.Name}}Setting) Key() Key               { return s.key }
 func (s {{.P.Name}}{{.T.Name}}Setting) Precedence() Precedence { return Precedence{{.P.Name}} }
 func (s {{.P.Name}}{{.T.Name}}Setting) Validate(v any) error {
-	_, err := s.convert(v)
+	tv, err := s.convert(v)
+	if err != nil {
+		return err
+	}
+	if s.validate != nil {
+		return s.validate(tv)
+	}
 	return err
 }
 
@@ -242,6 +261,25 @@ func (s {{.P.Name}}{{.T.Name}}Setting) WithDefault(v {{.T.GoType}}) {{.P.Name}}{
 	newS := s
 	newS.def = v
 	return newS
+}
+
+func (s {{.P.Name}}{{.T.Name}}Setting) WithValidator(f func({{.T.GoType}}) error) {{.P.Name}}{{.T.Name}}Setting {
+	newS := s
+	newS.validate = f
+	return newS
+}
+
+func (s {{.P.Name}}{{.T.Name}}ConstrainedDefaultSetting) Key() Key               { return s.key }
+func (s {{.P.Name}}{{.T.Name}}ConstrainedDefaultSetting) Precedence() Precedence { return Precedence{{.P.Name}} }
+func (s {{.P.Name}}{{.T.Name}}ConstrainedDefaultSetting) Validate(v any) error {
+	tv, err := s.convert(v)
+	if err != nil {
+		return err
+	}
+	if s.validate != nil {
+		return s.validate(tv)
+	}
+	return err
 }
 
 {{if eq .P.Name "Global" -}}
@@ -261,6 +299,7 @@ func (s {{.P.Name}}{{.T.Name}}Setting) Get(c *Collection) {{.T.Name}}PropertyFnW
 			s.key,
 			s.def,
 			s.convert,
+			s.validate,
 			precedence{{.P.Name}}({{.P.GoArgNames}}),
 		)
 	}
@@ -277,6 +316,7 @@ func (s {{.P.Name}}{{.T.Name}}ConstrainedDefaultSetting) Get(c *Collection) {{.T
 			s.key,
 			s.cdef,
 			s.convert,
+			s.validate,
 			precedence{{.P.Name}}({{.P.GoArgNames}}),
 		)
 	}

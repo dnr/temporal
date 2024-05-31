@@ -77,7 +77,13 @@ func NewGlobalBoolSettingWithConstrainedDefault(key Key, cdef []TypedConstrained
 func (s GlobalBoolSetting) Key() Key               { return s.key }
 func (s GlobalBoolSetting) Precedence() Precedence { return PrecedenceGlobal }
 func (s GlobalBoolSetting) Validate(v any) error {
-	_, err := s.convert(v)
+	tv, err := s.convert(v)
+	if err != nil {
+		return err
+	}
+	if s.validate != nil {
+		return s.validate(tv)
+	}
 	return err
 }
 
@@ -85,6 +91,25 @@ func (s GlobalBoolSetting) WithDefault(v bool) GlobalBoolSetting {
 	newS := s
 	newS.def = v
 	return newS
+}
+
+func (s GlobalBoolSetting) WithValidator(f func(bool) error) GlobalBoolSetting {
+	newS := s
+	newS.validate = f
+	return newS
+}
+
+func (s GlobalBoolConstrainedDefaultSetting) Key() Key               { return s.key }
+func (s GlobalBoolConstrainedDefaultSetting) Precedence() Precedence { return PrecedenceGlobal }
+func (s GlobalBoolConstrainedDefaultSetting) Validate(v any) error {
+	tv, err := s.convert(v)
+	if err != nil {
+		return err
+	}
+	if s.validate != nil {
+		return s.validate(tv)
+	}
+	return err
 }
 
 type BoolPropertyFn func() bool
@@ -96,6 +121,7 @@ func (s GlobalBoolSetting) Get(c *Collection) BoolPropertyFn {
 			s.key,
 			s.def,
 			s.convert,
+			s.validate,
 			precedenceGlobal(),
 		)
 	}
@@ -108,6 +134,7 @@ func (s GlobalBoolConstrainedDefaultSetting) Get(c *Collection) BoolPropertyFn {
 			s.key,
 			s.cdef,
 			s.convert,
+			s.validate,
 			precedenceGlobal(),
 		)
 	}
@@ -147,7 +174,13 @@ func NewNamespaceBoolSettingWithConstrainedDefault(key Key, cdef []TypedConstrai
 func (s NamespaceBoolSetting) Key() Key               { return s.key }
 func (s NamespaceBoolSetting) Precedence() Precedence { return PrecedenceNamespace }
 func (s NamespaceBoolSetting) Validate(v any) error {
-	_, err := s.convert(v)
+	tv, err := s.convert(v)
+	if err != nil {
+		return err
+	}
+	if s.validate != nil {
+		return s.validate(tv)
+	}
 	return err
 }
 
@@ -155,6 +188,25 @@ func (s NamespaceBoolSetting) WithDefault(v bool) NamespaceBoolSetting {
 	newS := s
 	newS.def = v
 	return newS
+}
+
+func (s NamespaceBoolSetting) WithValidator(f func(bool) error) NamespaceBoolSetting {
+	newS := s
+	newS.validate = f
+	return newS
+}
+
+func (s NamespaceBoolConstrainedDefaultSetting) Key() Key               { return s.key }
+func (s NamespaceBoolConstrainedDefaultSetting) Precedence() Precedence { return PrecedenceNamespace }
+func (s NamespaceBoolConstrainedDefaultSetting) Validate(v any) error {
+	tv, err := s.convert(v)
+	if err != nil {
+		return err
+	}
+	if s.validate != nil {
+		return s.validate(tv)
+	}
+	return err
 }
 
 type BoolPropertyFnWithNamespaceFilter func(namespace string) bool
@@ -166,6 +218,7 @@ func (s NamespaceBoolSetting) Get(c *Collection) BoolPropertyFnWithNamespaceFilt
 			s.key,
 			s.def,
 			s.convert,
+			s.validate,
 			precedenceNamespace(namespace),
 		)
 	}
@@ -178,6 +231,7 @@ func (s NamespaceBoolConstrainedDefaultSetting) Get(c *Collection) BoolPropertyF
 			s.key,
 			s.cdef,
 			s.convert,
+			s.validate,
 			precedenceNamespace(namespace),
 		)
 	}
@@ -217,7 +271,13 @@ func NewNamespaceIDBoolSettingWithConstrainedDefault(key Key, cdef []TypedConstr
 func (s NamespaceIDBoolSetting) Key() Key               { return s.key }
 func (s NamespaceIDBoolSetting) Precedence() Precedence { return PrecedenceNamespaceID }
 func (s NamespaceIDBoolSetting) Validate(v any) error {
-	_, err := s.convert(v)
+	tv, err := s.convert(v)
+	if err != nil {
+		return err
+	}
+	if s.validate != nil {
+		return s.validate(tv)
+	}
 	return err
 }
 
@@ -225,6 +285,25 @@ func (s NamespaceIDBoolSetting) WithDefault(v bool) NamespaceIDBoolSetting {
 	newS := s
 	newS.def = v
 	return newS
+}
+
+func (s NamespaceIDBoolSetting) WithValidator(f func(bool) error) NamespaceIDBoolSetting {
+	newS := s
+	newS.validate = f
+	return newS
+}
+
+func (s NamespaceIDBoolConstrainedDefaultSetting) Key() Key               { return s.key }
+func (s NamespaceIDBoolConstrainedDefaultSetting) Precedence() Precedence { return PrecedenceNamespaceID }
+func (s NamespaceIDBoolConstrainedDefaultSetting) Validate(v any) error {
+	tv, err := s.convert(v)
+	if err != nil {
+		return err
+	}
+	if s.validate != nil {
+		return s.validate(tv)
+	}
+	return err
 }
 
 type BoolPropertyFnWithNamespaceIDFilter func(namespaceID string) bool
@@ -236,6 +315,7 @@ func (s NamespaceIDBoolSetting) Get(c *Collection) BoolPropertyFnWithNamespaceID
 			s.key,
 			s.def,
 			s.convert,
+			s.validate,
 			precedenceNamespaceID(namespaceID),
 		)
 	}
@@ -248,6 +328,7 @@ func (s NamespaceIDBoolConstrainedDefaultSetting) Get(c *Collection) BoolPropert
 			s.key,
 			s.cdef,
 			s.convert,
+			s.validate,
 			precedenceNamespaceID(namespaceID),
 		)
 	}
@@ -287,7 +368,13 @@ func NewTaskQueueBoolSettingWithConstrainedDefault(key Key, cdef []TypedConstrai
 func (s TaskQueueBoolSetting) Key() Key               { return s.key }
 func (s TaskQueueBoolSetting) Precedence() Precedence { return PrecedenceTaskQueue }
 func (s TaskQueueBoolSetting) Validate(v any) error {
-	_, err := s.convert(v)
+	tv, err := s.convert(v)
+	if err != nil {
+		return err
+	}
+	if s.validate != nil {
+		return s.validate(tv)
+	}
 	return err
 }
 
@@ -295,6 +382,25 @@ func (s TaskQueueBoolSetting) WithDefault(v bool) TaskQueueBoolSetting {
 	newS := s
 	newS.def = v
 	return newS
+}
+
+func (s TaskQueueBoolSetting) WithValidator(f func(bool) error) TaskQueueBoolSetting {
+	newS := s
+	newS.validate = f
+	return newS
+}
+
+func (s TaskQueueBoolConstrainedDefaultSetting) Key() Key               { return s.key }
+func (s TaskQueueBoolConstrainedDefaultSetting) Precedence() Precedence { return PrecedenceTaskQueue }
+func (s TaskQueueBoolConstrainedDefaultSetting) Validate(v any) error {
+	tv, err := s.convert(v)
+	if err != nil {
+		return err
+	}
+	if s.validate != nil {
+		return s.validate(tv)
+	}
+	return err
 }
 
 type BoolPropertyFnWithTaskQueueFilter func(namespace string, taskQueue string, taskQueueType enumspb.TaskQueueType) bool
@@ -306,6 +412,7 @@ func (s TaskQueueBoolSetting) Get(c *Collection) BoolPropertyFnWithTaskQueueFilt
 			s.key,
 			s.def,
 			s.convert,
+			s.validate,
 			precedenceTaskQueue(namespace, taskQueue, taskQueueType),
 		)
 	}
@@ -318,6 +425,7 @@ func (s TaskQueueBoolConstrainedDefaultSetting) Get(c *Collection) BoolPropertyF
 			s.key,
 			s.cdef,
 			s.convert,
+			s.validate,
 			precedenceTaskQueue(namespace, taskQueue, taskQueueType),
 		)
 	}
@@ -357,7 +465,13 @@ func NewShardIDBoolSettingWithConstrainedDefault(key Key, cdef []TypedConstraine
 func (s ShardIDBoolSetting) Key() Key               { return s.key }
 func (s ShardIDBoolSetting) Precedence() Precedence { return PrecedenceShardID }
 func (s ShardIDBoolSetting) Validate(v any) error {
-	_, err := s.convert(v)
+	tv, err := s.convert(v)
+	if err != nil {
+		return err
+	}
+	if s.validate != nil {
+		return s.validate(tv)
+	}
 	return err
 }
 
@@ -365,6 +479,25 @@ func (s ShardIDBoolSetting) WithDefault(v bool) ShardIDBoolSetting {
 	newS := s
 	newS.def = v
 	return newS
+}
+
+func (s ShardIDBoolSetting) WithValidator(f func(bool) error) ShardIDBoolSetting {
+	newS := s
+	newS.validate = f
+	return newS
+}
+
+func (s ShardIDBoolConstrainedDefaultSetting) Key() Key               { return s.key }
+func (s ShardIDBoolConstrainedDefaultSetting) Precedence() Precedence { return PrecedenceShardID }
+func (s ShardIDBoolConstrainedDefaultSetting) Validate(v any) error {
+	tv, err := s.convert(v)
+	if err != nil {
+		return err
+	}
+	if s.validate != nil {
+		return s.validate(tv)
+	}
+	return err
 }
 
 type BoolPropertyFnWithShardIDFilter func(shardID int32) bool
@@ -376,6 +509,7 @@ func (s ShardIDBoolSetting) Get(c *Collection) BoolPropertyFnWithShardIDFilter {
 			s.key,
 			s.def,
 			s.convert,
+			s.validate,
 			precedenceShardID(shardID),
 		)
 	}
@@ -388,6 +522,7 @@ func (s ShardIDBoolConstrainedDefaultSetting) Get(c *Collection) BoolPropertyFnW
 			s.key,
 			s.cdef,
 			s.convert,
+			s.validate,
 			precedenceShardID(shardID),
 		)
 	}
@@ -427,7 +562,13 @@ func NewTaskTypeBoolSettingWithConstrainedDefault(key Key, cdef []TypedConstrain
 func (s TaskTypeBoolSetting) Key() Key               { return s.key }
 func (s TaskTypeBoolSetting) Precedence() Precedence { return PrecedenceTaskType }
 func (s TaskTypeBoolSetting) Validate(v any) error {
-	_, err := s.convert(v)
+	tv, err := s.convert(v)
+	if err != nil {
+		return err
+	}
+	if s.validate != nil {
+		return s.validate(tv)
+	}
 	return err
 }
 
@@ -435,6 +576,25 @@ func (s TaskTypeBoolSetting) WithDefault(v bool) TaskTypeBoolSetting {
 	newS := s
 	newS.def = v
 	return newS
+}
+
+func (s TaskTypeBoolSetting) WithValidator(f func(bool) error) TaskTypeBoolSetting {
+	newS := s
+	newS.validate = f
+	return newS
+}
+
+func (s TaskTypeBoolConstrainedDefaultSetting) Key() Key               { return s.key }
+func (s TaskTypeBoolConstrainedDefaultSetting) Precedence() Precedence { return PrecedenceTaskType }
+func (s TaskTypeBoolConstrainedDefaultSetting) Validate(v any) error {
+	tv, err := s.convert(v)
+	if err != nil {
+		return err
+	}
+	if s.validate != nil {
+		return s.validate(tv)
+	}
+	return err
 }
 
 type BoolPropertyFnWithTaskTypeFilter func(taskType enumsspb.TaskType) bool
@@ -446,6 +606,7 @@ func (s TaskTypeBoolSetting) Get(c *Collection) BoolPropertyFnWithTaskTypeFilter
 			s.key,
 			s.def,
 			s.convert,
+			s.validate,
 			precedenceTaskType(taskType),
 		)
 	}
@@ -458,6 +619,7 @@ func (s TaskTypeBoolConstrainedDefaultSetting) Get(c *Collection) BoolPropertyFn
 			s.key,
 			s.cdef,
 			s.convert,
+			s.validate,
 			precedenceTaskType(taskType),
 		)
 	}
@@ -497,7 +659,13 @@ func NewDestinationBoolSettingWithConstrainedDefault(key Key, cdef []TypedConstr
 func (s DestinationBoolSetting) Key() Key               { return s.key }
 func (s DestinationBoolSetting) Precedence() Precedence { return PrecedenceDestination }
 func (s DestinationBoolSetting) Validate(v any) error {
-	_, err := s.convert(v)
+	tv, err := s.convert(v)
+	if err != nil {
+		return err
+	}
+	if s.validate != nil {
+		return s.validate(tv)
+	}
 	return err
 }
 
@@ -505,6 +673,25 @@ func (s DestinationBoolSetting) WithDefault(v bool) DestinationBoolSetting {
 	newS := s
 	newS.def = v
 	return newS
+}
+
+func (s DestinationBoolSetting) WithValidator(f func(bool) error) DestinationBoolSetting {
+	newS := s
+	newS.validate = f
+	return newS
+}
+
+func (s DestinationBoolConstrainedDefaultSetting) Key() Key               { return s.key }
+func (s DestinationBoolConstrainedDefaultSetting) Precedence() Precedence { return PrecedenceDestination }
+func (s DestinationBoolConstrainedDefaultSetting) Validate(v any) error {
+	tv, err := s.convert(v)
+	if err != nil {
+		return err
+	}
+	if s.validate != nil {
+		return s.validate(tv)
+	}
+	return err
 }
 
 type BoolPropertyFnWithDestinationFilter func(namespace string, destination string) bool
@@ -516,6 +703,7 @@ func (s DestinationBoolSetting) Get(c *Collection) BoolPropertyFnWithDestination
 			s.key,
 			s.def,
 			s.convert,
+			s.validate,
 			precedenceDestination(namespace, destination),
 		)
 	}
@@ -528,6 +716,7 @@ func (s DestinationBoolConstrainedDefaultSetting) Get(c *Collection) BoolPropert
 			s.key,
 			s.cdef,
 			s.convert,
+			s.validate,
 			precedenceDestination(namespace, destination),
 		)
 	}
@@ -567,7 +756,13 @@ func NewGlobalIntSettingWithConstrainedDefault(key Key, cdef []TypedConstrainedV
 func (s GlobalIntSetting) Key() Key               { return s.key }
 func (s GlobalIntSetting) Precedence() Precedence { return PrecedenceGlobal }
 func (s GlobalIntSetting) Validate(v any) error {
-	_, err := s.convert(v)
+	tv, err := s.convert(v)
+	if err != nil {
+		return err
+	}
+	if s.validate != nil {
+		return s.validate(tv)
+	}
 	return err
 }
 
@@ -575,6 +770,25 @@ func (s GlobalIntSetting) WithDefault(v int) GlobalIntSetting {
 	newS := s
 	newS.def = v
 	return newS
+}
+
+func (s GlobalIntSetting) WithValidator(f func(int) error) GlobalIntSetting {
+	newS := s
+	newS.validate = f
+	return newS
+}
+
+func (s GlobalIntConstrainedDefaultSetting) Key() Key               { return s.key }
+func (s GlobalIntConstrainedDefaultSetting) Precedence() Precedence { return PrecedenceGlobal }
+func (s GlobalIntConstrainedDefaultSetting) Validate(v any) error {
+	tv, err := s.convert(v)
+	if err != nil {
+		return err
+	}
+	if s.validate != nil {
+		return s.validate(tv)
+	}
+	return err
 }
 
 type IntPropertyFn func() int
@@ -586,6 +800,7 @@ func (s GlobalIntSetting) Get(c *Collection) IntPropertyFn {
 			s.key,
 			s.def,
 			s.convert,
+			s.validate,
 			precedenceGlobal(),
 		)
 	}
@@ -598,6 +813,7 @@ func (s GlobalIntConstrainedDefaultSetting) Get(c *Collection) IntPropertyFn {
 			s.key,
 			s.cdef,
 			s.convert,
+			s.validate,
 			precedenceGlobal(),
 		)
 	}
@@ -637,7 +853,13 @@ func NewNamespaceIntSettingWithConstrainedDefault(key Key, cdef []TypedConstrain
 func (s NamespaceIntSetting) Key() Key               { return s.key }
 func (s NamespaceIntSetting) Precedence() Precedence { return PrecedenceNamespace }
 func (s NamespaceIntSetting) Validate(v any) error {
-	_, err := s.convert(v)
+	tv, err := s.convert(v)
+	if err != nil {
+		return err
+	}
+	if s.validate != nil {
+		return s.validate(tv)
+	}
 	return err
 }
 
@@ -645,6 +867,25 @@ func (s NamespaceIntSetting) WithDefault(v int) NamespaceIntSetting {
 	newS := s
 	newS.def = v
 	return newS
+}
+
+func (s NamespaceIntSetting) WithValidator(f func(int) error) NamespaceIntSetting {
+	newS := s
+	newS.validate = f
+	return newS
+}
+
+func (s NamespaceIntConstrainedDefaultSetting) Key() Key               { return s.key }
+func (s NamespaceIntConstrainedDefaultSetting) Precedence() Precedence { return PrecedenceNamespace }
+func (s NamespaceIntConstrainedDefaultSetting) Validate(v any) error {
+	tv, err := s.convert(v)
+	if err != nil {
+		return err
+	}
+	if s.validate != nil {
+		return s.validate(tv)
+	}
+	return err
 }
 
 type IntPropertyFnWithNamespaceFilter func(namespace string) int
@@ -656,6 +897,7 @@ func (s NamespaceIntSetting) Get(c *Collection) IntPropertyFnWithNamespaceFilter
 			s.key,
 			s.def,
 			s.convert,
+			s.validate,
 			precedenceNamespace(namespace),
 		)
 	}
@@ -668,6 +910,7 @@ func (s NamespaceIntConstrainedDefaultSetting) Get(c *Collection) IntPropertyFnW
 			s.key,
 			s.cdef,
 			s.convert,
+			s.validate,
 			precedenceNamespace(namespace),
 		)
 	}
@@ -707,7 +950,13 @@ func NewNamespaceIDIntSettingWithConstrainedDefault(key Key, cdef []TypedConstra
 func (s NamespaceIDIntSetting) Key() Key               { return s.key }
 func (s NamespaceIDIntSetting) Precedence() Precedence { return PrecedenceNamespaceID }
 func (s NamespaceIDIntSetting) Validate(v any) error {
-	_, err := s.convert(v)
+	tv, err := s.convert(v)
+	if err != nil {
+		return err
+	}
+	if s.validate != nil {
+		return s.validate(tv)
+	}
 	return err
 }
 
@@ -715,6 +964,25 @@ func (s NamespaceIDIntSetting) WithDefault(v int) NamespaceIDIntSetting {
 	newS := s
 	newS.def = v
 	return newS
+}
+
+func (s NamespaceIDIntSetting) WithValidator(f func(int) error) NamespaceIDIntSetting {
+	newS := s
+	newS.validate = f
+	return newS
+}
+
+func (s NamespaceIDIntConstrainedDefaultSetting) Key() Key               { return s.key }
+func (s NamespaceIDIntConstrainedDefaultSetting) Precedence() Precedence { return PrecedenceNamespaceID }
+func (s NamespaceIDIntConstrainedDefaultSetting) Validate(v any) error {
+	tv, err := s.convert(v)
+	if err != nil {
+		return err
+	}
+	if s.validate != nil {
+		return s.validate(tv)
+	}
+	return err
 }
 
 type IntPropertyFnWithNamespaceIDFilter func(namespaceID string) int
@@ -726,6 +994,7 @@ func (s NamespaceIDIntSetting) Get(c *Collection) IntPropertyFnWithNamespaceIDFi
 			s.key,
 			s.def,
 			s.convert,
+			s.validate,
 			precedenceNamespaceID(namespaceID),
 		)
 	}
@@ -738,6 +1007,7 @@ func (s NamespaceIDIntConstrainedDefaultSetting) Get(c *Collection) IntPropertyF
 			s.key,
 			s.cdef,
 			s.convert,
+			s.validate,
 			precedenceNamespaceID(namespaceID),
 		)
 	}
@@ -777,7 +1047,13 @@ func NewTaskQueueIntSettingWithConstrainedDefault(key Key, cdef []TypedConstrain
 func (s TaskQueueIntSetting) Key() Key               { return s.key }
 func (s TaskQueueIntSetting) Precedence() Precedence { return PrecedenceTaskQueue }
 func (s TaskQueueIntSetting) Validate(v any) error {
-	_, err := s.convert(v)
+	tv, err := s.convert(v)
+	if err != nil {
+		return err
+	}
+	if s.validate != nil {
+		return s.validate(tv)
+	}
 	return err
 }
 
@@ -785,6 +1061,25 @@ func (s TaskQueueIntSetting) WithDefault(v int) TaskQueueIntSetting {
 	newS := s
 	newS.def = v
 	return newS
+}
+
+func (s TaskQueueIntSetting) WithValidator(f func(int) error) TaskQueueIntSetting {
+	newS := s
+	newS.validate = f
+	return newS
+}
+
+func (s TaskQueueIntConstrainedDefaultSetting) Key() Key               { return s.key }
+func (s TaskQueueIntConstrainedDefaultSetting) Precedence() Precedence { return PrecedenceTaskQueue }
+func (s TaskQueueIntConstrainedDefaultSetting) Validate(v any) error {
+	tv, err := s.convert(v)
+	if err != nil {
+		return err
+	}
+	if s.validate != nil {
+		return s.validate(tv)
+	}
+	return err
 }
 
 type IntPropertyFnWithTaskQueueFilter func(namespace string, taskQueue string, taskQueueType enumspb.TaskQueueType) int
@@ -796,6 +1091,7 @@ func (s TaskQueueIntSetting) Get(c *Collection) IntPropertyFnWithTaskQueueFilter
 			s.key,
 			s.def,
 			s.convert,
+			s.validate,
 			precedenceTaskQueue(namespace, taskQueue, taskQueueType),
 		)
 	}
@@ -808,6 +1104,7 @@ func (s TaskQueueIntConstrainedDefaultSetting) Get(c *Collection) IntPropertyFnW
 			s.key,
 			s.cdef,
 			s.convert,
+			s.validate,
 			precedenceTaskQueue(namespace, taskQueue, taskQueueType),
 		)
 	}
@@ -847,7 +1144,13 @@ func NewShardIDIntSettingWithConstrainedDefault(key Key, cdef []TypedConstrained
 func (s ShardIDIntSetting) Key() Key               { return s.key }
 func (s ShardIDIntSetting) Precedence() Precedence { return PrecedenceShardID }
 func (s ShardIDIntSetting) Validate(v any) error {
-	_, err := s.convert(v)
+	tv, err := s.convert(v)
+	if err != nil {
+		return err
+	}
+	if s.validate != nil {
+		return s.validate(tv)
+	}
 	return err
 }
 
@@ -855,6 +1158,25 @@ func (s ShardIDIntSetting) WithDefault(v int) ShardIDIntSetting {
 	newS := s
 	newS.def = v
 	return newS
+}
+
+func (s ShardIDIntSetting) WithValidator(f func(int) error) ShardIDIntSetting {
+	newS := s
+	newS.validate = f
+	return newS
+}
+
+func (s ShardIDIntConstrainedDefaultSetting) Key() Key               { return s.key }
+func (s ShardIDIntConstrainedDefaultSetting) Precedence() Precedence { return PrecedenceShardID }
+func (s ShardIDIntConstrainedDefaultSetting) Validate(v any) error {
+	tv, err := s.convert(v)
+	if err != nil {
+		return err
+	}
+	if s.validate != nil {
+		return s.validate(tv)
+	}
+	return err
 }
 
 type IntPropertyFnWithShardIDFilter func(shardID int32) int
@@ -866,6 +1188,7 @@ func (s ShardIDIntSetting) Get(c *Collection) IntPropertyFnWithShardIDFilter {
 			s.key,
 			s.def,
 			s.convert,
+			s.validate,
 			precedenceShardID(shardID),
 		)
 	}
@@ -878,6 +1201,7 @@ func (s ShardIDIntConstrainedDefaultSetting) Get(c *Collection) IntPropertyFnWit
 			s.key,
 			s.cdef,
 			s.convert,
+			s.validate,
 			precedenceShardID(shardID),
 		)
 	}
@@ -917,7 +1241,13 @@ func NewTaskTypeIntSettingWithConstrainedDefault(key Key, cdef []TypedConstraine
 func (s TaskTypeIntSetting) Key() Key               { return s.key }
 func (s TaskTypeIntSetting) Precedence() Precedence { return PrecedenceTaskType }
 func (s TaskTypeIntSetting) Validate(v any) error {
-	_, err := s.convert(v)
+	tv, err := s.convert(v)
+	if err != nil {
+		return err
+	}
+	if s.validate != nil {
+		return s.validate(tv)
+	}
 	return err
 }
 
@@ -925,6 +1255,25 @@ func (s TaskTypeIntSetting) WithDefault(v int) TaskTypeIntSetting {
 	newS := s
 	newS.def = v
 	return newS
+}
+
+func (s TaskTypeIntSetting) WithValidator(f func(int) error) TaskTypeIntSetting {
+	newS := s
+	newS.validate = f
+	return newS
+}
+
+func (s TaskTypeIntConstrainedDefaultSetting) Key() Key               { return s.key }
+func (s TaskTypeIntConstrainedDefaultSetting) Precedence() Precedence { return PrecedenceTaskType }
+func (s TaskTypeIntConstrainedDefaultSetting) Validate(v any) error {
+	tv, err := s.convert(v)
+	if err != nil {
+		return err
+	}
+	if s.validate != nil {
+		return s.validate(tv)
+	}
+	return err
 }
 
 type IntPropertyFnWithTaskTypeFilter func(taskType enumsspb.TaskType) int
@@ -936,6 +1285,7 @@ func (s TaskTypeIntSetting) Get(c *Collection) IntPropertyFnWithTaskTypeFilter {
 			s.key,
 			s.def,
 			s.convert,
+			s.validate,
 			precedenceTaskType(taskType),
 		)
 	}
@@ -948,6 +1298,7 @@ func (s TaskTypeIntConstrainedDefaultSetting) Get(c *Collection) IntPropertyFnWi
 			s.key,
 			s.cdef,
 			s.convert,
+			s.validate,
 			precedenceTaskType(taskType),
 		)
 	}
@@ -987,7 +1338,13 @@ func NewDestinationIntSettingWithConstrainedDefault(key Key, cdef []TypedConstra
 func (s DestinationIntSetting) Key() Key               { return s.key }
 func (s DestinationIntSetting) Precedence() Precedence { return PrecedenceDestination }
 func (s DestinationIntSetting) Validate(v any) error {
-	_, err := s.convert(v)
+	tv, err := s.convert(v)
+	if err != nil {
+		return err
+	}
+	if s.validate != nil {
+		return s.validate(tv)
+	}
 	return err
 }
 
@@ -995,6 +1352,25 @@ func (s DestinationIntSetting) WithDefault(v int) DestinationIntSetting {
 	newS := s
 	newS.def = v
 	return newS
+}
+
+func (s DestinationIntSetting) WithValidator(f func(int) error) DestinationIntSetting {
+	newS := s
+	newS.validate = f
+	return newS
+}
+
+func (s DestinationIntConstrainedDefaultSetting) Key() Key               { return s.key }
+func (s DestinationIntConstrainedDefaultSetting) Precedence() Precedence { return PrecedenceDestination }
+func (s DestinationIntConstrainedDefaultSetting) Validate(v any) error {
+	tv, err := s.convert(v)
+	if err != nil {
+		return err
+	}
+	if s.validate != nil {
+		return s.validate(tv)
+	}
+	return err
 }
 
 type IntPropertyFnWithDestinationFilter func(namespace string, destination string) int
@@ -1006,6 +1382,7 @@ func (s DestinationIntSetting) Get(c *Collection) IntPropertyFnWithDestinationFi
 			s.key,
 			s.def,
 			s.convert,
+			s.validate,
 			precedenceDestination(namespace, destination),
 		)
 	}
@@ -1018,6 +1395,7 @@ func (s DestinationIntConstrainedDefaultSetting) Get(c *Collection) IntPropertyF
 			s.key,
 			s.cdef,
 			s.convert,
+			s.validate,
 			precedenceDestination(namespace, destination),
 		)
 	}
@@ -1057,7 +1435,13 @@ func NewGlobalFloatSettingWithConstrainedDefault(key Key, cdef []TypedConstraine
 func (s GlobalFloatSetting) Key() Key               { return s.key }
 func (s GlobalFloatSetting) Precedence() Precedence { return PrecedenceGlobal }
 func (s GlobalFloatSetting) Validate(v any) error {
-	_, err := s.convert(v)
+	tv, err := s.convert(v)
+	if err != nil {
+		return err
+	}
+	if s.validate != nil {
+		return s.validate(tv)
+	}
 	return err
 }
 
@@ -1065,6 +1449,25 @@ func (s GlobalFloatSetting) WithDefault(v float64) GlobalFloatSetting {
 	newS := s
 	newS.def = v
 	return newS
+}
+
+func (s GlobalFloatSetting) WithValidator(f func(float64) error) GlobalFloatSetting {
+	newS := s
+	newS.validate = f
+	return newS
+}
+
+func (s GlobalFloatConstrainedDefaultSetting) Key() Key               { return s.key }
+func (s GlobalFloatConstrainedDefaultSetting) Precedence() Precedence { return PrecedenceGlobal }
+func (s GlobalFloatConstrainedDefaultSetting) Validate(v any) error {
+	tv, err := s.convert(v)
+	if err != nil {
+		return err
+	}
+	if s.validate != nil {
+		return s.validate(tv)
+	}
+	return err
 }
 
 type FloatPropertyFn func() float64
@@ -1076,6 +1479,7 @@ func (s GlobalFloatSetting) Get(c *Collection) FloatPropertyFn {
 			s.key,
 			s.def,
 			s.convert,
+			s.validate,
 			precedenceGlobal(),
 		)
 	}
@@ -1088,6 +1492,7 @@ func (s GlobalFloatConstrainedDefaultSetting) Get(c *Collection) FloatPropertyFn
 			s.key,
 			s.cdef,
 			s.convert,
+			s.validate,
 			precedenceGlobal(),
 		)
 	}
@@ -1127,7 +1532,13 @@ func NewNamespaceFloatSettingWithConstrainedDefault(key Key, cdef []TypedConstra
 func (s NamespaceFloatSetting) Key() Key               { return s.key }
 func (s NamespaceFloatSetting) Precedence() Precedence { return PrecedenceNamespace }
 func (s NamespaceFloatSetting) Validate(v any) error {
-	_, err := s.convert(v)
+	tv, err := s.convert(v)
+	if err != nil {
+		return err
+	}
+	if s.validate != nil {
+		return s.validate(tv)
+	}
 	return err
 }
 
@@ -1135,6 +1546,25 @@ func (s NamespaceFloatSetting) WithDefault(v float64) NamespaceFloatSetting {
 	newS := s
 	newS.def = v
 	return newS
+}
+
+func (s NamespaceFloatSetting) WithValidator(f func(float64) error) NamespaceFloatSetting {
+	newS := s
+	newS.validate = f
+	return newS
+}
+
+func (s NamespaceFloatConstrainedDefaultSetting) Key() Key               { return s.key }
+func (s NamespaceFloatConstrainedDefaultSetting) Precedence() Precedence { return PrecedenceNamespace }
+func (s NamespaceFloatConstrainedDefaultSetting) Validate(v any) error {
+	tv, err := s.convert(v)
+	if err != nil {
+		return err
+	}
+	if s.validate != nil {
+		return s.validate(tv)
+	}
+	return err
 }
 
 type FloatPropertyFnWithNamespaceFilter func(namespace string) float64
@@ -1146,6 +1576,7 @@ func (s NamespaceFloatSetting) Get(c *Collection) FloatPropertyFnWithNamespaceFi
 			s.key,
 			s.def,
 			s.convert,
+			s.validate,
 			precedenceNamespace(namespace),
 		)
 	}
@@ -1158,6 +1589,7 @@ func (s NamespaceFloatConstrainedDefaultSetting) Get(c *Collection) FloatPropert
 			s.key,
 			s.cdef,
 			s.convert,
+			s.validate,
 			precedenceNamespace(namespace),
 		)
 	}
@@ -1197,7 +1629,13 @@ func NewNamespaceIDFloatSettingWithConstrainedDefault(key Key, cdef []TypedConst
 func (s NamespaceIDFloatSetting) Key() Key               { return s.key }
 func (s NamespaceIDFloatSetting) Precedence() Precedence { return PrecedenceNamespaceID }
 func (s NamespaceIDFloatSetting) Validate(v any) error {
-	_, err := s.convert(v)
+	tv, err := s.convert(v)
+	if err != nil {
+		return err
+	}
+	if s.validate != nil {
+		return s.validate(tv)
+	}
 	return err
 }
 
@@ -1205,6 +1643,25 @@ func (s NamespaceIDFloatSetting) WithDefault(v float64) NamespaceIDFloatSetting 
 	newS := s
 	newS.def = v
 	return newS
+}
+
+func (s NamespaceIDFloatSetting) WithValidator(f func(float64) error) NamespaceIDFloatSetting {
+	newS := s
+	newS.validate = f
+	return newS
+}
+
+func (s NamespaceIDFloatConstrainedDefaultSetting) Key() Key               { return s.key }
+func (s NamespaceIDFloatConstrainedDefaultSetting) Precedence() Precedence { return PrecedenceNamespaceID }
+func (s NamespaceIDFloatConstrainedDefaultSetting) Validate(v any) error {
+	tv, err := s.convert(v)
+	if err != nil {
+		return err
+	}
+	if s.validate != nil {
+		return s.validate(tv)
+	}
+	return err
 }
 
 type FloatPropertyFnWithNamespaceIDFilter func(namespaceID string) float64
@@ -1216,6 +1673,7 @@ func (s NamespaceIDFloatSetting) Get(c *Collection) FloatPropertyFnWithNamespace
 			s.key,
 			s.def,
 			s.convert,
+			s.validate,
 			precedenceNamespaceID(namespaceID),
 		)
 	}
@@ -1228,6 +1686,7 @@ func (s NamespaceIDFloatConstrainedDefaultSetting) Get(c *Collection) FloatPrope
 			s.key,
 			s.cdef,
 			s.convert,
+			s.validate,
 			precedenceNamespaceID(namespaceID),
 		)
 	}
@@ -1267,7 +1726,13 @@ func NewTaskQueueFloatSettingWithConstrainedDefault(key Key, cdef []TypedConstra
 func (s TaskQueueFloatSetting) Key() Key               { return s.key }
 func (s TaskQueueFloatSetting) Precedence() Precedence { return PrecedenceTaskQueue }
 func (s TaskQueueFloatSetting) Validate(v any) error {
-	_, err := s.convert(v)
+	tv, err := s.convert(v)
+	if err != nil {
+		return err
+	}
+	if s.validate != nil {
+		return s.validate(tv)
+	}
 	return err
 }
 
@@ -1275,6 +1740,25 @@ func (s TaskQueueFloatSetting) WithDefault(v float64) TaskQueueFloatSetting {
 	newS := s
 	newS.def = v
 	return newS
+}
+
+func (s TaskQueueFloatSetting) WithValidator(f func(float64) error) TaskQueueFloatSetting {
+	newS := s
+	newS.validate = f
+	return newS
+}
+
+func (s TaskQueueFloatConstrainedDefaultSetting) Key() Key               { return s.key }
+func (s TaskQueueFloatConstrainedDefaultSetting) Precedence() Precedence { return PrecedenceTaskQueue }
+func (s TaskQueueFloatConstrainedDefaultSetting) Validate(v any) error {
+	tv, err := s.convert(v)
+	if err != nil {
+		return err
+	}
+	if s.validate != nil {
+		return s.validate(tv)
+	}
+	return err
 }
 
 type FloatPropertyFnWithTaskQueueFilter func(namespace string, taskQueue string, taskQueueType enumspb.TaskQueueType) float64
@@ -1286,6 +1770,7 @@ func (s TaskQueueFloatSetting) Get(c *Collection) FloatPropertyFnWithTaskQueueFi
 			s.key,
 			s.def,
 			s.convert,
+			s.validate,
 			precedenceTaskQueue(namespace, taskQueue, taskQueueType),
 		)
 	}
@@ -1298,6 +1783,7 @@ func (s TaskQueueFloatConstrainedDefaultSetting) Get(c *Collection) FloatPropert
 			s.key,
 			s.cdef,
 			s.convert,
+			s.validate,
 			precedenceTaskQueue(namespace, taskQueue, taskQueueType),
 		)
 	}
@@ -1337,7 +1823,13 @@ func NewShardIDFloatSettingWithConstrainedDefault(key Key, cdef []TypedConstrain
 func (s ShardIDFloatSetting) Key() Key               { return s.key }
 func (s ShardIDFloatSetting) Precedence() Precedence { return PrecedenceShardID }
 func (s ShardIDFloatSetting) Validate(v any) error {
-	_, err := s.convert(v)
+	tv, err := s.convert(v)
+	if err != nil {
+		return err
+	}
+	if s.validate != nil {
+		return s.validate(tv)
+	}
 	return err
 }
 
@@ -1345,6 +1837,25 @@ func (s ShardIDFloatSetting) WithDefault(v float64) ShardIDFloatSetting {
 	newS := s
 	newS.def = v
 	return newS
+}
+
+func (s ShardIDFloatSetting) WithValidator(f func(float64) error) ShardIDFloatSetting {
+	newS := s
+	newS.validate = f
+	return newS
+}
+
+func (s ShardIDFloatConstrainedDefaultSetting) Key() Key               { return s.key }
+func (s ShardIDFloatConstrainedDefaultSetting) Precedence() Precedence { return PrecedenceShardID }
+func (s ShardIDFloatConstrainedDefaultSetting) Validate(v any) error {
+	tv, err := s.convert(v)
+	if err != nil {
+		return err
+	}
+	if s.validate != nil {
+		return s.validate(tv)
+	}
+	return err
 }
 
 type FloatPropertyFnWithShardIDFilter func(shardID int32) float64
@@ -1356,6 +1867,7 @@ func (s ShardIDFloatSetting) Get(c *Collection) FloatPropertyFnWithShardIDFilter
 			s.key,
 			s.def,
 			s.convert,
+			s.validate,
 			precedenceShardID(shardID),
 		)
 	}
@@ -1368,6 +1880,7 @@ func (s ShardIDFloatConstrainedDefaultSetting) Get(c *Collection) FloatPropertyF
 			s.key,
 			s.cdef,
 			s.convert,
+			s.validate,
 			precedenceShardID(shardID),
 		)
 	}
@@ -1407,7 +1920,13 @@ func NewTaskTypeFloatSettingWithConstrainedDefault(key Key, cdef []TypedConstrai
 func (s TaskTypeFloatSetting) Key() Key               { return s.key }
 func (s TaskTypeFloatSetting) Precedence() Precedence { return PrecedenceTaskType }
 func (s TaskTypeFloatSetting) Validate(v any) error {
-	_, err := s.convert(v)
+	tv, err := s.convert(v)
+	if err != nil {
+		return err
+	}
+	if s.validate != nil {
+		return s.validate(tv)
+	}
 	return err
 }
 
@@ -1415,6 +1934,25 @@ func (s TaskTypeFloatSetting) WithDefault(v float64) TaskTypeFloatSetting {
 	newS := s
 	newS.def = v
 	return newS
+}
+
+func (s TaskTypeFloatSetting) WithValidator(f func(float64) error) TaskTypeFloatSetting {
+	newS := s
+	newS.validate = f
+	return newS
+}
+
+func (s TaskTypeFloatConstrainedDefaultSetting) Key() Key               { return s.key }
+func (s TaskTypeFloatConstrainedDefaultSetting) Precedence() Precedence { return PrecedenceTaskType }
+func (s TaskTypeFloatConstrainedDefaultSetting) Validate(v any) error {
+	tv, err := s.convert(v)
+	if err != nil {
+		return err
+	}
+	if s.validate != nil {
+		return s.validate(tv)
+	}
+	return err
 }
 
 type FloatPropertyFnWithTaskTypeFilter func(taskType enumsspb.TaskType) float64
@@ -1426,6 +1964,7 @@ func (s TaskTypeFloatSetting) Get(c *Collection) FloatPropertyFnWithTaskTypeFilt
 			s.key,
 			s.def,
 			s.convert,
+			s.validate,
 			precedenceTaskType(taskType),
 		)
 	}
@@ -1438,6 +1977,7 @@ func (s TaskTypeFloatConstrainedDefaultSetting) Get(c *Collection) FloatProperty
 			s.key,
 			s.cdef,
 			s.convert,
+			s.validate,
 			precedenceTaskType(taskType),
 		)
 	}
@@ -1477,7 +2017,13 @@ func NewDestinationFloatSettingWithConstrainedDefault(key Key, cdef []TypedConst
 func (s DestinationFloatSetting) Key() Key               { return s.key }
 func (s DestinationFloatSetting) Precedence() Precedence { return PrecedenceDestination }
 func (s DestinationFloatSetting) Validate(v any) error {
-	_, err := s.convert(v)
+	tv, err := s.convert(v)
+	if err != nil {
+		return err
+	}
+	if s.validate != nil {
+		return s.validate(tv)
+	}
 	return err
 }
 
@@ -1485,6 +2031,25 @@ func (s DestinationFloatSetting) WithDefault(v float64) DestinationFloatSetting 
 	newS := s
 	newS.def = v
 	return newS
+}
+
+func (s DestinationFloatSetting) WithValidator(f func(float64) error) DestinationFloatSetting {
+	newS := s
+	newS.validate = f
+	return newS
+}
+
+func (s DestinationFloatConstrainedDefaultSetting) Key() Key               { return s.key }
+func (s DestinationFloatConstrainedDefaultSetting) Precedence() Precedence { return PrecedenceDestination }
+func (s DestinationFloatConstrainedDefaultSetting) Validate(v any) error {
+	tv, err := s.convert(v)
+	if err != nil {
+		return err
+	}
+	if s.validate != nil {
+		return s.validate(tv)
+	}
+	return err
 }
 
 type FloatPropertyFnWithDestinationFilter func(namespace string, destination string) float64
@@ -1496,6 +2061,7 @@ func (s DestinationFloatSetting) Get(c *Collection) FloatPropertyFnWithDestinati
 			s.key,
 			s.def,
 			s.convert,
+			s.validate,
 			precedenceDestination(namespace, destination),
 		)
 	}
@@ -1508,6 +2074,7 @@ func (s DestinationFloatConstrainedDefaultSetting) Get(c *Collection) FloatPrope
 			s.key,
 			s.cdef,
 			s.convert,
+			s.validate,
 			precedenceDestination(namespace, destination),
 		)
 	}
@@ -1547,7 +2114,13 @@ func NewGlobalStringSettingWithConstrainedDefault(key Key, cdef []TypedConstrain
 func (s GlobalStringSetting) Key() Key               { return s.key }
 func (s GlobalStringSetting) Precedence() Precedence { return PrecedenceGlobal }
 func (s GlobalStringSetting) Validate(v any) error {
-	_, err := s.convert(v)
+	tv, err := s.convert(v)
+	if err != nil {
+		return err
+	}
+	if s.validate != nil {
+		return s.validate(tv)
+	}
 	return err
 }
 
@@ -1555,6 +2128,25 @@ func (s GlobalStringSetting) WithDefault(v string) GlobalStringSetting {
 	newS := s
 	newS.def = v
 	return newS
+}
+
+func (s GlobalStringSetting) WithValidator(f func(string) error) GlobalStringSetting {
+	newS := s
+	newS.validate = f
+	return newS
+}
+
+func (s GlobalStringConstrainedDefaultSetting) Key() Key               { return s.key }
+func (s GlobalStringConstrainedDefaultSetting) Precedence() Precedence { return PrecedenceGlobal }
+func (s GlobalStringConstrainedDefaultSetting) Validate(v any) error {
+	tv, err := s.convert(v)
+	if err != nil {
+		return err
+	}
+	if s.validate != nil {
+		return s.validate(tv)
+	}
+	return err
 }
 
 type StringPropertyFn func() string
@@ -1566,6 +2158,7 @@ func (s GlobalStringSetting) Get(c *Collection) StringPropertyFn {
 			s.key,
 			s.def,
 			s.convert,
+			s.validate,
 			precedenceGlobal(),
 		)
 	}
@@ -1578,6 +2171,7 @@ func (s GlobalStringConstrainedDefaultSetting) Get(c *Collection) StringProperty
 			s.key,
 			s.cdef,
 			s.convert,
+			s.validate,
 			precedenceGlobal(),
 		)
 	}
@@ -1617,7 +2211,13 @@ func NewNamespaceStringSettingWithConstrainedDefault(key Key, cdef []TypedConstr
 func (s NamespaceStringSetting) Key() Key               { return s.key }
 func (s NamespaceStringSetting) Precedence() Precedence { return PrecedenceNamespace }
 func (s NamespaceStringSetting) Validate(v any) error {
-	_, err := s.convert(v)
+	tv, err := s.convert(v)
+	if err != nil {
+		return err
+	}
+	if s.validate != nil {
+		return s.validate(tv)
+	}
 	return err
 }
 
@@ -1625,6 +2225,25 @@ func (s NamespaceStringSetting) WithDefault(v string) NamespaceStringSetting {
 	newS := s
 	newS.def = v
 	return newS
+}
+
+func (s NamespaceStringSetting) WithValidator(f func(string) error) NamespaceStringSetting {
+	newS := s
+	newS.validate = f
+	return newS
+}
+
+func (s NamespaceStringConstrainedDefaultSetting) Key() Key               { return s.key }
+func (s NamespaceStringConstrainedDefaultSetting) Precedence() Precedence { return PrecedenceNamespace }
+func (s NamespaceStringConstrainedDefaultSetting) Validate(v any) error {
+	tv, err := s.convert(v)
+	if err != nil {
+		return err
+	}
+	if s.validate != nil {
+		return s.validate(tv)
+	}
+	return err
 }
 
 type StringPropertyFnWithNamespaceFilter func(namespace string) string
@@ -1636,6 +2255,7 @@ func (s NamespaceStringSetting) Get(c *Collection) StringPropertyFnWithNamespace
 			s.key,
 			s.def,
 			s.convert,
+			s.validate,
 			precedenceNamespace(namespace),
 		)
 	}
@@ -1648,6 +2268,7 @@ func (s NamespaceStringConstrainedDefaultSetting) Get(c *Collection) StringPrope
 			s.key,
 			s.cdef,
 			s.convert,
+			s.validate,
 			precedenceNamespace(namespace),
 		)
 	}
@@ -1687,7 +2308,13 @@ func NewNamespaceIDStringSettingWithConstrainedDefault(key Key, cdef []TypedCons
 func (s NamespaceIDStringSetting) Key() Key               { return s.key }
 func (s NamespaceIDStringSetting) Precedence() Precedence { return PrecedenceNamespaceID }
 func (s NamespaceIDStringSetting) Validate(v any) error {
-	_, err := s.convert(v)
+	tv, err := s.convert(v)
+	if err != nil {
+		return err
+	}
+	if s.validate != nil {
+		return s.validate(tv)
+	}
 	return err
 }
 
@@ -1695,6 +2322,25 @@ func (s NamespaceIDStringSetting) WithDefault(v string) NamespaceIDStringSetting
 	newS := s
 	newS.def = v
 	return newS
+}
+
+func (s NamespaceIDStringSetting) WithValidator(f func(string) error) NamespaceIDStringSetting {
+	newS := s
+	newS.validate = f
+	return newS
+}
+
+func (s NamespaceIDStringConstrainedDefaultSetting) Key() Key               { return s.key }
+func (s NamespaceIDStringConstrainedDefaultSetting) Precedence() Precedence { return PrecedenceNamespaceID }
+func (s NamespaceIDStringConstrainedDefaultSetting) Validate(v any) error {
+	tv, err := s.convert(v)
+	if err != nil {
+		return err
+	}
+	if s.validate != nil {
+		return s.validate(tv)
+	}
+	return err
 }
 
 type StringPropertyFnWithNamespaceIDFilter func(namespaceID string) string
@@ -1706,6 +2352,7 @@ func (s NamespaceIDStringSetting) Get(c *Collection) StringPropertyFnWithNamespa
 			s.key,
 			s.def,
 			s.convert,
+			s.validate,
 			precedenceNamespaceID(namespaceID),
 		)
 	}
@@ -1718,6 +2365,7 @@ func (s NamespaceIDStringConstrainedDefaultSetting) Get(c *Collection) StringPro
 			s.key,
 			s.cdef,
 			s.convert,
+			s.validate,
 			precedenceNamespaceID(namespaceID),
 		)
 	}
@@ -1757,7 +2405,13 @@ func NewTaskQueueStringSettingWithConstrainedDefault(key Key, cdef []TypedConstr
 func (s TaskQueueStringSetting) Key() Key               { return s.key }
 func (s TaskQueueStringSetting) Precedence() Precedence { return PrecedenceTaskQueue }
 func (s TaskQueueStringSetting) Validate(v any) error {
-	_, err := s.convert(v)
+	tv, err := s.convert(v)
+	if err != nil {
+		return err
+	}
+	if s.validate != nil {
+		return s.validate(tv)
+	}
 	return err
 }
 
@@ -1765,6 +2419,25 @@ func (s TaskQueueStringSetting) WithDefault(v string) TaskQueueStringSetting {
 	newS := s
 	newS.def = v
 	return newS
+}
+
+func (s TaskQueueStringSetting) WithValidator(f func(string) error) TaskQueueStringSetting {
+	newS := s
+	newS.validate = f
+	return newS
+}
+
+func (s TaskQueueStringConstrainedDefaultSetting) Key() Key               { return s.key }
+func (s TaskQueueStringConstrainedDefaultSetting) Precedence() Precedence { return PrecedenceTaskQueue }
+func (s TaskQueueStringConstrainedDefaultSetting) Validate(v any) error {
+	tv, err := s.convert(v)
+	if err != nil {
+		return err
+	}
+	if s.validate != nil {
+		return s.validate(tv)
+	}
+	return err
 }
 
 type StringPropertyFnWithTaskQueueFilter func(namespace string, taskQueue string, taskQueueType enumspb.TaskQueueType) string
@@ -1776,6 +2449,7 @@ func (s TaskQueueStringSetting) Get(c *Collection) StringPropertyFnWithTaskQueue
 			s.key,
 			s.def,
 			s.convert,
+			s.validate,
 			precedenceTaskQueue(namespace, taskQueue, taskQueueType),
 		)
 	}
@@ -1788,6 +2462,7 @@ func (s TaskQueueStringConstrainedDefaultSetting) Get(c *Collection) StringPrope
 			s.key,
 			s.cdef,
 			s.convert,
+			s.validate,
 			precedenceTaskQueue(namespace, taskQueue, taskQueueType),
 		)
 	}
@@ -1827,7 +2502,13 @@ func NewShardIDStringSettingWithConstrainedDefault(key Key, cdef []TypedConstrai
 func (s ShardIDStringSetting) Key() Key               { return s.key }
 func (s ShardIDStringSetting) Precedence() Precedence { return PrecedenceShardID }
 func (s ShardIDStringSetting) Validate(v any) error {
-	_, err := s.convert(v)
+	tv, err := s.convert(v)
+	if err != nil {
+		return err
+	}
+	if s.validate != nil {
+		return s.validate(tv)
+	}
 	return err
 }
 
@@ -1835,6 +2516,25 @@ func (s ShardIDStringSetting) WithDefault(v string) ShardIDStringSetting {
 	newS := s
 	newS.def = v
 	return newS
+}
+
+func (s ShardIDStringSetting) WithValidator(f func(string) error) ShardIDStringSetting {
+	newS := s
+	newS.validate = f
+	return newS
+}
+
+func (s ShardIDStringConstrainedDefaultSetting) Key() Key               { return s.key }
+func (s ShardIDStringConstrainedDefaultSetting) Precedence() Precedence { return PrecedenceShardID }
+func (s ShardIDStringConstrainedDefaultSetting) Validate(v any) error {
+	tv, err := s.convert(v)
+	if err != nil {
+		return err
+	}
+	if s.validate != nil {
+		return s.validate(tv)
+	}
+	return err
 }
 
 type StringPropertyFnWithShardIDFilter func(shardID int32) string
@@ -1846,6 +2546,7 @@ func (s ShardIDStringSetting) Get(c *Collection) StringPropertyFnWithShardIDFilt
 			s.key,
 			s.def,
 			s.convert,
+			s.validate,
 			precedenceShardID(shardID),
 		)
 	}
@@ -1858,6 +2559,7 @@ func (s ShardIDStringConstrainedDefaultSetting) Get(c *Collection) StringPropert
 			s.key,
 			s.cdef,
 			s.convert,
+			s.validate,
 			precedenceShardID(shardID),
 		)
 	}
@@ -1897,7 +2599,13 @@ func NewTaskTypeStringSettingWithConstrainedDefault(key Key, cdef []TypedConstra
 func (s TaskTypeStringSetting) Key() Key               { return s.key }
 func (s TaskTypeStringSetting) Precedence() Precedence { return PrecedenceTaskType }
 func (s TaskTypeStringSetting) Validate(v any) error {
-	_, err := s.convert(v)
+	tv, err := s.convert(v)
+	if err != nil {
+		return err
+	}
+	if s.validate != nil {
+		return s.validate(tv)
+	}
 	return err
 }
 
@@ -1905,6 +2613,25 @@ func (s TaskTypeStringSetting) WithDefault(v string) TaskTypeStringSetting {
 	newS := s
 	newS.def = v
 	return newS
+}
+
+func (s TaskTypeStringSetting) WithValidator(f func(string) error) TaskTypeStringSetting {
+	newS := s
+	newS.validate = f
+	return newS
+}
+
+func (s TaskTypeStringConstrainedDefaultSetting) Key() Key               { return s.key }
+func (s TaskTypeStringConstrainedDefaultSetting) Precedence() Precedence { return PrecedenceTaskType }
+func (s TaskTypeStringConstrainedDefaultSetting) Validate(v any) error {
+	tv, err := s.convert(v)
+	if err != nil {
+		return err
+	}
+	if s.validate != nil {
+		return s.validate(tv)
+	}
+	return err
 }
 
 type StringPropertyFnWithTaskTypeFilter func(taskType enumsspb.TaskType) string
@@ -1916,6 +2643,7 @@ func (s TaskTypeStringSetting) Get(c *Collection) StringPropertyFnWithTaskTypeFi
 			s.key,
 			s.def,
 			s.convert,
+			s.validate,
 			precedenceTaskType(taskType),
 		)
 	}
@@ -1928,6 +2656,7 @@ func (s TaskTypeStringConstrainedDefaultSetting) Get(c *Collection) StringProper
 			s.key,
 			s.cdef,
 			s.convert,
+			s.validate,
 			precedenceTaskType(taskType),
 		)
 	}
@@ -1967,7 +2696,13 @@ func NewDestinationStringSettingWithConstrainedDefault(key Key, cdef []TypedCons
 func (s DestinationStringSetting) Key() Key               { return s.key }
 func (s DestinationStringSetting) Precedence() Precedence { return PrecedenceDestination }
 func (s DestinationStringSetting) Validate(v any) error {
-	_, err := s.convert(v)
+	tv, err := s.convert(v)
+	if err != nil {
+		return err
+	}
+	if s.validate != nil {
+		return s.validate(tv)
+	}
 	return err
 }
 
@@ -1975,6 +2710,25 @@ func (s DestinationStringSetting) WithDefault(v string) DestinationStringSetting
 	newS := s
 	newS.def = v
 	return newS
+}
+
+func (s DestinationStringSetting) WithValidator(f func(string) error) DestinationStringSetting {
+	newS := s
+	newS.validate = f
+	return newS
+}
+
+func (s DestinationStringConstrainedDefaultSetting) Key() Key               { return s.key }
+func (s DestinationStringConstrainedDefaultSetting) Precedence() Precedence { return PrecedenceDestination }
+func (s DestinationStringConstrainedDefaultSetting) Validate(v any) error {
+	tv, err := s.convert(v)
+	if err != nil {
+		return err
+	}
+	if s.validate != nil {
+		return s.validate(tv)
+	}
+	return err
 }
 
 type StringPropertyFnWithDestinationFilter func(namespace string, destination string) string
@@ -1986,6 +2740,7 @@ func (s DestinationStringSetting) Get(c *Collection) StringPropertyFnWithDestina
 			s.key,
 			s.def,
 			s.convert,
+			s.validate,
 			precedenceDestination(namespace, destination),
 		)
 	}
@@ -1998,6 +2753,7 @@ func (s DestinationStringConstrainedDefaultSetting) Get(c *Collection) StringPro
 			s.key,
 			s.cdef,
 			s.convert,
+			s.validate,
 			precedenceDestination(namespace, destination),
 		)
 	}
@@ -2037,7 +2793,13 @@ func NewGlobalDurationSettingWithConstrainedDefault(key Key, cdef []TypedConstra
 func (s GlobalDurationSetting) Key() Key               { return s.key }
 func (s GlobalDurationSetting) Precedence() Precedence { return PrecedenceGlobal }
 func (s GlobalDurationSetting) Validate(v any) error {
-	_, err := s.convert(v)
+	tv, err := s.convert(v)
+	if err != nil {
+		return err
+	}
+	if s.validate != nil {
+		return s.validate(tv)
+	}
 	return err
 }
 
@@ -2045,6 +2807,25 @@ func (s GlobalDurationSetting) WithDefault(v time.Duration) GlobalDurationSettin
 	newS := s
 	newS.def = v
 	return newS
+}
+
+func (s GlobalDurationSetting) WithValidator(f func(time.Duration) error) GlobalDurationSetting {
+	newS := s
+	newS.validate = f
+	return newS
+}
+
+func (s GlobalDurationConstrainedDefaultSetting) Key() Key               { return s.key }
+func (s GlobalDurationConstrainedDefaultSetting) Precedence() Precedence { return PrecedenceGlobal }
+func (s GlobalDurationConstrainedDefaultSetting) Validate(v any) error {
+	tv, err := s.convert(v)
+	if err != nil {
+		return err
+	}
+	if s.validate != nil {
+		return s.validate(tv)
+	}
+	return err
 }
 
 type DurationPropertyFn func() time.Duration
@@ -2056,6 +2837,7 @@ func (s GlobalDurationSetting) Get(c *Collection) DurationPropertyFn {
 			s.key,
 			s.def,
 			s.convert,
+			s.validate,
 			precedenceGlobal(),
 		)
 	}
@@ -2068,6 +2850,7 @@ func (s GlobalDurationConstrainedDefaultSetting) Get(c *Collection) DurationProp
 			s.key,
 			s.cdef,
 			s.convert,
+			s.validate,
 			precedenceGlobal(),
 		)
 	}
@@ -2107,7 +2890,13 @@ func NewNamespaceDurationSettingWithConstrainedDefault(key Key, cdef []TypedCons
 func (s NamespaceDurationSetting) Key() Key               { return s.key }
 func (s NamespaceDurationSetting) Precedence() Precedence { return PrecedenceNamespace }
 func (s NamespaceDurationSetting) Validate(v any) error {
-	_, err := s.convert(v)
+	tv, err := s.convert(v)
+	if err != nil {
+		return err
+	}
+	if s.validate != nil {
+		return s.validate(tv)
+	}
 	return err
 }
 
@@ -2115,6 +2904,25 @@ func (s NamespaceDurationSetting) WithDefault(v time.Duration) NamespaceDuration
 	newS := s
 	newS.def = v
 	return newS
+}
+
+func (s NamespaceDurationSetting) WithValidator(f func(time.Duration) error) NamespaceDurationSetting {
+	newS := s
+	newS.validate = f
+	return newS
+}
+
+func (s NamespaceDurationConstrainedDefaultSetting) Key() Key               { return s.key }
+func (s NamespaceDurationConstrainedDefaultSetting) Precedence() Precedence { return PrecedenceNamespace }
+func (s NamespaceDurationConstrainedDefaultSetting) Validate(v any) error {
+	tv, err := s.convert(v)
+	if err != nil {
+		return err
+	}
+	if s.validate != nil {
+		return s.validate(tv)
+	}
+	return err
 }
 
 type DurationPropertyFnWithNamespaceFilter func(namespace string) time.Duration
@@ -2126,6 +2934,7 @@ func (s NamespaceDurationSetting) Get(c *Collection) DurationPropertyFnWithNames
 			s.key,
 			s.def,
 			s.convert,
+			s.validate,
 			precedenceNamespace(namespace),
 		)
 	}
@@ -2138,6 +2947,7 @@ func (s NamespaceDurationConstrainedDefaultSetting) Get(c *Collection) DurationP
 			s.key,
 			s.cdef,
 			s.convert,
+			s.validate,
 			precedenceNamespace(namespace),
 		)
 	}
@@ -2177,7 +2987,13 @@ func NewNamespaceIDDurationSettingWithConstrainedDefault(key Key, cdef []TypedCo
 func (s NamespaceIDDurationSetting) Key() Key               { return s.key }
 func (s NamespaceIDDurationSetting) Precedence() Precedence { return PrecedenceNamespaceID }
 func (s NamespaceIDDurationSetting) Validate(v any) error {
-	_, err := s.convert(v)
+	tv, err := s.convert(v)
+	if err != nil {
+		return err
+	}
+	if s.validate != nil {
+		return s.validate(tv)
+	}
 	return err
 }
 
@@ -2185,6 +3001,25 @@ func (s NamespaceIDDurationSetting) WithDefault(v time.Duration) NamespaceIDDura
 	newS := s
 	newS.def = v
 	return newS
+}
+
+func (s NamespaceIDDurationSetting) WithValidator(f func(time.Duration) error) NamespaceIDDurationSetting {
+	newS := s
+	newS.validate = f
+	return newS
+}
+
+func (s NamespaceIDDurationConstrainedDefaultSetting) Key() Key               { return s.key }
+func (s NamespaceIDDurationConstrainedDefaultSetting) Precedence() Precedence { return PrecedenceNamespaceID }
+func (s NamespaceIDDurationConstrainedDefaultSetting) Validate(v any) error {
+	tv, err := s.convert(v)
+	if err != nil {
+		return err
+	}
+	if s.validate != nil {
+		return s.validate(tv)
+	}
+	return err
 }
 
 type DurationPropertyFnWithNamespaceIDFilter func(namespaceID string) time.Duration
@@ -2196,6 +3031,7 @@ func (s NamespaceIDDurationSetting) Get(c *Collection) DurationPropertyFnWithNam
 			s.key,
 			s.def,
 			s.convert,
+			s.validate,
 			precedenceNamespaceID(namespaceID),
 		)
 	}
@@ -2208,6 +3044,7 @@ func (s NamespaceIDDurationConstrainedDefaultSetting) Get(c *Collection) Duratio
 			s.key,
 			s.cdef,
 			s.convert,
+			s.validate,
 			precedenceNamespaceID(namespaceID),
 		)
 	}
@@ -2247,7 +3084,13 @@ func NewTaskQueueDurationSettingWithConstrainedDefault(key Key, cdef []TypedCons
 func (s TaskQueueDurationSetting) Key() Key               { return s.key }
 func (s TaskQueueDurationSetting) Precedence() Precedence { return PrecedenceTaskQueue }
 func (s TaskQueueDurationSetting) Validate(v any) error {
-	_, err := s.convert(v)
+	tv, err := s.convert(v)
+	if err != nil {
+		return err
+	}
+	if s.validate != nil {
+		return s.validate(tv)
+	}
 	return err
 }
 
@@ -2255,6 +3098,25 @@ func (s TaskQueueDurationSetting) WithDefault(v time.Duration) TaskQueueDuration
 	newS := s
 	newS.def = v
 	return newS
+}
+
+func (s TaskQueueDurationSetting) WithValidator(f func(time.Duration) error) TaskQueueDurationSetting {
+	newS := s
+	newS.validate = f
+	return newS
+}
+
+func (s TaskQueueDurationConstrainedDefaultSetting) Key() Key               { return s.key }
+func (s TaskQueueDurationConstrainedDefaultSetting) Precedence() Precedence { return PrecedenceTaskQueue }
+func (s TaskQueueDurationConstrainedDefaultSetting) Validate(v any) error {
+	tv, err := s.convert(v)
+	if err != nil {
+		return err
+	}
+	if s.validate != nil {
+		return s.validate(tv)
+	}
+	return err
 }
 
 type DurationPropertyFnWithTaskQueueFilter func(namespace string, taskQueue string, taskQueueType enumspb.TaskQueueType) time.Duration
@@ -2266,6 +3128,7 @@ func (s TaskQueueDurationSetting) Get(c *Collection) DurationPropertyFnWithTaskQ
 			s.key,
 			s.def,
 			s.convert,
+			s.validate,
 			precedenceTaskQueue(namespace, taskQueue, taskQueueType),
 		)
 	}
@@ -2278,6 +3141,7 @@ func (s TaskQueueDurationConstrainedDefaultSetting) Get(c *Collection) DurationP
 			s.key,
 			s.cdef,
 			s.convert,
+			s.validate,
 			precedenceTaskQueue(namespace, taskQueue, taskQueueType),
 		)
 	}
@@ -2317,7 +3181,13 @@ func NewShardIDDurationSettingWithConstrainedDefault(key Key, cdef []TypedConstr
 func (s ShardIDDurationSetting) Key() Key               { return s.key }
 func (s ShardIDDurationSetting) Precedence() Precedence { return PrecedenceShardID }
 func (s ShardIDDurationSetting) Validate(v any) error {
-	_, err := s.convert(v)
+	tv, err := s.convert(v)
+	if err != nil {
+		return err
+	}
+	if s.validate != nil {
+		return s.validate(tv)
+	}
 	return err
 }
 
@@ -2325,6 +3195,25 @@ func (s ShardIDDurationSetting) WithDefault(v time.Duration) ShardIDDurationSett
 	newS := s
 	newS.def = v
 	return newS
+}
+
+func (s ShardIDDurationSetting) WithValidator(f func(time.Duration) error) ShardIDDurationSetting {
+	newS := s
+	newS.validate = f
+	return newS
+}
+
+func (s ShardIDDurationConstrainedDefaultSetting) Key() Key               { return s.key }
+func (s ShardIDDurationConstrainedDefaultSetting) Precedence() Precedence { return PrecedenceShardID }
+func (s ShardIDDurationConstrainedDefaultSetting) Validate(v any) error {
+	tv, err := s.convert(v)
+	if err != nil {
+		return err
+	}
+	if s.validate != nil {
+		return s.validate(tv)
+	}
+	return err
 }
 
 type DurationPropertyFnWithShardIDFilter func(shardID int32) time.Duration
@@ -2336,6 +3225,7 @@ func (s ShardIDDurationSetting) Get(c *Collection) DurationPropertyFnWithShardID
 			s.key,
 			s.def,
 			s.convert,
+			s.validate,
 			precedenceShardID(shardID),
 		)
 	}
@@ -2348,6 +3238,7 @@ func (s ShardIDDurationConstrainedDefaultSetting) Get(c *Collection) DurationPro
 			s.key,
 			s.cdef,
 			s.convert,
+			s.validate,
 			precedenceShardID(shardID),
 		)
 	}
@@ -2387,7 +3278,13 @@ func NewTaskTypeDurationSettingWithConstrainedDefault(key Key, cdef []TypedConst
 func (s TaskTypeDurationSetting) Key() Key               { return s.key }
 func (s TaskTypeDurationSetting) Precedence() Precedence { return PrecedenceTaskType }
 func (s TaskTypeDurationSetting) Validate(v any) error {
-	_, err := s.convert(v)
+	tv, err := s.convert(v)
+	if err != nil {
+		return err
+	}
+	if s.validate != nil {
+		return s.validate(tv)
+	}
 	return err
 }
 
@@ -2395,6 +3292,25 @@ func (s TaskTypeDurationSetting) WithDefault(v time.Duration) TaskTypeDurationSe
 	newS := s
 	newS.def = v
 	return newS
+}
+
+func (s TaskTypeDurationSetting) WithValidator(f func(time.Duration) error) TaskTypeDurationSetting {
+	newS := s
+	newS.validate = f
+	return newS
+}
+
+func (s TaskTypeDurationConstrainedDefaultSetting) Key() Key               { return s.key }
+func (s TaskTypeDurationConstrainedDefaultSetting) Precedence() Precedence { return PrecedenceTaskType }
+func (s TaskTypeDurationConstrainedDefaultSetting) Validate(v any) error {
+	tv, err := s.convert(v)
+	if err != nil {
+		return err
+	}
+	if s.validate != nil {
+		return s.validate(tv)
+	}
+	return err
 }
 
 type DurationPropertyFnWithTaskTypeFilter func(taskType enumsspb.TaskType) time.Duration
@@ -2406,6 +3322,7 @@ func (s TaskTypeDurationSetting) Get(c *Collection) DurationPropertyFnWithTaskTy
 			s.key,
 			s.def,
 			s.convert,
+			s.validate,
 			precedenceTaskType(taskType),
 		)
 	}
@@ -2418,6 +3335,7 @@ func (s TaskTypeDurationConstrainedDefaultSetting) Get(c *Collection) DurationPr
 			s.key,
 			s.cdef,
 			s.convert,
+			s.validate,
 			precedenceTaskType(taskType),
 		)
 	}
@@ -2457,7 +3375,13 @@ func NewDestinationDurationSettingWithConstrainedDefault(key Key, cdef []TypedCo
 func (s DestinationDurationSetting) Key() Key               { return s.key }
 func (s DestinationDurationSetting) Precedence() Precedence { return PrecedenceDestination }
 func (s DestinationDurationSetting) Validate(v any) error {
-	_, err := s.convert(v)
+	tv, err := s.convert(v)
+	if err != nil {
+		return err
+	}
+	if s.validate != nil {
+		return s.validate(tv)
+	}
 	return err
 }
 
@@ -2465,6 +3389,25 @@ func (s DestinationDurationSetting) WithDefault(v time.Duration) DestinationDura
 	newS := s
 	newS.def = v
 	return newS
+}
+
+func (s DestinationDurationSetting) WithValidator(f func(time.Duration) error) DestinationDurationSetting {
+	newS := s
+	newS.validate = f
+	return newS
+}
+
+func (s DestinationDurationConstrainedDefaultSetting) Key() Key               { return s.key }
+func (s DestinationDurationConstrainedDefaultSetting) Precedence() Precedence { return PrecedenceDestination }
+func (s DestinationDurationConstrainedDefaultSetting) Validate(v any) error {
+	tv, err := s.convert(v)
+	if err != nil {
+		return err
+	}
+	if s.validate != nil {
+		return s.validate(tv)
+	}
+	return err
 }
 
 type DurationPropertyFnWithDestinationFilter func(namespace string, destination string) time.Duration
@@ -2476,6 +3419,7 @@ func (s DestinationDurationSetting) Get(c *Collection) DurationPropertyFnWithDes
 			s.key,
 			s.def,
 			s.convert,
+			s.validate,
 			precedenceDestination(namespace, destination),
 		)
 	}
@@ -2488,6 +3432,7 @@ func (s DestinationDurationConstrainedDefaultSetting) Get(c *Collection) Duratio
 			s.key,
 			s.cdef,
 			s.convert,
+			s.validate,
 			precedenceDestination(namespace, destination),
 		)
 	}
@@ -2527,7 +3472,13 @@ func NewGlobalMapSettingWithConstrainedDefault(key Key, cdef []TypedConstrainedV
 func (s GlobalMapSetting) Key() Key               { return s.key }
 func (s GlobalMapSetting) Precedence() Precedence { return PrecedenceGlobal }
 func (s GlobalMapSetting) Validate(v any) error {
-	_, err := s.convert(v)
+	tv, err := s.convert(v)
+	if err != nil {
+		return err
+	}
+	if s.validate != nil {
+		return s.validate(tv)
+	}
 	return err
 }
 
@@ -2535,6 +3486,25 @@ func (s GlobalMapSetting) WithDefault(v map[string]any) GlobalMapSetting {
 	newS := s
 	newS.def = v
 	return newS
+}
+
+func (s GlobalMapSetting) WithValidator(f func(map[string]any) error) GlobalMapSetting {
+	newS := s
+	newS.validate = f
+	return newS
+}
+
+func (s GlobalMapConstrainedDefaultSetting) Key() Key               { return s.key }
+func (s GlobalMapConstrainedDefaultSetting) Precedence() Precedence { return PrecedenceGlobal }
+func (s GlobalMapConstrainedDefaultSetting) Validate(v any) error {
+	tv, err := s.convert(v)
+	if err != nil {
+		return err
+	}
+	if s.validate != nil {
+		return s.validate(tv)
+	}
+	return err
 }
 
 type MapPropertyFn func() map[string]any
@@ -2546,6 +3516,7 @@ func (s GlobalMapSetting) Get(c *Collection) MapPropertyFn {
 			s.key,
 			s.def,
 			s.convert,
+			s.validate,
 			precedenceGlobal(),
 		)
 	}
@@ -2558,6 +3529,7 @@ func (s GlobalMapConstrainedDefaultSetting) Get(c *Collection) MapPropertyFn {
 			s.key,
 			s.cdef,
 			s.convert,
+			s.validate,
 			precedenceGlobal(),
 		)
 	}
@@ -2597,7 +3569,13 @@ func NewNamespaceMapSettingWithConstrainedDefault(key Key, cdef []TypedConstrain
 func (s NamespaceMapSetting) Key() Key               { return s.key }
 func (s NamespaceMapSetting) Precedence() Precedence { return PrecedenceNamespace }
 func (s NamespaceMapSetting) Validate(v any) error {
-	_, err := s.convert(v)
+	tv, err := s.convert(v)
+	if err != nil {
+		return err
+	}
+	if s.validate != nil {
+		return s.validate(tv)
+	}
 	return err
 }
 
@@ -2605,6 +3583,25 @@ func (s NamespaceMapSetting) WithDefault(v map[string]any) NamespaceMapSetting {
 	newS := s
 	newS.def = v
 	return newS
+}
+
+func (s NamespaceMapSetting) WithValidator(f func(map[string]any) error) NamespaceMapSetting {
+	newS := s
+	newS.validate = f
+	return newS
+}
+
+func (s NamespaceMapConstrainedDefaultSetting) Key() Key               { return s.key }
+func (s NamespaceMapConstrainedDefaultSetting) Precedence() Precedence { return PrecedenceNamespace }
+func (s NamespaceMapConstrainedDefaultSetting) Validate(v any) error {
+	tv, err := s.convert(v)
+	if err != nil {
+		return err
+	}
+	if s.validate != nil {
+		return s.validate(tv)
+	}
+	return err
 }
 
 type MapPropertyFnWithNamespaceFilter func(namespace string) map[string]any
@@ -2616,6 +3613,7 @@ func (s NamespaceMapSetting) Get(c *Collection) MapPropertyFnWithNamespaceFilter
 			s.key,
 			s.def,
 			s.convert,
+			s.validate,
 			precedenceNamespace(namespace),
 		)
 	}
@@ -2628,6 +3626,7 @@ func (s NamespaceMapConstrainedDefaultSetting) Get(c *Collection) MapPropertyFnW
 			s.key,
 			s.cdef,
 			s.convert,
+			s.validate,
 			precedenceNamespace(namespace),
 		)
 	}
@@ -2667,7 +3666,13 @@ func NewNamespaceIDMapSettingWithConstrainedDefault(key Key, cdef []TypedConstra
 func (s NamespaceIDMapSetting) Key() Key               { return s.key }
 func (s NamespaceIDMapSetting) Precedence() Precedence { return PrecedenceNamespaceID }
 func (s NamespaceIDMapSetting) Validate(v any) error {
-	_, err := s.convert(v)
+	tv, err := s.convert(v)
+	if err != nil {
+		return err
+	}
+	if s.validate != nil {
+		return s.validate(tv)
+	}
 	return err
 }
 
@@ -2675,6 +3680,25 @@ func (s NamespaceIDMapSetting) WithDefault(v map[string]any) NamespaceIDMapSetti
 	newS := s
 	newS.def = v
 	return newS
+}
+
+func (s NamespaceIDMapSetting) WithValidator(f func(map[string]any) error) NamespaceIDMapSetting {
+	newS := s
+	newS.validate = f
+	return newS
+}
+
+func (s NamespaceIDMapConstrainedDefaultSetting) Key() Key               { return s.key }
+func (s NamespaceIDMapConstrainedDefaultSetting) Precedence() Precedence { return PrecedenceNamespaceID }
+func (s NamespaceIDMapConstrainedDefaultSetting) Validate(v any) error {
+	tv, err := s.convert(v)
+	if err != nil {
+		return err
+	}
+	if s.validate != nil {
+		return s.validate(tv)
+	}
+	return err
 }
 
 type MapPropertyFnWithNamespaceIDFilter func(namespaceID string) map[string]any
@@ -2686,6 +3710,7 @@ func (s NamespaceIDMapSetting) Get(c *Collection) MapPropertyFnWithNamespaceIDFi
 			s.key,
 			s.def,
 			s.convert,
+			s.validate,
 			precedenceNamespaceID(namespaceID),
 		)
 	}
@@ -2698,6 +3723,7 @@ func (s NamespaceIDMapConstrainedDefaultSetting) Get(c *Collection) MapPropertyF
 			s.key,
 			s.cdef,
 			s.convert,
+			s.validate,
 			precedenceNamespaceID(namespaceID),
 		)
 	}
@@ -2737,7 +3763,13 @@ func NewTaskQueueMapSettingWithConstrainedDefault(key Key, cdef []TypedConstrain
 func (s TaskQueueMapSetting) Key() Key               { return s.key }
 func (s TaskQueueMapSetting) Precedence() Precedence { return PrecedenceTaskQueue }
 func (s TaskQueueMapSetting) Validate(v any) error {
-	_, err := s.convert(v)
+	tv, err := s.convert(v)
+	if err != nil {
+		return err
+	}
+	if s.validate != nil {
+		return s.validate(tv)
+	}
 	return err
 }
 
@@ -2745,6 +3777,25 @@ func (s TaskQueueMapSetting) WithDefault(v map[string]any) TaskQueueMapSetting {
 	newS := s
 	newS.def = v
 	return newS
+}
+
+func (s TaskQueueMapSetting) WithValidator(f func(map[string]any) error) TaskQueueMapSetting {
+	newS := s
+	newS.validate = f
+	return newS
+}
+
+func (s TaskQueueMapConstrainedDefaultSetting) Key() Key               { return s.key }
+func (s TaskQueueMapConstrainedDefaultSetting) Precedence() Precedence { return PrecedenceTaskQueue }
+func (s TaskQueueMapConstrainedDefaultSetting) Validate(v any) error {
+	tv, err := s.convert(v)
+	if err != nil {
+		return err
+	}
+	if s.validate != nil {
+		return s.validate(tv)
+	}
+	return err
 }
 
 type MapPropertyFnWithTaskQueueFilter func(namespace string, taskQueue string, taskQueueType enumspb.TaskQueueType) map[string]any
@@ -2756,6 +3807,7 @@ func (s TaskQueueMapSetting) Get(c *Collection) MapPropertyFnWithTaskQueueFilter
 			s.key,
 			s.def,
 			s.convert,
+			s.validate,
 			precedenceTaskQueue(namespace, taskQueue, taskQueueType),
 		)
 	}
@@ -2768,6 +3820,7 @@ func (s TaskQueueMapConstrainedDefaultSetting) Get(c *Collection) MapPropertyFnW
 			s.key,
 			s.cdef,
 			s.convert,
+			s.validate,
 			precedenceTaskQueue(namespace, taskQueue, taskQueueType),
 		)
 	}
@@ -2807,7 +3860,13 @@ func NewShardIDMapSettingWithConstrainedDefault(key Key, cdef []TypedConstrained
 func (s ShardIDMapSetting) Key() Key               { return s.key }
 func (s ShardIDMapSetting) Precedence() Precedence { return PrecedenceShardID }
 func (s ShardIDMapSetting) Validate(v any) error {
-	_, err := s.convert(v)
+	tv, err := s.convert(v)
+	if err != nil {
+		return err
+	}
+	if s.validate != nil {
+		return s.validate(tv)
+	}
 	return err
 }
 
@@ -2815,6 +3874,25 @@ func (s ShardIDMapSetting) WithDefault(v map[string]any) ShardIDMapSetting {
 	newS := s
 	newS.def = v
 	return newS
+}
+
+func (s ShardIDMapSetting) WithValidator(f func(map[string]any) error) ShardIDMapSetting {
+	newS := s
+	newS.validate = f
+	return newS
+}
+
+func (s ShardIDMapConstrainedDefaultSetting) Key() Key               { return s.key }
+func (s ShardIDMapConstrainedDefaultSetting) Precedence() Precedence { return PrecedenceShardID }
+func (s ShardIDMapConstrainedDefaultSetting) Validate(v any) error {
+	tv, err := s.convert(v)
+	if err != nil {
+		return err
+	}
+	if s.validate != nil {
+		return s.validate(tv)
+	}
+	return err
 }
 
 type MapPropertyFnWithShardIDFilter func(shardID int32) map[string]any
@@ -2826,6 +3904,7 @@ func (s ShardIDMapSetting) Get(c *Collection) MapPropertyFnWithShardIDFilter {
 			s.key,
 			s.def,
 			s.convert,
+			s.validate,
 			precedenceShardID(shardID),
 		)
 	}
@@ -2838,6 +3917,7 @@ func (s ShardIDMapConstrainedDefaultSetting) Get(c *Collection) MapPropertyFnWit
 			s.key,
 			s.cdef,
 			s.convert,
+			s.validate,
 			precedenceShardID(shardID),
 		)
 	}
@@ -2877,7 +3957,13 @@ func NewTaskTypeMapSettingWithConstrainedDefault(key Key, cdef []TypedConstraine
 func (s TaskTypeMapSetting) Key() Key               { return s.key }
 func (s TaskTypeMapSetting) Precedence() Precedence { return PrecedenceTaskType }
 func (s TaskTypeMapSetting) Validate(v any) error {
-	_, err := s.convert(v)
+	tv, err := s.convert(v)
+	if err != nil {
+		return err
+	}
+	if s.validate != nil {
+		return s.validate(tv)
+	}
 	return err
 }
 
@@ -2885,6 +3971,25 @@ func (s TaskTypeMapSetting) WithDefault(v map[string]any) TaskTypeMapSetting {
 	newS := s
 	newS.def = v
 	return newS
+}
+
+func (s TaskTypeMapSetting) WithValidator(f func(map[string]any) error) TaskTypeMapSetting {
+	newS := s
+	newS.validate = f
+	return newS
+}
+
+func (s TaskTypeMapConstrainedDefaultSetting) Key() Key               { return s.key }
+func (s TaskTypeMapConstrainedDefaultSetting) Precedence() Precedence { return PrecedenceTaskType }
+func (s TaskTypeMapConstrainedDefaultSetting) Validate(v any) error {
+	tv, err := s.convert(v)
+	if err != nil {
+		return err
+	}
+	if s.validate != nil {
+		return s.validate(tv)
+	}
+	return err
 }
 
 type MapPropertyFnWithTaskTypeFilter func(taskType enumsspb.TaskType) map[string]any
@@ -2896,6 +4001,7 @@ func (s TaskTypeMapSetting) Get(c *Collection) MapPropertyFnWithTaskTypeFilter {
 			s.key,
 			s.def,
 			s.convert,
+			s.validate,
 			precedenceTaskType(taskType),
 		)
 	}
@@ -2908,6 +4014,7 @@ func (s TaskTypeMapConstrainedDefaultSetting) Get(c *Collection) MapPropertyFnWi
 			s.key,
 			s.cdef,
 			s.convert,
+			s.validate,
 			precedenceTaskType(taskType),
 		)
 	}
@@ -2947,7 +4054,13 @@ func NewDestinationMapSettingWithConstrainedDefault(key Key, cdef []TypedConstra
 func (s DestinationMapSetting) Key() Key               { return s.key }
 func (s DestinationMapSetting) Precedence() Precedence { return PrecedenceDestination }
 func (s DestinationMapSetting) Validate(v any) error {
-	_, err := s.convert(v)
+	tv, err := s.convert(v)
+	if err != nil {
+		return err
+	}
+	if s.validate != nil {
+		return s.validate(tv)
+	}
 	return err
 }
 
@@ -2955,6 +4068,25 @@ func (s DestinationMapSetting) WithDefault(v map[string]any) DestinationMapSetti
 	newS := s
 	newS.def = v
 	return newS
+}
+
+func (s DestinationMapSetting) WithValidator(f func(map[string]any) error) DestinationMapSetting {
+	newS := s
+	newS.validate = f
+	return newS
+}
+
+func (s DestinationMapConstrainedDefaultSetting) Key() Key               { return s.key }
+func (s DestinationMapConstrainedDefaultSetting) Precedence() Precedence { return PrecedenceDestination }
+func (s DestinationMapConstrainedDefaultSetting) Validate(v any) error {
+	tv, err := s.convert(v)
+	if err != nil {
+		return err
+	}
+	if s.validate != nil {
+		return s.validate(tv)
+	}
+	return err
 }
 
 type MapPropertyFnWithDestinationFilter func(namespace string, destination string) map[string]any
@@ -2966,6 +4098,7 @@ func (s DestinationMapSetting) Get(c *Collection) MapPropertyFnWithDestinationFi
 			s.key,
 			s.def,
 			s.convert,
+			s.validate,
 			precedenceDestination(namespace, destination),
 		)
 	}
@@ -2978,6 +4111,7 @@ func (s DestinationMapConstrainedDefaultSetting) Get(c *Collection) MapPropertyF
 			s.key,
 			s.cdef,
 			s.convert,
+			s.validate,
 			precedenceDestination(namespace, destination),
 		)
 	}
@@ -3020,13 +4154,25 @@ func NewGlobalTypedSettingWithConverter[T any](key Key, convert func(any) (T, er
 func (s GlobalTypedSetting[T]) Key() Key               { return s.key }
 func (s GlobalTypedSetting[T]) Precedence() Precedence { return PrecedenceGlobal }
 func (s GlobalTypedSetting[T]) Validate(v any) error {
-	_, err := s.convert(v)
+	tv, err := s.convert(v)
+	if err != nil {
+		return err
+	}
+	if s.validate != nil {
+		return s.validate(tv)
+	}
 	return err
 }
 
 func (s GlobalTypedSetting[T]) WithDefault(v T) GlobalTypedSetting[T] {
 	newS := s
 	newS.def = v
+	return newS
+}
+
+func (s GlobalTypedSetting[T]) WithValidator(f func(T) error) GlobalTypedSetting[T] {
+	newS := s
+	newS.validate = f
 	return newS
 }
 
@@ -3039,6 +4185,7 @@ func (s GlobalTypedSetting[T]) Get(c *Collection) TypedPropertyFn[T] {
 			s.key,
 			s.def,
 			s.convert,
+			s.validate,
 			precedenceGlobal(),
 		)
 	}
@@ -3081,13 +4228,25 @@ func NewNamespaceTypedSettingWithConverter[T any](key Key, convert func(any) (T,
 func (s NamespaceTypedSetting[T]) Key() Key               { return s.key }
 func (s NamespaceTypedSetting[T]) Precedence() Precedence { return PrecedenceNamespace }
 func (s NamespaceTypedSetting[T]) Validate(v any) error {
-	_, err := s.convert(v)
+	tv, err := s.convert(v)
+	if err != nil {
+		return err
+	}
+	if s.validate != nil {
+		return s.validate(tv)
+	}
 	return err
 }
 
 func (s NamespaceTypedSetting[T]) WithDefault(v T) NamespaceTypedSetting[T] {
 	newS := s
 	newS.def = v
+	return newS
+}
+
+func (s NamespaceTypedSetting[T]) WithValidator(f func(T) error) NamespaceTypedSetting[T] {
+	newS := s
+	newS.validate = f
 	return newS
 }
 
@@ -3100,6 +4259,7 @@ func (s NamespaceTypedSetting[T]) Get(c *Collection) TypedPropertyFnWithNamespac
 			s.key,
 			s.def,
 			s.convert,
+			s.validate,
 			precedenceNamespace(namespace),
 		)
 	}
@@ -3142,13 +4302,25 @@ func NewNamespaceIDTypedSettingWithConverter[T any](key Key, convert func(any) (
 func (s NamespaceIDTypedSetting[T]) Key() Key               { return s.key }
 func (s NamespaceIDTypedSetting[T]) Precedence() Precedence { return PrecedenceNamespaceID }
 func (s NamespaceIDTypedSetting[T]) Validate(v any) error {
-	_, err := s.convert(v)
+	tv, err := s.convert(v)
+	if err != nil {
+		return err
+	}
+	if s.validate != nil {
+		return s.validate(tv)
+	}
 	return err
 }
 
 func (s NamespaceIDTypedSetting[T]) WithDefault(v T) NamespaceIDTypedSetting[T] {
 	newS := s
 	newS.def = v
+	return newS
+}
+
+func (s NamespaceIDTypedSetting[T]) WithValidator(f func(T) error) NamespaceIDTypedSetting[T] {
+	newS := s
+	newS.validate = f
 	return newS
 }
 
@@ -3161,6 +4333,7 @@ func (s NamespaceIDTypedSetting[T]) Get(c *Collection) TypedPropertyFnWithNamesp
 			s.key,
 			s.def,
 			s.convert,
+			s.validate,
 			precedenceNamespaceID(namespaceID),
 		)
 	}
@@ -3203,13 +4376,25 @@ func NewTaskQueueTypedSettingWithConverter[T any](key Key, convert func(any) (T,
 func (s TaskQueueTypedSetting[T]) Key() Key               { return s.key }
 func (s TaskQueueTypedSetting[T]) Precedence() Precedence { return PrecedenceTaskQueue }
 func (s TaskQueueTypedSetting[T]) Validate(v any) error {
-	_, err := s.convert(v)
+	tv, err := s.convert(v)
+	if err != nil {
+		return err
+	}
+	if s.validate != nil {
+		return s.validate(tv)
+	}
 	return err
 }
 
 func (s TaskQueueTypedSetting[T]) WithDefault(v T) TaskQueueTypedSetting[T] {
 	newS := s
 	newS.def = v
+	return newS
+}
+
+func (s TaskQueueTypedSetting[T]) WithValidator(f func(T) error) TaskQueueTypedSetting[T] {
+	newS := s
+	newS.validate = f
 	return newS
 }
 
@@ -3222,6 +4407,7 @@ func (s TaskQueueTypedSetting[T]) Get(c *Collection) TypedPropertyFnWithTaskQueu
 			s.key,
 			s.def,
 			s.convert,
+			s.validate,
 			precedenceTaskQueue(namespace, taskQueue, taskQueueType),
 		)
 	}
@@ -3264,13 +4450,25 @@ func NewShardIDTypedSettingWithConverter[T any](key Key, convert func(any) (T, e
 func (s ShardIDTypedSetting[T]) Key() Key               { return s.key }
 func (s ShardIDTypedSetting[T]) Precedence() Precedence { return PrecedenceShardID }
 func (s ShardIDTypedSetting[T]) Validate(v any) error {
-	_, err := s.convert(v)
+	tv, err := s.convert(v)
+	if err != nil {
+		return err
+	}
+	if s.validate != nil {
+		return s.validate(tv)
+	}
 	return err
 }
 
 func (s ShardIDTypedSetting[T]) WithDefault(v T) ShardIDTypedSetting[T] {
 	newS := s
 	newS.def = v
+	return newS
+}
+
+func (s ShardIDTypedSetting[T]) WithValidator(f func(T) error) ShardIDTypedSetting[T] {
+	newS := s
+	newS.validate = f
 	return newS
 }
 
@@ -3283,6 +4481,7 @@ func (s ShardIDTypedSetting[T]) Get(c *Collection) TypedPropertyFnWithShardIDFil
 			s.key,
 			s.def,
 			s.convert,
+			s.validate,
 			precedenceShardID(shardID),
 		)
 	}
@@ -3325,13 +4524,25 @@ func NewTaskTypeTypedSettingWithConverter[T any](key Key, convert func(any) (T, 
 func (s TaskTypeTypedSetting[T]) Key() Key               { return s.key }
 func (s TaskTypeTypedSetting[T]) Precedence() Precedence { return PrecedenceTaskType }
 func (s TaskTypeTypedSetting[T]) Validate(v any) error {
-	_, err := s.convert(v)
+	tv, err := s.convert(v)
+	if err != nil {
+		return err
+	}
+	if s.validate != nil {
+		return s.validate(tv)
+	}
 	return err
 }
 
 func (s TaskTypeTypedSetting[T]) WithDefault(v T) TaskTypeTypedSetting[T] {
 	newS := s
 	newS.def = v
+	return newS
+}
+
+func (s TaskTypeTypedSetting[T]) WithValidator(f func(T) error) TaskTypeTypedSetting[T] {
+	newS := s
+	newS.validate = f
 	return newS
 }
 
@@ -3344,6 +4555,7 @@ func (s TaskTypeTypedSetting[T]) Get(c *Collection) TypedPropertyFnWithTaskTypeF
 			s.key,
 			s.def,
 			s.convert,
+			s.validate,
 			precedenceTaskType(taskType),
 		)
 	}
@@ -3386,13 +4598,25 @@ func NewDestinationTypedSettingWithConverter[T any](key Key, convert func(any) (
 func (s DestinationTypedSetting[T]) Key() Key               { return s.key }
 func (s DestinationTypedSetting[T]) Precedence() Precedence { return PrecedenceDestination }
 func (s DestinationTypedSetting[T]) Validate(v any) error {
-	_, err := s.convert(v)
+	tv, err := s.convert(v)
+	if err != nil {
+		return err
+	}
+	if s.validate != nil {
+		return s.validate(tv)
+	}
 	return err
 }
 
 func (s DestinationTypedSetting[T]) WithDefault(v T) DestinationTypedSetting[T] {
 	newS := s
 	newS.def = v
+	return newS
+}
+
+func (s DestinationTypedSetting[T]) WithValidator(f func(T) error) DestinationTypedSetting[T] {
+	newS := s
+	newS.validate = f
 	return newS
 }
 
@@ -3405,6 +4629,7 @@ func (s DestinationTypedSetting[T]) Get(c *Collection) TypedPropertyFnWithDestin
 			s.key,
 			s.def,
 			s.convert,
+			s.validate,
 			precedenceDestination(namespace, destination),
 		)
 	}

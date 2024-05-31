@@ -122,6 +122,7 @@ func matchAndConvert[T any](
 	key Key,
 	def T,
 	convert func(value any) (T, error),
+	validate func(T) error,
 	precedence []Constraints,
 ) T {
 	cvs := c.client.GetValue(key)
@@ -139,6 +140,14 @@ func matchAndConvert[T any](
 			c.logger.Warn("Failed to convert value, using default", tag.Key(key.String()), tag.IgnoredValue(val), tag.Error(err))
 		}
 		return def
+	}
+	if validate != nil {
+		if err := validate(typedVal); err != nil {
+			if c.throttleLog() {
+				c.logger.Warn("Failed to validate, using default", tag.Key(key.String()), tag.IgnoredValue(typedVal), tag.Error(err))
+			}
+			return def
+		}
 	}
 	return typedVal
 }
@@ -182,6 +191,7 @@ func matchAndConvertWithConstrainedDefault[T any](
 	key Key,
 	cdef []TypedConstrainedValue[T],
 	convert func(value any) (T, error),
+	validate func(T) error,
 	precedence []Constraints,
 ) T {
 	cvs := c.client.GetValue(key)
@@ -210,6 +220,14 @@ func matchAndConvertWithConstrainedDefault[T any](
 		}
 		// if haveDef == false, this will be the zero value, but that's the best we can do
 		return defVal
+	}
+	if validate != nil {
+		if err := validate(typedVal); err != nil {
+			if c.throttleLog() {
+				c.logger.Warn("Failed to validate, using default", tag.Key(key.String()), tag.IgnoredValue(typedVal), tag.Error(err))
+			}
+			return defVal
+		}
 	}
 	return typedVal
 

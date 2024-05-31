@@ -41,12 +41,14 @@ type (
 		key         Key                  // string value of key. case-insensitive.
 		def         T                    // default value. cdef is used in preference to def if non-nil.
 		convert     func(any) (T, error) // converter function
+		validate    func(T) error        // optional user validation
 		description string               // documentation
 	}
 	constrainedDefaultSetting[T any, P any] struct {
 		key         Key // string value of key. case-insensitive.
 		cdef        []TypedConstrainedValue[T]
 		convert     func(any) (T, error) // converter function
+		validate    func(T) error        // optional user validation
 		description string               // documentation
 	}
 
