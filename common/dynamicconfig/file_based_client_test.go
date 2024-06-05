@@ -26,6 +26,7 @@ package dynamicconfig_test
 
 import (
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -392,8 +393,8 @@ testGetBoolPropertyKey:
 	close(doneCh)
 }
 
-func (s *fileBasedClientSuite) TestUpdate_ChangedMapValue() {
-	dynamicconfig.NewNamespaceMapSetting("history.fakeRetryPolicy", retrypolicy.GetDefault(), "")
+func (s *fileBasedClientSuite) TestUpdate_ChangedTypedValue() {
+	dynamicconfig.NewNamespaceTypedSetting("history.fakeRetryPolicy", retrypolicy.DefaultDefaultRetrySettings, "")
 
 	ctrl := gomock.NewController(s.T())
 	defer ctrl.Finish()
@@ -647,8 +648,17 @@ testGetBoolPropertyKey:
   constraints:
     color: blue
 `))
-	s.Equal(3, len(lr.Errors))
-	s.ErrorContains(lr.Errors[0], "taskQueueName constraint must be string")
-	s.ErrorContains(lr.Errors[1], "invalid value for taskType")
-	s.ErrorContains(lr.Errors[2], `unknown constraint type "color"`)
+	found := 0
+	for _, err := range lr.Errors {
+		e := err.Error()
+		switch {
+		case strings.Contains(e, "taskQueueName constraint must be string"):
+			found++
+		case strings.Contains(e, "invalid is not a valid TaskQueueType"):
+			found++
+		case strings.Contains(e, `unknown constraint type "color"`):
+			found++
+		}
+	}
+	s.Equal(3, found)
 }
