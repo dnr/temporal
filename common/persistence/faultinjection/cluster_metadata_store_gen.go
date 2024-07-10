@@ -80,6 +80,15 @@ func (c *faultInjectionClusterMetadataStore) GetClusterMetadata(
 	})
 }
 
+func (c *faultInjectionClusterMetadataStore) GetDynamicConfig(
+	ctx context.Context,
+	request *persistence.GetDynamicConfigRequest,
+) (*persistence.GetDynamicConfigResponse, error) {
+	return inject1(c.generator.generate("GetDynamicConfig"), func() (*persistence.GetDynamicConfigResponse, error) {
+		return c.baseStore.GetDynamicConfig(ctx, request)
+	})
+}
+
 func (c *faultInjectionClusterMetadataStore) GetName() string {
 	return c.baseStore.GetName()
 }

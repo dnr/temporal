@@ -1168,6 +1168,19 @@ func (p *clusterMetadataPersistenceClient) DeleteClusterMetadata(
 	return p.persistence.DeleteClusterMetadata(ctx, request)
 }
 
+func (p *clusterMetadataPersistenceClient) GetDynamicConfig(
+	ctx context.Context,
+	request *GetDynamicConfigRequest,
+) (_ *GetDynamicConfigResponse, retErr error) {
+	caller := headers.GetCallerInfo(ctx).CallerName
+	startTime := time.Now().UTC()
+	defer func() {
+		p.healthSignals.Record(CallerSegmentMissing, caller, time.Since(startTime), retErr)
+		p.recordRequestMetrics(metrics.PersistenceGetDynamicConfigScope, caller, time.Since(startTime), retErr)
+	}()
+	return p.persistence.GetDynamicConfig(ctx, request)
+}
+
 func (p *clusterMetadataPersistenceClient) GetName() string {
 	return p.persistence.GetName()
 }

@@ -1152,6 +1152,21 @@ func (mr *MockClusterMetadataManagerMockRecorder) GetCurrentClusterMetadata(ctx 
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetCurrentClusterMetadata", reflect.TypeOf((*MockClusterMetadataManager)(nil).GetCurrentClusterMetadata), ctx)
 }
 
+// GetDynamicConfig mocks base method.
+func (m *MockClusterMetadataManager) GetDynamicConfig(ctx context.Context, request *GetDynamicConfigRequest) (*GetDynamicConfigResponse, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetDynamicConfig", ctx, request)
+	ret0, _ := ret[0].(*GetDynamicConfigResponse)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetDynamicConfig indicates an expected call of GetDynamicConfig.
+func (mr *MockClusterMetadataManagerMockRecorder) GetDynamicConfig(ctx, request interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetDynamicConfig", reflect.TypeOf((*MockClusterMetadataManager)(nil).GetDynamicConfig), ctx, request)
+}
+
 // GetName mocks base method.
 func (m *MockClusterMetadataManager) GetName() string {
 	m.ctrl.T.Helper()

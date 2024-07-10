@@ -1049,6 +1049,21 @@ func (p *clusterMetadataRetryablePersistenceClient) DeleteClusterMetadata(
 	return backoff.ThrottleRetryContext(ctx, op, p.policy, p.isRetryable)
 }
 
+func (p *clusterMetadataRetryablePersistenceClient) GetDynamicConfig(
+	ctx context.Context,
+	request *GetDynamicConfigRequest,
+) (*GetDynamicConfigResponse, error) {
+	var response *GetDynamicConfigResponse
+	op := func(ctx context.Context) error {
+		var err error
+		response, err = p.persistence.GetDynamicConfig(ctx, request)
+		return err
+	}
+
+	err := backoff.ThrottleRetryContext(ctx, op, p.policy, p.isRetryable)
+	return response, err
+}
+
 func (p *clusterMetadataRetryablePersistenceClient) Close() {
 	p.persistence.Close()
 }

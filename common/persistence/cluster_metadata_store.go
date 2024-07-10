@@ -216,6 +216,13 @@ func (m *clusterMetadataManagerImpl) DeleteClusterMetadata(
 	return m.persistence.DeleteClusterMetadata(ctx, &InternalDeleteClusterMetadataRequest{ClusterName: request.ClusterName})
 }
 
+func (m *clusterMetadataManagerImpl) GetDynamicConfig(
+	ctx context.Context,
+	request *GetDynamicConfigRequest,
+) (*GetDynamicConfigResponse, error) {
+	return m.persistence.GetDynamicConfig(ctx, request)
+}
+
 func (m *clusterMetadataManagerImpl) convertInternalGetClusterMetadataResponse(
 	resp *InternalGetClusterMetadataResponse,
 ) (*GetClusterMetadataResponse, error) {

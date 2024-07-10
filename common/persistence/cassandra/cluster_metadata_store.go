@@ -25,7 +25,11 @@
 package cassandra
 
 import (
+	"bytes"
+	"compress/gzip"
 	"context"
+	"errors"
+	"io"
 	"net"
 	"strings"
 	"time"
@@ -38,8 +42,13 @@ import (
 	"go.temporal.io/server/common/persistence/nosql/nosqlplugin/cassandra/gocql"
 )
 
-const constMetadataPartition = 0
-const constMembershipPartition = 0
+const (
+	constMetadataPartition   = 0
+	constMembershipPartition = 0
+
+	DynamicConfigPartition   = 10
+	DynamicConfigClusterName = ""
+)
 
 const (
 	// ****** CLUSTER_METADATA_INFO TABLE ******
@@ -64,6 +73,10 @@ WHERE membership_partition = ?`
 	templateWithHostIDSuffix         = ` AND host_id = ?`
 	templateAllowFiltering           = ` ALLOW FILTERING`
 	templateWithSessionSuffix        = ` AND session_start > ?`
+
+	// dynamic config
+	templateGetDynamicConfigVersion  = `SELECT version FROM cluster_metadata_info WHERE metadata_partition = ? AND cluster_name = ?`
+	templateGetDynamicConfigContents = `SELECT data, data_encoding, version FROM cluster_metadata_info WHERE metadata_partition = ? AND cluster_name = ?`
 )
 
 type (
@@ -298,6 +311,49 @@ func (m *ClusterMetadataStore) PruneClusterMembership(
 	request *p.PruneClusterMembershipRequest,
 ) error {
 	return nil
+}
+
+func (m *ClusterMetadataStore) GetDynamicConfig(
+	ctx context.Context,
+	request *p.GetDynamicConfigRequest,
+) (*p.GetDynamicConfigResponse, error) {
+	var contents []byte
+	var encoding string
+	var version int64
+
+	if request.Contents {
+		query := m.session.Query(templateGetDynamicConfigContents, DynamicConfigPartition, DynamicConfigClusterName).WithContext(ctx)
+		err := query.Scan(&contents, &encoding, &version)
+		if err != nil {
+			return nil, gocql.ConvertError("GetDynamicConfig", err)
+		}
+		switch encoding {
+		case "text":
+			// no compression
+		case "gzip":
+			gr, err := gzip.NewReader(bytes.NewReader(contents))
+			if err != nil {
+				return nil, err
+			}
+			contents, err = io.ReadAll(gr)
+			if err != nil {
+				return nil, err
+			}
+		default:
+			return nil, errors.New("unknown encoding")
+		}
+	} else {
+		query := m.session.Query(templateGetDynamicConfigVersion, DynamicConfigPartition, DynamicConfigClusterName).WithContext(ctx)
+		err := query.Scan(&version)
+		if err != nil {
+			return nil, gocql.ConvertError("GetDynamicConfig", err)
+		}
+	}
+
+	return &p.GetDynamicConfigResponse{
+		Modified: time.Unix(version, 0),
+		Contents: contents,
+	}, nil
 }
 
 func (m *ClusterMetadataStore) GetName() string {

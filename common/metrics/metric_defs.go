@@ -154,6 +154,8 @@ const (
 	PersistenceSaveClusterMetadataScope = "SaveClusterMetadata"
 	// PersistenceDeleteClusterMetadataScope tracks DeleteClusterMetadata calls made by service to persistence layer
 	PersistenceDeleteClusterMetadataScope = "DeleteClusterMetadata"
+	// PersistenceGetDynamicConfigScope tracks GetDynamicConfig calls made by service to persistence layer
+	PersistenceGetDynamicConfigScope = "GetDynamicConfig"
 	// PersistenceUpsertClusterMembershipScope tracks UpsertClusterMembership calls made by service to persistence layer
 	PersistenceUpsertClusterMembershipScope = "UpsertClusterMembership"
 	// PersistencePruneClusterMembershipScope tracks PruneClusterMembership calls made by service to persistence layer

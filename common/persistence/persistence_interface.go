@@ -131,6 +131,8 @@ type (
 		GetClusterMembers(ctx context.Context, request *GetClusterMembersRequest) (*GetClusterMembersResponse, error)
 		UpsertClusterMembership(ctx context.Context, request *UpsertClusterMembershipRequest) error
 		PruneClusterMembership(ctx context.Context, request *PruneClusterMembershipRequest) error
+		// Other misc APIs
+		GetDynamicConfig(ctx context.Context, request *GetDynamicConfigRequest) (*GetDynamicConfigResponse, error)
 	}
 
 	// ExecutionStore is used to manage workflow execution including mutable states / history / tasks.

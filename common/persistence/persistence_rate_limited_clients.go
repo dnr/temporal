@@ -1047,6 +1047,16 @@ func (c *clusterMetadataRateLimitedPersistenceClient) DeleteClusterMetadata(
 	return c.persistence.DeleteClusterMetadata(ctx, request)
 }
 
+func (c *clusterMetadataRateLimitedPersistenceClient) GetDynamicConfig(
+	ctx context.Context,
+	request *GetDynamicConfigRequest,
+) (*GetDynamicConfigResponse, error) {
+	if err := allow(ctx, "GetDynamicConfig", CallerSegmentMissing, c.systemRateLimiter, c.namespaceRateLimiter); err != nil {
+		return nil, err
+	}
+	return c.persistence.GetDynamicConfig(ctx, request)
+}
+
 func (p *nexusEndpointRateLimitedPersistenceClient) GetName() string {
 	return p.persistence.GetName()
 }

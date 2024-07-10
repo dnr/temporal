@@ -1190,6 +1190,7 @@ type (
 		GetClusterMetadata(ctx context.Context, request *GetClusterMetadataRequest) (*GetClusterMetadataResponse, error)
 		SaveClusterMetadata(ctx context.Context, request *SaveClusterMetadataRequest) (bool, error)
 		DeleteClusterMetadata(ctx context.Context, request *DeleteClusterMetadataRequest) error
+		GetDynamicConfig(ctx context.Context, request *GetDynamicConfigRequest) (*GetDynamicConfigResponse, error)
 	}
 
 	// NexusEndpointManager is used to manage CRUD for Nexus endpoints.
@@ -1302,6 +1303,15 @@ type (
 	ListQueuesResponse struct {
 		Queues        []QueueInfo
 		NextPageToken []byte
+	}
+
+	GetDynamicConfigRequest struct {
+		Contents bool // if true, get full contents also, otherwise just mtime
+	}
+
+	GetDynamicConfigResponse struct {
+		Modified time.Time
+		Contents []byte
 	}
 )
 
