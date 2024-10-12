@@ -37,16 +37,22 @@ type (
 		// GetValue returns a set of values and associated constraints for a key. Not all
 		// constraints are valid for all keys.
 		//
-		// The returned slice of ConstrainedValues is treated as a set, and order does not
-		// matter. The effective order of constraints is determined by server logic. See the
-		// comment on Constraints below.
+		// Usually, the order of ConstrainedValues doesn't matter, since Collection looks for
+		// an exact match on the Constraints. That is, when retriving a value for a namespace,
+		// a value constrained to that namespace will always be used over a value with no
+		// constraints, regardless of what order they appear in this slice. See the comment on
+		// Constraints below.
 		//
-		// If none of the ConstrainedValues match the constraints being used for the key, then
-		// the server default value will be used.
+		// However, if two ConstrainedValues have the exact same Constraints, then the first
+		// one will be used.
 		//
-		// Note that GetValue is called very often! You should not synchronously call out to an
-		// external system. Instead you should keep a set of all configured values, refresh it
-		// periodically or when notified, and only do in-memory lookups inside of GetValue.
+		// If none of the ConstrainedValues match the constraints being for lookup, then the
+		// server default value will be used.
+		//
+		// Note that GetValue is called very often and expected to be fast! You should not
+		// synchronously call out to an external system. Instead you should keep a set of all
+		// configured values, refresh it periodically or when notified, and only do in-memory
+		// lookups inside of GetValue.
 		GetValue(key Key) []ConstrainedValue
 	}
 
@@ -67,10 +73,13 @@ type (
 	// you treat keys as case-insensitive.
 	Key string
 
-	// ConstrainedValue is a value plus associated constraints.
+	// ConstrainedValue is a value plus associated constraints. This is the main value type
+	// used in the interface between Client and Collection.
 	//
-	// The type of the Value field depends on the key. Acceptable types will be one of:
+	// The type of the Value field depends on the key. Acceptable types will usually be one of:
 	//   int, float64, bool, string, map[string]any, time.Duration
+	// but settings for keys may define their own conversion functions that understand other
+	// types.
 	//
 	// If time.Duration is expected, a string is also accepted, which will be converted using
 	// timestamp.ParseDurationDefaultDays. If float64 is expected, int is also accepted. In
@@ -80,6 +89,8 @@ type (
 		Constraints Constraints
 		Value       any
 	}
+	// TypedConstrainedValue is used instead of ConstrainedValue for complex default values,
+	// where the type is available at compile time.
 	TypedConstrainedValue[T any] struct {
 		Constraints Constraints
 		Value       T
