@@ -319,23 +319,22 @@ func (ns *Namespace) ReplicationPolicy() ReplicationPolicy {
 }
 
 func (ns *Namespace) GetCustomData(key string) string {
-	if ns.info.Data == nil {
-		return ""
-	}
 	return ns.info.Data[key]
 }
 
 // Retention returns retention duration for this namespace.
 func (ns *Namespace) Retention() time.Duration {
-	if ns.config.Retention == nil {
-		return 0
-	}
-
 	return ns.config.Retention.AsDuration()
 }
 
 func (ns *Namespace) CustomSearchAttributesMapper() CustomSearchAttributesMapper {
 	return ns.customSearchAttributesMapper
+}
+
+func (ns *Namespace) DynamicConfigJson() string {
+	// Just for testing, use "__dc" from "data" if present.
+	// This should really be a new field or map.
+	return ns.GetCustomData("__dc")
 }
 
 // Error returns the reason associated with this bad binary.

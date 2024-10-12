@@ -633,5 +633,7 @@ func namespaceStateChanged(old *namespace.Namespace, new *namespace.Namespace) b
 		old.State() != new.State() ||
 		old.IsGlobalNamespace() != new.IsGlobalNamespace() ||
 		old.ActiveClusterName() != new.ActiveClusterName() ||
-		old.ReplicationState() != new.ReplicationState()
+		old.ReplicationState() != new.ReplicationState() ||
+		// HACK: also include dynamic config changed
+		old.DynamicConfigJson() != new.DynamicConfigJson()
 }
