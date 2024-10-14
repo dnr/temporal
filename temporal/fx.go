@@ -157,6 +157,8 @@ var (
 			WorkerServiceProvider,
 			ApplyClusterMetadataConfigProvider,
 		),
+		// Note: components instantiated in TopLevelModule will get a dynamicconfig.Collection
+		// that does not include per-namespace overrides that come from namespace metadata.
 		dynamicconfig.Module,
 		pprof.Module,
 		TraceExportModule,

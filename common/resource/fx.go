@@ -52,6 +52,7 @@ import (
 	"go.temporal.io/server/common/metrics"
 	"go.temporal.io/server/common/namespace"
 	"go.temporal.io/server/common/namespace/nsregistry"
+	"go.temporal.io/server/common/nsdcclient"
 	"go.temporal.io/server/common/persistence"
 	persistenceClient "go.temporal.io/server/common/persistence/client"
 	"go.temporal.io/server/common/persistence/serialization"
@@ -108,6 +109,8 @@ var Module = fx.Options(
 		func(p namespace.Registry) pingable.Pingable { return p },
 		fx.ResultTags(`group:"deadlockDetectorRoots"`),
 	)),
+	dynamicconfig.Module,
+	fx.Decorate(MergeNamespaceRegistryDynamicConfig),
 	fx.Provide(serialization.NewSerializer),
 	fx.Provide(HistoryBootstrapContainerProvider),
 	fx.Provide(VisibilityBootstrapContainerProvider),
@@ -411,6 +414,14 @@ func RPCFactoryProvider(
 		},
 		monitor,
 	), nil
+}
+
+func MergeNamespaceRegistryDynamicConfig(baseCli dynamicconfig.Client, reg namespace.Registry, lc fx.Lifecycle) dynamicconfig.Client {
+	nsCli := nsdcclient.NewNSDynamicConfigClient(reg)
+	lc.Append(fx.StartStopHook(nsCli.Start, nsCli.Stop))
+	mergedCli := dynamicconfig.NewMergedClient([]dynamicconfig.Client{nsCli, baseCli})
+	lc.Append(fx.StartStopHook(mergedCli.Start, mergedCli.Stop))
+	return mergedCli
 }
 
 func FrontendHTTPClientCacheProvider(

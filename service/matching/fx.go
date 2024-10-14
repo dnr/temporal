@@ -50,7 +50,6 @@ import (
 
 var Module = fx.Options(
 	resource.Module,
-	dynamicconfig.Module,
 	fx.Provide(ConfigProvider),
 	fx.Provide(PersistenceRateLimitingParamsProvider),
 	service.PersistenceLazyLoadedServiceResolverModule,

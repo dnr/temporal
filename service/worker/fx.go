@@ -62,7 +62,6 @@ var Module = fx.Options(
 	scheduler.Module,
 	batcher.Module,
 	dlq.Module,
-	dynamicconfig.Module,
 	fx.Provide(
 		func(c resource.HistoryClient) dlq.HistoryClient {
 			return c
