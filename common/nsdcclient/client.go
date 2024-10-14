@@ -52,11 +52,16 @@ type (
 
 var _ dynamicconfig.NotifyingClient = (*NSDynamicConfigClient)(nil)
 
-func NewNSDynamicConfigClient(r namespace.Registry) *NSDynamicConfigClient {
+func NewNSDynamicConfigClient() *NSDynamicConfigClient {
 	return &NSDynamicConfigClient{
-		r:             r,
 		subscriptions: make(map[int]dynamicconfig.ClientUpdateFunc),
 	}
+}
+
+// SetRegistry must be called before Start/Stop. If SetRegistry or Start is never called,
+// GetValue always returns nil.
+func (n *NSDynamicConfigClient) SetRegistry(r namespace.Registry) {
+	n.r = r
 }
 
 func (n *NSDynamicConfigClient) Start() {

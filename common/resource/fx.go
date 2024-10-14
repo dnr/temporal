@@ -110,7 +110,9 @@ var Module = fx.Options(
 		fx.ResultTags(`group:"deadlockDetectorRoots"`),
 	)),
 	dynamicconfig.Module,
-	fx.Decorate(MergeNamespaceRegistryDynamicConfig),
+	fx.Provide(nsdcclient.NewNSDynamicConfigClient),
+	fx.Decorate(MergedDynamicConfig),
+	fx.Invoke(ConnectNamespaceRegistryDynamicConfig),
 	fx.Provide(serialization.NewSerializer),
 	fx.Provide(HistoryBootstrapContainerProvider),
 	fx.Provide(VisibilityBootstrapContainerProvider),
@@ -416,12 +418,22 @@ func RPCFactoryProvider(
 	), nil
 }
 
-func MergeNamespaceRegistryDynamicConfig(baseCli dynamicconfig.Client, reg namespace.Registry, lc fx.Lifecycle) dynamicconfig.Client {
-	nsCli := nsdcclient.NewNSDynamicConfigClient(reg)
-	lc.Append(fx.StartStopHook(nsCli.Start, nsCli.Stop))
+func MergedDynamicConfig(nsCli *nsdcclient.NSDynamicConfigClient, baseCli dynamicconfig.Client, lc fx.Lifecycle) dynamicconfig.Client {
+	// This can't accept a namespace.Registry directly while building the graph because it
+	// creates a cycle (ns registry -> persistence rate limiting params -> service config ->
+	// dc collection -> dc client), which causes fx to instantiate a bunch of things twice,
+	// before and after decoration, which breaks dc-in-ns for service configs.
+	// Instead construct the ns dc client and merged client now and hook up the actual registry
+	// with Invoke.
 	mergedCli := dynamicconfig.NewMergedClient([]dynamicconfig.Client{nsCli, baseCli})
 	lc.Append(fx.StartStopHook(mergedCli.Start, mergedCli.Stop))
 	return mergedCli
+}
+
+func ConnectNamespaceRegistryDynamicConfig(nsCli *nsdcclient.NSDynamicConfigClient, reg namespace.Registry, lc fx.Lifecycle) {
+	// We have to connect this after the decorate phase because of fx dependency cycles. See MergedDynamicConfig.
+	nsCli.SetRegistry(reg)
+	lc.Append(fx.StartStopHook(nsCli.Start, nsCli.Stop))
 }
 
 func FrontendHTTPClientCacheProvider(
