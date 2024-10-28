@@ -11,7 +11,9 @@ import (
 	"go.temporal.io/server/common/rpc/interceptor"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/resolver"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 )
@@ -42,11 +44,17 @@ type serviceMethod struct {
 	serverInterceptor grpc.UnaryServerInterceptor
 	requestCounter    metrics.CounterIface
 	namespaceRegistry namespace.Registry
+	fakeClientConn    *grpc.ClientConn
 }
 
 var contextType = reflect.TypeOf((*context.Context)(nil)).Elem()
 var protoMessageType = reflect.TypeOf((*proto.Message)(nil)).Elem()
 var errorType = reflect.TypeOf((*error)(nil)).Elem()
+
+func init() {
+	// This must be done at static init time.
+	resolver.Register(inlineGrpcBuilder{})
+}
 
 func NewInlineClientConn() *inlineClientConn {
 	return &inlineClientConn{
@@ -63,6 +71,18 @@ func (icc *inlineClientConn) RegisterServer(
 	requestCounter metrics.CounterIface,
 	namespaceRegistry namespace.Registry,
 ) {
+	// Create a fake "real" *grpc.ClientConn just for client interceptors, since the function
+	// signature requires one. Our interceptors don't refer to the cc parameter, but the
+	// otelgrpc interceptor does, it calls cc.Target(). This will cause that to return
+	// "internal://...". We register an actual grpc resolver builder for the "internal" scheme
+	// to prevent grpc from falling back to dns. (Note that even if it falls back to dns, it
+	// won't do a lookup until the ClientConn is actually used. But it's safer to do this.)
+	target := inlineScheme + "://" + qualifiedServerName
+	fakeClientConn, err := grpc.NewClient(target, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		panic(err)
+	}
+
 	// Create the set of methods via reflection. We currently accept the overhead
 	// of reflection compared to having to custom generate gateway code.
 	serverVal := reflect.ValueOf(server)
@@ -97,6 +117,7 @@ func (icc *inlineClientConn) RegisterServer(
 			serverInterceptor: chainUnaryServerInterceptors(serverInterceptors),
 			requestCounter:    requestCounter,
 			namespaceRegistry: namespaceRegistry,
+			fakeClientConn:    fakeClientConn,
 		}
 	}
 }
@@ -168,8 +189,7 @@ func (icc *inlineClientConn) Invoke(
 		return err
 	}
 
-	// FIXME: use fake cc here to support otel
-	return serviceMethod.clientInterceptor(ctx, method, args, reply, nil, invoker, opts...)
+	return serviceMethod.clientInterceptor(ctx, method, args, reply, serviceMethod.fakeClientConn, invoker, opts...)
 }
 
 func (*inlineClientConn) NewStream(
@@ -260,4 +280,17 @@ func (f *fakeServerTransportStream) SendHeader(md metadata.MD) error {
 func (f *fakeServerTransportStream) SetTrailer(md metadata.MD) error {
 	f.trailer = md
 	return nil
+}
+
+type inlineGrpcBuilder struct{}
+
+const inlineScheme = "inline"
+
+func (i inlineGrpcBuilder) Build(target resolver.Target, cc resolver.ClientConn, opts resolver.BuildOptions) (resolver.Resolver, error) {
+	// This resolver is never actually used so we should not get here.
+	panic("not implemented")
+}
+
+func (i inlineGrpcBuilder) Scheme() string {
+	return inlineScheme
 }

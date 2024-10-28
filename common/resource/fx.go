@@ -65,6 +65,7 @@ import (
 	"go.temporal.io/server/common/telemetry"
 	"go.temporal.io/server/common/utf8validator"
 	"go.uber.org/fx"
+	"google.golang.org/grpc"
 	"google.golang.org/grpc/health"
 )
 
@@ -405,10 +406,9 @@ func RPCFactoryProvider(
 		frontendHTTPURL,
 		frontendHTTPPort,
 		frontendTLSConfig,
-		nil, // FIXME: put this back with a fake target?
-		// []grpc.UnaryClientInterceptor{
-		// 	grpc.UnaryClientInterceptor(traceInterceptor),
-		// },
+		[]grpc.UnaryClientInterceptor{
+			grpc.UnaryClientInterceptor(traceInterceptor),
+		},
 		monitor,
 	), nil
 }
