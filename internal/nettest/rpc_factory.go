@@ -58,6 +58,10 @@ func (f *RPCFactory) GetInternodeGRPCServerOptions() ([]grpc.ServerOption, error
 	return nil, nil
 }
 
+func (f *RPCFactory) GetGRPCClientInterceptors() []grpc.UnaryClientInterceptor {
+	return nil
+}
+
 func (f *RPCFactory) GetGRPCListener() net.Listener {
 	return f.listener
 }
