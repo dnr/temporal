@@ -17,7 +17,7 @@ import (
 )
 
 var (
-	errHTTPGRPCStreamNotSupported = errors.New("stream not supported")
+	errGRPCStreamNotSupported = errors.New("stream not supported")
 )
 
 // inlineClientConn is a [grpc.ClientConnInterface] implementation that forwards
@@ -106,13 +106,16 @@ func (icc *inlineClientConn) Invoke(
 	opts ...grpc.CallOption,
 ) error {
 	// Move outgoing metadata to incoming and set new outgoing metadata
-	md, _ := metadata.FromOutgoingContext(ctx)
-	// Set the client and version headers if not already set
-	if len(md[headers.ClientNameHeaderName]) == 0 {
-		md.Set(headers.ClientNameHeaderName, headers.ClientNameServerHTTP)
-	}
-	if len(md[headers.ClientVersionHeaderName]) == 0 {
-		md.Set(headers.ClientVersionHeaderName, headers.ServerVersion)
+	md, ok := metadata.FromOutgoingContext(ctx)
+	if ok {
+		// Set the client and version headers if not already set
+		if len(md[headers.ClientNameHeaderName]) == 0 {
+			// FIXME: don't use "HTTP" for internal
+			md.Set(headers.ClientNameHeaderName, headers.ClientNameServerHTTP)
+		}
+		if len(md[headers.ClientVersionHeaderName]) == 0 {
+			md.Set(headers.ClientVersionHeaderName, headers.ServerVersion)
+		}
 	}
 	ctx = metadata.NewIncomingContext(ctx, md)
 	outgoingMD := metadata.MD{}
@@ -165,7 +168,7 @@ func (*inlineClientConn) NewStream(
 	string,
 	...grpc.CallOption,
 ) (grpc.ClientStream, error) {
-	return nil, errHTTPGRPCStreamNotSupported
+	return nil, errGRPCStreamNotSupported
 }
 
 // Mostly taken from https://github.com/grpc/grpc-go/blob/v1.56.1/server.go#L1124-L1158
