@@ -65,10 +65,10 @@ func (m *MockRPCFactory) EXPECT() *MockRPCFactoryMockRecorder {
 }
 
 // CreateInternodeGRPCConnection mocks base method.
-func (m *MockRPCFactory) CreateInternodeGRPCConnection(rpcAddress string) *grpc.ClientConn {
+func (m *MockRPCFactory) CreateInternodeGRPCConnection(rpcAddress string) grpc.ClientConnInterface {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "CreateInternodeGRPCConnection", rpcAddress)
-	ret0, _ := ret[0].(*grpc.ClientConn)
+	ret0, _ := ret[0].(grpc.ClientConnInterface)
 	return ret0
 }
 
@@ -79,10 +79,10 @@ func (mr *MockRPCFactoryMockRecorder) CreateInternodeGRPCConnection(rpcAddress a
 }
 
 // CreateLocalFrontendGRPCConnection mocks base method.
-func (m *MockRPCFactory) CreateLocalFrontendGRPCConnection() *grpc.ClientConn {
+func (m *MockRPCFactory) CreateLocalFrontendGRPCConnection() grpc.ClientConnInterface {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "CreateLocalFrontendGRPCConnection")
-	ret0, _ := ret[0].(*grpc.ClientConn)
+	ret0, _ := ret[0].(grpc.ClientConnInterface)
 	return ret0
 }
 
@@ -108,10 +108,10 @@ func (mr *MockRPCFactoryMockRecorder) CreateLocalFrontendHTTPClient() *gomock.Ca
 }
 
 // CreateRemoteFrontendGRPCConnection mocks base method.
-func (m *MockRPCFactory) CreateRemoteFrontendGRPCConnection(rpcAddress string) *grpc.ClientConn {
+func (m *MockRPCFactory) CreateRemoteFrontendGRPCConnection(rpcAddress string) grpc.ClientConnInterface {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "CreateRemoteFrontendGRPCConnection", rpcAddress)
-	ret0, _ := ret[0].(*grpc.ClientConn)
+	ret0, _ := ret[0].(grpc.ClientConnInterface)
 	return ret0
 }
 

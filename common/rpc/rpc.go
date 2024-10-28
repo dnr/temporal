@@ -206,7 +206,7 @@ func getListenIP(cfg *config.RPC, logger log.Logger) net.IP {
 }
 
 // CreateRemoteFrontendGRPCConnection creates connection for gRPC calls
-func (d *RPCFactory) CreateRemoteFrontendGRPCConnection(rpcAddress string) *grpc.ClientConn {
+func (d *RPCFactory) CreateRemoteFrontendGRPCConnection(rpcAddress string) grpc.ClientConnInterface {
 	var tlsClientConfig *tls.Config
 	var err error
 	if d.tlsFactory != nil {
@@ -226,12 +226,12 @@ func (d *RPCFactory) CreateRemoteFrontendGRPCConnection(rpcAddress string) *grpc
 }
 
 // CreateLocalFrontendGRPCConnection creates connection for internal frontend calls
-func (d *RPCFactory) CreateLocalFrontendGRPCConnection() *grpc.ClientConn {
+func (d *RPCFactory) CreateLocalFrontendGRPCConnection() grpc.ClientConnInterface {
 	return d.dial(d.frontendURL, d.frontendTLSConfig)
 }
 
 // CreateInternodeGRPCConnection creates connection for gRPC calls
-func (d *RPCFactory) CreateInternodeGRPCConnection(hostName string) *grpc.ClientConn {
+func (d *RPCFactory) CreateInternodeGRPCConnection(hostName string) grpc.ClientConnInterface {
 	if c, ok := d.interNodeGrpcConnections.Get(hostName).(*grpc.ClientConn); ok {
 		return c
 	}
