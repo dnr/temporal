@@ -14,13 +14,14 @@ func RegisterInlineServer(
 	selfHostName string,
 	qualifiedServerName string,
 	server any,
-	interceptors []grpc.UnaryServerInterceptor,
+	clientInterceptors []grpc.UnaryClientInterceptor,
+	serverInterceptors []grpc.UnaryServerInterceptor,
 	requestCounter metrics.CounterIface,
 	namespaceRegistry namespace.Registry,
 ) {
 	v, _ := inlineConns.LoadOrStore(selfHostName, NewInlineClientConn())
 	cc := v.(*inlineClientConn)
-	cc.RegisterServer(qualifiedServerName, server, interceptors, requestCounter, namespaceRegistry)
+	cc.RegisterServer(qualifiedServerName, server, clientInterceptors, serverInterceptors, requestCounter, namespaceRegistry)
 }
 
 func GetInlineConn(hostName string) grpc.ClientConnInterface {

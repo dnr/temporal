@@ -162,6 +162,7 @@ func NewHTTPAPIServer(
 	clientConn.RegisterServer(
 		"temporal.api.workflowservice.v1.WorkflowService",
 		handler,
+		nil, // client interceptors
 		interceptors,
 		counter,
 		namespaceRegistry,
@@ -169,6 +170,7 @@ func NewHTTPAPIServer(
 	clientConn.RegisterServer(
 		"temporal.api.operatorservice.v1.OperatorService",
 		operatorHandler,
+		nil, // client interceptors
 		interceptors,
 		counter,
 		namespaceRegistry,

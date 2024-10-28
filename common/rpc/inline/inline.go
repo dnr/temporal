@@ -38,7 +38,8 @@ var _ grpc.ClientConnInterface = (*inlineClientConn)(nil)
 type serviceMethod struct {
 	info              grpc.UnaryServerInfo
 	handler           grpc.UnaryHandler
-	interceptor       grpc.UnaryServerInterceptor
+	clientInterceptor grpc.UnaryClientInterceptor
+	serverInterceptor grpc.UnaryServerInterceptor
 	requestCounter    metrics.CounterIface
 	namespaceRegistry namespace.Registry
 }
@@ -57,7 +58,8 @@ func NewInlineClientConn() *inlineClientConn {
 func (icc *inlineClientConn) RegisterServer(
 	qualifiedServerName string,
 	server any,
-	interceptors []grpc.UnaryServerInterceptor,
+	clientInterceptors []grpc.UnaryClientInterceptor,
+	serverInterceptors []grpc.UnaryServerInterceptor,
 	requestCounter metrics.CounterIface,
 	namespaceRegistry namespace.Registry,
 ) {
@@ -91,7 +93,8 @@ func (icc *inlineClientConn) RegisterServer(
 				err, _ := ret[1].Interface().(error)
 				return ret[0].Interface(), err
 			},
-			interceptor:       chainUnaryServerInterceptors(interceptors),
+			clientInterceptor: chainUnaryClientInterceptors(clientInterceptors),
+			serverInterceptor: chainUnaryServerInterceptors(serverInterceptors),
 			requestCounter:    requestCounter,
 			namespaceRegistry: namespaceRegistry,
 		}
@@ -137,29 +140,37 @@ func (icc *inlineClientConn) Invoke(
 	serviceMethod.requestCounter.Record(1, metrics.OperationTag(method), namespaceTag)
 
 	// Invoke
-	var resp any
-	var err error
-	if serviceMethod.interceptor == nil {
-		resp, err = serviceMethod.handler(ctx, args)
-	} else {
-		resp, err = serviceMethod.interceptor(ctx, args, &serviceMethod.info, serviceMethod.handler)
-	}
-
-	// Find the header call option and set response headers. We accept that if
-	// somewhere internally the metadata was replaced instead of appended to, this
-	// does not work.
-	for _, opt := range opts {
-		if callOpt, ok := opt.(grpc.HeaderCallOption); ok {
-			*callOpt.HeaderAddr = outgoingMD
+	invoker := func(ctx context.Context, method string, req, reply any, _ *grpc.ClientConn, opts ...grpc.CallOption) error {
+		var resp any
+		var err error
+		if serviceMethod.serverInterceptor == nil {
+			resp, err = serviceMethod.handler(ctx, args)
+		} else {
+			resp, err = serviceMethod.serverInterceptor(ctx, args, &serviceMethod.info, serviceMethod.handler)
 		}
+
+		// Find the header call option and set response headers. We accept that if
+		// somewhere internally the metadata was replaced instead of appended to, this
+		// does not work.
+		for _, opt := range opts {
+			if callOpt, ok := opt.(grpc.HeaderCallOption); ok {
+				*callOpt.HeaderAddr = outgoingMD
+			}
+		}
+
+		// Merge the response proto onto the wanted reply if non-nil
+		if respProto, _ := resp.(proto.Message); respProto != nil {
+			proto.Merge(reply.(proto.Message), respProto)
+		}
+
+		return err
 	}
 
-	// Merge the response proto onto the wanted reply if non-nil
-	if respProto, _ := resp.(proto.Message); respProto != nil {
-		proto.Merge(reply.(proto.Message), respProto)
+	if serviceMethod.clientInterceptor == nil {
+		return invoker(ctx, method, args, reply, nil, opts...)
+	} else {
+		return serviceMethod.clientInterceptor(ctx, method, args, reply, nil, invoker, opts...)
 	}
-
-	return err
 }
 
 func (*inlineClientConn) NewStream(
@@ -201,5 +212,28 @@ func getChainUnaryHandler(
 	}
 	return func(ctx context.Context, req interface{}) (interface{}, error) {
 		return interceptors[curr+1](ctx, req, info, getChainUnaryHandler(interceptors, curr+1, info, finalHandler))
+	}
+}
+
+// Mostly taken from https://github.com/grpc/grpc-go/blob/v1.66.0/clientconn.go
+// with modifications.
+func chainUnaryClientInterceptors(interceptors []grpc.UnaryClientInterceptor) grpc.UnaryClientInterceptor {
+	if len(interceptors) == 0 {
+		return nil
+	} else if len(interceptors) == 1 {
+		return interceptors[0]
+	} else {
+		return func(ctx context.Context, method string, req, reply any, cc *grpc.ClientConn, invoker grpc.UnaryInvoker, opts ...grpc.CallOption) error {
+			return interceptors[0](ctx, method, req, reply, cc, getChainUnaryInvoker(interceptors, 0, invoker), opts...)
+		}
+	}
+}
+
+func getChainUnaryInvoker(interceptors []grpc.UnaryClientInterceptor, curr int, finalInvoker grpc.UnaryInvoker) grpc.UnaryInvoker {
+	if curr == len(interceptors)-1 {
+		return finalInvoker
+	}
+	return func(ctx context.Context, method string, req, reply any, cc *grpc.ClientConn, opts ...grpc.CallOption) error {
+		return interceptors[curr+1](ctx, method, req, reply, cc, getChainUnaryInvoker(interceptors, curr+1, finalInvoker), opts...)
 	}
 }
