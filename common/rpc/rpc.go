@@ -44,6 +44,7 @@ import (
 	"go.temporal.io/server/common/membership"
 	"go.temporal.io/server/common/primitives"
 	"go.temporal.io/server/common/rpc/encryption"
+	"go.temporal.io/server/common/rpc/inline"
 	"go.temporal.io/server/environment"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
@@ -234,6 +235,10 @@ func (d *RPCFactory) CreateLocalFrontendGRPCConnection() grpc.ClientConnInterfac
 func (d *RPCFactory) CreateInternodeGRPCConnection(hostName string) grpc.ClientConnInterface {
 	if c, ok := d.interNodeGrpcConnections.Get(hostName).(*grpc.ClientConn); ok {
 		return c
+	}
+	if cc := inline.GetInlineConn(hostName); cc != nil {
+		d.interNodeGrpcConnections.Put(hostName, cc)
+		return cc
 	}
 	var tlsClientConfig *tls.Config
 	var err error
