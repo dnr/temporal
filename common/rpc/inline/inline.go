@@ -109,6 +109,7 @@ func (icc *inlineClientConn) Invoke(
 	opts ...grpc.CallOption,
 ) error {
 	// Move outgoing metadata to incoming and set new outgoing metadata
+	// FIXME: for inline (not http), let client interceptor do this
 	md, ok := metadata.FromOutgoingContext(ctx)
 	if ok {
 		// Set the client and version headers if not already set
@@ -139,8 +140,13 @@ func (icc *inlineClientConn) Invoke(
 	}
 	serviceMethod.requestCounter.Record(1, metrics.OperationTag(method), namespaceTag)
 
+	// For collecting trailers
+	var stream fakeServerTransportStream
+
 	// Invoke
 	invoker := func(ctx context.Context, method string, req, reply any, _ *grpc.ClientConn, opts ...grpc.CallOption) error {
+		ctx = grpc.NewContextWithServerTransportStream(ctx, &stream)
+
 		var resp any
 		var err error
 		if serviceMethod.serverInterceptor == nil {
@@ -149,16 +155,19 @@ func (icc *inlineClientConn) Invoke(
 			resp, err = serviceMethod.serverInterceptor(ctx, args, &serviceMethod.info, serviceMethod.handler)
 		}
 
-		// Find the header call option and set response headers. We accept that if
+		// Find the header/trailer call option and set response headers. We accept that if
 		// somewhere internally the metadata was replaced instead of appended to, this
 		// does not work.
 		for _, opt := range opts {
 			if callOpt, ok := opt.(grpc.HeaderCallOption); ok {
 				*callOpt.HeaderAddr = outgoingMD
+			} else if trailerOpt, ok := opt.(grpc.TrailerCallOption); ok {
+				*trailerOpt.TrailerAddr = stream.trailer
 			}
 		}
 
 		// Merge the response proto onto the wanted reply if non-nil
+		// TODO: is there any way to optimize this to not call Merge and do a "move" instead?
 		if respProto, _ := resp.(proto.Message); respProto != nil {
 			proto.Merge(reply.(proto.Message), respProto)
 		}
@@ -166,6 +175,7 @@ func (icc *inlineClientConn) Invoke(
 		return err
 	}
 
+	// FIXME: use fake cc here to support otel
 	if serviceMethod.clientInterceptor == nil {
 		return invoker(ctx, method, args, reply, nil, opts...)
 	} else {
@@ -236,4 +246,25 @@ func getChainUnaryInvoker(interceptors []grpc.UnaryClientInterceptor, curr int, 
 	return func(ctx context.Context, method string, req, reply any, cc *grpc.ClientConn, opts ...grpc.CallOption) error {
 		return interceptors[curr+1](ctx, method, req, reply, cc, getChainUnaryInvoker(interceptors, curr+1, finalInvoker), opts...)
 	}
+}
+
+type fakeServerTransportStream struct {
+	trailer metadata.MD
+}
+
+func (f *fakeServerTransportStream) Method() string {
+	panic("not implemented")
+}
+
+func (f *fakeServerTransportStream) SetHeader(md metadata.MD) error {
+	panic("not implemented")
+}
+
+func (f *fakeServerTransportStream) SendHeader(md metadata.MD) error {
+	panic("not implemented")
+}
+
+func (f *fakeServerTransportStream) SetTrailer(md metadata.MD) error {
+	f.trailer = md
+	return nil
 }
