@@ -25,75 +25,80 @@ var (
 // outgoing metadata to incoming and takes resulting outgoing metadata and sets
 // as header. But which headers to use and TLS peer context and such are
 // expected to be handled by the caller.
+//
+// RegisterServer must not be called concurrently with itself or with Invoke,
+// but after all RegisterServer calls are done (in server initialization),
+// Invoke may be called concurrently.
 type inlineClientConn struct {
-	methods           map[string]*serviceMethod
-	interceptor       grpc.UnaryServerInterceptor
-	requestsCounter   metrics.CounterIface
-	namespaceRegistry namespace.Registry
+	methods map[string]*serviceMethod
 }
 
 var _ grpc.ClientConnInterface = (*inlineClientConn)(nil)
 
 type serviceMethod struct {
-	info    grpc.UnaryServerInfo
-	handler grpc.UnaryHandler
+	info              grpc.UnaryServerInfo
+	handler           grpc.UnaryHandler
+	interceptor       grpc.UnaryServerInterceptor
+	requestCounter    metrics.CounterIface
+	namespaceRegistry namespace.Registry
 }
 
 var contextType = reflect.TypeOf((*context.Context)(nil)).Elem()
 var protoMessageType = reflect.TypeOf((*proto.Message)(nil)).Elem()
 var errorType = reflect.TypeOf((*error)(nil)).Elem()
 
-func NewInlineClientConn(
-	servers map[string]any,
-	interceptors []grpc.UnaryServerInterceptor,
-	requestCounter metrics.CounterIface,
-	namespaceRegistry namespace.Registry,
-) *inlineClientConn {
-	// Create the set of methods via reflection. We currently accept the overhead
-	// of reflection compared to having to custom generate gateway code.
-	methods := map[string]*serviceMethod{}
-	for qualifiedServerName, server := range servers {
-		serverVal := reflect.ValueOf(server)
-		for i := 0; i < serverVal.Type().NumMethod(); i++ {
-			reflectMethod := serverVal.Type().Method(i)
-			// We intentionally look this up by name to not assume method indexes line
-			// up from type to value
-			methodVal := serverVal.MethodByName(reflectMethod.Name)
-			// We assume the methods we want only accept a context + request and only
-			// return a response + error. We also assume the method name matches the
-			// RPC name.
-			methodType := methodVal.Type()
-			validRPCMethod := methodType.Kind() == reflect.Func &&
-				methodType.NumIn() == 2 &&
-				methodType.NumOut() == 2 &&
-				methodType.In(0) == contextType &&
-				methodType.In(1).Implements(protoMessageType) &&
-				methodType.Out(0).Implements(protoMessageType) &&
-				methodType.Out(1) == errorType
-			if !validRPCMethod {
-				continue
-			}
-			fullMethod := "/" + qualifiedServerName + "/" + reflectMethod.Name
-			methods[fullMethod] = &serviceMethod{
-				info: grpc.UnaryServerInfo{Server: server, FullMethod: fullMethod},
-				handler: func(ctx context.Context, req interface{}) (interface{}, error) {
-					ret := methodVal.Call([]reflect.Value{reflect.ValueOf(ctx), reflect.ValueOf(req)})
-					err, _ := ret[1].Interface().(error)
-					return ret[0].Interface(), err
-				},
-			}
-		}
-	}
-
+func NewInlineClientConn() *inlineClientConn {
 	return &inlineClientConn{
-		methods:           methods,
-		interceptor:       chainUnaryServerInterceptors(interceptors),
-		requestsCounter:   requestCounter,
-		namespaceRegistry: namespaceRegistry,
+		methods: make(map[string]*serviceMethod),
 	}
 }
 
-func (i *inlineClientConn) Invoke(
+// RegisterServer adds a server to the inlineClientConn. This must not be called concurrently.
+func (icc *inlineClientConn) RegisterServer(
+	qualifiedServerName string,
+	server any,
+	interceptors []grpc.UnaryServerInterceptor,
+	requestCounter metrics.CounterIface,
+	namespaceRegistry namespace.Registry,
+) {
+	// Create the set of methods via reflection. We currently accept the overhead
+	// of reflection compared to having to custom generate gateway code.
+	serverVal := reflect.ValueOf(server)
+	for i := 0; i < serverVal.Type().NumMethod(); i++ {
+		reflectMethod := serverVal.Type().Method(i)
+		// We intentionally look this up by name to not assume method indexes line
+		// up from type to value
+		methodVal := serverVal.MethodByName(reflectMethod.Name)
+		// We assume the methods we want only accept a context + request and only
+		// return a response + error. We also assume the method name matches the
+		// RPC name.
+		methodType := methodVal.Type()
+		validRPCMethod := methodType.Kind() == reflect.Func &&
+			methodType.NumIn() == 2 &&
+			methodType.NumOut() == 2 &&
+			methodType.In(0) == contextType &&
+			methodType.In(1).Implements(protoMessageType) &&
+			methodType.Out(0).Implements(protoMessageType) &&
+			methodType.Out(1) == errorType
+		if !validRPCMethod {
+			continue
+		}
+		fullMethod := "/" + qualifiedServerName + "/" + reflectMethod.Name
+		icc.methods[fullMethod] = &serviceMethod{
+			info: grpc.UnaryServerInfo{Server: server, FullMethod: fullMethod},
+			handler: func(ctx context.Context, req interface{}) (interface{}, error) {
+				ret := methodVal.Call([]reflect.Value{reflect.ValueOf(ctx), reflect.ValueOf(req)})
+				err, _ := ret[1].Interface().(error)
+				return ret[0].Interface(), err
+			},
+			interceptor:       chainUnaryServerInterceptors(interceptors),
+			requestCounter:    requestCounter,
+			namespaceRegistry: namespaceRegistry,
+		}
+	}
+}
+
+func (icc *inlineClientConn) Invoke(
 	ctx context.Context,
 	method string,
 	args any,
@@ -114,27 +119,27 @@ func (i *inlineClientConn) Invoke(
 	ctx = metadata.NewOutgoingContext(ctx, outgoingMD)
 
 	// Get the method. Should never fail, but we check anyways
-	serviceMethod := i.methods[method]
+	serviceMethod := icc.methods[method]
 	if serviceMethod == nil {
 		return status.Error(codes.NotFound, "call not found")
 	}
 
 	// Add metric
 	var namespaceTag metrics.Tag
-	if namespaceName := interceptor.MustGetNamespaceName(i.namespaceRegistry, args); namespaceName != "" {
+	if namespaceName := interceptor.MustGetNamespaceName(serviceMethod.namespaceRegistry, args); namespaceName != "" {
 		namespaceTag = metrics.NamespaceTag(namespaceName.String())
 	} else {
 		namespaceTag = metrics.NamespaceUnknownTag()
 	}
-	i.requestsCounter.Record(1, metrics.OperationTag(method), namespaceTag)
+	serviceMethod.requestCounter.Record(1, metrics.OperationTag(method), namespaceTag)
 
 	// Invoke
 	var resp any
 	var err error
-	if i.interceptor == nil {
+	if serviceMethod.interceptor == nil {
 		resp, err = serviceMethod.handler(ctx, args)
 	} else {
-		resp, err = i.interceptor(ctx, args, &serviceMethod.info, serviceMethod.handler)
+		resp, err = serviceMethod.interceptor(ctx, args, &serviceMethod.info, serviceMethod.handler)
 	}
 
 	// Find the header call option and set response headers. We accept that if

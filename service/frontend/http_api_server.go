@@ -157,13 +157,20 @@ func NewHTTPAPIServer(
 	opts = append(opts, runtime.WithIncomingHeaderMatcher(h.incomingHeaderMatcher))
 
 	// Create inline client connection
-	clientConn := inline.NewInlineClientConn(
-		map[string]any{
-			"temporal.api.workflowservice.v1.WorkflowService": handler,
-			"temporal.api.operatorservice.v1.OperatorService": operatorHandler,
-		},
+	counter := metrics.HTTPServiceRequests.With(metricsHandler)
+	clientConn := inline.NewInlineClientConn()
+	clientConn.RegisterServer(
+		"temporal.api.workflowservice.v1.WorkflowService",
+		handler,
 		interceptors,
-		metrics.HTTPServiceRequests.With(metricsHandler),
+		counter,
+		namespaceRegistry,
+	)
+	clientConn.RegisterServer(
+		"temporal.api.operatorservice.v1.OperatorService",
+		operatorHandler,
+		interceptors,
+		counter,
 		namespaceRegistry,
 	)
 
