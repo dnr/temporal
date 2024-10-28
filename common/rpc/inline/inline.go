@@ -147,8 +147,8 @@ func (icc *inlineClientConn) Invoke(
 	invoker := func(ctx context.Context, method string, req, reply any, _ *grpc.ClientConn, opts ...grpc.CallOption) error {
 		// We are now after all client interceptors, and before all server interceptors.
 
-		// Add a fake ServerTransportStream to capture any trailers set by server interceptors.
-		var stream fakeServerTransportStream
+		// Add a fake ServerTransportStream to capture any headers or trailers set by server interceptors.
+		stream := fakeServerTransportStream{method: method}
 		ctx = grpc.NewContextWithServerTransportStream(ctx, &stream)
 
 		// Move outgoing metadata to incoming and set new outgoing metadata
@@ -164,7 +164,7 @@ func (icc *inlineClientConn) Invoke(
 		// does not work.
 		for _, opt := range opts {
 			if callOpt, ok := opt.(grpc.HeaderCallOption); ok {
-				*callOpt.HeaderAddr = outgoingMD
+				*callOpt.HeaderAddr = metadata.Join(outgoingMD, stream.header)
 			} else if trailerOpt, ok := opt.(grpc.TrailerCallOption); ok {
 				*trailerOpt.TrailerAddr = stream.trailer
 			}
@@ -252,15 +252,18 @@ func getChainUnaryInvoker(interceptors []grpc.UnaryClientInterceptor, curr int, 
 }
 
 type fakeServerTransportStream struct {
+	method  string
+	header  metadata.MD
 	trailer metadata.MD
 }
 
 func (f *fakeServerTransportStream) Method() string {
-	panic("not implemented")
+	return f.method
 }
 
 func (f *fakeServerTransportStream) SetHeader(md metadata.MD) error {
-	panic("not implemented")
+	f.header = metadata.Join(f.header, md)
+	return nil
 }
 
 func (f *fakeServerTransportStream) SendHeader(md metadata.MD) error {
@@ -268,7 +271,7 @@ func (f *fakeServerTransportStream) SendHeader(md metadata.MD) error {
 }
 
 func (f *fakeServerTransportStream) SetTrailer(md metadata.MD) error {
-	f.trailer = md
+	f.trailer = metadata.Join(f.trailer, md)
 	return nil
 }
 
