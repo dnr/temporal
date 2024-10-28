@@ -163,7 +163,7 @@ func NewHTTPAPIServer(
 			"temporal.api.operatorservice.v1.OperatorService": operatorHandler,
 		},
 		interceptors,
-		metricsHandler,
+		metrics.HTTPServiceRequests.With(metricsHandler),
 		namespaceRegistry,
 	)
 

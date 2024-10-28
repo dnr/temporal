@@ -46,7 +46,7 @@ var errorType = reflect.TypeOf((*error)(nil)).Elem()
 func NewInlineClientConn(
 	servers map[string]any,
 	interceptors []grpc.UnaryServerInterceptor,
-	metricsHandler metrics.Handler,
+	requestCounter metrics.CounterIface,
 	namespaceRegistry namespace.Registry,
 ) *inlineClientConn {
 	// Create the set of methods via reflection. We currently accept the overhead
@@ -88,7 +88,7 @@ func NewInlineClientConn(
 	return &inlineClientConn{
 		methods:           methods,
 		interceptor:       chainUnaryServerInterceptors(interceptors),
-		requestsCounter:   metrics.HTTPServiceRequests.With(metricsHandler),
+		requestsCounter:   requestCounter,
 		namespaceRegistry: namespaceRegistry,
 	}
 }
