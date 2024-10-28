@@ -34,7 +34,9 @@ import (
 	"go.temporal.io/server/common/membership"
 	"go.temporal.io/server/common/metrics"
 	"go.temporal.io/server/common/persistence/visibility/manager"
+	"go.temporal.io/server/common/rpc/inline"
 	"go.temporal.io/server/common/util"
+	"go.temporal.io/server/service"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/health"
 	healthpb "google.golang.org/grpc/health/grpc_health_v1"
@@ -50,6 +52,8 @@ type Service struct {
 	logger                 log.SnTaggedLogger
 	membershipMonitor      membership.Monitor
 	grpcListener           net.Listener
+	grpcParams             service.GrpcServerOptionsParams
+	hostInfoProvider       membership.HostInfoProvider
 	runtimeMetricsReporter *metrics.RuntimeMetricsReporter
 	metricsHandler         metrics.Handler
 	healthServer           *health.Server
@@ -62,6 +66,8 @@ func NewService(
 	logger log.SnTaggedLogger,
 	membershipMonitor membership.Monitor,
 	grpcListener net.Listener,
+	grpcParams service.GrpcServerOptionsParams,
+	hostInfoProvider membership.HostInfoProvider,
 	runtimeMetricsReporter *metrics.RuntimeMetricsReporter,
 	handler *Handler,
 	metricsHandler metrics.Handler,
@@ -75,6 +81,8 @@ func NewService(
 		logger:                 logger,
 		membershipMonitor:      membershipMonitor,
 		grpcListener:           grpcListener,
+		grpcParams:             grpcParams,
+		hostInfoProvider:       hostInfoProvider,
 		runtimeMetricsReporter: runtimeMetricsReporter,
 		metricsHandler:         metricsHandler,
 		healthServer:           healthServer,
@@ -96,6 +104,15 @@ func (s *Service) Start() {
 	s.healthServer.SetServingStatus(serviceName, healthpb.HealthCheckResponse_SERVING)
 
 	reflection.Register(s.server)
+
+	inline.RegisterInlineServer(
+		s.hostInfoProvider.HostInfo().GetAddress(),
+		"temporal.server.api.matchingservice.v1.MatchingService",
+		s.handler,
+		service.GetUnaryInterceptors(s.grpcParams),
+		metrics.InlineRequests.With(s.metricsHandler),
+		s.handler.namespaceRegistry,
+	)
 
 	go func() {
 		s.logger.Info("Starting to serve on matching listener")
