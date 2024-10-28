@@ -146,14 +146,7 @@ func (icc *inlineClientConn) Invoke(
 	// Invoke
 	invoker := func(ctx context.Context, method string, req, reply any, _ *grpc.ClientConn, opts ...grpc.CallOption) error {
 		ctx = grpc.NewContextWithServerTransportStream(ctx, &stream)
-
-		var resp any
-		var err error
-		if serviceMethod.serverInterceptor == nil {
-			resp, err = serviceMethod.handler(ctx, args)
-		} else {
-			resp, err = serviceMethod.serverInterceptor(ctx, args, &serviceMethod.info, serviceMethod.handler)
-		}
+		resp, err := serviceMethod.serverInterceptor(ctx, args, &serviceMethod.info, serviceMethod.handler)
 
 		// Find the header/trailer call option and set response headers. We accept that if
 		// somewhere internally the metadata was replaced instead of appended to, this
@@ -176,11 +169,7 @@ func (icc *inlineClientConn) Invoke(
 	}
 
 	// FIXME: use fake cc here to support otel
-	if serviceMethod.clientInterceptor == nil {
-		return invoker(ctx, method, args, reply, nil, opts...)
-	} else {
-		return serviceMethod.clientInterceptor(ctx, method, args, reply, nil, invoker, opts...)
-	}
+	return serviceMethod.clientInterceptor(ctx, method, args, reply, nil, invoker, opts...)
 }
 
 func (*inlineClientConn) NewStream(
@@ -197,7 +186,9 @@ func (*inlineClientConn) NewStream(
 func chainUnaryServerInterceptors(interceptors []grpc.UnaryServerInterceptor) grpc.UnaryServerInterceptor {
 	switch len(interceptors) {
 	case 0:
-		return nil
+		return func(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (resp any, err error) {
+			return handler(ctx, req)
+		}
 	case 1:
 		return interceptors[0]
 	default:
@@ -229,7 +220,9 @@ func getChainUnaryHandler(
 // with modifications.
 func chainUnaryClientInterceptors(interceptors []grpc.UnaryClientInterceptor) grpc.UnaryClientInterceptor {
 	if len(interceptors) == 0 {
-		return nil
+		return func(ctx context.Context, method string, req, reply any, cc *grpc.ClientConn, invoker grpc.UnaryInvoker, opts ...grpc.CallOption) error {
+			return invoker(ctx, method, req, reply, cc, opts...)
+		}
 	} else if len(interceptors) == 1 {
 		return interceptors[0]
 	} else {
