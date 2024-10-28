@@ -51,6 +51,7 @@ import (
 	"go.temporal.io/server/common/utf8validator"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/peer"
 )
 
@@ -89,7 +90,7 @@ func NewHTTPAPIServer(
 	tlsConfigProvider encryption.TLSConfigProvider,
 	handler Handler,
 	operatorHandler *OperatorHandlerImpl,
-	interceptors []grpc.UnaryServerInterceptor,
+	serverInterceptors []grpc.UnaryServerInterceptor,
 	metricsHandler metrics.Handler,
 	router *mux.Router,
 	namespaceRegistry namespace.Registry,
@@ -156,22 +157,24 @@ func NewHTTPAPIServer(
 
 	opts = append(opts, runtime.WithIncomingHeaderMatcher(h.incomingHeaderMatcher))
 
+	clientInterceptors := []grpc.UnaryClientInterceptor{setDefaultClientHeadersForHTTP}
+
 	// Create inline client connection
 	counter := metrics.HTTPServiceRequests.With(metricsHandler)
 	clientConn := inline.NewInlineClientConn()
 	clientConn.RegisterServer(
 		"temporal.api.workflowservice.v1.WorkflowService",
 		handler,
-		nil, // client interceptors
-		interceptors,
+		clientInterceptors,
+		serverInterceptors,
 		counter,
 		namespaceRegistry,
 	)
 	clientConn.RegisterServer(
 		"temporal.api.operatorservice.v1.OperatorService",
 		operatorHandler,
-		nil, // client interceptors
-		interceptors,
+		clientInterceptors,
+		serverInterceptors,
 		counter,
 		namespaceRegistry,
 	)
@@ -342,4 +345,16 @@ func (h *HTTPAPIServer) incomingHeaderMatcher(headerName string) (string, bool) 
 		}
 	}
 	return runtime.DefaultHeaderMatcher(headerName)
+}
+
+func setDefaultClientHeadersForHTTP(ctx context.Context, method string, req, reply any, cc *grpc.ClientConn, invoker grpc.UnaryInvoker, opts ...grpc.CallOption) error {
+	// Set the client and version headers if not already set
+	md, _ := metadata.FromOutgoingContext(ctx)
+	if len(md[headers.ClientNameHeaderName]) == 0 {
+		ctx = metadata.AppendToOutgoingContext(ctx, headers.ClientNameHeaderName, headers.ClientNameServerHTTP)
+	}
+	if len(md[headers.ClientVersionHeaderName]) == 0 {
+		ctx = metadata.AppendToOutgoingContext(ctx, headers.ClientVersionHeaderName, headers.ServerVersion)
+	}
+	return invoker(ctx, method, req, reply, cc, opts...)
 }

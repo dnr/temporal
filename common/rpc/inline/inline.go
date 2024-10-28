@@ -5,7 +5,6 @@ import (
 	"errors"
 	"reflect"
 
-	"go.temporal.io/server/common/headers"
 	"go.temporal.io/server/common/metrics"
 	"go.temporal.io/server/common/namespace"
 	"go.temporal.io/server/common/rpc/interceptor"
@@ -129,23 +128,6 @@ func (icc *inlineClientConn) Invoke(
 	reply any,
 	opts ...grpc.CallOption,
 ) error {
-	// Move outgoing metadata to incoming and set new outgoing metadata
-	// FIXME: for inline (not http), let client interceptor do this
-	md, ok := metadata.FromOutgoingContext(ctx)
-	if ok {
-		// Set the client and version headers if not already set
-		if len(md[headers.ClientNameHeaderName]) == 0 {
-			// FIXME: don't use "HTTP" for internal
-			md.Set(headers.ClientNameHeaderName, headers.ClientNameServerHTTP)
-		}
-		if len(md[headers.ClientVersionHeaderName]) == 0 {
-			md.Set(headers.ClientVersionHeaderName, headers.ServerVersion)
-		}
-	}
-	ctx = metadata.NewIncomingContext(ctx, md)
-	outgoingMD := metadata.MD{}
-	ctx = metadata.NewOutgoingContext(ctx, outgoingMD)
-
 	// Get the method. Should never fail, but we check anyways
 	serviceMethod := icc.methods[method]
 	if serviceMethod == nil {
@@ -161,12 +143,20 @@ func (icc *inlineClientConn) Invoke(
 	}
 	serviceMethod.requestCounter.Record(1, metrics.OperationTag(method), namespaceTag)
 
-	// For collecting trailers
-	var stream fakeServerTransportStream
-
 	// Invoke
 	invoker := func(ctx context.Context, method string, req, reply any, _ *grpc.ClientConn, opts ...grpc.CallOption) error {
+		// We are now after all client interceptors, and before all server interceptors.
+
+		// Add a fake ServerTransportStream to capture any trailers set by server interceptors.
+		var stream fakeServerTransportStream
 		ctx = grpc.NewContextWithServerTransportStream(ctx, &stream)
+
+		// Move outgoing metadata to incoming and set new outgoing metadata
+		md, _ := metadata.FromOutgoingContext(ctx)
+		ctx = metadata.NewIncomingContext(ctx, md)
+		outgoingMD := metadata.MD{}
+		ctx = metadata.NewOutgoingContext(ctx, outgoingMD)
+
 		resp, err := serviceMethod.serverInterceptor(ctx, args, &serviceMethod.info, serviceMethod.handler)
 
 		// Find the header/trailer call option and set response headers. We accept that if
