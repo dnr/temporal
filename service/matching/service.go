@@ -109,7 +109,8 @@ func (s *Service) Start() {
 		s.hostInfoProvider.HostInfo().GetAddress(),
 		"temporal.server.api.matchingservice.v1.MatchingService",
 		s.handler,
-		service.GetUnaryInterceptors(s.grpcParams),
+		s.grpcParams.GetUnaryClientInterceptors(),
+		s.grpcParams.GetUnaryServerInterceptors(),
 		metrics.InlineRequests.With(s.metricsHandler),
 		s.handler.namespaceRegistry,
 	)

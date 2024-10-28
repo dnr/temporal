@@ -136,6 +136,20 @@ func (mr *MockRPCFactoryMockRecorder) GetFrontendGRPCServerOptions() *gomock.Cal
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetFrontendGRPCServerOptions", reflect.TypeOf((*MockRPCFactory)(nil).GetFrontendGRPCServerOptions))
 }
 
+// GetGRPCClientInterceptors mocks base method.
+func (m *MockRPCFactory) GetGRPCClientInterceptors() []grpc.UnaryClientInterceptor {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetGRPCClientInterceptors")
+	ret0, _ := ret[0].([]grpc.UnaryClientInterceptor)
+	return ret0
+}
+
+// GetGRPCClientInterceptors indicates an expected call of GetGRPCClientInterceptors.
+func (mr *MockRPCFactoryMockRecorder) GetGRPCClientInterceptors() *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetGRPCClientInterceptors", reflect.TypeOf((*MockRPCFactory)(nil).GetGRPCClientInterceptors))
+}
+
 // GetGRPCListener mocks base method.
 func (m *MockRPCFactory) GetGRPCListener() net.Listener {
 	m.ctrl.T.Helper()

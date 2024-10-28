@@ -151,12 +151,16 @@ func GrpcServerOptionsProvider(
 
 	return append(
 		grpcServerOptions,
-		grpc.ChainUnaryInterceptor(GetUnaryInterceptors(params)...),
+		grpc.ChainUnaryInterceptor(params.GetUnaryServerInterceptors()...),
 		grpc.ChainStreamInterceptor(params.TelemetryInterceptor.StreamIntercept),
 	)
 }
 
-func GetUnaryInterceptors(params GrpcServerOptionsParams) []grpc.UnaryServerInterceptor {
+func (params GrpcServerOptionsParams) GetUnaryClientInterceptors() []grpc.UnaryClientInterceptor {
+	return params.RpcFactory.GetGRPCClientInterceptors()
+}
+
+func (params GrpcServerOptionsParams) GetUnaryServerInterceptors() []grpc.UnaryServerInterceptor {
 	interceptors := []grpc.UnaryServerInterceptor{
 		rpc.ServiceErrorInterceptor,
 		grpc.UnaryServerInterceptor(params.TracingInterceptor),

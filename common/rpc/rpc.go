@@ -170,6 +170,10 @@ func (d *RPCFactory) GetInternodeClientTlsConfig() (*tls.Config, error) {
 	return nil, nil
 }
 
+func (d *RPCFactory) GetGRPCClientInterceptors() []grpc.UnaryClientInterceptor {
+	return d.clientInterceptors
+}
+
 // GetGRPCListener returns cached dispatcher for gRPC inbound or creates one
 func (d *RPCFactory) GetGRPCListener() net.Listener {
 	return d.grpcListener()
