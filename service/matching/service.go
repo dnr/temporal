@@ -53,7 +53,6 @@ type Service struct {
 	membershipMonitor      membership.Monitor
 	grpcListener           net.Listener
 	grpcParams             service.GrpcServerOptionsParams
-	hostInfoProvider       membership.HostInfoProvider
 	runtimeMetricsReporter *metrics.RuntimeMetricsReporter
 	metricsHandler         metrics.Handler
 	healthServer           *health.Server
@@ -67,7 +66,6 @@ func NewService(
 	membershipMonitor membership.Monitor,
 	grpcListener net.Listener,
 	grpcParams service.GrpcServerOptionsParams,
-	hostInfoProvider membership.HostInfoProvider,
 	runtimeMetricsReporter *metrics.RuntimeMetricsReporter,
 	handler *Handler,
 	metricsHandler metrics.Handler,
@@ -82,7 +80,6 @@ func NewService(
 		membershipMonitor:      membershipMonitor,
 		grpcListener:           grpcListener,
 		grpcParams:             grpcParams,
-		hostInfoProvider:       hostInfoProvider,
 		runtimeMetricsReporter: runtimeMetricsReporter,
 		metricsHandler:         metricsHandler,
 		healthServer:           healthServer,
@@ -106,7 +103,7 @@ func (s *Service) Start() {
 	reflection.Register(s.server)
 
 	inline.RegisterInlineServer(
-		s.hostInfoProvider.HostInfo().GetAddress(),
+		s.handler.hostInfoProvider.HostInfo().GetAddress(),
 		"temporal.server.api.matchingservice.v1.MatchingService",
 		s.handler,
 		s.grpcParams.GetUnaryClientInterceptors(),
