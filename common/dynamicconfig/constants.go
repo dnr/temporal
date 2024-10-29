@@ -1215,6 +1215,12 @@ Note: Enabling on an active queue will cause temporarily disruption.`,
 		`Try to send tasks to matching nodes in the same process as history.
 This also requires matching.spreadPartitions to be set.`,
 	)
+	MatchingLocalBalancingCacheSize = NewGlobalIntSetting(
+		"matching.localBalancingCacheSize",
+		1000,
+		`Size of cache for matching.localBalancing. This should be more than the number of
+task queues using local balancing.`,
+	)
 
 	// for matching testing only:
 

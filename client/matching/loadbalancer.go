@@ -59,16 +59,17 @@ type (
 	}
 
 	defaultLoadBalancer struct {
-		namespaceIDToName   func(id namespace.ID) (namespace.Name, error)
-		nReadPartitions     dynamicconfig.IntPropertyFnWithTaskQueueFilter
-		nWritePartitions    dynamicconfig.IntPropertyFnWithTaskQueueFilter
-		forceReadPartition  dynamicconfig.IntPropertyFn
-		forceWritePartition dynamicconfig.IntPropertyFn
-		spreadPartitions    dynamicconfig.BoolPropertyFnWithTaskQueueFilter
-		localRouting        dynamicconfig.BoolPropertyFnWithTaskQueueFilter
-		matchingResolver    membership.ServiceResolver
-		historyResolver     membership.ServiceResolver
-		inlineInfo          atomic.Pointer[inlineInfo]
+		namespaceIDToName       func(id namespace.ID) (namespace.Name, error)
+		nReadPartitions         dynamicconfig.IntPropertyFnWithTaskQueueFilter
+		nWritePartitions        dynamicconfig.IntPropertyFnWithTaskQueueFilter
+		forceReadPartition      dynamicconfig.IntPropertyFn
+		forceWritePartition     dynamicconfig.IntPropertyFn
+		spreadPartitions        dynamicconfig.BoolPropertyFnWithTaskQueueFilter
+		localBalancing          dynamicconfig.BoolPropertyFnWithTaskQueueFilter
+		localBalancingCacheSize dynamicconfig.IntPropertyFn
+		matchingResolver        membership.ServiceResolver
+		historyResolver         membership.ServiceResolver
+		inlineInfo              atomic.Pointer[inlineInfo]
 
 		lock         sync.RWMutex
 		taskQueueLBs map[tqid.TaskQueue]*tqLoadBalancer
@@ -101,16 +102,17 @@ func NewLoadBalancer(
 	dc *dynamicconfig.Collection,
 ) LoadBalancer {
 	lb := &defaultLoadBalancer{
-		namespaceIDToName:   namespaceIDToName,
-		nReadPartitions:     dynamicconfig.MatchingNumTaskqueueReadPartitions.Get(dc),
-		nWritePartitions:    dynamicconfig.MatchingNumTaskqueueWritePartitions.Get(dc),
-		forceReadPartition:  dynamicconfig.TestMatchingLBForceReadPartition.Get(dc),
-		forceWritePartition: dynamicconfig.TestMatchingLBForceWritePartition.Get(dc),
-		spreadPartitions:    dynamicconfig.MatchingSpreadPartitions.Get(dc),
-		localRouting:        dynamicconfig.MatchingLocalRouting.Get(dc),
-		matchingResolver:    matchingResolver,
-		historyResolver:     historyResolver,
-		taskQueueLBs:        make(map[tqid.TaskQueue]*tqLoadBalancer),
+		namespaceIDToName:       namespaceIDToName,
+		nReadPartitions:         dynamicconfig.MatchingNumTaskqueueReadPartitions.Get(dc),
+		nWritePartitions:        dynamicconfig.MatchingNumTaskqueueWritePartitions.Get(dc),
+		forceReadPartition:      dynamicconfig.TestMatchingLBForceReadPartition.Get(dc),
+		forceWritePartition:     dynamicconfig.TestMatchingLBForceWritePartition.Get(dc),
+		spreadPartitions:        dynamicconfig.MatchingSpreadPartitions.Get(dc),
+		localBalancing:          dynamicconfig.MatchingLocalBalancing.Get(dc),
+		localBalancingCacheSize: dynamicconfig.MatchingLocalBalancingCacheSize.Get(dc),
+		matchingResolver:        matchingResolver,
+		historyResolver:         historyResolver,
+		taskQueueLBs:            make(map[tqid.TaskQueue]*tqLoadBalancer),
 	}
 	lb.setupMembershipListener()
 	return lb
@@ -137,8 +139,9 @@ func (lb *defaultLoadBalancer) getInlineInfo() *inlineInfo {
 			return nil
 		}
 	}
+	// Clear tqCache every time history or matching membership changes
 	return &inlineInfo{
-		tqCache:      cache.New(1000, nil), // TODO: config
+		tqCache:      cache.New(lb.localBalancingCacheSize(), nil),
 		historyHosts: historyHosts,
 	}
 }
