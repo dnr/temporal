@@ -1203,6 +1203,13 @@ these log lines can be noisy, we want to be able to turn on and sample selective
 		time.Second,
 		`TaskQueueInfoByBuildIdTTL serves as a TTL for the cache holding DescribeTaskQueue partition results`,
 	)
+	MatchingSpreadPartitions = NewTaskQueueBoolSetting(
+		"matching.spreadPartitions",
+		false,
+		`Use LookupN instead of Lookup to spread partitions evenly across matching nodes.
+Note: Enabling on an active queue will cause temporarily disruption.`,
+	)
+
 	// for matching testing only:
 
 	TestMatchingDisableSyncMatch = NewGlobalBoolSetting(

@@ -160,6 +160,8 @@ func (cf *rpcClientFactory) NewMatchingClientWithTimeout(
 		cf.metricsHandler,
 		cf.logger,
 		matching.NewLoadBalancer(namespaceIDToName, cf.dynConfig),
+		namespaceIDToName,
+		dynamicconfig.MatchingSpreadPartitions.Get(cf.dynConfig),
 	)
 
 	if cf.metricsHandler != nil {
@@ -243,6 +245,14 @@ func (r *serviceKeyResolverImpl) Lookup(key string) (string, error) {
 		return "", err
 	}
 	return host.GetAddress(), nil
+}
+
+func (r *serviceKeyResolverImpl) LookupN(key string, n int) (string, error) {
+	hosts := r.resolver.LookupN(key, n)
+	if len(hosts) == 0 {
+		return "", membership.ErrInsufficientHosts
+	}
+	return hosts[n%len(hosts)].GetAddress(), nil
 }
 
 func (r *serviceKeyResolverImpl) GetAllAddresses() ([]string, error) {
