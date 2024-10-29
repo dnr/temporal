@@ -37,7 +37,7 @@ type (
 		GetAllClients() ([]interface{}, error)
 	}
 
-	keyResolver interface {
+	KeyResolver interface {
 		Lookup(key string) (string, error)
 		LookupN(key string, n int) (string, error)
 		GetAllAddresses() ([]string, error)
@@ -46,7 +46,7 @@ type (
 	clientProvider func(string) (interface{}, error)
 
 	clientCacheImpl struct {
-		keyResolver    keyResolver
+		keyResolver    KeyResolver
 		clientProvider clientProvider
 
 		cacheLock sync.RWMutex
@@ -56,7 +56,7 @@ type (
 
 // NewClientCache creates a new client cache based on membership
 func NewClientCache(
-	keyResolver keyResolver,
+	keyResolver KeyResolver,
 	clientProvider clientProvider,
 ) ClientCache {
 

@@ -143,23 +143,33 @@ func (cf *rpcClientFactory) NewMatchingClientWithTimeout(
 	timeout time.Duration,
 	longPollTimeout time.Duration,
 ) (matchingservice.MatchingServiceClient, error) {
-	resolver, err := cf.monitor.GetResolver(primitives.MatchingService)
+	matchingResolver, err := cf.monitor.GetResolver(primitives.MatchingService)
+	if err != nil {
+		return nil, err
+	}
+	historyResolver, err := cf.monitor.GetResolver(primitives.HistoryService)
 	if err != nil {
 		return nil, err
 	}
 
-	keyResolver := newServiceKeyResolver(resolver)
+	keyResolver := newServiceKeyResolver(matchingResolver)
 	clientProvider := func(clientKey string) (interface{}, error) {
 		connection := cf.rpcFactory.CreateInternodeGRPCConnection(clientKey)
 		return matchingservice.NewMatchingServiceClient(connection), nil
 	}
+	lb := matching.NewLoadBalancer(
+		namespaceIDToName,
+		matchingResolver,
+		historyResolver,
+		cf.dynConfig,
+	)
 	client := matching.NewClient(
 		timeout,
 		longPollTimeout,
 		common.NewClientCache(keyResolver, clientProvider),
 		cf.metricsHandler,
 		cf.logger,
-		matching.NewLoadBalancer(namespaceIDToName, cf.dynConfig),
+		lb,
 		namespaceIDToName,
 		dynamicconfig.MatchingSpreadPartitions.Get(cf.dynConfig),
 	)

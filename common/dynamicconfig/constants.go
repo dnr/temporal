@@ -1209,6 +1209,12 @@ these log lines can be noisy, we want to be able to turn on and sample selective
 		`Use LookupN instead of Lookup to spread partitions evenly across matching nodes.
 Note: Enabling on an active queue will cause temporarily disruption.`,
 	)
+	MatchingLocalBalancing = NewTaskQueueBoolSetting(
+		"matching.localBalancing",
+		false,
+		`Try to send tasks to matching nodes in the same process as history.
+This also requires matching.spreadPartitions to be set.`,
+	)
 
 	// for matching testing only:
 

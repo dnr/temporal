@@ -25,11 +25,17 @@
 package matching
 
 import (
+	"fmt"
 	"math/rand"
+	"net"
 	"sync"
+	"sync/atomic"
 
+	"go.temporal.io/server/common/cache"
 	"go.temporal.io/server/common/dynamicconfig"
+	"go.temporal.io/server/common/membership"
 	"go.temporal.io/server/common/namespace"
+	"go.temporal.io/server/common/rpc/inline"
 	"go.temporal.io/server/common/tqid"
 )
 
@@ -58,6 +64,11 @@ type (
 		nWritePartitions    dynamicconfig.IntPropertyFnWithTaskQueueFilter
 		forceReadPartition  dynamicconfig.IntPropertyFn
 		forceWritePartition dynamicconfig.IntPropertyFn
+		spreadPartitions    dynamicconfig.BoolPropertyFnWithTaskQueueFilter
+		localRouting        dynamicconfig.BoolPropertyFnWithTaskQueueFilter
+		matchingResolver    membership.ServiceResolver
+		historyResolver     membership.ServiceResolver
+		inlineInfo          atomic.Pointer[inlineInfo]
 
 		lock         sync.RWMutex
 		taskQueueLBs map[tqid.TaskQueue]*tqLoadBalancer
@@ -74,12 +85,19 @@ type (
 		TQPartition *tqid.NormalPartition
 		balancer    *tqLoadBalancer
 	}
+
+	inlineInfo struct {
+		tqCache      cache.Cache         // task queue routing key -> int (-1 for don't use)
+		historyHosts map[string]struct{} // history host without port -> {}
+	}
 )
 
 // NewLoadBalancer returns an instance of matching load balancer that
 // can help distribute api calls across task queue partitions
 func NewLoadBalancer(
 	namespaceIDToName func(id namespace.ID) (namespace.Name, error),
+	matchingResolver membership.ServiceResolver,
+	historyResolver membership.ServiceResolver,
 	dc *dynamicconfig.Collection,
 ) LoadBalancer {
 	lb := &defaultLoadBalancer{
@@ -88,10 +106,41 @@ func NewLoadBalancer(
 		nWritePartitions:    dynamicconfig.MatchingNumTaskqueueWritePartitions.Get(dc),
 		forceReadPartition:  dynamicconfig.TestMatchingLBForceReadPartition.Get(dc),
 		forceWritePartition: dynamicconfig.TestMatchingLBForceWritePartition.Get(dc),
-		lock:                sync.RWMutex{},
+		spreadPartitions:    dynamicconfig.MatchingSpreadPartitions.Get(dc),
+		localRouting:        dynamicconfig.MatchingLocalRouting.Get(dc),
+		matchingResolver:    matchingResolver,
+		historyResolver:     historyResolver,
 		taskQueueLBs:        make(map[tqid.TaskQueue]*tqLoadBalancer),
 	}
+	lb.setupMembershipListener()
 	return lb
+}
+
+func (lb *defaultLoadBalancer) setupMembershipListener() {
+	ch := make(chan *membership.ChangedEvent, 2)
+	lb.matchingResolver.AddListener(fmt.Sprintf("%p", lb), ch)
+	lb.historyResolver.AddListener(fmt.Sprintf("%p", lb), ch)
+	go func() {
+		for range ch {
+			lb.inlineInfo.Store(lb.getInlineInfo())
+		}
+	}()
+}
+
+func (lb *defaultLoadBalancer) getInlineInfo() *inlineInfo {
+	// Cache set of history hosts without port
+	historyHosts := make(map[string]struct{})
+	for _, h := range lb.historyResolver.Members() {
+		if host, _, err := net.SplitHostPort(h.GetAddress()); err == nil {
+			historyHosts[host] = struct{}{}
+		} else {
+			return nil
+		}
+	}
+	return &inlineInfo{
+		tqCache:      cache.New(1000, nil), // TODO: config
+		historyHosts: historyHosts,
+	}
 }
 
 func (lb *defaultLoadBalancer) PickWritePartition(
@@ -107,6 +156,11 @@ func (lb *defaultLoadBalancer) PickWritePartition(
 	}
 
 	n := max(1, lb.nWritePartitions(nsName.String(), taskQueue.Name(), taskQueue.TaskType()))
+
+	if i := lb.tryLocalBalancing(nsName, taskQueue, n); i >= 0 {
+		return taskQueue.NormalPartition(i)
+	}
+
 	return taskQueue.NormalPartition(rand.Intn(n))
 }
 
@@ -145,6 +199,59 @@ func (lb *defaultLoadBalancer) getTaskQueueLoadBalancer(tq *tqid.TaskQueue) *tqL
 	}
 	lb.lock.Unlock()
 	return tqlb
+}
+
+func (lb *defaultLoadBalancer) tryLocalBalancing(
+	nsName namespace.Name,
+	taskQueue *tqid.TaskQueue,
+	nPartitions int,
+) (retIndex int) {
+	if !lb.localBalancing(nsName.String(), taskQueue.Name(), taskQueue.TaskType()) ||
+		!lb.spreadPartitions(nsName.String(), taskQueue.Name(), taskQueue.TaskType()) {
+		return -1
+	}
+
+	info := lb.inlineInfo.Load()
+	if info == nil {
+		return -1
+	}
+
+	baseKey := taskQueue.RootPartition().RoutingKeyWithoutPartition()
+
+	if index := info.tqCache.Get(baseKey); index != nil {
+		return index.(int)
+	}
+
+	defer func() {
+		info.tqCache.Put(baseKey, retIndex)
+	}()
+
+	// Find destination for all partitions. Note this has to match the logic in
+	// getClientForTaskQueuePartition when spreadPartitions is true (we require
+	// spreadPartitions above). We don't call the ClientCache/KeyResolver interface directly
+	// since it only returns one at a time and we want to get all at once.
+	partitionHosts := lb.matchingResolver.LookupN(baseKey, nPartitions)
+	// If we have more partitions than matching hosts, then some hosts will have multiple
+	// partitions, so tasks will be unbalanced. We could handle this with more complex logic
+	// but it's not worth it.
+	if len(partitionHosts) == 0 || nPartitions > len(partitionHosts) {
+		return -1
+	}
+	localMatching := -1
+	for i, partitionHost := range partitionHosts {
+		// Check that there is a history host with the same address for all matching hosts with
+		// one of these partitions, otherwise tasks will be unbalanced.
+		host, _, _ := net.SplitHostPort(partitionHost.GetAddress())
+		if _, ok := info.historyHosts[host]; !ok {
+			return -1
+		}
+		// Check if this is the one that is in this process
+		if inline.GetInlineConn(partitionHost.GetAddress()) != nil {
+			localMatching = i
+		}
+	}
+	// If none are in this process, we'll return -1 and not use local routing
+	return localMatching
 }
 
 func newTaskQueueLoadBalancer(tq *tqid.TaskQueue) *tqLoadBalancer {
