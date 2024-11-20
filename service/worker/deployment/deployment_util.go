@@ -144,7 +144,8 @@ func (d *DeploymentWorkflowClient) RegisterTaskQueueWorker(
 
 	sa := &commonpb.SearchAttributes{}
 	searchattribute.AddSearchAttribute(&sa, searchattribute.TemporalNamespaceDivision, payload.EncodeString(DeploymentNamespaceDivision))
-	searchattribute.AddSearchAttribute(&sa, searchattribute.DeploymentSeries, payload.EncodeString(d.deployment.SeriesName))
+	// TODO: later
+	// searchattribute.AddSearchAttribute(&sa, searchattribute.DeploymentSeries, payload.EncodeString(d.deployment.SeriesName))
 
 	// initial memo fiels
 	memo, err := d.addInitialDeploymentMemo()
