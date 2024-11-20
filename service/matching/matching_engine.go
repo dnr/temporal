@@ -1579,13 +1579,15 @@ func (e *matchingEngineImpl) ApplyTaskQueueUserDataReplicationEvent(
 		// merge v1 sets
 		mergedData := MergeVersioningData(currentVersioningData, newVersioningData)
 
-		// take last writer for V2 rules
+		// take last writer for V2 rules and V3 data
 		if req.GetUserData().GetClock() == nil || current.GetClock() != nil && hlc.Greater(current.GetClock(), req.GetUserData().GetClock()) {
 			mergedData.AssignmentRules = currentVersioningData.GetAssignmentRules()
 			mergedData.RedirectRules = currentVersioningData.GetRedirectRules()
+			mergedUserData.DeploymentData = current.GetDeploymentData()
 		} else {
 			mergedData.AssignmentRules = newVersioningData.GetAssignmentRules()
 			mergedData.RedirectRules = newVersioningData.GetRedirectRules()
+			mergedUserData.DeploymentData = req.GetUserData().GetDeploymentData()
 		}
 
 		for _, buildId := range buildIdsToRevive {
