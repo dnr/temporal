@@ -101,9 +101,10 @@ type (
 		taskValidator              taskValidator
 		tasksAddedInIntervals      *taskTracker
 		tasksDispatchedInIntervals *taskTracker
-		// isDeploymentWorkflowStarted keeps track if we have already registered the task queue worker
+		// deploymentWorkflowStarted keeps track if we have already registered the task queue worker
 		// in the deployment.
-		isDeploymentWorkflowStarted atomic.Bool
+		deploymentWorkflowLock    sync.Mutex
+		deploymentWorkflowStarted bool
 	}
 )
 
@@ -342,21 +343,22 @@ func (c *physicalTaskQueueManagerImpl) PollTask(
 	}
 
 	if c.partitionMgr.engine.config.EnableDeployments(namespaceEntry.Name().String()) && pollMetadata.workerVersionCapabilities.UseVersioning {
-		if !c.isDeploymentWorkflowStarted.Load() {
-
+		c.deploymentWorkflowLock.Lock()
+		if !c.deploymentWorkflowStarted {
+			// TODO: add some backoff here if we got an error last time
 			workerDeployment := &deploypb.Deployment{
 				SeriesName: pollMetadata.workerVersionCapabilities.DeploymentSeriesName,
 				BuildId:    pollMetadata.workerVersionCapabilities.BuildId,
 			}
 			d := deployment.NewDeploymentWorkflowClient(namespaceEntry, workerDeployment, c.partitionMgr.engine.historyClient)
 			err := d.RegisterTaskQueueWorker(ctx, c.queue.TaskQueueFamily().Name(), c.queue.TaskType(), nil, c.partitionMgr.engine.config.MaxIDLengthLimit())
-
 			if err != nil {
+				c.deploymentWorkflowLock.Unlock()
 				return nil, err
 			}
-
-			c.isDeploymentWorkflowStarted.Store(true)
+			c.deploymentWorkflowStarted = true
 		}
+		c.deploymentWorkflowLock.Unlock()
 	}
 
 	// the desired global rate limit for the task queue comes from the
