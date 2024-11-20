@@ -42,6 +42,7 @@ import (
 	deployspb "go.temporal.io/server/api/deployment/v1"
 	"go.temporal.io/server/api/historyservice/v1"
 	"go.temporal.io/server/common"
+	hlc "go.temporal.io/server/common/clock/hybrid_logical_clock"
 	"go.temporal.io/server/common/namespace"
 	"go.temporal.io/server/common/payload"
 	"go.temporal.io/server/common/primitives"
@@ -119,7 +120,7 @@ func (d *DeploymentWorkflowClient) RegisterTaskQueueWorker(
 	ctx context.Context,
 	taskQueueName string,
 	taskQueueType enumspb.TaskQueueType,
-	pollTimestamp *timestamppb.Timestamp,
+	firstPoll *hlc.Clock,
 	maxIDLengthLimit int,
 ) error {
 	// validate params which are used for building workflowID's
@@ -137,7 +138,7 @@ func (d *DeploymentWorkflowClient) RegisterTaskQueueWorker(
 	if err != nil {
 		return err
 	}
-	updatePayload, err := d.generateRegisterWorkerInDeploymentArgs(taskQueueName, taskQueueType, pollTimestamp)
+	updatePayload, err := d.generateRegisterWorkerInDeploymentArgs(taskQueueName, taskQueueType, firstPoll)
 	if err != nil {
 		return err
 	}
@@ -200,12 +201,7 @@ func (d *DeploymentWorkflowClient) RegisterTaskQueueWorker(
 			},
 		},
 	})
-
-	if err != nil {
-		return err
-	}
-
-	return nil
+	return err
 }
 
 func (d *DeploymentWorkflowClient) addInitialDeploymentMemo() (*commonpb.Memo, error) {
@@ -241,12 +237,11 @@ func (d *DeploymentWorkflowClient) generateStartWorkflowPayload() (*commonpb.Pay
 }
 
 // GenerateUpdateDeploymentPayload generates update workflow payload
-func (d *DeploymentWorkflowClient) generateRegisterWorkerInDeploymentArgs(taskQueueName string, taskQueueType enumspb.TaskQueueType,
-	pollTimestamp *timestamppb.Timestamp) (*commonpb.Payloads, error) {
+func (d *DeploymentWorkflowClient) generateRegisterWorkerInDeploymentArgs(taskQueueName string, taskQueueType enumspb.TaskQueueType, firstPoll *hlc.Clock) (*commonpb.Payloads, error) {
 	updateArgs := &deployspb.RegisterWorkerInDeploymentArgs{
 		TaskQueueName:   taskQueueName,
 		TaskQueueType:   taskQueueType,
-		FirstPollerTime: nil, // TODO Shivam - come back to this
+		FirstPollerTime: firstPoll,
 	}
 	return sdk.PreferProtoDataConverter.ToPayloads(updateArgs)
 }

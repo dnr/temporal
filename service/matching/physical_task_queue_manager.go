@@ -43,6 +43,7 @@ import (
 	taskqueuespb "go.temporal.io/server/api/taskqueue/v1"
 	"go.temporal.io/server/common"
 	"go.temporal.io/server/common/clock"
+	hlc "go.temporal.io/server/common/clock/hybrid_logical_clock"
 	"go.temporal.io/server/common/cluster"
 	"go.temporal.io/server/common/debug"
 	"go.temporal.io/server/common/log"
@@ -105,6 +106,7 @@ type (
 		// in the deployment.
 		deploymentWorkflowLock    sync.Mutex
 		deploymentWorkflowStarted bool
+		firstPoll                 *hlc.Clock
 	}
 )
 
@@ -345,13 +347,21 @@ func (c *physicalTaskQueueManagerImpl) PollTask(
 	if c.partitionMgr.engine.config.EnableDeployments(namespaceEntry.Name().String()) && pollMetadata.workerVersionCapabilities.UseVersioning {
 		c.deploymentWorkflowLock.Lock()
 		if !c.deploymentWorkflowStarted {
+			// TODO: if we see this task queue in userdata, then we know this registration is
+			// done and can skip this
 			// TODO: add some backoff here if we got an error last time
+
+			if c.firstPoll == nil {
+				clusterID := c.partitionMgr.engine.clusterMeta.GetClusterID()
+				c.firstPoll = hlc.Next(hlc.Zero(clusterID), c.partitionMgr.engine.timeSource)
+			}
+
 			workerDeployment := &deploypb.Deployment{
 				SeriesName: pollMetadata.workerVersionCapabilities.DeploymentSeriesName,
 				BuildId:    pollMetadata.workerVersionCapabilities.BuildId,
 			}
 			d := deployment.NewDeploymentWorkflowClient(namespaceEntry, workerDeployment, c.partitionMgr.engine.historyClient)
-			err := d.RegisterTaskQueueWorker(ctx, c.queue.TaskQueueFamily().Name(), c.queue.TaskType(), nil, c.partitionMgr.engine.config.MaxIDLengthLimit())
+			err := d.RegisterTaskQueueWorker(ctx, c.queue.TaskQueueFamily().Name(), c.queue.TaskType(), c.firstPoll, c.partitionMgr.engine.config.MaxIDLengthLimit())
 			if err != nil {
 				c.deploymentWorkflowLock.Unlock()
 				return nil, err
