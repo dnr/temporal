@@ -31,6 +31,7 @@ import (
 	"time"
 
 	commonpb "go.temporal.io/api/common/v1"
+	deploypb "go.temporal.io/api/deployment/v1"
 	enumspb "go.temporal.io/api/enums/v1"
 	"go.temporal.io/api/serviceerror"
 	taskqueuepb "go.temporal.io/api/taskqueue/v1"
@@ -58,11 +59,21 @@ const (
 	UpdateDeploymentBuildIDSignalName = "update-deployment-build-id"
 	ForceCANSignalName                = "force-continue-as-new"
 
-	DeploymentWorkflowIDPrefix      = "temporal-sys-deployment"
-	DeploymentNameWorkflowIDPrefix  = "temporal-sys-deployment-name"
-	DeploymentWorkflowIDDelimeter   = "|"
-	DeploymentWorkflowIDInitialSize = (2 * len(DeploymentWorkflowIDDelimeter)) + len(DeploymentWorkflowIDPrefix)
-	BuildIDMemoKey                  = "DefaultBuildID"
+	// Queries
+	QueryDescribeDeployment = "describe-deployment"
+	QueryCurrentDeployment  = "current-deployment"
+
+	// Memos
+	DeploymentMemoField = "DeploymentMemo"
+
+	// Prefixes, Delimeters and Keys
+	DeploymentWorkflowIDPrefix       = "temporal-sys-deployment"
+	DeploymentSeriesWorkflowIDPrefix = "temporal-sys-deployment-series"
+	DeploymentWorkflowIDDelimeter    = "|"
+	DeploymentWorkflowIDInitialSize  = (2 * len(DeploymentWorkflowIDDelimeter)) + len(DeploymentWorkflowIDPrefix)
+	BuildIDMemoKey                   = "DefaultBuildID"
+	SeriesFieldName                  = "DeploymentSeries"
+	BuildIDFieldName                 = "BuildID"
 )
 
 var (
@@ -88,13 +99,13 @@ type DeploymentClient interface {
 // implements DeploymentClient
 type DeploymentWorkflowClient struct {
 	namespaceEntry *namespace.Namespace
-	deployment     *commonpb.WorkerDeployment
+	deployment     *deploypb.Deployment
 	historyClient  resource.HistoryClient
 }
 
 func NewDeploymentWorkflowClient(
 	namespaceEntry *namespace.Namespace,
-	deployment *commonpb.WorkerDeployment,
+	deployment *deploypb.Deployment,
 	historyClient resource.HistoryClient,
 ) *DeploymentWorkflowClient {
 	return &DeploymentWorkflowClient{
@@ -112,16 +123,16 @@ func (d *DeploymentWorkflowClient) RegisterTaskQueueWorker(
 	maxIDLengthLimit int,
 ) error {
 	// validate params which are used for building workflowID's
-	err := d.validateDeploymentWfParams("DeploymentName", d.deployment.DeploymentName, maxIDLengthLimit)
+	err := ValidateDeploymentWfParams(SeriesFieldName, d.deployment.SeriesName, maxIDLengthLimit)
 	if err != nil {
 		return err
 	}
-	err = d.validateDeploymentWfParams("BuildID", d.deployment.BuildId, maxIDLengthLimit)
+	err = ValidateDeploymentWfParams(BuildIDFieldName, d.deployment.BuildId, maxIDLengthLimit)
 	if err != nil {
 		return err
 	}
 
-	deploymentWorkflowID := d.generateDeploymentWorkflowID()
+	deploymentWorkflowID := GenerateDeploymentWorkflowID(d.deployment.SeriesName, d.deployment.BuildId)
 	workflowInputPayloads, err := d.generateStartWorkflowPayload()
 	if err != nil {
 		return err
@@ -133,6 +144,13 @@ func (d *DeploymentWorkflowClient) RegisterTaskQueueWorker(
 
 	sa := &commonpb.SearchAttributes{}
 	searchattribute.AddSearchAttribute(&sa, searchattribute.TemporalNamespaceDivision, payload.EncodeString(DeploymentNamespaceDivision))
+	searchattribute.AddSearchAttribute(&sa, searchattribute.DeploymentSeries, payload.EncodeString(d.deployment.SeriesName))
+
+	// initial memo fiels
+	memo, err := d.addInitialDeploymentMemo()
+	if err != nil {
+		return err
+	}
 
 	// Start workflow execution, if it hasn't already
 	startReq := &workflowservice.StartWorkflowExecutionRequest{
@@ -144,6 +162,7 @@ func (d *DeploymentWorkflowClient) RegisterTaskQueueWorker(
 		WorkflowIdReusePolicy:    enumspb.WORKFLOW_ID_REUSE_POLICY_ALLOW_DUPLICATE,
 		WorkflowIdConflictPolicy: enumspb.WORKFLOW_ID_CONFLICT_POLICY_USE_EXISTING,
 		SearchAttributes:         sa,
+		Memo:                     memo,
 	}
 
 	updateReq := &workflowservice.UpdateWorkflowExecutionRequest{
@@ -188,14 +207,23 @@ func (d *DeploymentWorkflowClient) RegisterTaskQueueWorker(
 	return nil
 }
 
-// GenerateDeploymentWorkflowID is a helper that generates a system accepted
-// workflowID which are used in our deployment workflows
-func (d *DeploymentWorkflowClient) generateDeploymentWorkflowID() string {
-	// escaping the reserved workflow delimiter (|) from the inputs, if present
-	escapedDeploymentName := d.escapeChar(d.deployment.DeploymentName)
-	escapedBuildId := d.escapeChar(d.deployment.BuildId)
+func (d *DeploymentWorkflowClient) addInitialDeploymentMemo() (*commonpb.Memo, error) {
+	memo := &commonpb.Memo{}
+	memo.Fields = make(map[string]*commonpb.Payload)
 
-	return DeploymentWorkflowIDPrefix + DeploymentWorkflowIDDelimeter + escapedDeploymentName + DeploymentWorkflowIDDelimeter + escapedBuildId
+	deploymentWorkflowMemo := &deployspb.DeploymentWorkflowMemo{
+		CreateTime:          timestamppb.Now(),
+		IsCurrentDeployment: false,
+	}
+
+	memoPayload, err := sdk.PreferProtoDataConverter.ToPayload(deploymentWorkflowMemo)
+	if err != nil {
+		return nil, err
+	}
+
+	memo.Fields[DeploymentMemoField] = memoPayload
+	return memo, nil
+
 }
 
 // GenerateStartWorkflowPayload generates start workflow execution payload
@@ -224,7 +252,7 @@ func (d *DeploymentWorkflowClient) generateRegisterWorkerInDeploymentArgs(taskQu
 
 // ValidateDeploymentWfParams is a helper that verifies if the fields used for generating
 // deployment related workflowID's are valid
-func (d *DeploymentWorkflowClient) validateDeploymentWfParams(fieldName string, field string, maxIDLengthLimit int) error {
+func ValidateDeploymentWfParams(fieldName string, field string, maxIDLengthLimit int) error {
 	// Length checks
 	if field == "" {
 		return serviceerror.NewInvalidArgument(fmt.Sprintf("%v cannot be empty", fieldName))
@@ -239,16 +267,26 @@ func (d *DeploymentWorkflowClient) validateDeploymentWfParams(fieldName string, 
 	return common.ValidateUTF8String(fieldName, field)
 }
 
-func (d *DeploymentWorkflowClient) escapeChar(s string) string {
+// EscapeChar is a helper which escapes the DeploymentWorkflowIDDelimeter character
+// in the input string
+func escapeChar(s string) string {
 	s = strings.Replace(s, `\`, `\\`, -1)
 	s = strings.Replace(s, DeploymentWorkflowIDDelimeter, `\`+DeploymentWorkflowIDDelimeter, -1)
 	return s
 }
 
-func generateDeploymentNameWorkflowID(deploymentName string) string {
-	var d *DeploymentWorkflowClient
-
+func GenerateDeploymentSeriesWorkflowID(deploymentSeriesName string) string {
 	// escaping the reserved workflow delimiter (|) from the inputs, if present
-	escapedDeploymentName := d.escapeChar(deploymentName)
-	return DeploymentNameWorkflowIDPrefix + DeploymentWorkflowIDDelimeter + escapedDeploymentName
+	escapedSeriesName := escapeChar(deploymentSeriesName)
+	return DeploymentSeriesWorkflowIDPrefix + DeploymentWorkflowIDDelimeter + escapedSeriesName
+}
+
+// GenerateDeploymentWorkflowID is a helper that generates a system accepted
+// workflowID which are used in our deployment workflows
+func GenerateDeploymentWorkflowID(seriesName string, buildID string) string {
+	// escaping the reserved workflow delimiter (|) from the inputs, if present
+	escapedSeriesName := escapeChar(seriesName)
+	escapedBuildId := escapeChar(buildID)
+
+	return DeploymentWorkflowIDPrefix + DeploymentWorkflowIDDelimeter + escapedSeriesName + DeploymentWorkflowIDDelimeter + escapedBuildId
 }
