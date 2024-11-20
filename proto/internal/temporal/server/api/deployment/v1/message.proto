@@ -26,25 +26,30 @@ package temporal.server.api.deployment.v1;
 
 option go_package = "go.temporal.io/server/api/deployment/v1;deployment";
 
-import "temporal/api/enums/v1/task_queue.proto";
 import "google/protobuf/timestamp.proto";
-import "temporal/api/deployment/v1/message.proto";
+
 import "temporal/api/common/v1/message.proto";
+import "temporal/api/deployment/v1/message.proto";
+import "temporal/api/enums/v1/task_queue.proto";
+
+import "temporal/server/api/clock/v1/message.proto";
 
 message DeploymentLocalState {
     temporal.api.deployment.v1.Deployment worker_deployment = 1;
     map<string, TaskQueueFamilyInfo> task_queue_families = 2;
     bool is_current_deployment = 3;
     google.protobuf.Timestamp create_time = 4;
-    map<string, temporal.api.common.v1.Payload> metadata = 5; 
-    
+    map<string, temporal.api.common.v1.Payload> metadata = 5;
+
     message TaskQueueFamilyInfo {
         // key: taskQueueType, val: TaskQueueInfo
         map<int32,TaskQueueInfo> task_queues = 1;
-        
+
         message TaskQueueInfo {
             temporal.api.enums.v1.TaskQueueType task_queue_type = 1;
-            google.protobuf.Timestamp first_poller_time = 2;
+            // (-- api-linter: core::0142::time-field-type=disabled
+            //     aip.dev/not-precedent: Using HLC instead of wall clock. --)
+            temporal.server.api.clock.v1.HybridLogicalClock first_poller_time = 2;
         }
     }
 }
@@ -61,10 +66,12 @@ message DeploymentSeriesWorkflowArgs {
     string default_build_id = 3;
 }
 
-message RegisterWorkerInDeploymentArgs{
+message RegisterWorkerInDeploymentArgs {
     string task_queue_name = 1;
     temporal.api.enums.v1.TaskQueueType task_queue_type = 2;
-    google.protobuf.Timestamp first_poller_time = 3;
+    // (-- api-linter: core::0142::time-field-type=disabled
+    //     aip.dev/not-precedent: Using HLC instead of wall clock. --)
+    temporal.server.api.clock.v1.HybridLogicalClock first_poller_time = 3;
 }
 
 message DescribeResponse {
