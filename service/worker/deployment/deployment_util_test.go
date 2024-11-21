@@ -31,7 +31,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
-	deploypb "go.temporal.io/api/deployment/v1"
+	deploymentpb "go.temporal.io/api/deployment/v1"
 	"go.temporal.io/api/serviceerror"
 	"go.temporal.io/server/api/historyservicemock/v1"
 	persistencespb "go.temporal.io/server/api/persistence/v1"
@@ -59,7 +59,7 @@ type (
 		mockNamespaceCache *namespace.MockRegistry
 		mockHistoryClient  *historyservicemock.MockHistoryServiceClient
 		VisibilityManager  *manager.MockVisibilityManager
-		workerDeployment   *deploypb.Deployment
+		workerDeployment   *deploymentpb.Deployment
 		deploymentClient   *DeploymentClient
 		sync.Mutex
 	}
@@ -80,7 +80,7 @@ func (d *deploymentWorkflowClientSuite) SetupTest() {
 	d.ns, d.mockNamespaceCache = createMockNamespaceCache(d.controller, testNamespace)
 	d.VisibilityManager = manager.NewMockVisibilityManager(d.controller)
 	d.mockHistoryClient = historyservicemock.NewMockHistoryServiceClient(d.controller)
-	d.workerDeployment = &deploypb.Deployment{
+	d.workerDeployment = &deploymentpb.Deployment{
 		SeriesName: testDeployment,
 		BuildId:    testBuildID,
 	}

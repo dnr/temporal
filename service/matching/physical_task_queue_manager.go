@@ -33,7 +33,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	deploypb "go.temporal.io/api/deployment/v1"
+	deploymentpb "go.temporal.io/api/deployment/v1"
 	enumspb "go.temporal.io/api/enums/v1"
 	"go.temporal.io/api/serviceerror"
 	taskqueuepb "go.temporal.io/api/taskqueue/v1"
@@ -354,8 +354,7 @@ func (c *physicalTaskQueueManagerImpl) PollTask(
 				clusterID := c.partitionMgr.engine.clusterMeta.GetClusterID()
 				c.firstPoll = hlc.Next(hlc.Zero(clusterID), c.partitionMgr.engine.timeSource)
 			}
-
-			workerDeployment := &deploypb.Deployment{
+			workerDeployment := &deploymentpb.Deployment{
 				SeriesName: pollMetadata.workerVersionCapabilities.DeploymentSeriesName,
 				BuildId:    pollMetadata.workerVersionCapabilities.BuildId,
 			}

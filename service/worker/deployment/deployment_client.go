@@ -29,13 +29,13 @@ import (
 	"fmt"
 
 	commonpb "go.temporal.io/api/common/v1"
-	deploypb "go.temporal.io/api/deployment/v1"
+	deploymentpb "go.temporal.io/api/deployment/v1"
 	enumspb "go.temporal.io/api/enums/v1"
 	querypb "go.temporal.io/api/query/v1"
 	taskqueuepb "go.temporal.io/api/taskqueue/v1"
 	updatepb "go.temporal.io/api/update/v1"
 	"go.temporal.io/api/workflowservice/v1"
-	deployspb "go.temporal.io/server/api/deployment/v1"
+	deploymentspb "go.temporal.io/server/api/deployment/v1"
 	"go.temporal.io/server/api/historyservice/v1"
 	hlc "go.temporal.io/server/common/clock/hybrid_logical_clock"
 	"go.temporal.io/server/common/dynamicconfig"
@@ -53,7 +53,7 @@ type DeploymentStoreClient interface {
 	RegisterTaskQueueWorker(
 		ctx context.Context,
 		namespaceEntry *namespace.Namespace,
-		deployment *deploypb.Deployment,
+		deployment *deploymentpb.Deployment,
 		taskQueueName string,
 		taskQueueType enumspb.TaskQueueType,
 		firstPoll *hlc.Clock,
@@ -64,20 +64,20 @@ type DeploymentStoreClient interface {
 		namespaceEntry *namespace.Namespace,
 		seriesName string,
 		buildID string,
-	) (*deploypb.DeploymentInfo, error)
+	) (*deploymentpb.Deployment, error)
 
 	GetCurrentDeployment(
 		ctx context.Context,
 		namespaceEntry *namespace.Namespace,
 		seriesName string,
-	) (*deploypb.DeploymentInfo, error)
+	) (*deploymentpb.Deployment, error)
 
 	ListDeployments(
 		ctx context.Context,
 		namespaceEntry *namespace.Namespace,
 		seriesName string,
 		NextPageToken []byte,
-	) ([]*deploypb.DeploymentListInfo, []byte, error)
+	) ([]*deploymentpb.DeploymentInfo, []byte, error)
 }
 
 // implements DeploymentClient
@@ -91,10 +91,10 @@ type DeploymentClient struct {
 func (d *DeploymentClient) RegisterTaskQueueWorker(
 	ctx context.Context,
 	namespaceEntry *namespace.Namespace,
-	deployment *deploypb.Deployment,
+	deployment *deploymentpb.Deployment,
 	taskQueueName string,
 	taskQueueType enumspb.TaskQueueType,
-	firstPoll *timestamppb.Timestamp,
+	firstPoll *hlc.Clock,
 ) error {
 	// validate params which are used for building workflowID's
 	err := ValidateDeploymentWfParams(SeriesFieldName, deployment.SeriesName, d.MaxIDLengthLimit())
@@ -175,7 +175,7 @@ func (d *DeploymentClient) RegisterTaskQueueWorker(
 	return err
 }
 
-func (d *DeploymentClient) DescribeDeployment(ctx context.Context, namespaceEntry *namespace.Namespace, seriesName string, buildID string) (*deploypb.DeploymentInfo, error) {
+func (d *DeploymentClient) DescribeDeployment(ctx context.Context, namespaceEntry *namespace.Namespace, seriesName string, buildID string) (*deploymentpb.DeploymentInfo, error) {
 	// validating params
 	err := ValidateDeploymentWfParams(SeriesFieldName, seriesName, d.MaxIDLengthLimit())
 	if err != nil {
@@ -204,28 +204,28 @@ func (d *DeploymentClient) DescribeDeployment(ctx context.Context, namespaceEntr
 		return nil, err
 	}
 
-	var queryResponse deployspb.DescribeResponse
+	var queryResponse deploymentspb.DescribeResponse
 	err = payloads.Decode(res.GetResponse().GetQueryResult(), &queryResponse)
 	if err != nil {
 		return nil, err
 	}
 
 	// build out task-queues for the response object
-	var taskQueues []*deploypb.DeploymentInfo_TaskQueueInfo
+	var taskQueues []*deploymentpb.DeploymentInfo_TaskQueueInfo
 	deploymentLocalState := queryResponse.DeploymentLocalState
 
 	for taskQueueName, taskQueueFamilyInfo := range deploymentLocalState.TaskQueueFamilies {
 		for _, taskQueueInfo := range taskQueueFamilyInfo.TaskQueues {
-			element := &deploypb.DeploymentInfo_TaskQueueInfo{
+			element := &deploymentpb.DeploymentInfo_TaskQueueInfo{
 				Name:            taskQueueName,
 				Type:            enumspb.TaskQueueType(taskQueueInfo.TaskQueueType),
-				FirstPollerTime: taskQueueInfo.FirstPollerTime,
+				FirstPollerTime: hlc.ProtoTimestamp(taskQueueInfo.FirstPollerTime),
 			}
 			taskQueues = append(taskQueues, element)
 		}
 	}
 
-	return &deploypb.DeploymentInfo{
+	return &deploymentpb.DeploymentInfo{
 		Deployment:     deploymentLocalState.WorkerDeployment,
 		CreateTime:     deploymentLocalState.CreateTime,
 		TaskQueueInfos: taskQueues,
@@ -234,7 +234,7 @@ func (d *DeploymentClient) DescribeDeployment(ctx context.Context, namespaceEntr
 	}, nil
 }
 
-func (d *DeploymentClient) GetCurrentDeployment(ctx context.Context, namespaceEntry *namespace.Namespace, seriesName string) (*deploypb.DeploymentInfo, error) {
+func (d *DeploymentClient) GetCurrentDeployment(ctx context.Context, namespaceEntry *namespace.Namespace, seriesName string) (*deploymentpb.DeploymentInfo, error) {
 
 	// Validating params
 	err := ValidateDeploymentWfParams(SeriesFieldName, seriesName, d.MaxIDLengthLimit())
@@ -282,7 +282,7 @@ func (d *DeploymentClient) GetCurrentDeployment(ctx context.Context, namespaceEn
 	return deploymentInfo, nil
 }
 
-func (d *DeploymentClient) ListDeployments(ctx context.Context, namespaceEntry *namespace.Namespace, seriesName string, NextPageToken []byte) ([]*deploypb.DeploymentListInfo, []byte, error) {
+func (d *DeploymentClient) ListDeployments(ctx context.Context, namespaceEntry *namespace.Namespace, seriesName string, NextPageToken []byte) ([]*deploymentpb.DeploymentListInfo, []byte, error) {
 
 	query := ""
 	if seriesName != "" {
@@ -305,11 +305,11 @@ func (d *DeploymentClient) ListDeployments(ctx context.Context, namespaceEntry *
 		return nil, nil, err
 	}
 
-	deployments := make([]*deploypb.DeploymentListInfo, len(persistenceResp.Executions))
+	deployments := make([]*deploymentpb.DeploymentListInfo, len(persistenceResp.Executions))
 	for _, ex := range persistenceResp.Executions {
 		deployment := ex.GetVersioningInfo().GetDeployment()
 		workflowMemo := d.decodeDeploymentMemo(ex.GetMemo())
-		deploymentListInfo := &deploypb.DeploymentListInfo{
+		deploymentListInfo := &deploymentpb.DeploymentListInfo{
 			Deployment: deployment,
 			CreateTime: workflowMemo.CreateTime,
 			IsCurrent:  workflowMemo.IsCurrentDeployment,
@@ -322,8 +322,8 @@ func (d *DeploymentClient) ListDeployments(ctx context.Context, namespaceEntry *
 
 }
 
-func (d *DeploymentClient) decodeDeploymentMemo(memo *commonpb.Memo) *deployspb.DeploymentWorkflowMemo {
-	var workflowMemo deployspb.DeploymentWorkflowMemo
+func (d *DeploymentClient) decodeDeploymentMemo(memo *commonpb.Memo) *deploymentspb.DeploymentWorkflowMemo {
+	var workflowMemo deploymentspb.DeploymentWorkflowMemo
 	err := sdk.PreferProtoDataConverter.FromPayload(memo.Fields[DeploymentMemoField], &workflowMemo)
 	if err != nil {
 		return nil
@@ -339,11 +339,11 @@ func (d *DeploymentClient) queryWithWorkflowID(seriesName string) string {
 }
 
 // GenerateStartWorkflowPayload generates start workflow execution payload
-func (d *DeploymentClient) generateStartWorkflowPayload(namespaceEntry *namespace.Namespace, deployment *deploypb.Deployment) (*commonpb.Payloads, error) {
-	workflowArgs := &deployspb.DeploymentWorkflowArgs{
+func (d *DeploymentClient) generateStartWorkflowPayload(namespaceEntry *namespace.Namespace, deployment *deploymentpb.Deployment) (*commonpb.Payloads, error) {
+	workflowArgs := &deploymentspb.DeploymentWorkflowArgs{
 		NamespaceName: namespaceEntry.Name().String(),
 		NamespaceId:   namespaceEntry.ID().String(),
-		DeploymentLocalState: &deployspb.DeploymentLocalState{
+		DeploymentLocalState: &deploymentspb.DeploymentLocalState{
 			WorkerDeployment:  deployment,
 			TaskQueueFamilies: nil,
 		},
@@ -357,7 +357,7 @@ func (d *DeploymentClient) generateRegisterWorkerInDeploymentArgs(
 	taskQueueType enumspb.TaskQueueType,
 	firstPoll *hlc.Clock,
 ) (*commonpb.Payloads, error) {
-	updateArgs := &deployspb.RegisterWorkerInDeploymentArgs{
+	updateArgs := &deploymentspb.RegisterWorkerInDeploymentArgs{
 		TaskQueueName:   taskQueueName,
 		TaskQueueType:   taskQueueType,
 		FirstPollerTime: firstPoll,
@@ -369,7 +369,7 @@ func (d *DeploymentClient) addInitialDeploymentMemo() (*commonpb.Memo, error) {
 	memo := &commonpb.Memo{}
 	memo.Fields = make(map[string]*commonpb.Payload)
 
-	deploymentWorkflowMemo := &deployspb.DeploymentWorkflowMemo{
+	deploymentWorkflowMemo := &deploymentspb.DeploymentWorkflowMemo{
 		CreateTime:          timestamppb.Now(),
 		IsCurrentDeployment: false,
 	}
