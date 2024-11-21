@@ -1566,9 +1566,9 @@ func (e *matchingEngineImpl) UpdateDeploymentUserData(
 		updatedClock := hlc.Next(clk, e.timeSource)
 
 		prevDeployments := data.GetDeploymentData()[int32(req.TaskQueueType)].GetDeployment()
-		var newDeploymentData map[int32]*persistencespb.DeploymentData
+		var newDeployments []*persistencespb.DeploymentData_Deployment
 
-		// each branch must either set newDeploymentData or return nil
+		// each branch must either set newDeployments or return nil
 		switch req.GetUpdate().(type) {
 		case *matchingservice.UpdateDeploymentUserDataRequest_Register_:
 			reg := req.GetRegister()
@@ -1587,15 +1587,11 @@ func (e *matchingEngineImpl) UpdateDeploymentUserData(
 			}
 
 			// need to add it
-			newDeployments := append(slices.Clone(prevDeployments), &persistencespb.DeploymentData_Deployment{
+			newDeployments = slices.Clone(prevDeployments)
+			newDeployments = append(newDeployments, &persistencespb.DeploymentData_Deployment{
 				Deployment:      reg.Deployment,
 				FirstPollerTime: reg.FirstPollerTime,
 			})
-
-			newDeploymentData = maps.Clone(data.GetDeploymentData())
-			newDeploymentData[int32(req.TaskQueueType)] = &persistencespb.DeploymentData{
-				Deployment: newDeployments,
-			}
 
 			e.logger.Info("UpdateDeploymentUserData registered deployment") // TODO: more details
 
@@ -1606,26 +1602,35 @@ func (e *matchingEngineImpl) UpdateDeploymentUserData(
 				return nil, false, errors.New("missing deployment")
 			}
 
-			var newDeployments []*persistencespb.DeploymentData_Deployment
+			maxCurrentIndex, foundIndex := -1, -1
+			maxCurrentTime := hlc.Zero(0)
 			for i, d := range prevDeployments {
+				if hlc.Greater(d.LastBecameCurrentTime, maxCurrentTime) {
+					maxCurrentIndex, maxCurrentTime = i, d.LastBecameCurrentTime
+				}
 				if d.Deployment.SeriesName == cur.Deployment.SeriesName && d.Deployment.BuildId == cur.Deployment.BuildId {
-					newDeployments = slices.Clone(prevDeployments)
-					newDeployments[i].LastBecameCurrentTime = updatedClock
+					foundIndex = i
 				}
 			}
-			if newDeployments == nil {
+			if foundIndex == -1 {
 				return nil, false, errors.New("deployment not found")
+			} else if foundIndex == maxCurrentIndex {
+				// deployment is already current
+				return nil, false, errUserDataUnmodified
 			}
 
-			newDeploymentData = maps.Clone(data.GetDeploymentData())
-			newDeploymentData[int32(req.TaskQueueType)] = &persistencespb.DeploymentData{
-				Deployment: newDeployments,
-			}
+			newDeployments = slices.Clone(prevDeployments)
+			newDeployments[foundIndex].LastBecameCurrentTime = updatedClock
 
 			e.logger.Info("UpdateDeploymentUserData marked as current") // TODO: more details
 
 		default:
 			return nil, false, errors.New("Unknown update type") // TODO: fix errors
+		}
+
+		newDeploymentData := maps.Clone(data.GetDeploymentData())
+		newDeploymentData[int32(req.TaskQueueType)] = &persistencespb.DeploymentData{
+			Deployment: newDeployments,
 		}
 
 		ret := &persistencespb.TaskQueueUserData{
