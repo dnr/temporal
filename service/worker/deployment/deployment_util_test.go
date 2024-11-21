@@ -60,7 +60,7 @@ type (
 		mockHistoryClient  *historyservicemock.MockHistoryServiceClient
 		VisibilityManager  *manager.MockVisibilityManager
 		workerDeployment   *deploymentpb.Deployment
-		deploymentClient   *DeploymentClient
+		deploymentClient   *DeploymentClientImpl
 		sync.Mutex
 	}
 )
@@ -84,7 +84,7 @@ func (d *deploymentWorkflowClientSuite) SetupTest() {
 		SeriesName: testDeployment,
 		BuildId:    testBuildID,
 	}
-	d.deploymentClient = &DeploymentClient{
+	d.deploymentClient = &DeploymentClientImpl{
 		HistoryClient:     d.mockHistoryClient,
 		VisibilityManager: d.VisibilityManager,
 	}

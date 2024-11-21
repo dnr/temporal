@@ -97,8 +97,8 @@ var Module = fx.Options(
 	fx.Provide(DeploymentStoreClientProvider),
 )
 
-func DeploymentStoreClientProvider(historyClient historyservice.HistoryServiceClient, visibilityManager manager.VisibilityManager, dc *dynamicconfig.Collection) *DeploymentClient {
-	return &DeploymentClient{
+func DeploymentStoreClientProvider(historyClient historyservice.HistoryServiceClient, visibilityManager manager.VisibilityManager, dc *dynamicconfig.Collection) *DeploymentClientImpl {
+	return &DeploymentClientImpl{
 		HistoryClient:         historyClient,
 		VisibilityManager:     visibilityManager,
 		MaxIDLengthLimit:      dynamicconfig.MaxIDLengthLimit.Get(dc),
