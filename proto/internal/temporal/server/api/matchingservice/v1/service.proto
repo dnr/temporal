@@ -126,6 +126,10 @@ service MatchingService {
     rpc GetWorkerVersioningRules (GetWorkerVersioningRulesRequest) returns (GetWorkerVersioningRulesResponse) { }
 
     // This request should always be routed to the node holding the root partition of the workflow task queue.
+    // (-- api-linter: core::0134::response-message-name=disabled
+    //     aip.dev/not-precedent: UpdateDeploymentUserData RPC doesn't follow Google API format. --)
+    // (-- api-linter: core::0134::method-signature=disabled
+    //     aip.dev/not-precedent: UpdateDeploymentUserData RPC doesn't follow Google API format. --)
     rpc UpdateDeploymentUserData (UpdateDeploymentUserDataRequest) returns (UpdateDeploymentUserDataResponse) {}
 
     // Apply a user data replication event.

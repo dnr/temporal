@@ -70,7 +70,7 @@ func DeploymentWorkflow(ctx workflow.Context, deploymentWorkflowArgs *deployment
 	return deploymentWorkflowRunner.run()
 }
 
-func (d *DeploymentWorkflowRunner) ListenToSignals(ctx workflow.Context) {
+func (d *DeploymentWorkflowRunner) listenToSignals(ctx workflow.Context) {
 	// Fetch signal channels
 	updateBuildIDSignalChannel := workflow.GetSignalChannel(ctx, UpdateDeploymentBuildIDSignalName)
 	forceCANSignalChannel := workflow.GetSignalChannel(ctx, ForceCANSignalName)
@@ -94,7 +94,6 @@ func (d *DeploymentWorkflowRunner) ListenToSignals(ctx workflow.Context) {
 }
 
 func (d *DeploymentWorkflowRunner) run() error {
-	var a AwaitSignals
 	var pendingUpdates int
 
 	// Set up Query Handlers here:
@@ -143,14 +142,19 @@ func (d *DeploymentWorkflowRunner) run() error {
 			}
 			d.DeploymentLocalState.TaskQueueFamilies[updateInput.TaskQueueName].TaskQueues[int32(updateInput.TaskQueueType)] = newTaskQueueWorkerInfo
 
-			// Call activity which starts a "DeploymentSeries" workflow
+			// Call activities which start a "DeploymentSeries" workflow and register the task queue in user data.
 			activityCtx := workflow.WithActivityOptions(ctx, defaultActivityOptions)
 			seriesFuture := workflow.ExecuteActivity(activityCtx, d.a.StartDeploymentSeriesWorkflow, &StartDeploymentSeriesRequest{
 				SeriesName: d.DeploymentLocalState.WorkerDeployment.SeriesName,
 			})
-			userdataFuture := workflow.ExecuteActivity(activityCtx, d.a.UpdateUserData, &UpdateUserDataRequest{})
+			userDataFuture := workflow.ExecuteActivity(activityCtx, d.a.UpdateUserData, &UpdateUserDataRequest{
+				Deployment:      d.DeploymentLocalState.WorkerDeployment,
+				TaskQueueName:   updateInput.TaskQueueName,
+				TaskQueueType:   updateInput.TaskQueueType,
+				FirstPollerTime: updateInput.FirstPollerTime,
+			})
 
-			return cmp.Or(seriesFuture.Get(ctx, nil), userdataFuture.Get(ctx, nil))
+			return cmp.Or(seriesFuture.Get(ctx, nil), userDataFuture.Get(ctx, nil))
 		},
 		// TODO Shivam - have a validator which backsoff updates if we are scheduled to have a CAN
 	); err != nil {
@@ -177,10 +181,6 @@ func (d *DeploymentWorkflowRunner) run() error {
 
 	d.logger.Debug("Deployment doing continue-as-new")
 	return workflow.NewContinueAsNewError(d.ctx, DeploymentWorkflow, d.DeploymentWorkflowArgs)
-
-}
-
-func (d *DeploymentWorkflowRunner) invokeDeploymentSeriesActivity(ctx workflow.Context, seriesName string) error {
 
 }
 

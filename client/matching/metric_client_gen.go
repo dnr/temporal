@@ -327,6 +327,20 @@ func (c *metricClient) RespondQueryTaskCompleted(
 	return c.client.RespondQueryTaskCompleted(ctx, request, opts...)
 }
 
+func (c *metricClient) UpdateDeploymentUserData(
+	ctx context.Context,
+	request *matchingservice.UpdateDeploymentUserDataRequest,
+	opts ...grpc.CallOption,
+) (_ *matchingservice.UpdateDeploymentUserDataResponse, retError error) {
+
+	metricsHandler, startTime := c.startMetricsRecording(ctx, "MatchingClientUpdateDeploymentUserData")
+	defer func() {
+		c.finishMetricsRecording(metricsHandler, startTime, retError)
+	}()
+
+	return c.client.UpdateDeploymentUserData(ctx, request, opts...)
+}
+
 func (c *metricClient) UpdateNexusEndpoint(
 	ctx context.Context,
 	request *matchingservice.UpdateNexusEndpointRequest,

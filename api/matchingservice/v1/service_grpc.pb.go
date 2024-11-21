@@ -61,6 +61,7 @@ const (
 	MatchingService_GetTaskQueueUserData_FullMethodName                   = "/temporal.server.api.matchingservice.v1.MatchingService/GetTaskQueueUserData"
 	MatchingService_UpdateWorkerVersioningRules_FullMethodName            = "/temporal.server.api.matchingservice.v1.MatchingService/UpdateWorkerVersioningRules"
 	MatchingService_GetWorkerVersioningRules_FullMethodName               = "/temporal.server.api.matchingservice.v1.MatchingService/GetWorkerVersioningRules"
+	MatchingService_UpdateDeploymentUserData_FullMethodName               = "/temporal.server.api.matchingservice.v1.MatchingService/UpdateDeploymentUserData"
 	MatchingService_ApplyTaskQueueUserDataReplicationEvent_FullMethodName = "/temporal.server.api.matchingservice.v1.MatchingService/ApplyTaskQueueUserDataReplicationEvent"
 	MatchingService_GetBuildIdTaskQueueMapping_FullMethodName             = "/temporal.server.api.matchingservice.v1.MatchingService/GetBuildIdTaskQueueMapping"
 	MatchingService_ForceLoadTaskQueuePartition_FullMethodName            = "/temporal.server.api.matchingservice.v1.MatchingService/ForceLoadTaskQueuePartition"
@@ -146,6 +147,15 @@ type MatchingServiceClient interface {
 	//
 	//	aip.dev/not-precedent: GetWorkerVersioningRulesRequest RPC doesn't follow Google API format. --)
 	GetWorkerVersioningRules(ctx context.Context, in *GetWorkerVersioningRulesRequest, opts ...grpc.CallOption) (*GetWorkerVersioningRulesResponse, error)
+	// This request should always be routed to the node holding the root partition of the workflow task queue.
+	// (-- api-linter: core::0134::response-message-name=disabled
+	//
+	//	aip.dev/not-precedent: UpdateDeploymentUserData RPC doesn't follow Google API format. --)
+	//
+	// (-- api-linter: core::0134::method-signature=disabled
+	//
+	//	aip.dev/not-precedent: UpdateDeploymentUserData RPC doesn't follow Google API format. --)
+	UpdateDeploymentUserData(ctx context.Context, in *UpdateDeploymentUserDataRequest, opts ...grpc.CallOption) (*UpdateDeploymentUserDataResponse, error)
 	// Apply a user data replication event.
 	ApplyTaskQueueUserDataReplicationEvent(ctx context.Context, in *ApplyTaskQueueUserDataReplicationEventRequest, opts ...grpc.CallOption) (*ApplyTaskQueueUserDataReplicationEventResponse, error)
 	// Gets all task queue names mapped to a given build ID
@@ -386,6 +396,15 @@ func (c *matchingServiceClient) GetWorkerVersioningRules(ctx context.Context, in
 	return out, nil
 }
 
+func (c *matchingServiceClient) UpdateDeploymentUserData(ctx context.Context, in *UpdateDeploymentUserDataRequest, opts ...grpc.CallOption) (*UpdateDeploymentUserDataResponse, error) {
+	out := new(UpdateDeploymentUserDataResponse)
+	err := c.cc.Invoke(ctx, MatchingService_UpdateDeploymentUserData_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *matchingServiceClient) ApplyTaskQueueUserDataReplicationEvent(ctx context.Context, in *ApplyTaskQueueUserDataReplicationEventRequest, opts ...grpc.CallOption) (*ApplyTaskQueueUserDataReplicationEventResponse, error) {
 	out := new(ApplyTaskQueueUserDataReplicationEventResponse)
 	err := c.cc.Invoke(ctx, MatchingService_ApplyTaskQueueUserDataReplicationEvent_FullMethodName, in, out, opts...)
@@ -557,6 +576,15 @@ type MatchingServiceServer interface {
 	//
 	//	aip.dev/not-precedent: GetWorkerVersioningRulesRequest RPC doesn't follow Google API format. --)
 	GetWorkerVersioningRules(context.Context, *GetWorkerVersioningRulesRequest) (*GetWorkerVersioningRulesResponse, error)
+	// This request should always be routed to the node holding the root partition of the workflow task queue.
+	// (-- api-linter: core::0134::response-message-name=disabled
+	//
+	//	aip.dev/not-precedent: UpdateDeploymentUserData RPC doesn't follow Google API format. --)
+	//
+	// (-- api-linter: core::0134::method-signature=disabled
+	//
+	//	aip.dev/not-precedent: UpdateDeploymentUserData RPC doesn't follow Google API format. --)
+	UpdateDeploymentUserData(context.Context, *UpdateDeploymentUserDataRequest) (*UpdateDeploymentUserDataResponse, error)
 	// Apply a user data replication event.
 	ApplyTaskQueueUserDataReplicationEvent(context.Context, *ApplyTaskQueueUserDataReplicationEventRequest) (*ApplyTaskQueueUserDataReplicationEventResponse, error)
 	// Gets all task queue names mapped to a given build ID
@@ -679,6 +707,9 @@ func (UnimplementedMatchingServiceServer) UpdateWorkerVersioningRules(context.Co
 }
 func (UnimplementedMatchingServiceServer) GetWorkerVersioningRules(context.Context, *GetWorkerVersioningRulesRequest) (*GetWorkerVersioningRulesResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetWorkerVersioningRules not implemented")
+}
+func (UnimplementedMatchingServiceServer) UpdateDeploymentUserData(context.Context, *UpdateDeploymentUserDataRequest) (*UpdateDeploymentUserDataResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method UpdateDeploymentUserData not implemented")
 }
 func (UnimplementedMatchingServiceServer) ApplyTaskQueueUserDataReplicationEvent(context.Context, *ApplyTaskQueueUserDataReplicationEventRequest) (*ApplyTaskQueueUserDataReplicationEventResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ApplyTaskQueueUserDataReplicationEvent not implemented")
@@ -1068,6 +1099,24 @@ func _MatchingService_GetWorkerVersioningRules_Handler(srv interface{}, ctx cont
 	return interceptor(ctx, in, info, handler)
 }
 
+func _MatchingService_UpdateDeploymentUserData_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(UpdateDeploymentUserDataRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(MatchingServiceServer).UpdateDeploymentUserData(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: MatchingService_UpdateDeploymentUserData_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(MatchingServiceServer).UpdateDeploymentUserData(ctx, req.(*UpdateDeploymentUserDataRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _MatchingService_ApplyTaskQueueUserDataReplicationEvent_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(ApplyTaskQueueUserDataReplicationEventRequest)
 	if err := dec(in); err != nil {
@@ -1348,6 +1397,10 @@ var MatchingService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetWorkerVersioningRules",
 			Handler:    _MatchingService_GetWorkerVersioningRules_Handler,
+		},
+		{
+			MethodName: "UpdateDeploymentUserData",
+			Handler:    _MatchingService_UpdateDeploymentUserData_Handler,
 		},
 		{
 			MethodName: "ApplyTaskQueueUserDataReplicationEvent",

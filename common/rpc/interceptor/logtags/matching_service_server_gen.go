@@ -94,6 +94,8 @@ func (wt *WorkflowTags) extractFromMatchingServiceServerRequest(req any) []tag.T
 		return nil
 	case *matchingservice.RespondQueryTaskCompletedRequest:
 		return nil
+	case *matchingservice.UpdateDeploymentUserDataRequest:
+		return nil
 	case *matchingservice.UpdateNexusEndpointRequest:
 		return nil
 	case *matchingservice.UpdateTaskQueueUserDataRequest:

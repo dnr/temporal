@@ -253,6 +253,7 @@ func (x *DeploymentSeriesWorkflowArgs) GetDefaultBuildId() string {
 	return ""
 }
 
+// Used as input for update on deployment workflow.
 type RegisterWorkerInDeploymentArgs struct {
 	state         protoimpl.MessageState
 	sizeCache     protoimpl.SizeCache

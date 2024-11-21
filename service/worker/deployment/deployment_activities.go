@@ -27,10 +27,13 @@ package deployment
 import (
 	"context"
 
-	"go.temporal.io/api/enums/v1"
+	deploymentpb "go.temporal.io/api/deployment/v1"
+	enumspb "go.temporal.io/api/enums/v1"
 	"go.temporal.io/sdk/activity"
 	sdkclient "go.temporal.io/sdk/client"
 	deploymentspb "go.temporal.io/server/api/deployment/v1"
+	"go.temporal.io/server/api/matchingservice/v1"
+	hlc "go.temporal.io/server/common/clock/hybrid_logical_clock"
 	"go.temporal.io/server/common/namespace"
 	"go.temporal.io/server/common/primitives"
 	"go.temporal.io/server/common/resource"
@@ -48,8 +51,12 @@ type (
 		SeriesName string
 	}
 
+	// FIXME: needs to be proto, can't embed pbs in json
 	UpdateUserDataRequest struct {
-		SeriesName string
+		Deployment      *deploymentpb.Deployment
+		TaskQueueName   string
+		TaskQueueType   enumspb.TaskQueueType
+		FirstPollerTime *hlc.Clock
 	}
 )
 
@@ -67,18 +74,15 @@ func (a *DeploymentActivities) StartDeploymentSeriesWorkflow(ctx context.Context
 		Memo: map[string]interface{}{
 			DeploymentSeriesBuildIDMemoField: "",
 		},
-		WorkflowIDReusePolicy:    enums.WORKFLOW_ID_REUSE_POLICY_ALLOW_DUPLICATE,
-		WorkflowIDConflictPolicy: enums.WORKFLOW_ID_CONFLICT_POLICY_USE_EXISTING,
-	}
-
-	// Build workflow args
-	deploymentSeriesWorkflowArgs := &deploymentspb.DeploymentSeriesWorkflowArgs{
-		NamespaceName: a.namespaceName.String(),
-		NamespaceId:   a.namespaceID.String(),
+		WorkflowIDReusePolicy:    enumspb.WORKFLOW_ID_REUSE_POLICY_ALLOW_DUPLICATE,
+		WorkflowIDConflictPolicy: enumspb.WORKFLOW_ID_CONFLICT_POLICY_USE_EXISTING,
 	}
 
 	// Calling the workflow with the args
-	_, err := a.sdkClient.ExecuteWorkflow(ctx, workflowOptions, DeploymentSeriesWorkflow, deploymentSeriesWorkflowArgs)
+	_, err := a.sdkClient.ExecuteWorkflow(ctx, workflowOptions, DeploymentSeriesWorkflow, &deploymentspb.DeploymentSeriesWorkflowArgs{
+		NamespaceName: a.namespaceName.String(),
+		NamespaceId:   a.namespaceID.String(),
+	})
 	if err != nil {
 		logger.Error("starting deployment series workflow failed", "seriesName", input.SeriesName, "error", err)
 	}
@@ -87,7 +91,22 @@ func (a *DeploymentActivities) StartDeploymentSeriesWorkflow(ctx context.Context
 
 func (a *DeploymentActivities) UpdateUserData(ctx context.Context, input UpdateUserDataRequest) error {
 	logger := activity.GetLogger(ctx)
-	logger.Info("updating userdata on task queue", "taskqueue", FIXME, "type", FIXME)
+	logger.Info("updating task queue userdata for deployment", "taskqueue", input.TaskQueueName, "type", input.TaskQueueType,
+		"seriesname", input.Deployment.SeriesName, "buildid", input.Deployment.BuildId)
 
-	_, err := a.matchingClient.UpdateTaskQueueUserData
+	_, err := a.matchingClient.UpdateDeploymentUserData(ctx, &matchingservice.UpdateDeploymentUserDataRequest{
+		NamespaceId:   a.namespaceID.String(),
+		TaskQueue:     input.TaskQueueName,
+		TaskQueueType: input.TaskQueueType,
+		Update: &matchingservice.UpdateDeploymentUserDataRequest_Register_{
+			Register: &matchingservice.UpdateDeploymentUserDataRequest_Register{
+				Deployment:      input.Deployment,
+				FirstPollerTime: input.FirstPollerTime,
+			},
+		},
+	})
+	if err != nil {
+		logger.Error("updating task queue userdata", "error", err)
+	}
+	return err
 }

@@ -585,6 +585,26 @@ func (mr *MockMatchingServiceClientMockRecorder) RespondQueryTaskCompleted(ctx, 
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RespondQueryTaskCompleted", reflect.TypeOf((*MockMatchingServiceClient)(nil).RespondQueryTaskCompleted), varargs...)
 }
 
+// UpdateDeploymentUserData mocks base method.
+func (m *MockMatchingServiceClient) UpdateDeploymentUserData(ctx context.Context, in *matchingservice.UpdateDeploymentUserDataRequest, opts ...grpc.CallOption) (*matchingservice.UpdateDeploymentUserDataResponse, error) {
+	m.ctrl.T.Helper()
+	varargs := []any{ctx, in}
+	for _, a := range opts {
+		varargs = append(varargs, a)
+	}
+	ret := m.ctrl.Call(m, "UpdateDeploymentUserData", varargs...)
+	ret0, _ := ret[0].(*matchingservice.UpdateDeploymentUserDataResponse)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// UpdateDeploymentUserData indicates an expected call of UpdateDeploymentUserData.
+func (mr *MockMatchingServiceClientMockRecorder) UpdateDeploymentUserData(ctx, in any, opts ...any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	varargs := append([]any{ctx, in}, opts...)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UpdateDeploymentUserData", reflect.TypeOf((*MockMatchingServiceClient)(nil).UpdateDeploymentUserData), varargs...)
+}
+
 // UpdateNexusEndpoint mocks base method.
 func (m *MockMatchingServiceClient) UpdateNexusEndpoint(ctx context.Context, in *matchingservice.UpdateNexusEndpointRequest, opts ...grpc.CallOption) (*matchingservice.UpdateNexusEndpointResponse, error) {
 	m.ctrl.T.Helper()
@@ -1076,6 +1096,21 @@ func (m *MockMatchingServiceServer) RespondQueryTaskCompleted(arg0 context.Conte
 func (mr *MockMatchingServiceServerMockRecorder) RespondQueryTaskCompleted(arg0, arg1 any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RespondQueryTaskCompleted", reflect.TypeOf((*MockMatchingServiceServer)(nil).RespondQueryTaskCompleted), arg0, arg1)
+}
+
+// UpdateDeploymentUserData mocks base method.
+func (m *MockMatchingServiceServer) UpdateDeploymentUserData(arg0 context.Context, arg1 *matchingservice.UpdateDeploymentUserDataRequest) (*matchingservice.UpdateDeploymentUserDataResponse, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "UpdateDeploymentUserData", arg0, arg1)
+	ret0, _ := ret[0].(*matchingservice.UpdateDeploymentUserDataResponse)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// UpdateDeploymentUserData indicates an expected call of UpdateDeploymentUserData.
+func (mr *MockMatchingServiceServerMockRecorder) UpdateDeploymentUserData(arg0, arg1 any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UpdateDeploymentUserData", reflect.TypeOf((*MockMatchingServiceServer)(nil).UpdateDeploymentUserData), arg0, arg1)
 }
 
 // UpdateNexusEndpoint mocks base method.

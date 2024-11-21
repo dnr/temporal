@@ -26,6 +26,7 @@ package temporal.server.api.persistence.v1;
 option go_package = "go.temporal.io/server/api/persistence/v1;persistence";
 
 import "temporal/server/api/clock/v1/message.proto";
+import "temporal/api/deployment/v1/message.proto";
 import "temporal/api/taskqueue/v1/message.proto";
 
 // BuildId is an identifier with a timestamped status used to identify workers for task queue versioning purposes.
@@ -106,11 +107,12 @@ message VersioningData {
 }
 
 message DeploymentData {
-    string current_deployment = 1;
-    repeated DeploymentInfo deployment_info = 2;
+    // Current deployment is defined implicitly as the deployment with the most recent last_became_current_time.
 
-    message DeploymentInfo {
-        string deployment_name = 1;
+    repeated Deployment deployment = 1;
+
+    message Deployment {
+        temporal.api.deployment.v1.Deployment deployment = 1;
         // (-- api-linter: core::0142::time-field-type=disabled
         //     aip.dev/not-precedent: Using HLC instead of wall clock. --)
         temporal.server.api.clock.v1.HybridLogicalClock first_poller_time = 2;
