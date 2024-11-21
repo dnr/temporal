@@ -29,8 +29,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"math"
 	"math/rand"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -1538,6 +1540,105 @@ func (e *matchingEngineImpl) GetTaskQueueUserData(
 		pm.MarkAlive()
 	}
 	return pm.GetUserDataManager().HandleGetUserDataRequest(ctx, req)
+}
+
+func (e *matchingEngineImpl) UpdateDeploymentUserData(
+	ctx context.Context,
+	req *matchingservice.UpdateDeploymentUserDataRequest,
+) (*matchingservice.UpdateDeploymentUserDataResponse, error) {
+	taskQueueFamily, err := tqid.NewTaskQueueFamily(req.NamespaceId, req.GetTaskQueue())
+	if err != nil {
+		return nil, err
+	}
+
+	tqMgr, _, err := e.getTaskQueuePartitionManager(ctx, taskQueueFamily.TaskQueue(enumspb.TASK_QUEUE_TYPE_WORKFLOW).RootPartition(), true, loadCauseOtherWrite)
+	if err != nil {
+		return nil, err
+	}
+
+	updateOptions := UserDataUpdateOptions{Source: "UpdateDeploymentUserData"}
+
+	err = tqMgr.GetUserDataManager().UpdateUserData(ctx, updateOptions, func(data *persistencespb.TaskQueueUserData) (*persistencespb.TaskQueueUserData, bool, error) {
+		clk := data.GetClock()
+		if clk == nil {
+			clk = hlc.Zero(e.clusterMeta.GetClusterID())
+		}
+		updatedClock := hlc.Next(clk, e.timeSource)
+
+		prevDeployments := data.GetDeploymentData()[int32(req.TaskQueueType)].GetDeployment()
+		var newDeploymentData map[int32]*persistencespb.DeploymentData
+
+		// each branch must either set newDeploymentData or return nil
+		switch req.GetUpdate().(type) {
+		case *matchingservice.UpdateDeploymentUserDataRequest_Register_:
+			reg := req.GetRegister()
+			if reg.Deployment == nil {
+				// TODO: fix errors
+				return nil, false, errors.New("missing deployment")
+			} else if reg.FirstPollerTime == nil {
+				return nil, false, errors.New("missing first poller time")
+			}
+
+			// check if it's there already
+			for _, d := range prevDeployments {
+				if d.Deployment.SeriesName == reg.Deployment.SeriesName && d.Deployment.BuildId == reg.Deployment.BuildId {
+					return nil, false, errUserDataUnmodified
+				}
+			}
+
+			// need to add it
+			newDeployments := append(slices.Clone(prevDeployments), &persistencespb.DeploymentData_Deployment{
+				Deployment:      reg.Deployment,
+				FirstPollerTime: reg.FirstPollerTime,
+			})
+
+			newDeploymentData = maps.Clone(data.GetDeploymentData())
+			newDeploymentData[int32(req.TaskQueueType)] = &persistencespb.DeploymentData{
+				Deployment: newDeployments,
+			}
+
+			e.logger.Info("UpdateDeploymentUserData registered deployment") // TODO: more details
+
+		case *matchingservice.UpdateDeploymentUserDataRequest_MakeCurrent_:
+			cur := req.GetMakeCurrent()
+			if cur.Deployment == nil {
+				// TODO: fix errors
+				return nil, false, errors.New("missing deployment")
+			}
+
+			var newDeployments []*persistencespb.DeploymentData_Deployment
+			for i, d := range prevDeployments {
+				if d.Deployment.SeriesName == cur.Deployment.SeriesName && d.Deployment.BuildId == cur.Deployment.BuildId {
+					newDeployments = slices.Clone(prevDeployments)
+					newDeployments[i].LastBecameCurrentTime = updatedClock
+				}
+			}
+			if newDeployments == nil {
+				return nil, false, errors.New("deployment not found")
+			}
+
+			newDeploymentData = maps.Clone(data.GetDeploymentData())
+			newDeploymentData[int32(req.TaskQueueType)] = &persistencespb.DeploymentData{
+				Deployment: newDeployments,
+			}
+
+			e.logger.Info("UpdateDeploymentUserData marked as current") // TODO: more details
+
+		default:
+			return nil, false, errors.New("Unknown update type") // TODO: fix errors
+		}
+
+		ret := &persistencespb.TaskQueueUserData{
+			Clock:          updatedClock,
+			VersioningData: data.VersioningData,
+			DeploymentData: newDeploymentData,
+		}
+		return ret, true, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &matchingservice.UpdateDeploymentUserDataResponse{}, nil
 }
 
 func (e *matchingEngineImpl) ApplyTaskQueueUserDataReplicationEvent(

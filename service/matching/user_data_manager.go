@@ -117,6 +117,7 @@ var _ userDataManager = (*userDataManagerImpl)(nil)
 var (
 	errUserDataNoMutateNonRoot = serviceerror.NewInvalidArgument("can only mutate user data on root workflow task queue")
 	errTaskQueueClosed         = serviceerror.NewUnavailable("task queue closed")
+	errUserDataUnmodified      = errors.New("sentinel error for unchanged user data")
 )
 
 func newUserDataManager(
@@ -365,6 +366,9 @@ func (m *userDataManagerImpl) UpdateUserData(ctx context.Context, options UserDa
 		return err
 	}
 	newData, shouldReplicate, err := m.updateUserData(ctx, updateFn, options)
+	if err == errUserDataUnmodified {
+		return nil
+	}
 	if err != nil {
 		return err
 	}
@@ -426,6 +430,9 @@ func (m *userDataManagerImpl) updateUserData(
 		return nil, false, serviceerror.NewFailedPrecondition(fmt.Sprintf("user data version mismatch: requested: %d, current: %d", options.KnownVersion, preUpdateVersion))
 	}
 	updatedUserData, shouldReplicate, err := updateFn(preUpdateData)
+	if err == errUserDataUnmodified {
+		return nil, false, err
+	}
 	if err != nil {
 		m.logger.Error("user data update function failed", tag.Error(err), tag.NewStringTag("user-data-update-source", options.Source))
 		return nil, false, err

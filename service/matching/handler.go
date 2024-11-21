@@ -392,6 +392,14 @@ func (h *Handler) GetTaskQueueUserData(
 	return h.engine.GetTaskQueueUserData(ctx, request)
 }
 
+func (h *Handler) UpdateDeploymentUserData(
+	ctx context.Context,
+	request *matchingservice.UpdateDeploymentUserDataRequest,
+) (_ *matchingservice.UpdateDeploymentUserDataResponse, retError error) {
+	defer log.CapturePanic(h.logger, &retError)
+	return h.engine.UpdateDeploymentUserData(ctx, request)
+}
+
 func (h *Handler) ApplyTaskQueueUserDataReplicationEvent(
 	ctx context.Context,
 	request *matchingservice.ApplyTaskQueueUserDataReplicationEventRequest,
