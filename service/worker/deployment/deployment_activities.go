@@ -30,34 +30,34 @@ import (
 	"go.temporal.io/api/enums/v1"
 	"go.temporal.io/sdk/activity"
 	sdkclient "go.temporal.io/sdk/client"
-	deployspb "go.temporal.io/server/api/deployment/v1"
+	deploymentspb "go.temporal.io/server/api/deployment/v1"
 	"go.temporal.io/server/common/namespace"
 	"go.temporal.io/server/common/primitives"
-	"go.temporal.io/server/common/sdk"
+	"go.temporal.io/server/common/resource"
 )
 
 type (
 	DeploymentActivities struct {
-		activityDeps
-		namespaceName namespace.Name
-		namespaceID   namespace.ID
+		namespaceName  namespace.Name
+		namespaceID    namespace.ID
+		sdkClient      sdkclient.Client
+		matchingClient resource.MatchingClient
 	}
 
-	DeploymentSeriesWorkflowActivityInput struct {
+	StartDeploymentSeriesRequest struct {
+		SeriesName string
+	}
+
+	UpdateUserDataRequest struct {
 		SeriesName string
 	}
 )
 
 // StartDeploymentSeriesWorkflow activity starts a DeploymentSeries workflow
 
-func (a *DeploymentActivities) StartDeploymentSeriesWorkflow(ctx context.Context, input DeploymentSeriesWorkflowActivityInput) error {
+func (a *DeploymentActivities) StartDeploymentSeriesWorkflow(ctx context.Context, input StartDeploymentSeriesRequest) error {
 	logger := activity.GetLogger(ctx)
-	logger.Info("activity to start DeploymentSeries workflow started")
-
-	sdkClient := a.ClientFactory.NewClient(sdkclient.Options{
-		Namespace:     a.namespaceName.String(),
-		DataConverter: sdk.PreferProtoDataConverter,
-	})
+	logger.Info("starting deployment series workflow", "seriesName", input.SeriesName)
 
 	workflowID := GenerateDeploymentSeriesWorkflowID(input.SeriesName)
 
@@ -72,16 +72,22 @@ func (a *DeploymentActivities) StartDeploymentSeriesWorkflow(ctx context.Context
 	}
 
 	// Build workflow args
-	deploymentSeriesWorkflowArgs := &deployspb.DeploymentSeriesWorkflowArgs{
+	deploymentSeriesWorkflowArgs := &deploymentspb.DeploymentSeriesWorkflowArgs{
 		NamespaceName: a.namespaceName.String(),
 		NamespaceId:   a.namespaceID.String(),
 	}
 
 	// Calling the workflow with the args
-	_, err := sdkClient.ExecuteWorkflow(ctx, workflowOptions, DeploymentSeriesWorkflow, deploymentSeriesWorkflowArgs)
+	_, err := a.sdkClient.ExecuteWorkflow(ctx, workflowOptions, DeploymentSeriesWorkflow, deploymentSeriesWorkflowArgs)
 	if err != nil {
-		return err
+		logger.Error("starting deployment series workflow failed", "seriesName", input.SeriesName, "error", err)
 	}
+	return err
+}
 
-	return nil
+func (a *DeploymentActivities) UpdateUserData(ctx context.Context, input UpdateUserDataRequest) error {
+	logger := activity.GetLogger(ctx)
+	logger.Info("updating userdata on task queue", "taskqueue", FIXME, "type", FIXME)
+
+	_, err := a.matchingClient.UpdateTaskQueueUserData
 }

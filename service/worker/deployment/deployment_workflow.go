@@ -25,29 +25,40 @@
 package deployment
 
 import (
+	"cmp"
+	"time"
+
 	sdkclient "go.temporal.io/sdk/client"
 	sdklog "go.temporal.io/sdk/log"
+	"go.temporal.io/sdk/temporal"
 	"go.temporal.io/sdk/workflow"
-	deployspb "go.temporal.io/server/api/deployment/v1"
+	deploymentspb "go.temporal.io/server/api/deployment/v1"
 )
 
 type (
 	// DeploymentWorkflowRunner holds the local state for a deployment workflow
 	DeploymentWorkflowRunner struct {
-		*deployspb.DeploymentWorkflowArgs
-		ctx     workflow.Context
-		a       *DeploymentActivities
-		logger  sdklog.Logger
-		metrics sdkclient.MetricsHandler
-		lock    workflow.Mutex
+		*deploymentspb.DeploymentWorkflowArgs
+		ctx              workflow.Context
+		a                *DeploymentActivities
+		logger           sdklog.Logger
+		metrics          sdkclient.MetricsHandler
+		lock             workflow.Mutex
+		signalsCompleted bool
 	}
 )
 
-type AwaitSignals struct {
-	SignalsCompleted bool
-}
+var (
+	defaultActivityOptions = workflow.ActivityOptions{
+		StartToCloseTimeout: 1 * time.Minute,
+		RetryPolicy: &temporal.RetryPolicy{
+			InitialInterval: 1 * time.Second,
+			MaximumInterval: 60 * time.Second,
+		},
+	}
+)
 
-func DeploymentWorkflow(ctx workflow.Context, deploymentWorkflowArgs *deployspb.DeploymentWorkflowArgs) error {
+func DeploymentWorkflow(ctx workflow.Context, deploymentWorkflowArgs *deploymentspb.DeploymentWorkflowArgs) error {
 	deploymentWorkflowRunner := &DeploymentWorkflowRunner{
 		DeploymentWorkflowArgs: deploymentWorkflowArgs,
 		ctx:                    ctx,
@@ -59,7 +70,7 @@ func DeploymentWorkflow(ctx workflow.Context, deploymentWorkflowArgs *deployspb.
 	return deploymentWorkflowRunner.run()
 }
 
-func (a *AwaitSignals) ListenToSignals(ctx workflow.Context) {
+func (d *DeploymentWorkflowRunner) ListenToSignals(ctx workflow.Context) {
 	// Fetch signal channels
 	updateBuildIDSignalChannel := workflow.GetSignalChannel(ctx, UpdateDeploymentBuildIDSignalName)
 	forceCANSignalChannel := workflow.GetSignalChannel(ctx, ForceCANSignalName)
@@ -79,7 +90,7 @@ func (a *AwaitSignals) ListenToSignals(ctx workflow.Context) {
 	}
 
 	// Done processing signals before CAN
-	a.SignalsCompleted = true
+	d.signalsCompleted = true
 }
 
 func (d *DeploymentWorkflowRunner) run() error {
@@ -93,13 +104,13 @@ func (d *DeploymentWorkflowRunner) run() error {
 	}
 
 	// Listen to signals in a different go-routine to make business logic clearer
-	workflow.Go(d.ctx, a.ListenToSignals)
+	workflow.Go(d.ctx, d.listenToSignals)
 
 	// Setting an update handler for updating deployment task-queues
 	if err := workflow.SetUpdateHandler(
 		d.ctx,
 		RegisterWorkerInDeployment,
-		func(ctx workflow.Context, updateInput *deployspb.RegisterWorkerInDeploymentArgs) error {
+		func(ctx workflow.Context, updateInput *deploymentspb.RegisterWorkerInDeploymentArgs) error {
 			err := d.lock.Lock(d.ctx)
 			if err != nil {
 				d.logger.Error("Could not acquire deploymnet workflow lock")
@@ -113,11 +124,11 @@ func (d *DeploymentWorkflowRunner) run() error {
 
 			// if no TaskQueueFamilies have been registered for the deployment
 			if d.DeploymentLocalState.TaskQueueFamilies == nil {
-				d.DeploymentLocalState.TaskQueueFamilies = make(map[string]*deployspb.DeploymentLocalState_TaskQueueFamilyInfo)
+				d.DeploymentLocalState.TaskQueueFamilies = make(map[string]*deploymentspb.DeploymentLocalState_TaskQueueFamilyInfo)
 			}
 			// if no TaskQueues have been registered for the TaskQueueName
 			if d.DeploymentLocalState.TaskQueueFamilies[updateInput.TaskQueueName].TaskQueues == nil {
-				d.DeploymentLocalState.TaskQueueFamilies[updateInput.TaskQueueName].TaskQueues = make(map[int32]*deployspb.DeploymentLocalState_TaskQueueFamilyInfo_TaskQueueInfo)
+				d.DeploymentLocalState.TaskQueueFamilies[updateInput.TaskQueueName].TaskQueues = make(map[int32]*deploymentspb.DeploymentLocalState_TaskQueueFamilyInfo_TaskQueueInfo)
 			}
 
 			// idempotency check
@@ -126,14 +137,20 @@ func (d *DeploymentWorkflowRunner) run() error {
 			}
 
 			// Add the task queue to the local state
-			newTaskQueueWorkerInfo := &deployspb.DeploymentLocalState_TaskQueueFamilyInfo_TaskQueueInfo{
+			newTaskQueueWorkerInfo := &deploymentspb.DeploymentLocalState_TaskQueueFamilyInfo_TaskQueueInfo{
 				TaskQueueType:   updateInput.TaskQueueType,
 				FirstPollerTime: updateInput.FirstPollerTime,
 			}
 			d.DeploymentLocalState.TaskQueueFamilies[updateInput.TaskQueueName].TaskQueues[int32(updateInput.TaskQueueType)] = newTaskQueueWorkerInfo
 
 			// Call activity which starts a "DeploymentSeries" workflow
-			return d.invokeDeploymentSeriesActivity(ctx, d.DeploymentLocalState.WorkerDeployment.SeriesName)
+			activityCtx := workflow.WithActivityOptions(ctx, defaultActivityOptions)
+			seriesFuture := workflow.ExecuteActivity(activityCtx, d.a.StartDeploymentSeriesWorkflow, &StartDeploymentSeriesRequest{
+				SeriesName: d.DeploymentLocalState.WorkerDeployment.SeriesName,
+			})
+			userdataFuture := workflow.ExecuteActivity(activityCtx, d.a.UpdateUserData, &UpdateUserDataRequest{})
+
+			return cmp.Or(seriesFuture.Get(ctx, nil), userdataFuture.Get(ctx, nil))
 		},
 		// TODO Shivam - have a validator which backsoff updates if we are scheduled to have a CAN
 	); err != nil {
@@ -141,7 +158,7 @@ func (d *DeploymentWorkflowRunner) run() error {
 	}
 
 	// Wait on any pending signals and updates.
-	err := workflow.Await(d.ctx, func() bool { return pendingUpdates == 0 && a.SignalsCompleted })
+	err := workflow.Await(d.ctx, func() bool { return pendingUpdates == 0 && d.signalsCompleted })
 	if err != nil {
 		return err
 	}
@@ -159,26 +176,16 @@ func (d *DeploymentWorkflowRunner) run() error {
 	*/
 
 	d.logger.Debug("Deployment doing continue-as-new")
-	workflowArgs := &deployspb.DeploymentWorkflowArgs{
-		NamespaceName:        d.NamespaceName,
-		NamespaceId:          d.NamespaceId,
-		DeploymentLocalState: d.DeploymentLocalState,
-	}
-	return workflow.NewContinueAsNewError(d.ctx, DeploymentWorkflow, workflowArgs)
+	return workflow.NewContinueAsNewError(d.ctx, DeploymentWorkflow, d.DeploymentWorkflowArgs)
 
 }
 
 func (d *DeploymentWorkflowRunner) invokeDeploymentSeriesActivity(ctx workflow.Context, seriesName string) error {
 
-	activityCtx := workflow.WithActivityOptions(ctx, defaultActivityOptions)
-	activityArgs := &DeploymentSeriesWorkflowActivityInput{
-		SeriesName: seriesName,
-	}
-	return workflow.ExecuteActivity(activityCtx, d.a.StartDeploymentSeriesWorkflow, activityArgs).Get(ctx, nil)
 }
 
-func (d *DeploymentWorkflowRunner) handleDescribeQuery() (*deployspb.DescribeResponse, error) {
-	return &deployspb.DescribeResponse{
+func (d *DeploymentWorkflowRunner) handleDescribeQuery() (*deploymentspb.DescribeResponse, error) {
+	return &deploymentspb.DescribeResponse{
 		DeploymentLocalState: d.DeploymentLocalState,
 	}, nil
 }

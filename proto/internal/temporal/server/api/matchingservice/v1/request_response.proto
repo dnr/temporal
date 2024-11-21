@@ -285,6 +285,7 @@ message GetWorkerBuildIdCompatibilityRequest {
     string namespace_id = 1;
     temporal.api.workflowservice.v1.GetWorkerBuildIdCompatibilityRequest request = 2;
 }
+
 message GetWorkerBuildIdCompatibilityResponse {
     temporal.api.workflowservice.v1.GetWorkerBuildIdCompatibilityResponse response = 1;
 }
@@ -305,11 +306,30 @@ message GetTaskQueueUserDataRequest {
     // available (or timeout).
     bool wait_new_data = 4;
 }
+
 message GetTaskQueueUserDataResponse {
     reserved 1;
     // Versioned user data, set if the task queue has user data and the request's last_known_user_data_version is less
     // than the version cached in the root partition.
     temporal.server.api.persistence.v1.VersionedTaskQueueUserData user_data = 2;
+}
+
+message UpdateDeploymentUserDataRequest {
+    string namespace_id = 1;
+    string task_queue = 2;
+    // Note: this is the task queue type being modified, but this field should not be used for
+    // routing, the user data is owned by the WORKFLOW task queue.
+    temporal.api.enums.v1.TaskQueueType task_queue_type = 3;
+
+    message XXX {
+    }
+
+    oneof command {
+        XXX request = 4;
+    }
+}
+
+message UpdateDeploymentUserDataResponse {
 }
 
 message ApplyTaskQueueUserDataReplicationEventRequest {

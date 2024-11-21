@@ -28,6 +28,7 @@ import (
 	"fmt"
 
 	enumspb "go.temporal.io/api/enums/v1"
+	sdkclient "go.temporal.io/sdk/client"
 	sdkworker "go.temporal.io/sdk/worker"
 	"go.temporal.io/sdk/workflow"
 	"go.temporal.io/server/api/historyservice/v1"
@@ -137,18 +138,23 @@ func (s *workerComponent) Register(registry sdkworker.Registry, ns *namespace.Na
 
 // TODO Shivam - place holder for now but will initialize activity rate limits (if any) amongst other things
 func (s *workerComponent) newDeploymentActivities(name namespace.Name, id namespace.ID) *DeploymentActivities {
+	sdkClient := s.activityDeps.ClientFactory.NewClient(sdkclient.Options{
+		Namespace:     name.String(),
+		DataConverter: sdk.PreferProtoDataConverter,
+	})
+
 	return &DeploymentActivities{
-		activityDeps:  s.activityDeps,
-		namespaceName: name,
-		namespaceID:   id,
+		namespaceName:  name,
+		namespaceID:    id,
+		sdkClient:      sdkClient,
+		matchingClient: s.activityDeps.MatchingClient,
 	}
 }
 
 // TODO Shivam - place holder for now but will initialize activity rate limits (if any) amongst other things
 func (s *workerComponent) newDeploymentSeriesActivities(name namespace.Name, id namespace.ID) *DeploymentSeriesActivities {
 	return &DeploymentSeriesActivities{
-		activityDeps: s.activityDeps,
-		namespace:    name,
-		namespaceID:  id,
+		namespace:   name,
+		namespaceID: id,
 	}
 }

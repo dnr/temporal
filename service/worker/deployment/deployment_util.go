@@ -27,11 +27,8 @@ package deployment
 import (
 	"fmt"
 	"strings"
-	"time"
 
 	"go.temporal.io/api/serviceerror"
-	"go.temporal.io/sdk/temporal"
-	"go.temporal.io/sdk/workflow"
 	"go.temporal.io/server/common"
 )
 
@@ -58,17 +55,6 @@ const (
 	DeploymentWorkflowIDInitialSize  = (2 * len(DeploymentWorkflowIDDelimeter)) + len(DeploymentWorkflowIDPrefix)
 	SeriesFieldName                  = "DeploymentSeries"
 	BuildIDFieldName                 = "BuildID"
-)
-
-var (
-	defaultActivityOptions = workflow.ActivityOptions{
-		ScheduleToCloseTimeout: 1 * time.Hour,
-		StartToCloseTimeout:    1 * time.Minute,
-		RetryPolicy: &temporal.RetryPolicy{
-			InitialInterval: 1 * time.Second,
-			MaximumInterval: 60 * time.Second,
-		},
-	}
 )
 
 // ValidateDeploymentWfParams is a helper that verifies if the fields used for generating
