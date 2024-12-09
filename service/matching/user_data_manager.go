@@ -31,6 +31,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/pborman/uuid"
 	enumspb "go.temporal.io/api/enums/v1"
 	"go.temporal.io/api/serviceerror"
 	"go.temporal.io/server/api/matchingservice/v1"
@@ -94,6 +95,7 @@ type (
 	userDataManagerImpl struct {
 		lock            sync.Mutex
 		partition       tqid.Partition
+		ownerId         string
 		userData        *persistencespb.VersionedTaskQueueUserData
 		userDataChanged chan struct{}
 		userDataState   userDataState
@@ -132,6 +134,7 @@ func newUserDataManager(
 	m := &userDataManagerImpl{
 		logger:            logger,
 		partition:         partition,
+		ownerId:           uuid.New(),
 		config:            config,
 		namespaceRegistry: registry,
 		userDataChanged:   make(chan struct{}),
@@ -349,6 +352,7 @@ func (m *userDataManagerImpl) loadUserDataFromDB(ctx context.Context) error {
 	response, err := m.store.GetTaskQueueUserData(ctx, &persistence.GetTaskQueueUserDataRequest{
 		NamespaceID: m.partition.NamespaceId(),
 		TaskQueue:   m.partition.TaskQueue().Name(),
+		OwnerID:     m.ownerId,
 	})
 	if common.IsNotFoundError(err) {
 		// not all task queues have user data
@@ -470,6 +474,7 @@ func (m *userDataManagerImpl) updateUserData(
 		UserData:        &persistencespb.VersionedTaskQueueUserData{Version: preUpdateVersion, Data: updatedUserData},
 		BuildIdsAdded:   added,
 		BuildIdsRemoved: removed,
+		OwnerId:         m.ownerId,
 	})
 	if err != nil {
 		m.logger.Error("failed to push new user data to owning matching node for namespace", tag.Error(err))

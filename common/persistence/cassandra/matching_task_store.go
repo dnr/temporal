@@ -126,7 +126,7 @@ const (
 		`IF range_id = ?`
 
 	templateGetTaskQueueUserDataQuery = `SELECT data, data_encoding, version
-	    FROM task_queue_user_data
+		FROM task_queue_user_data
 		WHERE namespace_id = ? AND build_id = ''
 		AND task_queue_name = ?`
 
@@ -143,6 +143,21 @@ const (
 		(namespace_id, build_id, task_queue_name, data, data_encoding, version) VALUES
 		(?           , ''      , ?              , ?   , ?            , 1      ) IF NOT EXISTS`
 
+	templateGetTaskQueueUserDataOwnerQuery = `SELECT data
+		FROM task_queue_user_data
+		WHERE namespace_id = ? AND task_queue_name = ? AND build_id = ?`
+
+	templateInsertTaskQueueUserDataOwnerQuery = `INSERT INTO task_queue_user_data
+		(namespace_id, build_id, task_queue_name, data) VALUES
+		(?           , ?       , ?              , ?) IF NOT EXISTS`
+
+	templateUpdateTaskQueueUserDataOwnerQuery = `UPDATE task_queue_user_data SET
+		data = ?
+		WHERE namespace_id = ?
+		AND build_id = ?
+		AND task_queue_name = ?
+		IF data = ?`
+
 	templateInsertBuildIdTaskQueueMappingQuery = `INSERT INTO task_queue_user_data
 	(namespace_id, build_id, task_queue_name) VALUES
 	(?           , ?       , ?)`
@@ -154,6 +169,10 @@ const (
 
 	// Not much of a need to make this configurable, we're just reading some strings
 	listTaskQueueNamesByBuildIdPageSize = 100
+
+	// Special "build_id" used to represent lock on task_queue_user_data table.
+	// For this row, "data" is an owner id.
+	buildIdOwner = "/_sys/temporal_owner"
 )
 
 type (
@@ -499,6 +518,11 @@ func (d *MatchingTaskStore) GetTaskQueueUserData(
 	ctx context.Context,
 	request *p.GetTaskQueueUserDataRequest,
 ) (*p.InternalGetTaskQueueUserDataResponse, error) {
+	// We want to lock the user data record to prevent old owners from writing, but we also
+	// don't want to create records where there were none, since most task queues don't have
+	// user data. So query first to check if we have any data. If we have no data, then don't
+	// lock it. This leaves open a window where a new owner could observe "no user data", an
+	// old owner could write initial user data, and the new owner wouldn't realize.
 	query := d.Session.Query(templateGetTaskQueueUserDataQuery,
 		request.NamespaceID,
 		request.TaskQueue,
@@ -506,6 +530,66 @@ func (d *MatchingTaskStore) GetTaskQueueUserData(
 	var version int64
 	var userDataBytes []byte
 	var encoding string
+	if err := query.Scan(&userDataBytes, &encoding, &version); err != nil {
+		return nil, gocql.ConvertError("GetTaskQueueData", err)
+	}
+
+	// We did find some data. We need to do a LWT to set the owner and get the most recent
+	// data.
+
+	// Get the current owner.
+	query = d.Session.Query(templateGetTaskQueueUserDataOwnerQuery,
+		request.NamespaceID,
+		request.TaskQueue,
+		buildIdOwner,
+	).WithContext(ctx)
+	var currentOwner []byte
+	if err := query.Scan(&currentOwner); gocql.IsNotFoundError(err) {
+		currentOwner = nil
+	} else if err != nil {
+		return nil, gocql.ConvertError("GetTaskQueueData(get owner)", err)
+	}
+
+	previous := make(map[string]any)
+
+	if len(currentOwner) == 0 {
+		// Set initial owner
+		query = d.Session.Query(templateInsertTaskQueueUserDataOwnerQuery,
+			request.NamespaceID,
+			buildIdOwner,
+			request.TaskQueue,
+			request.OwnerID,
+		).WithContext(ctx)
+		if applied, err := query.MapScanCAS(previous); err != nil {
+			return nil, gocql.ConvertError("GetTaskQueueData(set initial owner)", err)
+		} else if !applied {
+			return nil, p.NewConditionFailedError(
+				"Failed to set initial task queue user data owner on %v to %v (already exists)",
+				request.TaskQueue, request.OwnerID)
+		}
+	} else {
+		// Update owner
+		query = d.Session.Query(templateUpdateTaskQueueUserDataOwnerQuery,
+			request.OwnerID,
+			request.NamespaceID,
+			buildIdOwner,
+			request.TaskQueue,
+			currentOwner,
+		).WithContext(ctx)
+		if applied, err := query.MapScanCAS(previous); err != nil {
+			return nil, gocql.ConvertError("GetTaskQueueData(set owner)", err)
+		} else if !applied {
+			return nil, p.NewConditionFailedError(
+				"Failed to update task queue user data owner on %v to %v (previous %v)",
+				request.TaskQueue, request.OwnerID, previous["data"])
+		}
+	}
+
+	// Now that we set the owner, read again to make sure we have the latest data
+	query = d.Session.Query(templateGetTaskQueueUserDataQuery,
+		request.NamespaceID,
+		request.TaskQueue,
+	).WithContext(ctx)
 	if err := query.Scan(&userDataBytes, &encoding, &version); err != nil {
 		return nil, gocql.ConvertError("GetTaskQueueData", err)
 	}
@@ -520,7 +604,7 @@ func (d *MatchingTaskStore) UpdateTaskQueueUserData(
 	ctx context.Context,
 	request *p.InternalUpdateTaskQueueUserDataRequest,
 ) error {
-	batch := d.Session.NewBatch(gocql.UnloggedBatch).WithContext(ctx)
+	batch := d.Session.NewBatch(gocql.LoggedBatch).WithContext(ctx)
 
 	if request.Version == 0 {
 		batch.Query(templateInsertTaskQueueUserDataQuery,
@@ -528,6 +612,13 @@ func (d *MatchingTaskStore) UpdateTaskQueueUserData(
 			request.TaskQueue,
 			request.UserData.Data,
 			request.UserData.EncodingType.String(),
+		)
+		// Insert owner to ensure this fails if another node took ownership.
+		batch.Query(templateInsertTaskQueueUserDataOwnerQuery,
+			request.NamespaceID,
+			buildIdOwner,
+			request.TaskQueue,
+			request.OwnerID,
 		)
 	} else {
 		batch.Query(templateUpdateTaskQueueUserDataQuery,
@@ -538,7 +629,16 @@ func (d *MatchingTaskStore) UpdateTaskQueueUserData(
 			request.TaskQueue,
 			request.Version,
 		)
+		// Update the owner to itself to ensure this fails if another node took ownership.
+		batch.Query(templateUpdateTaskQueueUserDataOwnerQuery,
+			request.OwnerID,
+			request.NamespaceID,
+			buildIdOwner,
+			request.TaskQueue,
+			request.OwnerID,
+		)
 	}
+
 	for _, buildId := range request.BuildIdsAdded {
 		batch.Query(templateInsertBuildIdTaskQueueMappingQuery, request.NamespaceID, buildId, request.TaskQueue)
 	}
@@ -553,7 +653,7 @@ func (d *MatchingTaskStore) UpdateTaskQueueUserData(
 		return gocql.ConvertError("UpdateTaskQueueUserData", err)
 	}
 
-	// We only care about the conflict in the first query
+	// We only care if there was a conflict or not, not which one it was in
 	err = iter.Close()
 	if err != nil {
 		return gocql.ConvertError("UpdateTaskQueueUserData", err)

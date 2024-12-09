@@ -1798,6 +1798,7 @@ func (e *matchingEngineImpl) UpdateTaskQueueUserData(ctx context.Context, reques
 		UserData:        request.GetUserData(),
 		BuildIdsAdded:   request.BuildIdsAdded,
 		BuildIdsRemoved: request.BuildIdsRemoved,
+		OwnerID:         request.OwnerId,
 	})
 	return &matchingservice.UpdateTaskQueueUserDataResponse{}, err
 }

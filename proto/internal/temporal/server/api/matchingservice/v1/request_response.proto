@@ -399,6 +399,8 @@ message UpdateTaskQueueUserDataRequest {
     repeated string build_ids_added = 4;
     // List of removed build ids
     repeated string build_ids_removed = 5;
+    // Owner for write fencing
+    string owner_id = 6;
 }
 
 message UpdateTaskQueueUserDataResponse {

@@ -165,7 +165,7 @@ service MatchingService {
     //     aip.dev/not-precedent: CreateNexusEndpoint RPC doesn't follow Google API format. --)
     // (-- api-linter: core::0133::http-uri-parent=disabled
     //     aip.dev/not-precedent: CreateNexusEndpoint RPC doesn't follow Google API format. --)
-    rpc	CreateNexusEndpoint(CreateNexusEndpointRequest) returns (CreateNexusEndpointResponse) {}
+    rpc CreateNexusEndpoint(CreateNexusEndpointRequest) returns (CreateNexusEndpointResponse) {}
     // Optimistically update a Nexus endpoint based on provided version.
     // If this request is accepted, the input is considered the "current" state of this service at the time it was
     // persisted and the updated version is returned.
@@ -175,9 +175,9 @@ service MatchingService {
     //     aip.dev/not-precedent: UpdateNexusEndpoint RPC doesn't follow Google API format. --)
     // (-- api-linter: core::0134::request-resource-required=disabled
     //     aip.dev/not-precedent: UpdateNexusEndpoint RPC doesn't follow Google API format. --)
-    rpc	UpdateNexusEndpoint(UpdateNexusEndpointRequest) returns (UpdateNexusEndpointResponse) {}
+    rpc UpdateNexusEndpoint(UpdateNexusEndpointRequest) returns (UpdateNexusEndpointResponse) {}
     // Delete a service by its name.
-    rpc	DeleteNexusEndpoint(DeleteNexusEndpointRequest) returns (DeleteNexusEndpointResponse) {}
+    rpc DeleteNexusEndpoint(DeleteNexusEndpointRequest) returns (DeleteNexusEndpointResponse) {}
     // List all registered services.
-    rpc	ListNexusEndpoints(ListNexusEndpointsRequest) returns (ListNexusEndpointsResponse) {}
+    rpc ListNexusEndpoints(ListNexusEndpointsRequest) returns (ListNexusEndpointsResponse) {}
 }

@@ -516,6 +516,7 @@ type (
 	GetTaskQueueUserDataRequest struct {
 		NamespaceID string
 		TaskQueue   string
+		OwnerID     string
 	}
 
 	// GetTaskQueueUserDataResponse is the output type for the GetTaskQueueUserData API
@@ -530,6 +531,7 @@ type (
 		UserData        *persistencespb.VersionedTaskQueueUserData
 		BuildIdsAdded   []string
 		BuildIdsRemoved []string
+		OwnerID         string
 	}
 
 	ListTaskQueueUserDataEntriesRequest struct {
@@ -1148,9 +1150,16 @@ type (
 		//  - number of rows deleted, which may be equal to limit
 		CompleteTasksLessThan(ctx context.Context, request *CompleteTasksLessThanRequest) (int, error)
 
-		// GetTaskQueueUserData gets versioned user data.
-		// This data would only exist if a user uses APIs that generate it, such as the worker versioning related APIs.
-		// The caller should be prepared to gracefully handle the "NotFound" service error.
+		// GetTaskQueueUserData gets and locks versioned user data with the given owner_id so
+		// that subsequent UpdateTaskQueueUserData calls will fail unless the same owner_id is
+		// given.
+		//
+		// This data would only exist if a user uses APIs that generate it, such as the worker
+		// versioning related APIs. The caller should be prepared to gracefully handle the
+		// "NotFound" service error.
+		//
+		// If no user data exist, it won't be locked, to avoid creating unnecessary rows, so in
+		// that case there's less protection against competing writes.
 		GetTaskQueueUserData(ctx context.Context, request *GetTaskQueueUserDataRequest) (*GetTaskQueueUserDataResponse, error)
 		// UpdateTaskQueueUserData updates the user data for a given task queue.
 		// The request takes the _current_ known version along with the data to update.
@@ -1383,6 +1392,10 @@ func SplitHistoryGarbageCleanupInfo(info string) (namespaceID, workflowID, runID
 	workflowEnd := len(info) - len(runID) - 1
 	workflowID = info[len(namespaceID)+1 : workflowEnd]
 	return
+}
+
+func NewConditionFailedError(format string, a ...any) *ConditionFailedError {
+	return &ConditionFailedError{Msg: fmt.Sprintf(format, a)}
 }
 
 type ServiceType int
