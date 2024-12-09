@@ -614,12 +614,16 @@ func (d *MatchingTaskStore) UpdateTaskQueueUserData(
 			request.UserData.EncodingType.String(),
 		)
 		// Insert owner to ensure this fails if another node took ownership.
-		batch.Query(templateInsertTaskQueueUserDataOwnerQuery,
-			request.NamespaceID,
-			buildIdOwner,
-			request.TaskQueue,
-			request.OwnerID,
-		)
+		// During an upgrade to this version, an older matching node may send a request without
+		// owner id. In that case, skip this check.
+		if len(request.OwnerID) != 0 {
+			batch.Query(templateInsertTaskQueueUserDataOwnerQuery,
+				request.NamespaceID,
+				buildIdOwner,
+				request.TaskQueue,
+				request.OwnerID,
+			)
+		}
 	} else {
 		batch.Query(templateUpdateTaskQueueUserDataQuery,
 			request.UserData.Data,
@@ -630,13 +634,17 @@ func (d *MatchingTaskStore) UpdateTaskQueueUserData(
 			request.Version,
 		)
 		// Update the owner to itself to ensure this fails if another node took ownership.
-		batch.Query(templateUpdateTaskQueueUserDataOwnerQuery,
-			request.OwnerID,
-			request.NamespaceID,
-			buildIdOwner,
-			request.TaskQueue,
-			request.OwnerID,
-		)
+		// During an upgrade to this version, an older matching node may send a request without
+		// owner id. In that case, skip this check.
+		if len(request.OwnerID) != 0 {
+			batch.Query(templateUpdateTaskQueueUserDataOwnerQuery,
+				request.OwnerID,
+				request.NamespaceID,
+				buildIdOwner,
+				request.TaskQueue,
+				request.OwnerID,
+			)
+		}
 	}
 
 	for _, buildId := range request.BuildIdsAdded {
