@@ -510,13 +510,15 @@ func (s *FunctionalTestBase) RunTestWithMatchingBehavior(subtest func()) {
 					name, func() {
 						if forceTaskForward {
 							s.OverrideDynamicConfig(dynamicconfig.MatchingNumTaskqueueWritePartitions, 13)
-							s.OverrideDynamicConfig(dynamicconfig.TestMatchingLBForceWritePartition, 11)
+							s.testCluster.host.matchingForceWritePartition.Store(11)
+							s.T().Cleanup(func() { s.testCluster.host.matchingForceWritePartition.Store(-1) })
 						} else {
 							s.OverrideDynamicConfig(dynamicconfig.MatchingNumTaskqueueWritePartitions, 1)
 						}
 						if forcePollForward {
 							s.OverrideDynamicConfig(dynamicconfig.MatchingNumTaskqueueReadPartitions, 13)
-							s.OverrideDynamicConfig(dynamicconfig.TestMatchingLBForceReadPartition, 5)
+							s.testCluster.host.matchingForceReadPartition.Store(5)
+							s.T().Cleanup(func() { s.testCluster.host.matchingForceReadPartition.Store(-1) })
 						} else {
 							s.OverrideDynamicConfig(dynamicconfig.MatchingNumTaskqueueReadPartitions, 1)
 						}

@@ -68,6 +68,7 @@ type (
 			numberOfHistoryShards int32,
 			logger log.Logger,
 			throttledLogger log.Logger,
+			lbFactory matching.LBFactory,
 		) Factory
 	}
 
@@ -82,6 +83,7 @@ type (
 		numberOfHistoryShards int32
 		logger                log.Logger
 		throttledLogger       log.Logger
+		lbFactory             matching.LBFactory
 	}
 
 	factoryProviderImpl struct {
@@ -106,6 +108,7 @@ func (p *factoryProviderImpl) NewFactory(
 	numberOfHistoryShards int32,
 	logger log.Logger,
 	throttledLogger log.Logger,
+	lbFactory matching.LBFactory,
 ) Factory {
 	return &rpcClientFactory{
 		rpcFactory:            rpcFactory,
@@ -115,6 +118,7 @@ func (p *factoryProviderImpl) NewFactory(
 		numberOfHistoryShards: numberOfHistoryShards,
 		logger:                logger,
 		throttledLogger:       throttledLogger,
+		lbFactory:             lbFactory,
 	}
 }
 
@@ -159,7 +163,7 @@ func (cf *rpcClientFactory) NewMatchingClientWithTimeout(
 		common.NewClientCache(keyResolver, clientProvider),
 		cf.metricsHandler,
 		cf.logger,
-		matching.NewLoadBalancer(namespaceIDToName, cf.dynConfig),
+		cf.lbFactory(namespaceIDToName, cf.dynConfig),
 	)
 
 	if cf.metricsHandler != nil {

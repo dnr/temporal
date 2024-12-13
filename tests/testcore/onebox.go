@@ -46,6 +46,7 @@ import (
 	"go.temporal.io/server/api/historyservice/v1"
 	"go.temporal.io/server/api/matchingservice/v1"
 	"go.temporal.io/server/client"
+	matchingclient "go.temporal.io/server/client/matching"
 	"go.temporal.io/server/common"
 	carchiver "go.temporal.io/server/common/archiver"
 	"go.temporal.io/server/common/archiver/provider"
@@ -100,6 +101,8 @@ type (
 		matchingClient matchingservice.MatchingServiceClient
 
 		matchingDisableSyncMatch atomic.Bool
+
+		matchingForceReadPartition, matchingForceWritePartition atomic.Int32
 
 		dcClient                         *dynamicconfig.MemoryClient
 		logger                           log.Logger
@@ -760,15 +763,21 @@ func (c *TemporalImpl) newClientFactoryProvider(
 	config *cluster.Config,
 	mockAdminClient map[string]adminservice.AdminServiceClient,
 ) client.FactoryProvider {
+	c.matchingForceReadPartition.Store(-1)
+	c.matchingForceWritePartition.Store(-1)
 	return &clientFactoryProvider{
-		config:          config,
-		mockAdminClient: mockAdminClient,
+		config:              config,
+		mockAdminClient:     mockAdminClient,
+		forceReadPartition:  &c.matchingForceReadPartition,
+		forceWritePartition: &c.matchingForceWritePartition,
 	}
 }
 
 type clientFactoryProvider struct {
 	config          *cluster.Config
 	mockAdminClient map[string]adminservice.AdminServiceClient
+
+	forceReadPartition, forceWritePartition *atomic.Int32
 }
 
 func (p *clientFactoryProvider) NewFactory(
@@ -779,6 +788,7 @@ func (p *clientFactoryProvider) NewFactory(
 	numberOfHistoryShards int32,
 	logger log.Logger,
 	throttledLogger log.Logger,
+	_ matchingclient.LBFactory, // ignored, overridden in test
 ) client.Factory {
 	f := client.NewFactoryProvider().NewFactory(
 		rpcFactory,
@@ -788,6 +798,7 @@ func (p *clientFactoryProvider) NewFactory(
 		numberOfHistoryShards,
 		logger,
 		throttledLogger,
+		matchingclient.NewLoadBalancerTestMixinFactory(p.forceReadPartition, p.forceWritePartition),
 	)
 	return &clientFactory{
 		Factory:         f,

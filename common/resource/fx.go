@@ -239,6 +239,7 @@ func ClientFactoryProvider(
 		persistenceConfig.NumHistoryShards,
 		logger,
 		throttledLogger,
+		matching.NewLoadBalancer,
 	)
 }
 
