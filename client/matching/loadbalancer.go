@@ -55,6 +55,9 @@ type (
 		PickReadPartition(
 			taskQueue *tqid.TaskQueue,
 		) *pollToken
+
+		// internal, for testing:
+		newTaskQueueLoadBalancer(*tqid.TaskQueue) tqLoadBalancerInterface
 	}
 
 	LBFactory func(
@@ -63,6 +66,8 @@ type (
 	) LoadBalancer
 
 	defaultLoadBalancer struct {
+		impl LoadBalancer
+
 		namespaceIDToName func(id namespace.ID) (namespace.Name, error)
 		nReadPartitions   dynamicconfig.IntPropertyFnWithTaskQueueFilter
 		nWritePartitions  dynamicconfig.IntPropertyFnWithTaskQueueFilter
@@ -112,6 +117,7 @@ func NewLoadBalancer(
 		lock:              sync.RWMutex{},
 		taskQueueLBs:      make(map[tqid.TaskQueue]tqLoadBalancerInterface),
 	}
+	lb.impl = lb
 	return lb
 }
 
@@ -122,11 +128,13 @@ func NewLoadBalancerTestMixinFactory(forceReadPartition, forceWritePartition *at
 	) LoadBalancer {
 		lb := NewLoadBalancer(namespaceIDToName, dc)
 		lbi := lb.(*defaultLoadBalancer)
-		return &loadBalancerTestMixin{
+		lbtm := &loadBalancerTestMixin{
 			defaultLoadBalancer: lbi,
 			forceReadPartition:  forceReadPartition,
 			forceWritePartition: forceWritePartition,
 		}
+		lbtm.impl = lbtm
+		return lbtm
 	})
 }
 
@@ -182,7 +190,8 @@ func (lb *defaultLoadBalancer) getTaskQueueLoadBalancer(tq *tqid.TaskQueue) tqLo
 	lb.lock.Lock()
 	tqlb, ok = lb.taskQueueLBs[*tq]
 	if !ok {
-		tqlb = lb.newTaskQueueLoadBalancer(tq)
+		// virtual call:
+		tqlb = lb.impl.newTaskQueueLoadBalancer(tq)
 		lb.taskQueueLBs[*tq] = tqlb
 	}
 	lb.lock.Unlock()
