@@ -68,6 +68,7 @@ var Module = fx.Options(
 	fx.Provide(ServerProvider),
 	fx.Provide(NewService),
 	fx.Invoke(ServiceLifetimeHooks),
+	fx.Provide(func() ptqmFactory { return newPhysicalTaskQueueManager }), // overridden by tests
 )
 
 func ServerProvider(grpcServerOptions []grpc.ServerOption) *grpc.Server {

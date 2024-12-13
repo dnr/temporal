@@ -35,6 +35,7 @@ import (
 	"slices"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -97,6 +98,8 @@ type (
 		operatorClient operatorservice.OperatorServiceClient
 		historyClient  historyservice.HistoryServiceClient
 		matchingClient matchingservice.MatchingServiceClient
+
+		matchingDisableSyncMatch atomic.Bool
 
 		dcClient                         *dynamicconfig.MemoryClient
 		logger                           log.Logger
@@ -540,6 +543,7 @@ func (c *TemporalImpl) startMatching() {
 			fx.Provide(resource.DefaultSnTaggedLoggerProvider),
 			fx.Provide(c.GetTaskCategoryRegistry),
 			fx.Supply(c.spanExporters),
+			fx.Replace(matching.NewPhysicalTaskQueueManagerTestMixinFactory(&c.matchingDisableSyncMatch)),
 			temporal.ServiceTracingModule,
 			matching.Module,
 			temporal.FxLogAdapter,

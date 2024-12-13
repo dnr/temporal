@@ -109,7 +109,7 @@ func newTaskQueuePartitionManager(
 		cachedPhysicalInfoByBuildId: nil,
 	}
 
-	defaultQ, err := newPhysicalTaskQueueManager(pm, UnversionedQueueKey(partition))
+	defaultQ, err := e.ptqmFactory(pm, UnversionedQueueKey(partition))
 	if err != nil {
 		return nil, err
 	}
@@ -708,7 +708,7 @@ func (pm *taskQueuePartitionManagerImpl) getVersionedQueueNoWait(
 			} else {
 				dbq = VersionSetQueueKey(pm.partition, versionSet)
 			}
-			vq, err = newPhysicalTaskQueueManager(pm, dbq)
+			vq, err = pm.engine.ptqmFactory(pm, dbq)
 			if err != nil {
 				pm.versionedQueuesLock.Unlock()
 				return nil, err

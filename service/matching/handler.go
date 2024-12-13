@@ -88,6 +88,7 @@ func NewHandler(
 	namespaceReplicationQueue persistence.NamespaceReplicationQueue,
 	visibilityManager manager.VisibilityManager,
 	nexusEndpointManager persistence.NexusEndpointManager,
+	ptqmFactory ptqmFactory,
 ) *Handler {
 	handler := &Handler{
 		config:          config,
@@ -110,6 +111,7 @@ func NewHandler(
 			namespaceReplicationQueue,
 			visibilityManager,
 			nexusEndpointManager,
+			ptqmFactory,
 		),
 		namespaceRegistry: namespaceRegistry,
 	}

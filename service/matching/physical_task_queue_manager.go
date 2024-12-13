@@ -109,6 +109,11 @@ type (
 		deploymentRegisterError error // last "too many ..." error we got when registering
 		firstPoll               time.Time
 	}
+
+	physicalTaskQueueManagerTestMixin struct {
+		*physicalTaskQueueManagerImpl
+		enabled *atomic.Bool
+	}
 )
 
 // a circular array of a fixed size for tracking tasks
@@ -221,7 +226,7 @@ func newPhysicalTaskQueueManager(
 	partitionMgr *taskQueuePartitionManagerImpl,
 	queue *PhysicalTaskQueueKey,
 	opts ...taskQueueManagerOpt,
-) (*physicalTaskQueueManagerImpl, error) {
+) (physicalTaskQueueManager, error) {
 	e := partitionMgr.engine
 	config := partitionMgr.config
 	buildIdTagValue := queue.Version().MetricsTagValue()
@@ -279,6 +284,24 @@ func newPhysicalTaskQueueManager(
 		opt(pqMgr)
 	}
 	return pqMgr, nil
+}
+
+func NewPhysicalTaskQueueManagerTestMixinFactory(enabled *atomic.Bool) ptqmFactory {
+	return ptqmFactory(func(
+		partitionMgr *taskQueuePartitionManagerImpl,
+		queue *PhysicalTaskQueueKey,
+		opts ...taskQueueManagerOpt,
+	) (physicalTaskQueueManager, error) {
+		ptqm, err := newPhysicalTaskQueueManager(partitionMgr, queue, opts...)
+		if err != nil {
+			return nil, err
+		}
+		ptqmi := ptqm.(*physicalTaskQueueManagerImpl)
+		return &physicalTaskQueueManagerTestMixin{
+			physicalTaskQueueManagerImpl: ptqmi,
+			enabled:                      enabled,
+		}, nil
+	})
 }
 
 func (c *physicalTaskQueueManagerImpl) Start() {
@@ -529,14 +552,33 @@ func (c *physicalTaskQueueManagerImpl) TrySyncMatch(ctx context.Context, task *i
 		// request sent by history service
 		c.liveness.markAlive()
 		c.tasksAddedInIntervals.incrementTaskCount()
-		if c.config.TestDisableSyncMatch() {
-			return false, nil
-		}
 	}
 	childCtx, cancel := newChildContext(ctx, c.config.SyncMatchWaitDuration(), time.Second)
 	defer cancel()
 
 	return c.matcher.Offer(childCtx, task)
+}
+
+// override:
+func (c *physicalTaskQueueManagerTestMixin) TrySyncMatch(ctx context.Context, task *internalTask) (bool, error) {
+	// fall back to default if test mode not enabled:
+	if !c.enabled.Load() {
+		return c.physicalTaskQueueManagerImpl.TrySyncMatch(ctx, task)
+	}
+	// alternative impl where we always give up if not forwarded:
+	if !task.isForwarded() {
+		c.liveness.markAlive()
+		c.tasksAddedInIntervals.incrementTaskCount()
+		return false, nil
+	}
+	childCtx, cancel := newChildContext(ctx, c.config.SyncMatchWaitDuration(), time.Second)
+	defer cancel()
+
+	return c.matcher.Offer(childCtx, task)
+}
+
+func (c *physicalTaskQueueManagerTestMixin) EnableTestMixin(enable bool) {
+	c.enabled.Store(enable)
 }
 
 func (c *physicalTaskQueueManagerImpl) ensureRegisteredInDeployment(

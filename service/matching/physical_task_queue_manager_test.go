@@ -290,7 +290,7 @@ func createTestTaskQueueManagerWithConfig(
 	if err != nil {
 		return nil, err
 	}
-	return tlMgr, nil
+	return tlMgr.(*physicalTaskQueueManagerImpl), nil
 }
 
 func createTestTaskQueuePartitionManager(ns *namespace.Namespace, partition tqid.Partition, tqConfig *taskQueueConfig, me *matchingEngineImpl, userDataManager userDataManager) *taskQueuePartitionManagerImpl {

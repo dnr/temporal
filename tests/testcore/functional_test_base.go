@@ -521,9 +521,10 @@ func (s *FunctionalTestBase) RunTestWithMatchingBehavior(subtest func()) {
 							s.OverrideDynamicConfig(dynamicconfig.MatchingNumTaskqueueReadPartitions, 1)
 						}
 						if forceAsync {
-							s.OverrideDynamicConfig(dynamicconfig.TestMatchingDisableSyncMatch, true)
+							s.testCluster.host.matchingDisableSyncMatch.Store(true)
+							s.T().Cleanup(func() { s.testCluster.host.matchingDisableSyncMatch.Store(false) })
 						} else {
-							s.OverrideDynamicConfig(dynamicconfig.TestMatchingDisableSyncMatch, false)
+							s.testCluster.host.matchingDisableSyncMatch.Store(false)
 						}
 
 						subtest()

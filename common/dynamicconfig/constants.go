@@ -1246,11 +1246,6 @@ these log lines can be noisy, we want to be able to turn on and sample selective
 	)
 	// for matching testing only:
 
-	TestMatchingDisableSyncMatch = NewGlobalBoolSetting(
-		"test.matching.disableSyncMatch",
-		false,
-		`TestMatchingDisableSyncMatch forces tasks to go through the db once`,
-	)
 	TestMatchingLBForceReadPartition = NewGlobalIntSetting(
 		"test.matching.lbForceReadPartition",
 		-1,

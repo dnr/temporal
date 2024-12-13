@@ -166,7 +166,10 @@ type (
 		namespaceUpdateLockMapLock sync.Mutex
 		// Stores results of reachability queries to visibility
 		reachabilityCache reachabilityCache
+		ptqmFactory       ptqmFactory
 	}
+
+	ptqmFactory func(*taskQueuePartitionManagerImpl, *PhysicalTaskQueueKey, ...taskQueueManagerOpt) (physicalTaskQueueManager, error)
 )
 
 var (
@@ -203,6 +206,7 @@ func NewEngine(
 	namespaceReplicationQueue persistence.NamespaceReplicationQueue,
 	visibilityManager manager.VisibilityManager,
 	nexusEndpointManager persistence.NexusEndpointManager,
+	ptqmFactory ptqmFactory,
 ) Engine {
 	scopedMetricsHandler := metricsHandler.WithTags(metrics.OperationTag(metrics.MatchingEngineScope))
 	e := &matchingEngineImpl{
@@ -238,6 +242,7 @@ func NewEngine(
 		outstandingPollers:        collection.NewSyncMap[string, context.CancelFunc](),
 		namespaceReplicationQueue: namespaceReplicationQueue,
 		namespaceUpdateLockMap:    make(map[string]*namespaceUpdateLocks),
+		ptqmFactory:               ptqmFactory,
 	}
 	e.reachabilityCache = newReachabilityCache(
 		metrics.NoopMetricsHandler,
