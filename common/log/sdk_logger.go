@@ -26,6 +26,7 @@ package log
 
 import (
 	"fmt"
+	"strings"
 
 	"go.temporal.io/sdk/log"
 	"go.temporal.io/server/common/log/tag"
@@ -34,10 +35,16 @@ import (
 const (
 	extraSkipForSdkLogger = 1
 	noValue               = "no value"
+
+	// These should match strings in Go SDK
+	panicMsg  = "Workflow panic"
+	errorKey  = "Error"
+	tmprl1100 = "[TMPRL1100]"
 )
 
 type SdkLogger struct {
-	logger Logger
+	logger  Logger
+	OnError func(msg string, kv []any)
 }
 
 var _ log.Logger = (*SdkLogger)(nil)
@@ -91,10 +98,31 @@ func (l *SdkLogger) Warn(msg string, keyvals ...interface{}) {
 }
 
 func (l *SdkLogger) Error(msg string, keyvals ...interface{}) {
+	l.checkError(msg, keyvals)
 	l.logger.Error(msg, l.tags(keyvals)...)
 }
 
 func (l *SdkLogger) With(keyvals ...interface{}) log.Logger {
 	return NewSdkLogger(
 		With(l.logger, l.tags(keyvals)...))
+}
+
+func (l *SdkLogger) checkError(msg string, kv []any) {
+	// A non-determinism error will show as:
+	// msg: "Workflow panic"
+	// one of the kv pairs will have key Error, with value "[TMPRL1100] ..."
+	if l.OnError != nil && msg == panicMsg && check1100(kv) {
+		l.OnError(msg, kv)
+	}
+}
+
+func check1100(kv []any) bool {
+	for i := 0; i+1 < len(kv); i += 2 {
+		if k, ok := kv[i].(string); ok && k == errorKey {
+			if v, ok := kv[i+1].(string); ok && strings.HasPrefix(v, tmprl1100) {
+				return true
+			}
+		}
+	}
+	return false
 }

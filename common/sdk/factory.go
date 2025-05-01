@@ -31,10 +31,12 @@ import (
 	"crypto/tls"
 	"errors"
 	"sync"
+	"sync/atomic"
 
+	commonpb "go.temporal.io/api/common/v1"
 	"go.temporal.io/api/serviceerror"
+	"go.temporal.io/api/workflowservice/v1"
 	sdkclient "go.temporal.io/sdk/client"
-	sdklog "go.temporal.io/sdk/log"
 	sdkworker "go.temporal.io/sdk/worker"
 	"go.temporal.io/server/common"
 	"go.temporal.io/server/common/backoff"
@@ -62,10 +64,13 @@ type (
 		tlsConfig       *tls.Config
 		metricsHandler  *MetricsHandler
 		logger          log.Logger
-		sdklogger       sdklog.Logger
 		systemSdkClient sdkclient.Client
 		stickyCacheSize dynamicconfig.IntPropertyFn
 		once            sync.Once
+	}
+
+	autoresetter struct {
+		client atomic.Value // sdkclient.Client
 	}
 )
 
@@ -85,15 +90,16 @@ func NewClientFactory(
 		tlsConfig:       tlsConfig,
 		metricsHandler:  NewMetricsHandler(metricsHandler),
 		logger:          logger,
-		sdklogger:       log.NewSdkLogger(logger),
 		stickyCacheSize: stickyCacheSize,
 	}
 }
 
-func (f *clientFactory) options(options sdkclient.Options) sdkclient.Options {
+func (f *clientFactory) options(options sdkclient.Options, a *autoresetter) sdkclient.Options {
 	options.HostPort = f.hostPort
 	options.MetricsHandler = f.metricsHandler
-	options.Logger = f.sdklogger
+	logger := log.NewSdkLogger(f.logger)
+	logger.OnError = a.onError
+	options.Logger = logger
 	options.ConnectionOptions = sdkclient.ConnectionOptions{
 		TLS: f.tlsConfig,
 		DialOptions: []grpc.DialOption{
@@ -105,23 +111,27 @@ func (f *clientFactory) options(options sdkclient.Options) sdkclient.Options {
 
 func (f *clientFactory) NewClient(options sdkclient.Options) sdkclient.Client {
 	// this shouldn't fail if the first client was created successfully
-	client, err := sdkclient.NewClientFromExisting(f.GetSystemClient(), f.options(options))
+	a := new(autoresetter)
+	client, err := sdkclient.NewClientFromExisting(f.GetSystemClient(), f.options(options, a))
 	if err != nil {
 		f.logger.Fatal("error creating sdk client", tag.Error(err))
 	}
+	a.setClient(client)
 	return client
 }
 
 func (f *clientFactory) GetSystemClient() sdkclient.Client {
 	f.once.Do(func() {
 		err := backoff.ThrottleRetry(func() error {
+			a := new(autoresetter)
 			sdkClient, err := sdkclient.Dial(f.options(sdkclient.Options{
 				Namespace: primitives.SystemLocalNamespace,
-			}))
+			}, a))
 			if err != nil {
 				f.logger.Warn("error creating sdk client", tag.Error(err))
 				return err
 			}
+			a.setClient(sdkClient)
 			f.systemSdkClient = sdkClient
 			return nil
 		}, common.CreateSdkClientFactoryRetryPolicy(), func(err error) bool {
@@ -171,4 +181,36 @@ func sdkClientNameHeadersInjectorInterceptor() grpc.UnaryClientInterceptor {
 		ctx = metadata.NewOutgoingContext(ctx, md)
 		return invoker(ctx, method, req, reply, cc, opts...)
 	}
+}
+
+func (a *autoresetter) setClient(client sdkclient.Client) {
+	a.client.Store(client)
+}
+func (a *autoresetter) onError(msg string, kv []any) {
+	client, ok := a.client.Load().(sdkclient.Client)
+	if !ok {
+		return
+	}
+	req := workflowservice.ResetWorkflowExecutionRequest{
+		Reason:                    "auto-reset for internal workflow nondeterminism error",
+		WorkflowExecution:         &commonpb.WorkflowExecution{},
+		WorkflowTaskFinishEventId: 2, // FIXME: can we use 2 as the first wtf started event or do we have to look it up?
+	}
+	for i := 0; i+1 < len(kv); i += 2 {
+		k, _ := kv[i].(string)
+		v, _ := kv[i+1].(string)
+		if k == "" || v == "" {
+			continue
+		}
+		switch k {
+		case "Namespace":
+			req.Namespace = v
+		case "WorkflowID":
+			req.WorkflowExecution.WorkflowId = v
+		}
+	}
+	if req.Namespace == "" && req.WorkflowExecution.WorkflowId == "" {
+		return
+	}
+	_, _ = client.ResetWorkflowExecution(context.TODO(), &req)
 }
