@@ -7,7 +7,7 @@ import (
 	"fmt"
 
 	commonpb "go.temporal.io/api/common/v1"
-	"go.temporal.io/sdk/converter"
+	"goclone.zone/go.temporal.io/sdk/converter"
 )
 
 var (

@@ -18,6 +18,9 @@ import (
 	"go.temporal.io/server/common/testing/taskpoller"
 	"go.temporal.io/server/common/testing/testvars"
 	"go.temporal.io/server/tests/testcore"
+	sdkclient "goclone.zone/go.temporal.io/sdk/client"
+	"goclone.zone/go.temporal.io/sdk/temporal"
+	"goclone.zone/go.temporal.io/sdk/workflow"
 	"google.golang.org/protobuf/types/known/durationpb"
 )
 
@@ -220,4 +223,19 @@ func wrongorderness(vs []int) float64 {
 		}
 	}
 	return float64(wrong) / float64(l*(l-1)/2)
+}
+
+func (s *PriorityFairnessSuite) TestFairness_Execute_Demo() {
+	// This is just a demo of using a new SDK feature, this is not how the test will
+	// be written eventually.
+	myWf := func(ctx workflow.Context) error { return nil }
+	opts := sdkclient.StartWorkflowOptions{
+		TaskQueue: s.TaskQueue(),
+		Priority: temporal.Priority{
+			PriorityKey: 2,
+			FairnessKey: "user1", // <-- new feature not in released sdk
+		},
+	}
+	_, err := s.SdkClient().ExecuteWorkflow(context.Background(), opts, myWf)
+	s.NoError(err)
 }

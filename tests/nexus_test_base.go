@@ -11,7 +11,7 @@ import (
 	"go.temporal.io/api/serviceerror"
 	taskqueuepb "go.temporal.io/api/taskqueue/v1"
 	"go.temporal.io/api/workflowservice/v1"
-	"go.temporal.io/sdk/converter"
+	"goclone.zone/go.temporal.io/sdk/converter"
 	"go.temporal.io/server/tests/testcore"
 )
 
