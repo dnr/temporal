@@ -116,9 +116,8 @@ func (f *factoryImpl) NewTaskManager() (persistence.TaskManager, error) {
 }
 
 // NewFairTaskManager returns a new task fairness manager
-// TODO(fairness): cleanup; rename to NewTaskManager
 func (f *factoryImpl) NewFairTaskManager() (persistence.FairTaskManager, error) {
-	taskStore, err := f.dataStoreFactory.NewTaskFairnessStore()
+	taskStore, err := f.dataStoreFactory.NewFairTaskStore()
 	if err != nil {
 		return nil, err
 	}

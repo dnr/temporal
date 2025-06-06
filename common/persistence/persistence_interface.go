@@ -33,8 +33,8 @@ type (
 		Close()
 		// NewTaskStore returns a new task store
 		NewTaskStore() (TaskStore, error)
-		// NewTaskStore returns a new task store
-		NewTaskFairnessStore() (TaskStore, error)
+		// NewFairTaskStore returns a new task store with fairness enabled
+		NewFairTaskStore() (TaskStore, error)
 		// NewShardStore returns a new shard store
 		NewShardStore() (ShardStore, error)
 		// NewMetadataStore returns a new metadata store
