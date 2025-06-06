@@ -323,6 +323,7 @@ func (db *taskQueueDB) getTotalApproximateBacklogCount() (total int64) {
 func (db *taskQueueDB) CreateTasks(
 	ctx context.Context,
 	taskIDs []int64,
+	passes []int64,
 	reqs []*writeTaskRequest,
 ) (createTasksResponse, error) {
 	db.Lock()
@@ -339,6 +340,9 @@ func (db *taskQueueDB) CreateTasks(
 		task := &persistencespb.AllocatedTaskInfo{
 			TaskId: taskIDs[i],
 			Data:   req.taskInfo,
+		}
+		if i < len(passes) {
+			task.PassNumber = passes[i]
 		}
 		allTasks[i] = task
 		allSubqueues[i] = req.subqueue

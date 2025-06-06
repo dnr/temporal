@@ -32,6 +32,7 @@ type AllocatedTaskInfo struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Data          *TaskInfo              `protobuf:"bytes,1,opt,name=data,proto3" json:"data,omitempty"`
 	TaskId        int64                  `protobuf:"varint,2,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`
+	PassNumber    int64                  `protobuf:"varint,3,opt,name=pass_number,json=passNumber,proto3" json:"pass_number,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -76,6 +77,13 @@ func (x *AllocatedTaskInfo) GetData() *TaskInfo {
 func (x *AllocatedTaskInfo) GetTaskId() int64 {
 	if x != nil {
 		return x.TaskId
+	}
+	return 0
+}
+
+func (x *AllocatedTaskInfo) GetPassNumber() int64 {
+	if x != nil {
+		return x.PassNumber
 	}
 	return 0
 }
@@ -484,10 +492,12 @@ var File_temporal_server_api_persistence_v1_tasks_proto protoreflect.FileDescrip
 
 const file_temporal_server_api_persistence_v1_tasks_proto_rawDesc = "" +
 	"\n" +
-	".temporal/server/api/persistence/v1/tasks.proto\x12\"temporal.server.api.persistence.v1\x1a\x1fgoogle/protobuf/timestamp.proto\x1a$temporal/api/common/v1/message.proto\x1a&temporal/api/enums/v1/task_queue.proto\x1a*temporal/server/api/clock/v1/message.proto\x1a.temporal/server/api/taskqueue/v1/message.proto\"n\n" +
+	".temporal/server/api/persistence/v1/tasks.proto\x12\"temporal.server.api.persistence.v1\x1a\x1fgoogle/protobuf/timestamp.proto\x1a$temporal/api/common/v1/message.proto\x1a&temporal/api/enums/v1/task_queue.proto\x1a*temporal/server/api/clock/v1/message.proto\x1a.temporal/server/api/taskqueue/v1/message.proto\"\x8f\x01\n" +
 	"\x11AllocatedTaskInfo\x12@\n" +
 	"\x04data\x18\x01 \x01(\v2,.temporal.server.api.persistence.v1.TaskInfoR\x04data\x12\x17\n" +
-	"\atask_id\x18\x02 \x01(\x03R\x06taskId\"\x87\x04\n" +
+	"\atask_id\x18\x02 \x01(\x03R\x06taskId\x12\x1f\n" +
+	"\vpass_number\x18\x03 \x01(\x03R\n" +
+	"passNumber\"\x87\x04\n" +
 	"\bTaskInfo\x12!\n" +
 	"\fnamespace_id\x18\x01 \x01(\tR\vnamespaceId\x12\x1f\n" +
 	"\vworkflow_id\x18\x02 \x01(\tR\n" +

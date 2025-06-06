@@ -13,6 +13,13 @@ import (
 	"go.temporal.io/server/common/log"
 	"go.temporal.io/server/common/log/tag"
 	"go.temporal.io/server/common/metrics"
+	"go.temporal.io/server/service/matching/counter"
+)
+
+const (
+	strideFactor = 10000
+	minWeight    = 0.001
+	// minWeight * strideFactor should be > 1
 )
 
 type (
@@ -21,19 +28,12 @@ type (
 		backlogMgr         *fairBacklogManagerImpl
 		config             *taskQueueConfig
 		db                 *taskQueueDB
+		counter            counter.Counter
 		logger             log.Logger
 		appendCh           chan *writeTaskRequest
 		taskIDBlock        taskIDBlock
 		currentTaskIDBlock taskIDBlock // copy of taskIDBlock for safe concurrent access via getCurrentTaskIDBlock()
 	}
-)
-
-var (
-// errShutdown indicates that the task queue is shutting down
-// errShutdown            = &persistence.ConditionFailedError{Msg: "task queue shutting down"}
-// errNonContiguousBlocks = errors.New("previous block end is not equal to current block")
-
-// noTaskIDs = taskIDBlock{start: 1, end: 0}
 )
 
 func newFairTaskWriter(
@@ -43,6 +43,7 @@ func newFairTaskWriter(
 		backlogMgr:  backlogMgr,
 		config:      backlogMgr.config,
 		db:          backlogMgr.db,
+		counter:     counter.NewMapCounter(), // FIXME: configurable
 		logger:      backlogMgr.logger,
 		appendCh:    make(chan *writeTaskRequest, backlogMgr.config.OutstandingTaskAppendsThreshold()),
 		taskIDBlock: noTaskIDs,
@@ -111,11 +112,29 @@ func (w *fairTaskWriter) allocTaskIDs(count int) ([]int64, error) {
 	return result, nil
 }
 
+func (w *fairTaskWriter) allocPasses(tasks []*writeTaskRequest) []int64 {
+	out := make([]int64, len(tasks))
+	for i, task := range tasks {
+		key := task.taskInfo.Priority.GetFairnessKey()
+		weight := task.taskInfo.Priority.GetFairnessWeight()
+		if weight == 0 {
+			weight = 1.0
+		}
+		// FIXME: check override weights here
+		weight = max(minWeight, weight)
+		inc := max(1, int64(strideFactor/weight))
+		base := int64(0) // FIXME: get ack level
+		out[i] = w.counter.GetPass(key, base, inc)
+	}
+	return out
+}
+
 func (w *fairTaskWriter) appendTasks(
 	taskIDs []int64,
+	passes []int64,
 	reqs []*writeTaskRequest,
 ) error {
-	resp, err := w.db.CreateTasks(w.backlogMgr.tqCtx, taskIDs, reqs)
+	resp, err := w.db.CreateTasks(w.backlogMgr.tqCtx, taskIDs, passes, reqs)
 	if err != nil {
 		w.backlogMgr.signalIfFatal(err)
 		w.logger.Error("Persistent store operation failure",
@@ -163,7 +182,8 @@ func (w *fairTaskWriter) taskWriterLoop() {
 
 			taskIDs, err := w.allocTaskIDs(len(reqs))
 			if err == nil {
-				err = w.appendTasks(taskIDs, reqs)
+				passes := w.allocPasses(reqs)
+				err = w.appendTasks(taskIDs, passes, reqs)
 			}
 			for _, req := range reqs {
 				req.responseCh <- err
