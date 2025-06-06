@@ -101,11 +101,11 @@ const (
 )
 
 type matchingTaskStoreV1 struct {
-	*userDataStore
+	userDataStore
 }
 
 func newMatchingTaskStoreV1(
-	userDataStore *userDataStore,
+	userDataStore userDataStore,
 ) *matchingTaskStoreV1 {
 	return &matchingTaskStoreV1{userDataStore: userDataStore}
 }

@@ -110,14 +110,13 @@ const (
 
 // matchingTaskStoreV2 is a fork of matchingTaskStoreV1 that uses a new task schema.
 // All methods and queries were duplicated (even if they didn't change) to reduce the shared code.
-// Eventually, the original matchingTaskStoreV1 will be removed; and it this can be
-// renamed to matchingTaskStoreV1.
+// Eventually, the original matchingTaskStoreV1 will be removed.
 type matchingTaskStoreV2 struct {
-	*userDataStore
+	userDataStore
 }
 
 func newMatchingTaskStoreV2(
-	userDataStore *userDataStore,
+	userDataStore userDataStore,
 ) *matchingTaskStoreV2 {
 	return &matchingTaskStoreV2{userDataStore: userDataStore}
 }
