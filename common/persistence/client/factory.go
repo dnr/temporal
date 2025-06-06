@@ -28,7 +28,7 @@ type (
 		Close()
 		// NewTaskManager returns a new task manager
 		NewTaskManager() (persistence.TaskManager, error)
-		// NewFairTaskManager returns a new task (fairness) manager
+		// NewFairTaskManager returns a new fair task manager
 		NewFairTaskManager() (persistence.FairTaskManager, error)
 		// NewShardManager returns a new shard manager
 		NewShardManager() (persistence.ShardManager, error)

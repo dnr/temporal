@@ -80,12 +80,11 @@ CREATE TABLE history_tree (
 };
 
 -- Stores activity or workflow tasks
--- TODO(fairness): cleanup; remove this table
 CREATE TABLE tasks (
   namespace_id        uuid,
   task_queue_name     text,
   task_queue_type     int, -- enum TaskQueueType {ActivityTask, WorkflowTask}
-  type                int, -- enum rowType {Task, TaskQueue}
+  type                int, -- enum rowType {Task, TaskQueue} and subqueue id
   task_id             bigint,  -- unique identifier for tasks, monotonically increasing
   range_id            bigint, -- Used to ensure that only one process can write to the table
   task                blob,
@@ -103,7 +102,7 @@ CREATE TABLE tasks_v2 (
   namespace_id        uuid,
   task_queue_name     text,
   task_queue_type     int, -- enum TaskQueueType {ActivityTask, WorkflowTask}
-  type                int, -- enum rowType {Task, TaskQueue}
+  type                int, -- enum rowType {Task, TaskQueue} and subqueue id
   pass                bigint, -- pass for tasks (see stride scheduling algorithm for fairness)
   task_id             bigint, -- unique identifier for tasks
   range_id            bigint, -- used to ensure that only one process can write to the table
