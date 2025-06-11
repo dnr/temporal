@@ -294,6 +294,10 @@ func (d *matchingTaskStoreV2) CreateTasks(
 	taskQueueType := request.TaskType
 
 	for _, task := range request.Tasks {
+		if task.Pass == 0 {
+			return nil, serviceerror.NewInternal("invalid fair queue task missing pass number")
+		}
+
 		ttl := getTaskTTL(task.ExpiryTime)
 
 		if ttl <= 0 || ttl > maxCassandraTTL {

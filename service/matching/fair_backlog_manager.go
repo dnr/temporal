@@ -134,7 +134,7 @@ func (c *fairBacklogManagerImpl) loadSubqueuesLocked(subqueues []persistencespb.
 	// existing subqueues never changes. If we change that, this logic will need to change.
 	for i := range subqueues {
 		if i >= len(c.subqueues) {
-			r := newFairTaskReader(c, i, subqueues[i].AckLevel)
+			r := newFairTaskReader(c, i, fairLevel{Pass: subqueues[i].AckLevelPass, ID: subqueues[i].AckLevel})
 			r.Start()
 			c.subqueues = append(c.subqueues, r)
 		}
@@ -251,15 +251,16 @@ func (c *fairBacklogManagerImpl) BacklogStatus() *taskqueuepb.TaskQueueStatus {
 	defer c.subqueueLock.Unlock()
 
 	// TODO(pri): needs more work for subqueues, for now just return read/ack level for subqueue 0
-	var readLevel, ackLevel int64
+	// TODO(fair): needs even more work for fairness
+	var readLevel, ackLevel fairLevel
 	if len(c.subqueues) > 0 {
 		readLevel, ackLevel = c.subqueues[subqueueZero].getLevels()
 	}
 
 	taskIDBlock := rangeIDToTaskIDBlock(c.db.RangeID(), c.config.RangeSize)
 	return &taskqueuepb.TaskQueueStatus{
-		ReadLevel: readLevel,
-		AckLevel:  ackLevel,
+		ReadLevel: readLevel.ID,
+		AckLevel:  ackLevel.ID,
 		// use getApproximateBacklogCount instead of BacklogCountHint since it's more accurate
 		BacklogCountHint: c.db.getTotalApproximateBacklogCount(),
 		TaskIdBlock: &taskqueuepb.TaskIdBlock{
@@ -283,8 +284,10 @@ func (c *fairBacklogManagerImpl) InternalStatus() []*taskqueuespb.InternalTaskQu
 	for i, r := range c.subqueues {
 		readLevel, ackLevel := r.getLevels()
 		status[i] = &taskqueuespb.InternalTaskQueueStatus{
-			ReadLevel: readLevel,
-			AckLevel:  ackLevel,
+			ReadLevel:     readLevel.ID,
+			ReadLevelPass: readLevel.Pass,
+			AckLevel:      ackLevel.ID,
+			AckLevelPass:  ackLevel.Pass,
 			TaskIdBlock: &taskqueuepb.TaskIdBlock{
 				StartId: currentTaskIDBlock.start,
 				EndId:   currentTaskIDBlock.end,

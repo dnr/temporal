@@ -614,17 +614,12 @@ type (
 		NextPageToken []byte
 	}
 
-	// CompleteTaskRequest is used to complete a task
-	CompleteTaskRequest struct {
-		TaskQueue *TaskQueueKey
-		TaskID    int64
-	}
-
 	// CompleteTasksLessThanRequest contains the request params needed to invoke CompleteTasksLessThan API
 	CompleteTasksLessThanRequest struct {
 		NamespaceID        string
 		TaskQueueName      string
 		TaskType           enumspb.TaskQueueType
+		ExclusiveMaxPass   int64 // FIXME
 		ExclusiveMaxTaskID int64 // Tasks less than this ID will be completed
 		Subqueue           int
 		Limit              int // Limit on the max number of tasks that can be completed. Required param

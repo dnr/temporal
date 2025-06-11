@@ -68,6 +68,8 @@ message SubqueueInfo {
     // The rest are mutable state for the subqueue:
     int64 ack_level = 2;
     int64 approximate_backlog_count = 3;
+    // used for fair tasks:
+    int64 ack_level_pass = 4;
 }
 
 message SubqueueKey {

@@ -336,8 +336,10 @@ type SubqueueInfo struct {
 	// The rest are mutable state for the subqueue:
 	AckLevel                int64 `protobuf:"varint,2,opt,name=ack_level,json=ackLevel,proto3" json:"ack_level,omitempty"`
 	ApproximateBacklogCount int64 `protobuf:"varint,3,opt,name=approximate_backlog_count,json=approximateBacklogCount,proto3" json:"approximate_backlog_count,omitempty"`
-	unknownFields           protoimpl.UnknownFields
-	sizeCache               protoimpl.SizeCache
+	// used for fair tasks:
+	AckLevelPass  int64 `protobuf:"varint,4,opt,name=ack_level_pass,json=ackLevelPass,proto3" json:"ack_level_pass,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *SubqueueInfo) Reset() {
@@ -387,6 +389,13 @@ func (x *SubqueueInfo) GetAckLevel() int64 {
 func (x *SubqueueInfo) GetApproximateBacklogCount() int64 {
 	if x != nil {
 		return x.ApproximateBacklogCount
+	}
+	return 0
+}
+
+func (x *SubqueueInfo) GetAckLevelPass() int64 {
+	if x != nil {
+		return x.AckLevelPass
 	}
 	return 0
 }
@@ -523,11 +532,12 @@ const file_temporal_server_api_persistence_v1_tasks_proto_rawDesc = "" +
 	"expiryTime\x12D\n" +
 	"\x10last_update_time\x18\a \x01(\v2\x1a.google.protobuf.TimestampR\x0elastUpdateTime\x12:\n" +
 	"\x19approximate_backlog_count\x18\b \x01(\x03R\x17approximateBacklogCount\x12N\n" +
-	"\tsubqueues\x18\t \x03(\v20.temporal.server.api.persistence.v1.SubqueueInfoR\tsubqueues\"\xaa\x01\n" +
+	"\tsubqueues\x18\t \x03(\v20.temporal.server.api.persistence.v1.SubqueueInfoR\tsubqueues\"\xd0\x01\n" +
 	"\fSubqueueInfo\x12A\n" +
 	"\x03key\x18\x01 \x01(\v2/.temporal.server.api.persistence.v1.SubqueueKeyR\x03key\x12\x1b\n" +
 	"\tack_level\x18\x02 \x01(\x03R\backLevel\x12:\n" +
-	"\x19approximate_backlog_count\x18\x03 \x01(\x03R\x17approximateBacklogCount\")\n" +
+	"\x19approximate_backlog_count\x18\x03 \x01(\x03R\x17approximateBacklogCount\x12$\n" +
+	"\x0eack_level_pass\x18\x04 \x01(\x03R\fackLevelPass\")\n" +
 	"\vSubqueueKey\x12\x1a\n" +
 	"\bpriority\x18\x01 \x01(\x05R\bpriority\"[\n" +
 	"\aTaskKey\x127\n" +

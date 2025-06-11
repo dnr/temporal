@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/emirpasic/gods/maps/treemap"
-	godsutils "github.com/emirpasic/gods/utils"
 	"go.temporal.io/api/serviceerror"
 	persistencespb "go.temporal.io/server/api/persistence/v1"
 	"go.temporal.io/server/common"
@@ -25,6 +24,11 @@ import (
 )
 
 type (
+	fairLevel struct {
+		Pass int64
+		ID   int64
+	}
+
 	fairTaskReader struct {
 		backlogMgr *fairBacklogManagerImpl
 		subqueue   int
@@ -41,22 +45,30 @@ type (
 		addRetries *semaphore.Weighted
 
 		// ack manager state
-		outstandingTasks *treemap.Map // TaskID->acked
+		outstandingTasks *treemap.Map // fairLevel->acked
 		loadedTasks      int
-		readLevel        int64 // Maximum TaskID inserted into outstandingTasks
-		ackLevel         int64 // Maximum TaskID below which all tasks are acked
+		readLevel        fairLevel // Maximum Pass,TaskID inserted into outstandingTasks
+		ackLevel         fairLevel // Maximum Pass,TaskID below which all tasks are acked
 
 		// gc state
 		inGC       bool
-		gcAckLevel int64     // last ack level GCed
+		gcAckLevel fairLevel // last ack level GCed
 		lastGCTime time.Time // last time GCed
 	}
 )
 
+/*
+
+Fair Task Reader operation:
+
+FIXME
+
+*/
+
 func newFairTaskReader(
 	backlogMgr *fairBacklogManagerImpl,
 	subqueue int,
-	initialAckLevel int64,
+	initialAckLevel fairLevel,
 ) *fairTaskReader {
 	return &fairTaskReader{
 		backlogMgr: backlogMgr,
@@ -71,7 +83,7 @@ func newFairTaskReader(
 		addRetries: semaphore.NewWeighted(concurrentAddRetries),
 
 		// ack manager
-		outstandingTasks: treemap.NewWith(godsutils.Int64Comparator),
+		outstandingTasks: treemap.NewWith(fairLevelComparator),
 		readLevel:        initialAckLevel,
 		ackLevel:         initialAckLevel,
 	}
@@ -129,7 +141,7 @@ func (tr *fairTaskReader) completeTask(task *internalTask, res taskResponse) {
 
 	tr.backlogAge.record(task.event.AllocatedTaskInfo.Data.CreateTime, -1)
 
-	numAcked := tr.ackTaskLocked(task.event.TaskId)
+	numAcked := tr.ackTaskLocked(fairLevel{Pass: task.event.PassNumber, ID: task.event.TaskId})
 
 	tr.maybeGCLocked()
 
@@ -139,7 +151,7 @@ func (tr *fairTaskReader) completeTask(task *internalTask, res taskResponse) {
 		tr.SignalTaskLoading()
 	}
 
-	tr.backlogMgr.db.updateAckLevelAndBacklogStats(tr.subqueue, tr.ackLevel, -numAcked, tr.backlogAge.oldestTime())
+	tr.backlogMgr.db.updateFairAckLevelAndBacklogStats(tr.subqueue, tr.ackLevel, -numAcked, tr.backlogAge.oldestTime())
 }
 
 // nolint:revive // can simplify later
@@ -188,17 +200,16 @@ Loop:
 	}
 }
 
-// TODO(pri): old matcher cleanup: move here
-// type getTasksBatchResponse struct {
-// 	tasks           []*persistencespb.AllocatedTaskInfo
-// 	readLevel       int64
-// 	isReadBatchDone bool
-// }
+type getFairTasksBatchResponse struct {
+	tasks           []*persistencespb.AllocatedTaskInfo
+	readLevel       fairLevel
+	isReadBatchDone bool
+}
 
 // Returns a batch of tasks from persistence starting form current read level.
 // Also return a number that can be used to update readLevel
 // Also return a bool to indicate whether read is finished
-func (tr *fairTaskReader) getTaskBatch(ctx context.Context) (getTasksBatchResponse, error) {
+func (tr *fairTaskReader) getTaskBatch(ctx context.Context) (getFairTasksBatchResponse, error) {
 	tr.lock.Lock()
 	readLevel := tr.readLevel
 	tr.lock.Unlock()
@@ -405,8 +416,8 @@ func (tr *fairTaskReader) getLoadedTasks() int {
 	return tr.loadedTasks
 }
 
-func (tr *fairTaskReader) ackTaskLocked(taskId int64) int64 {
-	wasAlreadyAcked, found := tr.outstandingTasks.Get(taskId)
+func (tr *fairTaskReader) ackTaskLocked(level fairLevel) int64 {
+	wasAlreadyAcked, found := tr.outstandingTasks.Get(level)
 	if !softassert.That(tr.logger, found, "completed task not found in oustandingTasks") {
 		return 0
 	}
@@ -414,24 +425,24 @@ func (tr *fairTaskReader) ackTaskLocked(taskId int64) int64 {
 		return 0
 	}
 
-	tr.outstandingTasks.Put(taskId, true)
+	tr.outstandingTasks.Put(level, true)
 	tr.loadedTasks--
 
 	// Adjust the ack level as far as we can
 	var numAcked int64
 	for {
-		minId, acked := tr.outstandingTasks.Min()
-		if minId == nil || !acked.(bool) {
+		minLevel, acked := tr.outstandingTasks.Min()
+		if minLevel == nil || !acked.(bool) {
 			break
 		}
-		tr.ackLevel = minId.(int64) // nolint:revive
-		tr.outstandingTasks.Remove(minId)
+		tr.ackLevel = minLevel.(fairLevel) // nolint:revive
+		tr.outstandingTasks.Remove(minLevel)
 		numAcked += 1
 	}
 	return numAcked
 }
 
-func (tr *fairTaskReader) setReadLevelAfterGap(newReadLevel int64) {
+func (tr *fairTaskReader) setReadLevelAfterGap(newReadLevel fairLevel) {
 	tr.lock.Lock()
 	defer tr.lock.Unlock()
 	if tr.ackLevel == tr.readLevel {
@@ -446,7 +457,7 @@ func (tr *fairTaskReader) setReadLevelAfterGap(newReadLevel int64) {
 	tr.readLevel = newReadLevel
 }
 
-func (tr *fairTaskReader) getLevels() (readLevel, ackLevel int64) {
+func (tr *fairTaskReader) getLevels() (readLevel, ackLevel fairLevel) {
 	tr.lock.Lock()
 	defer tr.lock.Unlock()
 	return tr.readLevel, tr.ackLevel
@@ -465,9 +476,10 @@ func (tr *fairTaskReader) maybeGCLocked() {
 }
 
 func (tr *fairTaskReader) shouldGCLocked() bool {
+	// FIXME: does subtracting ID really work here?!
 	if tr.inGC {
 		return false
-	} else if gcGap := int(tr.ackLevel - tr.gcAckLevel); gcGap == 0 {
+	} else if gcGap := int(tr.ackLevel.ID - tr.gcAckLevel.ID); gcGap == 0 {
 		return false
 	} else if gcGap >= tr.backlogMgr.config.MaxTaskDeleteBatchSize() {
 		return true
@@ -476,13 +488,13 @@ func (tr *fairTaskReader) shouldGCLocked() bool {
 }
 
 // called in new goroutine
-func (tr *fairTaskReader) doGC(ackLevel int64) {
+func (tr *fairTaskReader) doGC(ackLevel fairLevel) {
 	batchSize := tr.backlogMgr.config.MaxTaskDeleteBatchSize()
 
 	ctx, cancel := context.WithTimeout(tr.backlogMgr.tqCtx, ioTimeout)
 	defer cancel()
 
-	n, err := tr.backlogMgr.db.CompleteTasksLessThan(ctx, ackLevel+1, batchSize, tr.subqueue)
+	n, err := tr.backlogMgr.db.CompleteFairTasksLessThan(ctx, ackLevel, batchSize, tr.subqueue)
 
 	tr.lock.Lock()
 	defer tr.lock.Unlock()
@@ -499,4 +511,26 @@ func (tr *fairTaskReader) doGC(ackLevel int64) {
 	if n == persistence.UnknownNumRowsAffected || n < batchSize {
 		tr.gcAckLevel = ackLevel
 	}
+}
+
+func fairLevelLess(a, b fairLevel) bool {
+	return a.Pass < b.Pass || a.Pass == b.Pass && a.ID < b.ID
+}
+
+func fairLevelComparator(aany, bany any) int {
+	a := aany.(fairLevel) // nolint:revive
+	b := bany.(fairLevel) // nolint:revive
+	if fairLevelLess(a, b) {
+		return -1
+	} else if fairLevelLess(b, a) {
+		return 1
+	}
+	return 0
+}
+
+func fairLevelMax(a, b fairLevel) fairLevel {
+	if fairLevelLess(a, b) {
+		return b
+	}
+	return a
 }
