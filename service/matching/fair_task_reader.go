@@ -57,14 +57,6 @@ type (
 	}
 )
 
-/*
-
-Fair Task Reader operation:
-
-FIXME
-
-*/
-
 func newFairTaskReader(
 	backlogMgr *fairBacklogManagerImpl,
 	subqueue int,
