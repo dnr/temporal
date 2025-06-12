@@ -52,7 +52,7 @@ type (
 
 		// gc state
 		inGC       bool
-		gcAckLevel fairLevel // last ack level GCed
+		numToGC    int64     // counts approximately how many tasks we can delete with a GC
 		lastGCTime time.Time // last time GCed
 	}
 )
@@ -135,6 +135,7 @@ func (tr *fairTaskReader) completeTask(task *internalTask, res taskResponse) {
 
 	numAcked := tr.ackTaskLocked(fairLevel{Pass: task.event.PassNumber, ID: task.event.TaskId})
 
+	tr.numToGC += numAcked
 	tr.maybeGCLocked()
 
 	// use == so we just signal once when we cross this threshold
@@ -468,15 +469,11 @@ func (tr *fairTaskReader) maybeGCLocked() {
 }
 
 func (tr *fairTaskReader) shouldGCLocked() bool {
-	// FIXME: does subtracting ID really work here?!
-	if tr.inGC {
+	if tr.inGC || tr.numToGC == 0 {
 		return false
-	} else if gcGap := int(tr.ackLevel.ID - tr.gcAckLevel.ID); gcGap == 0 {
-		return false
-	} else if gcGap >= tr.backlogMgr.config.MaxTaskDeleteBatchSize() {
-		return true
 	}
-	return time.Since(tr.lastGCTime) > tr.backlogMgr.config.TaskDeleteInterval()
+	return tr.numToGC >= tr.backlogMgr.config.MaxTaskDeleteBatchSize() ||
+		time.Since(tr.lastGCTime) > tr.backlogMgr.config.TaskDeleteInterval()
 }
 
 // called in new goroutine
@@ -500,8 +497,10 @@ func (tr *fairTaskReader) doGC(ackLevel fairLevel) {
 	// - sql: return number of rows affected (should be <= batchSize)
 	// if we get UnknownNumRowsAffected or a smaller number than our limit, we know we got
 	// everything <= ackLevel, so we can reset ours. if not, we may have to try again.
-	if n == persistence.UnknownNumRowsAffected || n < batchSize {
-		tr.gcAckLevel = ackLevel
+	if n == persistence.UnknownNumRowsAffected {
+		tr.numToGC = 0
+	} else {
+		tr.numToGC = max(0, tr.numToGC-n)
 	}
 }
 
