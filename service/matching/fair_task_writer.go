@@ -134,7 +134,7 @@ func (w *fairTaskWriter) appendTasks(
 	passes []int64,
 	reqs []*writeTaskRequest,
 ) error {
-	resp, err := w.db.CreateTasks(w.backlogMgr.tqCtx, taskIDs, passes, reqs)
+	resp, err := w.db.CreateFairTasks(w.backlogMgr.tqCtx, taskIDs, passes, reqs)
 	if err != nil {
 		w.backlogMgr.signalIfFatal(err)
 		w.logger.Error("Persistent store operation failure",

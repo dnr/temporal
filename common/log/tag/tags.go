@@ -620,11 +620,6 @@ func TaskID(taskID int64) ZapTag {
 	return NewInt64("queue-task-id", taskID)
 }
 
-// TaskPass returns tag for Task PassNumber
-func TaskPass(pass int64) ZapTag {
-	return NewInt64("queue-task-pass", pass)
-}
-
 // TaskKey returns tag for TaskKey
 func TaskKey(key interface{}) ZapTag {
 	return NewAnyTag("queue-task-key", key)

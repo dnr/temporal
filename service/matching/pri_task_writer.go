@@ -126,7 +126,7 @@ func (w *priTaskWriter) appendTasks(
 	taskIDs []int64,
 	reqs []*writeTaskRequest,
 ) error {
-	resp, err := w.db.CreateTasks(w.backlogMgr.tqCtx, taskIDs, nil, reqs)
+	resp, err := w.db.CreateTasks(w.backlogMgr.tqCtx, taskIDs, reqs)
 	if err != nil {
 		w.backlogMgr.signalIfFatal(err)
 		w.logger.Error("Persistent store operation failure",

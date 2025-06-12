@@ -47,9 +47,7 @@ type (
 
 	dbSubqueue struct {
 		persistencespb.SubqueueInfo
-		maxReadLevel     int64
-		maxReadLevelPass int64
-		oldestTime       time.Time // time of oldest task if backlog, otherwise zero time
+		oldestTime time.Time // time of oldest task if backlog, otherwise zero time
 	}
 
 	taskQueueState struct {
@@ -127,20 +125,20 @@ func (db *taskQueueDB) GetMaxFairReadLevel(subqueue int) fairLevel {
 }
 
 func (db *taskQueueDB) getMaxReadLevelLocked(subqueue int) int64 {
-	return db.subqueues[subqueue].maxReadLevel
+	return db.subqueues[subqueue].MaxReadLevelId
 }
 
 func (db *taskQueueDB) getMaxFairReadLevelLocked(subqueue int) fairLevel {
 	s := db.subqueues[subqueue]
-	return fairLevel{pass: s.maxReadLevelPass, id: s.maxReadLevel}
+	return fairLevel{pass: s.MaxReadLevelPass, id: s.MaxReadLevelId}
 }
 
 // This is only exposed for testing!
 func (db *taskQueueDB) setMaxReadLevelForTesting(subqueue int, pass, level int64) {
 	db.Lock()
 	defer db.Unlock()
-	db.subqueues[subqueue].maxReadLevelPass = pass
-	db.subqueues[subqueue].maxReadLevel = level
+	db.subqueues[subqueue].MaxReadLevelPass = pass
+	db.subqueues[subqueue].MaxReadLevelId = level
 }
 
 // RenewLease renews the lease on a taskqueue. If there is no previous lease,
@@ -192,7 +190,7 @@ func (db *taskQueueDB) takeOverTaskQueueLocked(
 		// before. Set max read level of all subqueues to just before our new block.
 		maxReadLevel := rangeIDToTaskIDBlock(db.rangeID, db.config.RangeSize).start - 1
 		for _, s := range db.subqueues {
-			s.maxReadLevel = maxReadLevel
+			s.MaxReadLevelId = maxReadLevel
 		}
 		// FIXME: need to figure out max read level pass!
 		return nil
@@ -210,7 +208,7 @@ func (db *taskQueueDB) takeOverTaskQueueLocked(
 		db.lastWrite = time.Now()
 		// In this case, ensureDefaultSubqueuesLocked already initialized subqueue 0 to have
 		// ackLevel and maxReadLevel 0, so we don't need to initialize them.
-		softassert.That(db.logger, db.subqueues[0].maxReadLevel == 0, "should have maxReadLevel 0 here")
+		softassert.That(db.logger, db.subqueues[0].MaxReadLevelId == 0, "should have maxReadLevel 0 here")
 		softassert.That(db.logger, db.subqueues[0].AckLevel == 0, "should have ackLevel 0 here")
 		// FIXME: need to figure out max read level pass!
 		return nil
@@ -396,7 +394,7 @@ func (db *taskQueueDB) CreateTasks(
 		u := updates[req.subqueue]
 		updates[req.subqueue] = subqueueCreateTasksResponse{
 			tasks:              append(u.tasks, task),
-			maxReadLevelBefore: db.subqueues[req.subqueue].maxReadLevel,
+			maxReadLevelBefore: db.subqueues[req.subqueue].MaxReadLevelId,
 			maxReadLevelAfter:  task.TaskId, // task ids are in order so this is the max
 		}
 	}
@@ -420,7 +418,7 @@ func (db *taskQueueDB) CreateTasks(
 	// so that taskReader is guaranteed to see the new read level when SpoolTask wakes it up.
 	// Do this even if the write fails, we won't reuse the task ids.
 	for i, update := range updates {
-		db.subqueues[i].maxReadLevel = update.maxReadLevelAfter
+		db.subqueues[i].MaxReadLevelId = update.maxReadLevelAfter
 	}
 
 	if err == nil {
@@ -468,7 +466,7 @@ func (db *taskQueueDB) CreateFairTasks(
 		u := updates[req.subqueue]
 		updates[req.subqueue] = subqueueCreateFairTasksResponse{
 			tasks:              append(u.tasks, task),
-			maxReadLevelBefore: fairLevel{pass: current.maxReadLevelPass, id: current.maxReadLevel},
+			maxReadLevelBefore: fairLevel{pass: current.MaxReadLevelPass, id: current.MaxReadLevelId},
 			maxReadLevelAfter:  fairLevelMax(u.maxReadLevelAfter, fairLevel{pass: task.PassNumber, id: task.TaskId}),
 		}
 	}
@@ -488,12 +486,12 @@ func (db *taskQueueDB) CreateFairTasks(
 			Subqueues: allSubqueues,
 		})
 
-	// Update the maxReadLevel after the writes are completed, but before we send the response,
+	// Update the MaxReadLevel after the writes are completed, but before we send the response,
 	// so that taskReader is guaranteed to see the new read level when SpoolTask wakes it up.
 	// Do this even if the write fails, we won't reuse the task ids.
 	for i, update := range updates {
-		db.subqueues[i].maxReadLevel = update.maxReadLevelAfter.id
-		db.subqueues[i].maxReadLevelPass = update.maxReadLevelAfter.pass
+		db.subqueues[i].MaxReadLevelPass = update.maxReadLevelAfter.pass
+		db.subqueues[i].MaxReadLevelId = update.maxReadLevelAfter.id
 	}
 
 	if err == nil {
@@ -530,13 +528,30 @@ func (db *taskQueueDB) GetTasks(
 	})
 }
 
+// GetFairTasks returns a batch of tasks after the given level
+func (db *taskQueueDB) GetFairTasks(
+	ctx context.Context,
+	subqueue int,
+	inclusiveMinLevel fairLevel,
+	batchSize int,
+) (*persistence.GetTasksResponse, error) {
+	return db.store.GetTasks(ctx, &persistence.GetTasksRequest{
+		NamespaceID:        db.queue.NamespaceId(),
+		TaskQueue:          db.queue.PersistenceName(),
+		TaskType:           db.queue.TaskType(),
+		InclusiveMinPass:   inclusiveMinLevel.pass,
+		InclusiveMinTaskID: inclusiveMinLevel.id,
+		Subqueue:           subqueue,
+		PageSize:           batchSize,
+	})
+}
+
 // CompleteTasksLessThan deletes of tasks less than the given taskID. Limit is
 // the upper bound of number of tasks that can be deleted by this method. It may
 // or may not be honored
 func (db *taskQueueDB) CompleteTasksLessThan(
 	ctx context.Context,
 	exclusiveMaxTaskID int64,
-	exclusiveMaxPass int64,
 	limit int,
 	subqueue int,
 ) (int, error) {
@@ -544,7 +559,6 @@ func (db *taskQueueDB) CompleteTasksLessThan(
 		NamespaceID:        db.queue.NamespaceId(),
 		TaskQueueName:      db.queue.PersistenceName(),
 		TaskType:           db.queue.TaskType(),
-		ExclusiveMaxPass:   exclusiveMaxPass,
 		ExclusiveMaxTaskID: exclusiveMaxTaskID,
 		Subqueue:           subqueue,
 		Limit:              limit,
@@ -553,7 +567,6 @@ func (db *taskQueueDB) CompleteTasksLessThan(
 		db.logger.Error("Persistent store operation failure",
 			tag.StoreOperationCompleteTasksLessThan,
 			tag.Error(err),
-			tag.TaskPass(exclusiveMaxPass),
 			tag.TaskID(exclusiveMaxTaskID),
 			tag.WorkflowTaskQueueType(db.queue.TaskType()),
 			tag.WorkflowTaskQueueName(db.queue.PersistenceName()),
@@ -575,8 +588,8 @@ func (db *taskQueueDB) CompleteFairTasksLessThan(
 		NamespaceID:        db.queue.NamespaceId(),
 		TaskQueueName:      db.queue.PersistenceName(),
 		TaskType:           db.queue.TaskType(),
-		ExclusiveMaxTaskID: exclusiveMaxLevel.id,
 		ExclusiveMaxPass:   exclusiveMaxLevel.pass,
+		ExclusiveMaxTaskID: exclusiveMaxLevel.id,
 		Subqueue:           subqueue,
 		Limit:              limit,
 	})
@@ -662,7 +675,7 @@ func (db *taskQueueDB) emitBacklogGaugesLocked() {
 		oldestTime = minNonZeroTime(oldestTime, s.oldestTime)
 		// note: this metric is only an estimation for the lag.
 		// taskID in DB may not be continuous, especially when task list ownership changes.
-		totalLag += s.maxReadLevel - s.AckLevel
+		totalLag += s.MaxReadLevelId - s.AckLevel
 	}
 
 	metrics.ApproximateBacklogCount.With(db.metricsHandler).Record(float64(approximateBacklogCount))
@@ -709,7 +722,8 @@ func (db *taskQueueDB) newSubqueueLocked(key *persistencespb.SubqueueKey) *dbSub
 	// start ack level + max read level just before the current block
 	initAckLevel := rangeIDToTaskIDBlock(db.rangeID, db.config.RangeSize).start - 1
 
-	s := &dbSubqueue{maxReadLevel: initAckLevel}
+	s := &dbSubqueue{}
+	s.MaxReadLevelId = initAckLevel
 	s.Key = key
 	s.AckLevel = initAckLevel
 	return s

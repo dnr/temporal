@@ -620,7 +620,7 @@ type (
 		NamespaceID        string
 		TaskQueueName      string
 		TaskType           enumspb.TaskQueueType
-		ExclusiveMaxPass   int64 // FIXME
+		ExclusiveMaxPass   int64 // FIXME: document
 		ExclusiveMaxTaskID int64 // Tasks less than this ID will be completed
 		Subqueue           int
 		Limit              int // Limit on the max number of tasks that can be completed. Required param

@@ -68,16 +68,16 @@ message SubqueueInfo {
     // The rest are mutable state for the subqueue:
     int64 ack_level = 2;
     int64 approximate_backlog_count = 3;
+
     // used for fair tasks:
     int64 ack_level_pass = 4;
+    int64 max_read_level_pass = 5;
+    int64 max_read_level_id = 6;
 }
 
 message SubqueueKey {
     // Each subqueue contains tasks from only one priority level.
     int32 priority = 1;
-
-    // // Additionally, tasks may be split by a fairness mechanism into buckets.
-    // int32 fairness_bucket = 2;
 }
 
 message TaskKey {

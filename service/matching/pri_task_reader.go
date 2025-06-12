@@ -84,6 +84,9 @@ func newPriTaskReader(
 		outstandingTasks: treemap.NewWith(godsutils.Int64Comparator),
 		readLevel:        initialAckLevel,
 		ackLevel:         initialAckLevel,
+
+		// gc state
+		lastGCTime: time.Now(),
 	}
 }
 
@@ -157,44 +160,43 @@ func (tr *priTaskReader) getTasksPump() {
 	ctx := tr.backlogMgr.tqCtx
 
 	tr.SignalTaskLoading() // prime pump
-Loop:
 	for {
 		select {
 		case <-ctx.Done():
 			return
-
 		case <-tr.notifyC:
-			if tr.getLoadedTasks() > tr.backlogMgr.config.GetTasksReloadAt() {
-				// Too many loaded already, ignore this signal. We'll get another signal when
-				// loadedTasks drops low enough.
-				continue Loop
-			}
-
-			batch, err := tr.getTaskBatch(ctx)
-			tr.backlogMgr.signalIfFatal(err)
-			if err != nil {
-				// TODO: Should we ever stop retrying on db errors?
-				if common.IsResourceExhausted(err) {
-					tr.backoffSignal(taskReaderThrottleRetryDelay)
-				} else {
-					tr.backoffSignal(tr.retrier.NextBackOff(err))
-				}
-				continue Loop
-			}
-			tr.retrier.Reset()
-
-			if len(batch.tasks) == 0 {
-				tr.setReadLevelAfterGap(batch.readLevel)
-				if !batch.isReadBatchDone {
-					tr.SignalTaskLoading()
-				}
-				continue Loop
-			}
-
-			tr.processTaskBatch(batch.tasks)
-			// There may be more tasks.
-			tr.SignalTaskLoading()
 		}
+
+		if tr.getLoadedTasks() > tr.backlogMgr.config.GetTasksReloadAt() {
+			// Too many loaded already, ignore this signal. We'll get another signal when
+			// loadedTasks drops low enough.
+			continue
+		}
+
+		batch, err := tr.getTaskBatch(ctx)
+		tr.backlogMgr.signalIfFatal(err)
+		if err != nil {
+			// TODO: Should we ever stop retrying on db errors?
+			if common.IsResourceExhausted(err) {
+				tr.backoffSignal(taskReaderThrottleRetryDelay)
+			} else {
+				tr.backoffSignal(tr.retrier.NextBackOff(err))
+			}
+			continue
+		}
+		tr.retrier.Reset()
+
+		if len(batch.tasks) == 0 {
+			tr.setReadLevelAfterGap(batch.readLevel)
+			if !batch.isReadBatchDone {
+				tr.SignalTaskLoading()
+			}
+			continue
+		}
+
+		tr.processTaskBatch(batch.tasks)
+		// There may be more tasks.
+		tr.SignalTaskLoading()
 	}
 }
 

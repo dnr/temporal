@@ -58,7 +58,7 @@ func newFairBacklogManager(
 ) *fairBacklogManagerImpl {
 	// For the purposes of taskQueueDB, call this just a TaskManager. It'll return errors if we
 	// use it incorectly. TODO: this is not the cleanest way to do this...
-	taskManager := TaskManager(fairTaskManager)
+	taskManager := persistence.TaskManager(fairTaskManager)
 
 	bmg := &fairBacklogManagerImpl{
 		pqMgr:               pqMgr,
@@ -211,7 +211,7 @@ func (c *fairBacklogManagerImpl) SpoolTask(taskInfo *persistencespb.TaskInfo) er
 	return err
 }
 
-func (c *fairBacklogManagerImpl) signalReaders(resp createTasksResponse) {
+func (c *fairBacklogManagerImpl) signalReaders(resp createFairTasksResponse) {
 	c.subqueueLock.Lock()
 	subqueues := slices.Clone(c.subqueues)
 	c.subqueueLock.Unlock()

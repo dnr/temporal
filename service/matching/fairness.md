@@ -41,24 +41,16 @@ and we have them in memory waiting to dispatch. We may write new tasks either ab
 When we load the task queue metadata, we get A and M. All non-dispatched backlog tasks should
 be in that range (see Fencing below). Initialize R to A.
 
-When we read: Do a read for tasks with R <= level <= M, limit Bt (batch target size). Note that
+When we read: Do a read for tasks with R <= level, limit Bt (batch target size). Note that
 if R > M, then the range must be empty and we can skip the read.
 
-Suppose we get n tasks and the last one is m (n <= Bt and m <= M). For now, suppose that we're
+Suppose we get n tasks and the last one is m (n <= Bt). For now, suppose that we're
 not concurrently writing tasks.
 
-Case n == Bt, m < M: We've read one full batch but we didn't get to the end. Set R to m+1 so
-that we can start the next read there.
+Case n == Bt: We've read one full batch. Set R to m+1 so that we can start the next read there.
 
-Case n == Bt, m == M: We read one full batch and it just happened to get to the end. Set R to
-M+1. When we dispatch enough tasks and want to load more, we'll see that R > M and not do
-another read.
-
-Case 0 < n < Bt, m == M: We read a partial batch and got to the end. Set R to M+1. We don't have
-to do another read since R > M.
-
-Case 0 < n < Bt, m < M: We read completely up to M but we didn't find a task _at_ M. This is
-okay, maybe it expired. Set R to M+1 anyway.
+Case 0 < n < Bt: We read a partial batch and got to the end. Set R to m+1. We won't do another
+read next time since R > M.
 
 Case n == 0: We didn't find any tasks at all. Set R to M+1.
 
