@@ -46,7 +46,7 @@ type (
 		addRetries *semaphore.Weighted
 
 		// ack manager state
-		outstandingTasks *treemap.Map // fairLevel->acked
+		outstandingTasks *treemap.Map // fairLevel->*internalTask (nil if acked)
 		loadedTasks      int
 		readLevel        fairLevel
 		ackLevel         fairLevel
@@ -193,70 +193,27 @@ func (tr *fairTaskReader) getTasksPump() {
 		}
 		tr.retrier.Reset()
 
-		tr.processTaskBatch(res.Tasks, maxReadLevel)
+		// filter out deleted
+		tasks := slices.DeleteFunc(res.Tasks, func(t *persistencespb.AllocatedTaskInfo) bool {
+			if IsTaskExpired(t) {
+				metrics.ExpiredTasksPerTaskQueueCounter.With(tr.backlogMgr.metricsHandler).Record(1)
+				return true
+			}
+			return false
+		})
+
+		if len(res.Tasks) == 0 {
+			continue
+		}
+
+		tr.mergeTasks(tasks)
+
 		// There may be more tasks.
 		tr.SignalTaskLoading()
 	}
 }
 
-func (tr *fairTaskReader) processTaskBatch(tasks []*persistencespb.AllocatedTaskInfo, maxReadLevel fairLevel) {
-	tr.lock.Lock()
-
-	if len(tasks) == 0 {
-		// FIXME: what if signalNewTasks moved readLevel backwards???
-		tr.readLevel = maxReadLevel
-		tr.lock.Unlock()
-		return
-	}
-
-	tasks = slices.DeleteFunc(tasks, func(t *persistencespb.AllocatedTaskInfo) bool {
-		level := fairLevel{pass: t.PassNumber, id: t.TaskId}
-		// FIXME: what if signalNewTasks moved readLevel backwards???
-		tr.readLevel = fairLevelMax(tr.readLevel, level)
-
-		if IsTaskExpired(t) {
-			metrics.ExpiredTasksPerTaskQueueCounter.With(tr.backlogMgr.metricsHandler).Record(1)
-			return true
-		}
-
-		// We may race to read tasks with signalNewTasks. If it wins, we may end up seeing
-		// tasks twice. In that case, we should just ignore them. If we win (based on
-		// readLevel), signalNewTasks will give up and signal us.
-		_, found := tr.outstandingTasks.Get(level)
-		return found
-	})
-
-	tr.recordNewTasksLocked(tasks)
-
-	tr.lock.Unlock()
-
-	tr.addNewTasks(tasks)
-}
-
-// To add tasks to the matcher: call recordNewTasksLocked with tr.lock held, then release the
-// lock and call addNewTasks. We call addTaskToMatcher outside tr.lock since it may take other
-// locks to redirect the task.
-func (tr *fairTaskReader) recordNewTasksLocked(tasks []*persistencespb.AllocatedTaskInfo) {
-	// After we get to this point, we must eventually call task.finish or
-	// task.finishForwarded, which will call tr.completeTask.
-	for _, t := range tasks {
-		level := fairLevel{pass: t.PassNumber, id: t.TaskId}
-		tr.outstandingTasks.Put(level, false)
-		tr.loadedTasks++
-		tr.backlogAge.record(t.Data.CreateTime, 1)
-	}
-}
-
-// To add tasks to the matcher: call recordNewTasksLocked with tr.lock held, then release the
-// lock and call addNewTasks. We call addTaskToMatcher outside tr.lock since it may take other
-// locks to redirect the task.
-func (tr *fairTaskReader) addNewTasks(tasks []*persistencespb.AllocatedTaskInfo) {
-	for _, t := range tasks {
-		task := newInternalTaskFromBacklog(t, tr.completeTask)
-		tr.addTaskToMatcher(task)
-	}
-}
-
+// call with_out_ lock held
 func (tr *fairTaskReader) addTaskToMatcher(task *internalTask) {
 	err := tr.backlogMgr.addSpooledTask(task)
 	if err == nil {
@@ -329,38 +286,126 @@ func (tr *fairTaskReader) retryAddAfterError(task *internalTask) {
 }
 
 func (tr *fairTaskReader) signalNewTasks(resp subqueueCreateFairTasksResponse) {
+	tr.mergeTasks(resp.tasks)
+}
+
+func (tr *fairTaskReader) mergeTasks(tasks []*persistencespb.AllocatedTaskInfo) {
 	tr.lock.Lock()
 
-	// FIXME: this is fragile, how about send on signal channel?
+	/**
 
-	// We have to be very careful not to increment the read level past an ID that will somehow
-	// end up in the database, otherwise we might lose a task. We do this by verifying that our
-	// read level was equal to the previous max read level (i.e. we were at the end of the
-	// queue), and then we set it to the max read level as of CreateTasks.
-	// We also check that there's room in memory.
-	canAddDirect := tr.readLevel == resp.maxReadLevelBefore &&
-		(tr.loadedTasks+len(resp.tasks)) <= tr.backlogMgr.config.GetTasksBatchSize() &&
-		!slices.ContainsFunc(resp.tasks, func(t *persistencespb.AllocatedTaskInfo) bool {
-			// Because we checked readLevel, we know that getTasksPump can't have beat us to
-			// adding these tasks to outstandingTasks. So they should definitely not be there.
-			level := fairLevel{pass: t.PassNumber, id: t.TaskId}
-			_, found := tr.outstandingTasks.Get(level)
-			return softassert.That(tr.logger, !found, "newly-written task already present in outstanding tasks")
-		})
+	if pump is not busy, then we can send this batch on the channel and pump can figure it out.
+	but what if pump is busy? i.e. it's currenly reading? then we just took from notifyC and
+	it's empty, so we can send one batch and it'll see it when it's done with the current read.
 
-	if !canAddDirect {
-		tr.lock.Unlock()
-		tr.SignalTaskLoading()
-		return
+	but... what if we signal more than once while it's reading, so the channel is full?
+	any of these signals may result in read level being moved backwards, so we can't just drop it.
+
+	what if we had a goroutine to manage the read level that isn't the pump?
+	both signalNewTasks and getTasksPump would interact with it.
+	I guess it's not a goroutine, just factored-out read level logic.
+
+	so what is the logic?
+
+	signalNewTasks should:
+	plan 1:
+		1. set read level to Wmin
+		2. drop any tasks in buffer > Wmin
+		3. signal pump
+	plan 2:
+		Take the tasks in the buffer plus the tasks that were just written and sort them by
+		level. Take the first Bt of them (or all of them if < Bt). Set the buffer to that set.
+		Set R to the maximum level in that set. Discard the rest from memory.
+
+	take plan 1 for now. what if this happens concurrently with a read?
+	so we're doing:
+	- start read t >= R0
+	- write new tasks [Wmin, Wmax]
+	- finish read, found some tasks
+
+	are there any other interesting orderings? not really, this signalNewTasks happens all
+	at once. we don't care when the write started since the write doesn't care about R.
+	er.. wait, what's this maxReadLevelBefore?
+
+	one easy option: discard the read results and just try again!
+
+	another option: treat the read results as if they just got written, i.e. do the same logic
+	as signalNewTasks! does this work?!?!
+
+	let's try it...
+	*/
+
+	// Take the tasks in the buffer plus the tasks that were just written and sort them by level.
+
+	// get outstanding tasks. note these values are *internalTask.
+	merged := tr.outstandingTasks.Select(func(k, v any) bool {
+		return v.(*internalTask) != nil // nolint:revive
+	})
+	// add the tasks we just wrote. note these values are *AllocatedTaskInfo.
+	for _, t := range tasks {
+		level := fairLevel{pass: t.PassNumber, id: t.TaskId}
+		if _, have := merged.Get(level); have {
+			// duplicate: we write something we just read, or read something we just wrote.
+			// either way we have it in the buffer already. FIXME: is this right?
+			continue
+		}
+		merged.Put(level, t)
 	}
 
-	tr.readLevel = resp.maxReadLevelAfter
+	// Take the first Bt of them (or all of them if < Bt). Set the buffer to that set.
+	batchSize := tr.backlogMgr.config.GetTasksBatchSize()
+	it := merged.Iterator()
+	var lastLevel fairLevel
+	tasks = tasks[:0]
+	for b := 0; it.Next() && b < batchSize; b++ {
+		lastLevel = it.Key().(fairLevel) // nolint:revive
+		if t, ok := it.Value().(*persistencespb.AllocatedTaskInfo); ok {
+			// new task we need to add to the matcher
+			tasks = append(tasks, t)
+		}
+	}
 
-	tr.recordNewTasksLocked(resp.tasks)
+	// Set R to the maximum level in that set.
+	tr.readLevel = lastLevel
 
+	// If there are remaining tasks in the merged set, they can't fit in the buffer.
+	// If they came from the tasks we just wrote, ignore them. If they came from the buffer,
+	// remove them from the buffer.
+	// FIXME: this size initialization may be wrong
+	toRemove := make([]*internalTask, 0, merged.Size()-batchSize)
+	for it.Next() {
+		if t, ok := it.Value().(*internalTask); ok {
+			// task that was in the matcher before that we have to remove
+			toRemove = append(toRemove, t)
+		}
+	}
+
+	for _, task := range toRemove {
+		// FIXME: do remove bookkeeping here!!
+		_ = task
+	}
+
+	// After we get to this point, we must eventually call task.finish or
+	// task.finishForwarded, which will call tr.completeTask.
+	internalTasks := make([]*internalTask, len(tasks))
+	for i, t := range tasks {
+		level := fairLevel{pass: t.PassNumber, id: t.TaskId}
+		internalTasks[i] = newInternalTaskFromBacklog(t, tr.completeTask)
+		tr.outstandingTasks.Put(level, internalTasks[i])
+		tr.loadedTasks++
+		tr.backlogAge.record(t.Data.CreateTime, 1)
+	}
+
+	// unlock before calling addTaskToMatcher
 	tr.lock.Unlock()
 
-	tr.addNewTasks(resp.tasks)
+	for _, task := range toRemove {
+		tr.backlogMgr.removeSpooledTask(task)
+	}
+
+	for _, task := range internalTasks {
+		tr.addTaskToMatcher(task)
+	}
 }
 
 func (tr *fairTaskReader) backoffSignal(duration time.Duration) {
@@ -395,14 +440,15 @@ func (tr *fairTaskReader) ackTaskLocked(level fairLevel) int64 {
 		return 0
 	}
 
-	tr.outstandingTasks.Put(level, true)
+	tr.outstandingTasks.Put(level, (*internalTask)(nil))
 	tr.loadedTasks--
 
 	// Adjust the ack level as far as we can
 	var numAcked int64
 	for {
-		minLevel, acked := tr.outstandingTasks.Min()
-		if minLevel == nil || !acked.(bool) {
+		minLevel, v := tr.outstandingTasks.Min()
+		task := v.(*internalTask) // nolint:revive
+		if minLevel == nil || task != nil {
 			break
 		}
 		tr.ackLevel = minLevel.(fairLevel) // nolint:revive

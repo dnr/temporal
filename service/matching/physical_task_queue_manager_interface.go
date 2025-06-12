@@ -35,6 +35,7 @@ type (
 		DispatchSpooledTask(ctx context.Context, task *internalTask, userDataChanged <-chan struct{}) error
 		AddSpooledTask(task *internalTask) error
 		AddSpooledTaskToMatcher(task *internalTask)
+		RemoveSpooledTask(task *internalTask)
 		UserDataChanged()
 		// DispatchQueryTask will dispatch query to local or remote poller. If forwarded then result or error is returned,
 		// if dispatched to local poller then nil and nil is returned.

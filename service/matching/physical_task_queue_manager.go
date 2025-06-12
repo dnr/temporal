@@ -428,6 +428,10 @@ func (c *physicalTaskQueueManagerImpl) AddSpooledTaskToMatcher(task *internalTas
 	c.priMatcher.AddTask(task)
 }
 
+func (c *physicalTaskQueueManagerImpl) RemoveSpooledTask(task *internalTask) {
+	c.priMatcher.RemoveTask(task)
+}
+
 func (c *physicalTaskQueueManagerImpl) UserDataChanged() {
 	c.matcher.ReprocessAllTasks()
 }

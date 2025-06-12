@@ -435,6 +435,10 @@ func (tm *priTaskMatcher) AddTask(task *internalTask) {
 	tm.data.EnqueueTaskNoWait(task)
 }
 
+func (tm *priTaskMatcher) RemoveTask(task *internalTask) {
+	// FIXME!!!
+}
+
 func (tm *priTaskMatcher) emitDispatchLatency(task *internalTask, forwarded bool) {
 	if task.event.Data.CreateTime == nil {
 		return // should not happen but for safety
