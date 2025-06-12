@@ -24,9 +24,10 @@ import (
 )
 
 type (
+	// FIXME: can we just call this dbLevel and use it everywhere?!
 	fairLevel struct {
-		Pass int64
-		ID   int64
+		pass int64
+		id   int64
 	}
 
 	fairTaskReader struct {
@@ -133,7 +134,7 @@ func (tr *fairTaskReader) completeTask(task *internalTask, res taskResponse) {
 
 	tr.backlogAge.record(task.event.AllocatedTaskInfo.Data.CreateTime, -1)
 
-	numAcked := tr.ackTaskLocked(fairLevel{Pass: task.event.PassNumber, ID: task.event.TaskId})
+	numAcked := tr.ackTaskLocked(fairLevel{pass: task.event.PassNumber, id: task.event.TaskId})
 
 	tr.numToGC += numAcked
 	tr.maybeGCLocked()
@@ -505,7 +506,7 @@ func (tr *fairTaskReader) doGC(ackLevel fairLevel) {
 }
 
 func fairLevelLess(a, b fairLevel) bool {
-	return a.Pass < b.Pass || a.Pass == b.Pass && a.ID < b.ID
+	return a.pass < b.pass || a.pass == b.pass && a.id < b.id
 }
 
 func fairLevelComparator(aany, bany any) int {

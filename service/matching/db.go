@@ -132,7 +132,7 @@ func (db *taskQueueDB) getMaxReadLevelLocked(subqueue int) int64 {
 
 func (db *taskQueueDB) getMaxFairReadLevelLocked(subqueue int) fairLevel {
 	s := db.subqueues[subqueue]
-	return fairLevel{Pass: s.maxReadLevelPass, ID: s.maxReadLevel}
+	return fairLevel{pass: s.maxReadLevelPass, id: s.maxReadLevel}
 }
 
 // This is only exposed for testing!
@@ -313,13 +313,13 @@ func (db *taskQueueDB) updateFairAckLevelAndBacklogStats(subqueue int, newAckLev
 
 	db.lastChange = time.Now()
 	dbQueue := db.subqueues[subqueue]
-	if fairLevelLess(newAckLevel, fairLevel{Pass: dbQueue.AckLevelPass, ID: dbQueue.AckLevel}) {
+	if fairLevelLess(newAckLevel, fairLevel{pass: dbQueue.AckLevelPass, id: dbQueue.AckLevel}) {
 		softassert.Fail(db.logger,
 			fmt.Sprintf("ack level in subqueue %d should not move backwards (from %v to %v)",
 				subqueue, dbQueue.AckLevel, newAckLevel))
 	}
-	dbQueue.AckLevelPass = newAckLevel.Pass
-	dbQueue.AckLevel = newAckLevel.ID
+	dbQueue.AckLevelPass = newAckLevel.pass
+	dbQueue.AckLevel = newAckLevel.id
 
 	// FIXME: does this ever happen? need to change condition?
 	if newAckLevel == db.getMaxFairReadLevelLocked(subqueue) {
@@ -468,8 +468,8 @@ func (db *taskQueueDB) CreateFairTasks(
 		u := updates[req.subqueue]
 		updates[req.subqueue] = subqueueCreateFairTasksResponse{
 			tasks:              append(u.tasks, task),
-			maxReadLevelBefore: fairLevel{Pass: current.maxReadLevelPass, ID: current.maxReadLevel},
-			maxReadLevelAfter:  fairLevelMax(u.maxReadLevelAfter, fairLevel{Pass: task.PassNumber, ID: task.TaskId}),
+			maxReadLevelBefore: fairLevel{pass: current.maxReadLevelPass, id: current.maxReadLevel},
+			maxReadLevelAfter:  fairLevelMax(u.maxReadLevelAfter, fairLevel{pass: task.PassNumber, id: task.TaskId}),
 		}
 	}
 
@@ -492,8 +492,8 @@ func (db *taskQueueDB) CreateFairTasks(
 	// so that taskReader is guaranteed to see the new read level when SpoolTask wakes it up.
 	// Do this even if the write fails, we won't reuse the task ids.
 	for i, update := range updates {
-		db.subqueues[i].maxReadLevel = update.maxReadLevelAfter.ID
-		db.subqueues[i].maxReadLevelPass = update.maxReadLevelAfter.Pass
+		db.subqueues[i].maxReadLevel = update.maxReadLevelAfter.id
+		db.subqueues[i].maxReadLevelPass = update.maxReadLevelAfter.pass
 	}
 
 	if err == nil {
@@ -575,8 +575,8 @@ func (db *taskQueueDB) CompleteFairTasksLessThan(
 		NamespaceID:        db.queue.NamespaceId(),
 		TaskQueueName:      db.queue.PersistenceName(),
 		TaskType:           db.queue.TaskType(),
-		ExclusiveMaxTaskID: exclusiveMaxLevel.ID,
-		ExclusiveMaxPass:   exclusiveMaxLevel.Pass,
+		ExclusiveMaxTaskID: exclusiveMaxLevel.id,
+		ExclusiveMaxPass:   exclusiveMaxLevel.pass,
 		Subqueue:           subqueue,
 		Limit:              limit,
 	})
