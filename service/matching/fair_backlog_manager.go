@@ -50,16 +50,21 @@ func newFairBacklogManager(
 	tqCtx context.Context,
 	pqMgr physicalTaskQueueManager,
 	config *taskQueueConfig,
-	taskManager persistence.TaskManager,
+	fairTaskManager persistence.FairTaskManager,
 	logger log.Logger,
 	throttledLogger log.ThrottledLogger,
 	matchingClient matchingservice.MatchingServiceClient,
 	metricsHandler metrics.Handler,
 ) *fairBacklogManagerImpl {
+	// For the purposes of taskQueueDB, call this just a TaskManager. It'll return errors if we
+	// use it incorectly. TODO: this is not the cleanest way to do this...
+	taskManager := TaskManager(fairTaskManager)
+
 	bmg := &fairBacklogManagerImpl{
 		pqMgr:               pqMgr,
 		config:              config,
 		tqCtx:               tqCtx,
+		db:                  newTaskQueueDB(config, taskManager, pqMgr.QueueKey(), logger, metricsHandler),
 		subqueuesByPriority: make(map[int32]int),
 		matchingClient:      matchingClient,
 		metricsHandler:      metricsHandler,
@@ -67,7 +72,6 @@ func newFairBacklogManager(
 		throttledLogger:     throttledLogger,
 		initializedError:    future.NewFuture[struct{}](),
 	}
-	bmg.db = newTaskQueueDB(config, taskManager, pqMgr.QueueKey(), logger, metricsHandler)
 	bmg.taskWriter = newFairTaskWriter(bmg)
 	return bmg
 }
