@@ -345,6 +345,10 @@ func (d *matchingTaskStoreV1) GetTasks(
 	ctx context.Context,
 	request *p.GetTasksRequest,
 ) (*p.InternalGetTasksResponse, error) {
+	if request.InclusiveMinPass != 0 {
+		return nil, serviceerror.NewInternal("invalid GetTasks request on queue")
+	}
+
 	// Reading taskqueue tasks need to be quorum level consistent, otherwise we could lose tasks
 	query := d.Session.Query(templateGetTasksQuery,
 		request.NamespaceID,
@@ -405,6 +409,10 @@ func (d *matchingTaskStoreV1) CompleteTasksLessThan(
 	ctx context.Context,
 	request *p.CompleteTasksLessThanRequest,
 ) (int, error) {
+	if request.ExclusiveMaxPass != 0 {
+		return 0, serviceerror.NewInternal("invalid CompleteTasksLessThan request on queue")
+	}
+
 	query := d.Session.Query(
 		templateCompleteTasksLessThanQuery,
 		request.NamespaceID,

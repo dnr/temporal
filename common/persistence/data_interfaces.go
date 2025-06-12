@@ -601,6 +601,7 @@ type (
 		NamespaceID        string
 		TaskQueue          string
 		TaskType           enumspb.TaskQueueType
+		InclusiveMinPass   int64 // FairTaskManager only
 		InclusiveMinTaskID int64
 		ExclusiveMaxTaskID int64
 		Subqueue           int

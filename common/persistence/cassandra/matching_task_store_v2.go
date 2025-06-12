@@ -29,17 +29,14 @@ const (
 		`and task_queue_name = ? ` +
 		`and task_queue_type = ? ` +
 		`and type = ? ` +
-		`and pass = 0 ` + // TODO(fairness): provide pass
-		`and task_id >= ? ` +
-		`and task_id < ?`
+		`and (pass = ? and task_id >= ? or pass > ?)`
 
 	templateCompleteTasksLessThanQuery_v2 = `DELETE FROM tasks_v2 ` +
 		`WHERE namespace_id = ? ` +
 		`AND task_queue_name = ? ` +
 		`AND task_queue_type = ? ` +
 		`AND type = ? ` +
-		`and pass = 0 ` + // TODO(fairness): provide pass
-		`AND task_id < ? `
+		`and (pass < ? or pass = ? and task_id < ?)`
 
 	templateGetTaskQueueQuery_v2 = `SELECT ` +
 		`range_id, ` +
@@ -50,7 +47,7 @@ const (
 		`and task_queue_name = ? ` +
 		`and task_queue_type = ? ` +
 		`and type = ? ` +
-		`and pass = 0 ` + // TODO(fairness): provide pass
+		`and pass = 0 ` +
 		`and task_id = ?`
 
 	templateInsertTaskQueueQuery_v2 = `INSERT INTO tasks_v2 (` +
@@ -358,14 +355,20 @@ func (d *matchingTaskStoreV2) GetTasks(
 	ctx context.Context,
 	request *p.GetTasksRequest,
 ) (*p.InternalGetTasksResponse, error) {
+	// Require starting from pass 1.
+	if request.InclusiveMinPass < 1 || request.ExclusiveMaxTaskID != 0 {
+		return nil, serviceerror.NewInternal("invalid GetTasks request on fair queue")
+	}
+
 	// Reading taskqueue tasks need to be quorum level consistent, otherwise we could lose tasks
 	query := d.Session.Query(templateGetTasksQuery_v2,
 		request.NamespaceID,
 		request.TaskQueue,
 		request.TaskType,
 		rowTypeTaskInSubqueue(request.Subqueue),
+		request.InclusiveMinPass,
 		request.InclusiveMinTaskID,
-		request.ExclusiveMaxTaskID,
+		request.InclusiveMinPass,
 	).WithContext(ctx)
 	iter := query.PageSize(request.PageSize).PageState(request.NextPageToken).Iter()
 
@@ -418,12 +421,19 @@ func (d *matchingTaskStoreV2) CompleteTasksLessThan(
 	ctx context.Context,
 	request *p.CompleteTasksLessThanRequest,
 ) (int, error) {
+	// Require starting from pass 1.
+	if request.ExclusiveMaxPass < 1 {
+		return 0, serviceerror.NewInternal("invalid CompleteTasksLessThan request on fair queue")
+	}
+
 	query := d.Session.Query(
 		templateCompleteTasksLessThanQuery_v2,
 		request.NamespaceID,
 		request.TaskQueueName,
 		request.TaskType,
 		rowTypeTaskInSubqueue(request.Subqueue),
+		request.ExclusiveMaxPass,
+		request.ExclusiveMaxPass,
 		request.ExclusiveMaxTaskID,
 	).WithContext(ctx)
 	err := query.Exec()
