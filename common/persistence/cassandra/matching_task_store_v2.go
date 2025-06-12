@@ -24,7 +24,7 @@ const (
 		`VALUES(?, ?, ?, ?, ?, ?, ?, ?) USING TTL ?`
 
 	templateGetTasksQuery_v2 = `SELECT task_id, task, task_encoding ` +
-		`FROM tasks ` +
+		`FROM tasks_v2 ` +
 		`WHERE namespace_id = ? ` +
 		`and task_queue_name = ? ` +
 		`and task_queue_type = ? ` +
