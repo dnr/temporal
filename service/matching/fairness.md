@@ -178,10 +178,42 @@ TODO
 
 
 
+## Problems
 
+### ack level could move backwards?
 
+consider:
 
+- ack level is 10. we have tasks 11, 21, 31 in buffer.
+- task writer chooses levels for some new tasks, e.g. 13, 15, 25.
+- sends write to db.
+- task 11 is acked. task reader sets ack level to 11.
+- task 21 is acked. task reader sets ack level to 21.
+- write completes. 13, 15, 25 are sent to task reader to merge into buffer.
+- at this point we need to set the ack level backwards?!?
 
+even worse:
+
+- ack level is 10. we have tasks 11, 21, 31 in buffer.
+- task writer chooses levels for some new tasks, e.g. 13, 15, 25.
+- sends write to db.
+- task 11 is acked. task reader sets ack level to 11.
+- task 21 is acked. task reader sets ack level to 21.
+- write completes in db.
+- gc kicks in: deletes <= 21.
+- new tasks are now lost.
+
+fix?
+
+at the point where task writer picks those levels, we need to add them to ack manager so that
+ack manager knows it can't move the ack level further.
+
+does it have to add them individually, or just set a minimum "pending write level"?
+pending write level can be cleared if there is no pending write.
+
+let's try it with just the simple: during a write, the ack level is pinned.
+it's unpinned by either signalNewTasks or by an explicit "write failed" call.
+when unpinned, tr should try moving it more.
 
 
 

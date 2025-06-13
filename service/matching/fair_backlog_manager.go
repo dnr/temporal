@@ -19,6 +19,7 @@ import (
 	"go.temporal.io/server/common/log/tag"
 	"go.temporal.io/server/common/metrics"
 	"go.temporal.io/server/common/persistence"
+	"go.temporal.io/server/service/matching/counter"
 )
 
 type (
@@ -55,6 +56,7 @@ func newFairBacklogManager(
 	throttledLogger log.ThrottledLogger,
 	matchingClient matchingservice.MatchingServiceClient,
 	metricsHandler metrics.Handler,
+	cntr counter.Counter,
 ) *fairBacklogManagerImpl {
 	// For the purposes of taskQueueDB, call this just a TaskManager. It'll return errors if we
 	// use it incorectly. TODO: this is not the cleanest way to do this...
@@ -72,7 +74,7 @@ func newFairBacklogManager(
 		throttledLogger:     throttledLogger,
 		initializedError:    future.NewFuture[struct{}](),
 	}
-	bmg.taskWriter = newFairTaskWriter(bmg)
+	bmg.taskWriter = newFairTaskWriter(bmg, cntr)
 	return bmg
 }
 
@@ -165,7 +167,7 @@ func (c *fairBacklogManagerImpl) getSubqueueForPriority(priority int32) int {
 		return i
 	}
 
-	// We need to allocate a new subqueue. Note this is doing io under backlogLock,
+	// We need to allocate a new subqueue. Note this is doing io under subqueueLock,
 	// but we want to serialize these updates.
 	// TODO(pri): maybe we can improve that
 	subqueues, err := c.db.AllocateSubqueue(c.tqCtx, &persistencespb.SubqueueKey{
@@ -209,6 +211,23 @@ func (c *fairBacklogManagerImpl) SpoolTask(taskInfo *persistencespb.TaskInfo) er
 	err := c.taskWriter.appendTask(subqueue, taskInfo)
 	c.signalIfFatal(err)
 	return err
+}
+
+func (c *fairBacklogManagerImpl) getAndPinAckLevels() ([]fairLevel, func()) {
+	c.subqueueLock.Lock()
+	subqueues := slices.Clone(c.subqueues)
+	c.subqueueLock.Unlock()
+
+	levels := make([]fairLevel, len(subqueues))
+	for i, s := range subqueues {
+		levels[i] = s.getAndPinAckLevel()
+	}
+	unpin := func() {
+		for _, s := range subqueues {
+			s.unpinAckLevel()
+		}
+	}
+	return levels, unpin
 }
 
 func (c *fairBacklogManagerImpl) signalReaders(resp createFairTasksResponse) {

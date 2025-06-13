@@ -26,6 +26,7 @@ import (
 	"go.temporal.io/server/common/quotas"
 	"go.temporal.io/server/common/testing/testhooks"
 	"go.temporal.io/server/common/worker_versioning"
+	"go.temporal.io/server/service/matching/counter"
 	"go.temporal.io/server/service/worker/workerdeployment"
 	"google.golang.org/protobuf/types/known/durationpb"
 )
@@ -175,6 +176,7 @@ func newPhysicalTaskQueueManager(
 	})
 
 	if fairness {
+		cntr := counter.NewMapCounter() // FIXME: configurable
 		pqMgr.backlogMgr = newFairBacklogManager(
 			tqCtx,
 			pqMgr,
@@ -184,6 +186,7 @@ func newPhysicalTaskQueueManager(
 			throttledLogger,
 			e.matchingRawClient,
 			newPriMetricsHandler(taggedMetricsHandler),
+			cntr,
 		)
 		var fwdr *priForwarder
 		var err error

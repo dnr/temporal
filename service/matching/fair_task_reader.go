@@ -49,7 +49,8 @@ type (
 		outstandingTasks *treemap.Map // fairLevel->*internalTask (nil if acked)
 		loadedTasks      int
 		readLevel        fairLevel
-		ackLevel         fairLevel
+		ackLevel         fairLevel // FIXME: make this inclusive everywhere
+		ackLevelPinned   bool
 
 		// gc state
 		inGC       bool
@@ -135,20 +136,15 @@ func (tr *fairTaskReader) completeTask(task *internalTask, res taskResponse) {
 	tr.lock.Lock()
 	defer tr.lock.Unlock()
 
-	tr.backlogAge.record(task.event.AllocatedTaskInfo.Data.CreateTime, -1)
+	tr.backlogAge.record(task.event.Data.CreateTime, -1)
 
-	numAcked := tr.ackTaskLocked(fairLevel{pass: task.event.PassNumber, id: task.event.TaskId})
-
-	tr.numToGC += int(numAcked)
-	tr.maybeGCLocked()
+	tr.ackTaskLocked(fairLevel{pass: task.event.PassNumber, id: task.event.TaskId})
 
 	// use == so we just signal once when we cross this threshold
 	// TODO(pri): is this safe? maybe we need to improve this
 	if tr.loadedTasks == tr.backlogMgr.config.GetTasksReloadAt() {
 		tr.SignalTaskLoading()
 	}
-
-	tr.backlogMgr.db.updateFairAckLevelAndBacklogStats(tr.subqueue, tr.ackLevel, -numAcked, tr.backlogAge.oldestTime())
 }
 
 // nolint:revive // can simplify later
@@ -156,6 +152,7 @@ func (tr *fairTaskReader) getTasksPump() {
 	ctx := tr.backlogMgr.tqCtx
 
 	tr.SignalTaskLoading() // prime pump
+	// FIXME: do we need a goroutine here at all?
 	for {
 		select {
 		case <-ctx.Done():
@@ -431,17 +428,25 @@ func (tr *fairTaskReader) getLoadedTasks() int {
 	return tr.loadedTasks
 }
 
-func (tr *fairTaskReader) ackTaskLocked(level fairLevel) int64 {
+func (tr *fairTaskReader) ackTaskLocked(level fairLevel) {
 	wasAlreadyAcked, found := tr.outstandingTasks.Get(level)
 	if !softassert.That(tr.logger, found, "completed task not found in oustandingTasks") {
-		return 0
+		return
 	}
 	if !softassert.That(tr.logger, !wasAlreadyAcked.(bool), "completed task was already acked") {
-		return 0
+		return
 	}
 
 	tr.outstandingTasks.Put(level, (*internalTask)(nil))
 	tr.loadedTasks--
+
+	tr.advanceAckLevelLocked()
+}
+
+func (tr *fairTaskReader) advanceAckLevelLocked() {
+	if tr.ackLevelPinned {
+		return
+	}
 
 	// Adjust the ack level as far as we can
 	var numAcked int64
@@ -455,22 +460,31 @@ func (tr *fairTaskReader) ackTaskLocked(level fairLevel) int64 {
 		tr.outstandingTasks.Remove(minLevel)
 		numAcked += 1
 	}
-	return numAcked
+
+	if numAcked > 0 {
+		tr.numToGC += int(numAcked)
+		tr.maybeGCLocked()
+
+		tr.backlogMgr.db.updateFairAckLevelAndBacklogStats(tr.subqueue, tr.ackLevel, -numAcked, tr.backlogAge.oldestTime())
+	}
 }
 
-func (tr *fairTaskReader) setReadLevelAfterGap(newReadLevel fairLevel) {
+func (tr *fairTaskReader) getAndPinAckLevel() fairLevel {
 	tr.lock.Lock()
 	defer tr.lock.Unlock()
-	if tr.ackLevel == tr.readLevel {
-		// This is called after we read a range and find no tasks. The range we read was tr.readLevel to newReadLevel.
-		// (We know this because nothing should change tr.readLevel except the getTasksPump loop itself, after initialization.
-		// And getTasksPump doesn't start until it gets a signal from taskWriter that it's initialized the levels.)
-		// If we've acked all tasks up to tr.readLevel, and there are no tasks between that and newReadLevel, then we've
-		// acked all tasks up to newReadLevel too. This lets us advance the ack level on a task queue with no activity
-		// but where the rangeid has moved higher, to prevent excessive reads on the next load.
-		tr.ackLevel = newReadLevel
-	}
-	tr.readLevel = newReadLevel
+
+	softassert.That(tr.logger, !tr.ackLevelPinned, "ack level already pinned")
+	tr.ackLevelPinned = true
+	return tr.ackLevel
+}
+
+func (tr *fairTaskReader) unpinAckLevel() {
+	tr.lock.Lock()
+	defer tr.lock.Unlock()
+
+	softassert.That(tr.logger, tr.ackLevelPinned, "ack level wasn't pinned")
+	tr.ackLevelPinned = false
+	tr.advanceAckLevelLocked()
 }
 
 func (tr *fairTaskReader) getLevels() (readLevel, ackLevel fairLevel) {

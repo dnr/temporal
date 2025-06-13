@@ -38,12 +38,13 @@ type (
 
 func newFairTaskWriter(
 	backlogMgr *fairBacklogManagerImpl,
+	cntr counter.Counter,
 ) *fairTaskWriter {
 	return &fairTaskWriter{
 		backlogMgr:  backlogMgr,
 		config:      backlogMgr.config,
 		db:          backlogMgr.db,
-		counter:     counter.NewMapCounter(), // FIXME: configurable
+		counter:     cntr,
 		logger:      backlogMgr.logger,
 		appendCh:    make(chan *writeTaskRequest, backlogMgr.config.OutstandingTaskAppendsThreshold()),
 		taskIDBlock: noTaskIDs,
@@ -112,41 +113,31 @@ func (w *fairTaskWriter) allocTaskIDs(count int) ([]int64, error) {
 	return result, nil
 }
 
-func (w *fairTaskWriter) allocPasses(tasks []*writeTaskRequest) []int64 {
-	out := make([]int64, len(tasks))
+func (w *fairTaskWriter) pickPasses(tasks []*writeTaskRequest, bases []fairLevel) []int64 {
+	// FIXME: get this from config
+	var overrideWeights map[string]float32
+
+	passes := make([]int64, len(tasks))
 	for i, task := range tasks {
 		key := task.taskInfo.Priority.GetFairnessKey()
-		weight := task.taskInfo.Priority.GetFairnessWeight()
-		if weight == 0 {
-			weight = 1.0
+
+		weight, ok := overrideWeights[key]
+		if !ok {
+			weight = task.taskInfo.Priority.GetFairnessWeight()
 		}
-		// FIXME: check override weights here
-		weight = max(minWeight, weight)
+		if weight <= 0.0 {
+			weight = 1.0
+		} else if weight < minWeight {
+			weight = minWeight
+		}
+
 		inc := max(1, int64(strideFactor/weight))
-		base := int64(0) // FIXME: get ack level
-		out[i] = w.counter.GetPass(key, base, inc)
-	}
-	return out
-}
 
-func (w *fairTaskWriter) appendTasks(
-	taskIDs []int64,
-	passes []int64,
-	reqs []*writeTaskRequest,
-) error {
-	resp, err := w.db.CreateFairTasks(w.backlogMgr.tqCtx, taskIDs, passes, reqs)
-	if err != nil {
-		w.backlogMgr.signalIfFatal(err)
-		w.logger.Error("Persistent store operation failure",
-			tag.StoreOperationCreateTask,
-			tag.Error(err),
-			tag.WorkflowTaskQueueName(w.backlogMgr.queueKey().PersistenceName()),
-			tag.WorkflowTaskQueueType(w.backlogMgr.queueKey().TaskType()))
-		return err
-	}
+		base := bases[task.subqueue].pass
 
-	w.backlogMgr.signalReaders(resp)
-	return nil
+		passes[i] = w.counter.GetPass(key, base, inc)
+	}
+	return passes
 }
 
 func (w *fairTaskWriter) initState() error {
@@ -174,23 +165,34 @@ func (w *fairTaskWriter) taskWriterLoop() {
 		atomic.StoreInt64(&w.currentTaskIDBlock.start, w.taskIDBlock.start)
 		atomic.StoreInt64(&w.currentTaskIDBlock.end, w.taskIDBlock.end)
 
+		var req *writeTaskRequest
 		select {
-		case request := <-w.appendCh:
-			// read a batch of requests from the channel
-			reqs = append(reqs[:0], request)
-			reqs = w.getWriteBatch(reqs)
-
-			taskIDs, err := w.allocTaskIDs(len(reqs))
-			if err == nil {
-				passes := w.allocPasses(reqs)
-				err = w.appendTasks(taskIDs, passes, reqs)
-			}
-			for _, req := range reqs {
-				req.responseCh <- err
-			}
-
 		case <-w.backlogMgr.tqCtx.Done():
 			return
+		case req = <-w.appendCh:
+		}
+
+		// read a batch of requests from the channel
+		reqs = append(reqs[:0], req)
+		reqs = w.getWriteBatch(reqs)
+
+		ids, err := w.allocTaskIDs(len(reqs))
+
+		if err == nil {
+			bases, unpin := w.backlogMgr.getAndPinAckLevels()
+			passes := w.pickPasses(reqs, bases)
+			var resp createFairTasksResponse
+			resp, err = w.db.CreateFairTasks(w.backlogMgr.tqCtx, ids, passes, reqs)
+			if err == nil {
+				w.backlogMgr.signalReaders(resp)
+			} else {
+				w.logger.Error("Persistent store operation failure", tag.StoreOperationCreateTask, tag.Error(err))
+				w.backlogMgr.signalIfFatal(err)
+			}
+			unpin()
+		}
+		for _, req := range reqs {
+			req.responseCh <- err
 		}
 	}
 }

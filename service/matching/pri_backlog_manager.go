@@ -181,7 +181,7 @@ func (c *priBacklogManagerImpl) getSubqueueForPriority(priority int32) int {
 		return i
 	}
 
-	// We need to allocate a new subqueue. Note this is doing io under backlogLock,
+	// We need to allocate a new subqueue. Note this is doing io under subqueueLock,
 	// but we want to serialize these updates.
 	// TODO(pri): maybe we can improve that
 	subqueues, err := c.db.AllocateSubqueue(c.tqCtx, &persistencespb.SubqueueKey{
