@@ -5,6 +5,7 @@ import (
 	"errors"
 	"slices"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/emirpasic/gods/maps/treemap"
@@ -33,11 +34,11 @@ type (
 	fairTaskReader struct {
 		backlogMgr *fairBacklogManagerImpl
 		subqueue   int
-		notifyC    chan struct{} // Used as signal to notify pump of new tasks
 		logger     log.Logger
 
 		lock sync.Mutex
 
+		readPending  atomic.Bool
 		backoffTimer *time.Timer
 		retrier      backoff.Retrier
 
@@ -67,7 +68,6 @@ func newFairTaskReader(
 	return &fairTaskReader{
 		backlogMgr: backlogMgr,
 		subqueue:   subqueue,
-		notifyC:    make(chan struct{}, 1),
 		logger:     backlogMgr.logger,
 		retrier: backoff.NewRetrier(
 			common.CreateReadTaskRetryPolicy(),
@@ -86,16 +86,8 @@ func newFairTaskReader(
 	}
 }
 
-// Start fairTaskReader background goroutines.
 func (tr *fairTaskReader) Start() {
-	go tr.getTasksPump()
-}
-
-func (tr *fairTaskReader) SignalTaskLoading() {
-	select {
-	case tr.notifyC <- struct{}{}:
-	default: // channel already has an event, don't block
-	}
+	tr.readTasks()
 }
 
 func (tr *fairTaskReader) getOldestBacklogTime() time.Time {
@@ -143,70 +135,62 @@ func (tr *fairTaskReader) completeTask(task *internalTask, res taskResponse) {
 	// use == so we just signal once when we cross this threshold
 	// TODO(pri): is this safe? maybe we need to improve this
 	if tr.loadedTasks == tr.backlogMgr.config.GetTasksReloadAt() {
-		tr.SignalTaskLoading()
+		tr.readTasks()
 	}
 }
 
-// nolint:revive // can simplify later
-func (tr *fairTaskReader) getTasksPump() {
-	ctx := tr.backlogMgr.tqCtx
+func (tr *fairTaskReader) readTasks() {
+	if tr.readPending.CompareAndSwap(false, true) {
+		go tr.readTasksImpl()
+	}
+}
 
-	tr.SignalTaskLoading() // prime pump
-	// FIXME: do we need a goroutine here at all?
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-tr.notifyC:
-		}
+func (tr *fairTaskReader) readTasksImpl() {
+	defer tr.readPending.Store(false)
 
-		if tr.getLoadedTasks() > tr.backlogMgr.config.GetTasksReloadAt() {
-			// Too many loaded already, ignore this signal. We'll get another signal when
-			// loadedTasks drops low enough.
-			continue
-		}
+	reloadAt := tr.backlogMgr.config.GetTasksReloadAt()
 
-		tr.lock.Lock()
-		readLevel := tr.readLevel
+	tr.lock.Lock()
+	if tr.loadedTasks > reloadAt {
+		// Too many loaded already. We'll get called again when loadedTasks drops low enough.
 		tr.lock.Unlock()
+		return
+	}
+	readLevel := tr.readLevel
+	tr.lock.Unlock()
 
-		maxReadLevel := tr.backlogMgr.db.GetMaxFairReadLevel(tr.subqueue)
+	maxReadLevel := tr.backlogMgr.db.GetMaxFairReadLevel(tr.subqueue)
 
-		if fairLevelLess(maxReadLevel, tr.readLevel) {
-			// we're at the end, don't need to actually do a read
-			continue
+	if fairLevelLess(maxReadLevel, readLevel) {
+		// we're at the end, don't need to actually do a read
+		return
+	}
+
+	batch := tr.backlogMgr.config.GetTasksBatchSize()
+	res, err := tr.backlogMgr.db.GetFairTasks(tr.backlogMgr.tqCtx, tr.subqueue, readLevel, batch)
+	if err != nil {
+		tr.backlogMgr.signalIfFatal(err)
+		// TODO: Should we ever stop retrying on db errors?
+		if common.IsResourceExhausted(err) {
+			tr.backoffSignal(taskReaderThrottleRetryDelay)
+		} else {
+			tr.backoffSignal(tr.retrier.NextBackOff(err))
 		}
+		return
+	}
+	tr.retrier.Reset()
 
-		res, err := tr.backlogMgr.db.GetFairTasks(ctx, tr.subqueue, readLevel, tr.backlogMgr.config.GetTasksBatchSize())
-		if err != nil {
-			tr.backlogMgr.signalIfFatal(err)
-			// TODO: Should we ever stop retrying on db errors?
-			if common.IsResourceExhausted(err) {
-				tr.backoffSignal(taskReaderThrottleRetryDelay)
-			} else {
-				tr.backoffSignal(tr.retrier.NextBackOff(err))
-			}
-			continue
+	// filter out deleted
+	tasks := slices.DeleteFunc(res.Tasks, func(t *persistencespb.AllocatedTaskInfo) bool {
+		if IsTaskExpired(t) {
+			metrics.ExpiredTasksPerTaskQueueCounter.With(tr.backlogMgr.metricsHandler).Record(1)
+			return true
 		}
-		tr.retrier.Reset()
+		return false
+	})
 
-		// filter out deleted
-		tasks := slices.DeleteFunc(res.Tasks, func(t *persistencespb.AllocatedTaskInfo) bool {
-			if IsTaskExpired(t) {
-				metrics.ExpiredTasksPerTaskQueueCounter.With(tr.backlogMgr.metricsHandler).Record(1)
-				return true
-			}
-			return false
-		})
-
-		if len(res.Tasks) == 0 {
-			continue
-		}
-
+	if len(res.Tasks) > 0 {
 		tr.mergeTasks(tasks)
-
-		// There may be more tasks.
-		tr.SignalTaskLoading()
 	}
 }
 
@@ -412,10 +396,10 @@ func (tr *fairTaskReader) backoffSignal(duration time.Duration) {
 	if tr.backoffTimer == nil {
 		tr.backoffTimer = time.AfterFunc(duration, func() {
 			tr.lock.Lock()
-			defer tr.lock.Unlock()
-
-			tr.SignalTaskLoading() // re-enqueue the event
 			tr.backoffTimer = nil
+			tr.lock.Unlock()
+
+			tr.readTasks()
 		})
 	}
 }
