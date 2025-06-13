@@ -264,6 +264,15 @@ func (d *matcherData) EnqueueTaskNoWait(task *internalTask) {
 	d.findAndWakeMatches()
 }
 
+func (d *matcherData) RemoveTask(task *internalTask) {
+	d.lock.Lock()
+	defer d.lock.Unlock()
+
+	if task.matchHeapIndex >= 0 {
+		d.tasks.Remove(task)
+	}
+}
+
 func (d *matcherData) EnqueueTaskAndWait(ctxs []context.Context, task *internalTask) *matchResult {
 	d.lock.Lock()
 	defer d.lock.Unlock()

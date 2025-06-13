@@ -436,7 +436,7 @@ func (tm *priTaskMatcher) AddTask(task *internalTask) {
 }
 
 func (tm *priTaskMatcher) RemoveTask(task *internalTask) {
-	// FIXME!!!
+	tm.data.RemoveTask(task)
 }
 
 func (tm *priTaskMatcher) emitDispatchLatency(task *internalTask, forwarded bool) {
