@@ -357,15 +357,15 @@ func (tr *fairTaskReader) mergeTasks(tasks []*persistencespb.AllocatedTaskInfo) 
 	// remove them from the buffer.
 	toRemove := make([]*internalTask, 0, merged.Size()-canBuffer)
 	for it.Next() {
-		if t, ok := it.Value().(*internalTask); ok {
+		if task, ok := it.Value().(*internalTask); ok {
 			// task that was in the matcher before that we have to remove
-			toRemove = append(toRemove, t)
-		}
-	}
+			tr.backlogAge.record(task.event.Data.CreateTime, -1)
+			tr.loadedTasks--
+			tr.outstandingTasks.Remove(it.Key().(fairLevel))
 
-	for _, task := range toRemove {
-		// FIXME: do remove bookkeeping here!!
-		_ = task
+			// do remove from matcher below
+			toRemove = append(toRemove, task)
+		}
 	}
 
 	// After we get to this point, we must eventually call task.finish or
@@ -379,7 +379,7 @@ func (tr *fairTaskReader) mergeTasks(tasks []*persistencespb.AllocatedTaskInfo) 
 		tr.backlogAge.record(t.Data.CreateTime, 1)
 	}
 
-	// unlock before calling addTaskToMatcher
+	// unlock before calling addTaskToMatcher/removeSpooledTask
 	tr.lock.Unlock()
 
 	for _, task := range toRemove {
