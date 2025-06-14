@@ -47,7 +47,7 @@ type (
 		addRetries *semaphore.Weighted
 
 		// ack manager state
-		outstandingTasks *treemap.Map // fairLevel->*internalTask (nil if acked)
+		outstandingTasks *treemap.Map // fairLevel->*internalTask (or nil if acked)
 		loadedTasks      int
 		readLevel        fairLevel
 		ackLevel         fairLevel // FIXME: make this inclusive everywhere
@@ -320,7 +320,8 @@ func (tr *fairTaskReader) mergeTasks(tasks []*persistencespb.AllocatedTaskInfo) 
 
 	// get outstanding tasks. note these values are *internalTask.
 	merged := tr.outstandingTasks.Select(func(k, v any) bool {
-		return v.(*internalTask) != nil // nolint:revive
+		_, ok := v.(*internalTask)
+		return ok
 	})
 	// add the tasks we just wrote. note these values are *AllocatedTaskInfo.
 	for _, t := range tasks {
@@ -338,12 +339,14 @@ func (tr *fairTaskReader) mergeTasks(tasks []*persistencespb.AllocatedTaskInfo) 
 	it := merged.Iterator()
 	var lastLevel fairLevel
 	tasks = tasks[:0]
+	canBuffer := 0
 	for b := 0; it.Next() && b < batchSize; b++ {
 		lastLevel = it.Key().(fairLevel) // nolint:revive
 		if t, ok := it.Value().(*persistencespb.AllocatedTaskInfo); ok {
 			// new task we need to add to the matcher
 			tasks = append(tasks, t)
 		}
+		canBuffer++
 	}
 
 	// Set R to the maximum level in that set.
@@ -352,8 +355,7 @@ func (tr *fairTaskReader) mergeTasks(tasks []*persistencespb.AllocatedTaskInfo) 
 	// If there are remaining tasks in the merged set, they can't fit in the buffer.
 	// If they came from the tasks we just wrote, ignore them. If they came from the buffer,
 	// remove them from the buffer.
-	// FIXME: this size initialization may be wrong
-	toRemove := make([]*internalTask, 0, merged.Size()-batchSize)
+	toRemove := make([]*internalTask, 0, merged.Size()-canBuffer)
 	for it.Next() {
 		if t, ok := it.Value().(*internalTask); ok {
 			// task that was in the matcher before that we have to remove
@@ -413,15 +415,13 @@ func (tr *fairTaskReader) getLoadedTasks() int {
 }
 
 func (tr *fairTaskReader) ackTaskLocked(level fairLevel) {
-	wasAlreadyAcked, found := tr.outstandingTasks.Get(level)
-	if !softassert.That(tr.logger, found, "completed task not found in oustandingTasks") {
+	if task, found := tr.outstandingTasks.Get(level); !softassert.That(tr.logger, found, "completed task not found in oustandingTasks") {
 		return
-	}
-	if !softassert.That(tr.logger, !wasAlreadyAcked.(bool), "completed task was already acked") {
+	} else if _, ok := task.(*internalTask); !softassert.That(tr.logger, ok, "completed task was already acked") {
 		return
 	}
 
-	tr.outstandingTasks.Put(level, (*internalTask)(nil))
+	tr.outstandingTasks.Put(level, nil)
 	tr.loadedTasks--
 
 	tr.advanceAckLevelLocked()
@@ -436,8 +436,9 @@ func (tr *fairTaskReader) advanceAckLevelLocked() {
 	var numAcked int64
 	for {
 		minLevel, v := tr.outstandingTasks.Min()
-		task := v.(*internalTask) // nolint:revive
-		if minLevel == nil || task != nil {
+		if minLevel == nil {
+			break
+		} else if _, ok := v.(*internalTask); ok {
 			break
 		}
 		tr.ackLevel = minLevel.(fairLevel) // nolint:revive

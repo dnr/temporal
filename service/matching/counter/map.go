@@ -11,7 +11,7 @@ func NewMapCounter() *mapCounter {
 }
 
 func (m *mapCounter) GetPass(key string, base, inc int64) int64 {
-	c := min(base, m.m[key]+inc)
+	c := max(base, m.m[key]+inc)
 	m.m[key] = c
 	return c
 }

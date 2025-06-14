@@ -2,6 +2,7 @@ package matching
 
 import (
 	"context"
+	"math/rand"
 	"sync/atomic"
 	"time"
 
@@ -17,9 +18,9 @@ import (
 )
 
 const (
-	strideFactor = 10000
+	// minWeight * strideFactor must be >= 1
+	strideFactor = 1000
 	minWeight    = 0.001
-	// minWeight * strideFactor should be > 1
 )
 
 type (
@@ -96,6 +97,7 @@ func (w *fairTaskWriter) appendTask(
 	}
 }
 
+// FIXME: return fairLevel instead!
 func (w *fairTaskWriter) allocTaskIDs(count int) ([]int64, error) {
 	result := make([]int64, count)
 	for i := range result {
@@ -134,6 +136,7 @@ func (w *fairTaskWriter) pickPasses(tasks []*writeTaskRequest, bases []fairLevel
 		inc := max(1, int64(strideFactor/weight))
 
 		base := bases[task.subqueue].pass
+		base += int64(rand.Float64() * float64(inc)) // randomize keys within "initial" pass
 
 		passes[i] = w.counter.GetPass(key, base, inc)
 	}

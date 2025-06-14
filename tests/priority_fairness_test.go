@@ -34,6 +34,7 @@ func (s *PrioritySuite) SetupSuite() {
 	dynamicConfigOverrides := map[dynamicconfig.Key]any{
 		dynamicconfig.MatchingUseNewMatcher.Key():     true,
 		dynamicconfig.MatchingGetTasksBatchSize.Key(): 20,
+		dynamicconfig.MatchingGetTasksReloadAt.Key():  5,
 	}
 	s.FunctionalTestBase.SetupSuiteWithCluster(testcore.WithDynamicConfigOverrides(dynamicConfigOverrides))
 }
@@ -238,6 +239,7 @@ func (s *FairnessSuite) SetupSuite() {
 	dynamicConfigOverrides := map[dynamicconfig.Key]any{
 		dynamicconfig.MatchingEnableFairness.Key():         true,
 		dynamicconfig.MatchingGetTasksBatchSize.Key():      20,
+		dynamicconfig.MatchingGetTasksReloadAt.Key():       5,
 		dynamicconfig.NumPendingActivitiesLimitError.Key(): 1000,
 		// TODO: disable this later?
 		dynamicconfig.MatchingNumTaskqueueReadPartitions.Key():  1,
