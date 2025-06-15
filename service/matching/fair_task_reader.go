@@ -128,8 +128,6 @@ func (tr *fairTaskReader) completeTask(task *internalTask, res taskResponse) {
 	tr.lock.Lock()
 	defer tr.lock.Unlock()
 
-	tr.backlogAge.record(task.event.Data.CreateTime, -1)
-
 	tr.ackTaskLocked(fairLevel{pass: task.event.PassNumber, id: task.event.TaskId})
 
 	// use == so we just signal once when we cross this threshold
@@ -361,6 +359,7 @@ func (tr *fairTaskReader) mergeTasks(tasks []*persistencespb.AllocatedTaskInfo) 
 			// task that was in the matcher before that we have to remove
 			tr.backlogAge.record(task.event.Data.CreateTime, -1)
 			tr.loadedTasks--
+			softassert.That(tr.logger, tr.loadedTasks >= 0, "loadedTasks went negative")
 			tr.outstandingTasks.Remove(it.Key().(fairLevel))
 
 			// do remove from matcher below
@@ -421,8 +420,9 @@ func (tr *fairTaskReader) ackTaskLocked(level fairLevel) {
 		return
 	}
 
-	tr.outstandingTasks.Put(level, nil)
+	tr.backlogAge.record(task.event.Data.CreateTime, -1)
 	tr.loadedTasks--
+	tr.outstandingTasks.Put(level, nil)
 
 	tr.advanceAckLevelLocked()
 }
