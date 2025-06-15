@@ -363,7 +363,6 @@ func (db *taskQueueDB) getTotalApproximateBacklogCount() (total int64) {
 // CreateTasks creates a batch of given tasks for this task queue
 func (db *taskQueueDB) CreateTasks(
 	ctx context.Context,
-	taskIDs []int64,
 	reqs []*writeTaskRequest,
 ) (createTasksResponse, error) {
 	db.Lock()
@@ -378,7 +377,7 @@ func (db *taskQueueDB) CreateTasks(
 	allSubqueues := make([]int, len(reqs))
 	for i, req := range reqs {
 		task := &persistencespb.AllocatedTaskInfo{
-			TaskId: taskIDs[i],
+			TaskId: req.id,
 			Data:   req.taskInfo,
 		}
 		allTasks[i] = task
@@ -432,7 +431,6 @@ func (db *taskQueueDB) CreateTasks(
 // CreateFairTasks creates a batch of given tasks for this task queue
 func (db *taskQueueDB) CreateFairTasks(
 	ctx context.Context,
-	levels []fairLevel,
 	reqs []*writeTaskRequest,
 ) (createFairTasksResponse, error) {
 	db.Lock()
@@ -448,8 +446,8 @@ func (db *taskQueueDB) CreateFairTasks(
 	allSubqueues := make([]int, len(reqs))
 	for i, req := range reqs {
 		task := &persistencespb.AllocatedTaskInfo{
-			TaskId:     levels[i].id,
-			PassNumber: levels[i].pass,
+			TaskId:     req.id,
+			PassNumber: req.pass,
 			Data:       req.taskInfo,
 		}
 		allTasks[i] = task
