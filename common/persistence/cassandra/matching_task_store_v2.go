@@ -3,6 +3,7 @@ package cassandra
 import (
 	"context"
 	"fmt"
+	"math"
 	"strings"
 	"time"
 
@@ -29,14 +30,14 @@ const (
 		`and task_queue_name = ? ` +
 		`and task_queue_type = ? ` +
 		`and type = ? ` +
-		`and (pass = ? and task_id >= ? or pass > ?)`
+		`and (pass, task_id) >= (?, ?)`
 
 	templateCompleteTasksLessThanQuery_v2 = `DELETE FROM tasks_v2 ` +
 		`WHERE namespace_id = ? ` +
 		`AND task_queue_name = ? ` +
 		`AND task_queue_type = ? ` +
 		`AND type = ? ` +
-		`and (pass < ? or pass = ? and task_id < ?)`
+		`and (pass, task_id) < (?, ?)`
 
 	templateGetTaskQueueQuery_v2 = `SELECT ` +
 		`range_id, ` +
@@ -356,7 +357,7 @@ func (d *matchingTaskStoreV2) GetTasks(
 	request *p.GetTasksRequest,
 ) (*p.InternalGetTasksResponse, error) {
 	// Require starting from pass 1.
-	if request.InclusiveMinPass < 1 || request.ExclusiveMaxTaskID != 0 {
+	if request.InclusiveMinPass < 1 || request.ExclusiveMaxTaskID != math.MaxInt64 {
 		return nil, serviceerror.NewInternal("invalid GetTasks request on fair queue")
 	}
 
@@ -368,7 +369,6 @@ func (d *matchingTaskStoreV2) GetTasks(
 		rowTypeTaskInSubqueue(request.Subqueue),
 		request.InclusiveMinPass,
 		request.InclusiveMinTaskID,
-		request.InclusiveMinPass,
 	).WithContext(ctx)
 	iter := query.PageSize(request.PageSize).PageState(request.NextPageToken).Iter()
 
@@ -388,7 +388,6 @@ func (d *matchingTaskStoreV2) GetTasks(
 		if !ok {
 			var byteSliceType []byte
 			return nil, newPersistedTypeMismatchError("task", byteSliceType, rawTask, task)
-
 		}
 
 		rawEncoding, ok := task["task_encoding"]
@@ -432,7 +431,6 @@ func (d *matchingTaskStoreV2) CompleteTasksLessThan(
 		request.TaskQueueName,
 		request.TaskType,
 		rowTypeTaskInSubqueue(request.Subqueue),
-		request.ExclusiveMaxPass,
 		request.ExclusiveMaxPass,
 		request.ExclusiveMaxTaskID,
 	).WithContext(ctx)

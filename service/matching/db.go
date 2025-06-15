@@ -3,6 +3,7 @@ package matching
 import (
 	"context"
 	"fmt"
+	"math"
 	"slices"
 	"sync"
 	"time"
@@ -72,7 +73,7 @@ type (
 
 	subqueueCreateFairTasksResponse struct {
 		tasks              []*persistencespb.AllocatedTaskInfo
-		maxReadLevelBefore fairLevel
+		maxReadLevelBefore fairLevel // FIXME: can we just get rid of these?
 		maxReadLevelAfter  fairLevel
 	}
 )
@@ -541,6 +542,7 @@ func (db *taskQueueDB) GetFairTasks(
 		TaskType:           db.queue.TaskType(),
 		InclusiveMinPass:   inclusiveMinLevel.pass,
 		InclusiveMinTaskID: inclusiveMinLevel.id,
+		ExclusiveMaxTaskID: math.MaxInt64,
 		Subqueue:           subqueue,
 		PageSize:           batchSize,
 	})
@@ -723,6 +725,7 @@ func (db *taskQueueDB) newSubqueueLocked(key *persistencespb.SubqueueKey) *dbSub
 	initAckLevel := rangeIDToTaskIDBlock(db.rangeID, db.config.RangeSize).start - 1
 
 	s := &dbSubqueue{}
+	// FIXME: MaxReadLevelPass???
 	s.MaxReadLevelId = initAckLevel
 	s.Key = key
 	s.AckLevel = initAckLevel

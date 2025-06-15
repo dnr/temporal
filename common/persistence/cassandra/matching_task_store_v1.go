@@ -376,7 +376,6 @@ func (d *matchingTaskStoreV1) GetTasks(
 		if !ok {
 			var byteSliceType []byte
 			return nil, newPersistedTypeMismatchError("task", byteSliceType, rawTask, task)
-
 		}
 
 		rawEncoding, ok := task["task_encoding"]

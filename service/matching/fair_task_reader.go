@@ -3,6 +3,7 @@ package matching
 import (
 	"context"
 	"errors"
+	"fmt"
 	"slices"
 	"sync"
 	"sync/atomic"
@@ -20,6 +21,7 @@ import (
 	"go.temporal.io/server/common/persistence"
 	serviceerrors "go.temporal.io/server/common/serviceerror"
 	"go.temporal.io/server/common/softassert"
+	"go.temporal.io/server/common/tqid"
 	"go.temporal.io/server/common/util"
 	"golang.org/x/sync/semaphore"
 )
@@ -47,8 +49,8 @@ type (
 		addRetries *semaphore.Weighted
 
 		// ack manager state
-		outstandingTasks *treemap.Map // fairLevel->*internalTask (or nil if acked)
-		loadedTasks      int
+		outstandingTasks *treemap.Map // fairLevel -> *internalTask, or nil if acked
+		loadedTasks      int          // == number of non-nil entries in outstandingTasks
 		readLevel        fairLevel
 		ackLevel         fairLevel // FIXME: make this inclusive everywhere
 		ackLevelPinned   bool
@@ -78,7 +80,7 @@ func newFairTaskReader(
 
 		// ack manager
 		outstandingTasks: treemap.NewWith(fairLevelComparator),
-		readLevel:        initialAckLevel,
+		readLevel:        fairLevelMax(initialAckLevel, fairLevel{pass: 1}), // FIXME: this is awkward, can we improve it?
 		ackLevel:         initialAckLevel,
 
 		// gc state
@@ -128,10 +130,12 @@ func (tr *fairTaskReader) completeTask(task *internalTask, res taskResponse) {
 	tr.lock.Lock()
 	defer tr.lock.Unlock()
 
+	tr.backlogAge.record(task.event.Data.CreateTime, -1)
 	tr.ackTaskLocked(fairLevel{pass: task.event.PassNumber, id: task.event.TaskId})
 
 	// use == so we just signal once when we cross this threshold
 	// TODO(pri): is this safe? maybe we need to improve this
+	fmt.Printf("@@@ %s completeTask reload? %d vs %d\n", tr, tr.loadedTasks, tr.backlogMgr.config.GetTasksReloadAt())
 	if tr.loadedTasks == tr.backlogMgr.config.GetTasksReloadAt() {
 		tr.readTasks()
 	}
@@ -139,7 +143,10 @@ func (tr *fairTaskReader) completeTask(task *internalTask, res taskResponse) {
 
 func (tr *fairTaskReader) readTasks() {
 	if tr.readPending.CompareAndSwap(false, true) {
+		fmt.Printf("@@@ %s readTasks doing read\n", tr)
 		go tr.readTasksImpl()
+	} else {
+		fmt.Printf("@@@ %s readTasks skipping\n", tr)
 	}
 }
 
@@ -149,6 +156,7 @@ func (tr *fairTaskReader) readTasksImpl() {
 	reloadAt := tr.backlogMgr.config.GetTasksReloadAt()
 
 	tr.lock.Lock()
+	fmt.Printf("@@@ %s readTasksImpl read? %d vs %d\n", tr, tr.loadedTasks, reloadAt)
 	if tr.loadedTasks > reloadAt {
 		// Too many loaded already. We'll get called again when loadedTasks drops low enough.
 		tr.lock.Unlock()
@@ -159,14 +167,17 @@ func (tr *fairTaskReader) readTasksImpl() {
 
 	maxReadLevel := tr.backlogMgr.db.GetMaxFairReadLevel(tr.subqueue)
 
+	fmt.Printf("@@@ %s readTasksImpl max ? lvl: %v ? %v\n", tr, maxReadLevel, readLevel)
 	if fairLevelLess(maxReadLevel, readLevel) {
 		// we're at the end, don't need to actually do a read
 		return
 	}
 
 	batch := tr.backlogMgr.config.GetTasksBatchSize()
+	fmt.Printf("@@@ %s readTasksImpl READ FROM %v\n", tr, readLevel)
 	res, err := tr.backlogMgr.db.GetFairTasks(tr.backlogMgr.tqCtx, tr.subqueue, readLevel, batch)
 	if err != nil {
+		fmt.Printf("@@@ %s readTasksImpl ERR %v\n", tr, err)
 		tr.backlogMgr.signalIfFatal(err)
 		// TODO: Should we ever stop retrying on db errors?
 		if common.IsResourceExhausted(err) {
@@ -187,6 +198,7 @@ func (tr *fairTaskReader) readTasksImpl() {
 		return false
 	})
 
+	fmt.Printf("@@@ %s readTasksImpl GOT %v\n", tr, len(res.Tasks))
 	if len(res.Tasks) > 0 {
 		tr.mergeTasks(tasks)
 	}
@@ -265,6 +277,7 @@ func (tr *fairTaskReader) retryAddAfterError(task *internalTask) {
 }
 
 func (tr *fairTaskReader) signalNewTasks(resp subqueueCreateFairTasksResponse) {
+	fmt.Printf("@@@ %s signalNewTasks %d\n", tr, len(resp.tasks))
 	tr.mergeTasks(resp.tasks)
 }
 
@@ -321,15 +334,19 @@ func (tr *fairTaskReader) mergeTasks(tasks []*persistencespb.AllocatedTaskInfo) 
 		_, ok := v.(*internalTask)
 		return ok
 	})
+	fmt.Printf("@@@ %s merging: %d total outstanding, %d unacked\n", tr, tr.outstandingTasks.Size(), merged.Size())
+	fmt.Printf("@@@ %s merging: unacked %v\n", tr, tr.outstandingTasks.Keys())
 	// add the tasks we just wrote. note these values are *AllocatedTaskInfo.
 	for _, t := range tasks {
 		level := fairLevel{pass: t.PassNumber, id: t.TaskId}
 		if _, have := merged.Get(level); have {
 			// duplicate: we write something we just read, or read something we just wrote.
 			// either way we have it in the buffer already. FIXME: is this right?
+			fmt.Printf("@@@ %s merging: DUPLICATE %v\n", tr, level)
 			continue
 		}
 		merged.Put(level, t)
+		fmt.Printf("@@@ %s merging: new task %v\n", tr, level)
 	}
 
 	// Take the first Bt of them (or all of them if < Bt). Set the buffer to that set.
@@ -343,12 +360,14 @@ func (tr *fairTaskReader) mergeTasks(tasks []*persistencespb.AllocatedTaskInfo) 
 		if t, ok := it.Value().(*persistencespb.AllocatedTaskInfo); ok {
 			// new task we need to add to the matcher
 			tasks = append(tasks, t)
+			fmt.Printf("@@@ %s merging: add to buf %v\n", tr, lastLevel)
 		}
 		canBuffer++
 	}
 
 	// Set R to the maximum level in that set.
 	tr.readLevel = lastLevel
+	fmt.Printf("@@@ %s merging: SETTING READLEVEL %v\n", tr, lastLevel)
 
 	// If there are remaining tasks in the merged set, they can't fit in the buffer.
 	// If they came from the tasks we just wrote, ignore them. If they came from the buffer,
@@ -356,6 +375,7 @@ func (tr *fairTaskReader) mergeTasks(tasks []*persistencespb.AllocatedTaskInfo) 
 	toRemove := make([]*internalTask, 0, merged.Size()-canBuffer)
 	for it.Next() {
 		if task, ok := it.Value().(*internalTask); ok {
+			fmt.Printf("@@@ %s merging: discarding from buf %v\n", tr, it.Key().(fairLevel))
 			// task that was in the matcher before that we have to remove
 			tr.backlogAge.record(task.event.Data.CreateTime, -1)
 			tr.loadedTasks--
@@ -367,12 +387,12 @@ func (tr *fairTaskReader) mergeTasks(tasks []*persistencespb.AllocatedTaskInfo) 
 		}
 	}
 
-	// After we get to this point, we must eventually call task.finish or
-	// task.finishForwarded, which will call tr.completeTask.
 	internalTasks := make([]*internalTask, len(tasks))
 	for i, t := range tasks {
 		level := fairLevel{pass: t.PassNumber, id: t.TaskId}
 		internalTasks[i] = newInternalTaskFromBacklog(t, tr.completeTask)
+		// After we get to this point, we must eventually call task.finish or
+		// task.finishForwarded, which will call tr.completeTask.
 		tr.outstandingTasks.Put(level, internalTasks[i])
 		tr.loadedTasks++
 		tr.backlogAge.record(t.Data.CreateTime, 1)
@@ -388,6 +408,7 @@ func (tr *fairTaskReader) mergeTasks(tasks []*persistencespb.AllocatedTaskInfo) 
 	for _, task := range internalTasks {
 		tr.addTaskToMatcher(task)
 	}
+	fmt.Printf("@@@ %s mergeTasks done ------------------\n", tr)
 }
 
 func (tr *fairTaskReader) backoffSignal(duration time.Duration) {
@@ -420,9 +441,9 @@ func (tr *fairTaskReader) ackTaskLocked(level fairLevel) {
 		return
 	}
 
-	tr.backlogAge.record(task.event.Data.CreateTime, -1)
-	tr.loadedTasks--
+	fmt.Println("@@@ ackTaskLocked", level)
 	tr.outstandingTasks.Put(level, nil)
+	tr.loadedTasks--
 
 	tr.advanceAckLevelLocked()
 }
@@ -505,6 +526,7 @@ func (tr *fairTaskReader) doGC(ackLevel fairLevel) {
 	ctx, cancel := context.WithTimeout(tr.backlogMgr.tqCtx, ioTimeout)
 	defer cancel()
 
+	fmt.Printf("@@@ %s readTasksImpl DELETE FROM %v\n", tr, ackLevel)
 	n, err := tr.backlogMgr.db.CompleteFairTasksLessThan(ctx, ackLevel, batchSize, tr.subqueue)
 
 	tr.lock.Lock()
@@ -524,6 +546,24 @@ func (tr *fairTaskReader) doGC(ackLevel fairLevel) {
 	} else {
 		tr.numToGC = max(0, tr.numToGC-n)
 	}
+}
+
+func (tr *fairTaskReader) String() string {
+	p := tr.backlogMgr.queueKey().Partition()
+	if np, ok := p.(*tqid.NormalPartition); ok {
+		return fmt.Sprintf("Q[%s|%s|%d|%d]",
+			np.TaskType(),
+			np.TaskQueue().Name(),
+			np.PartitionId(),
+			tr.subqueue,
+		)
+	} else {
+		return fmt.Sprintf("STQ[%v]", p)
+	}
+}
+
+func (l fairLevel) String() string {
+	return fmt.Sprintf("<%d,%d>", l.pass, l.id)
 }
 
 func fairLevelLess(a, b fairLevel) bool {

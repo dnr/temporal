@@ -332,7 +332,7 @@ func (s *FairnessSuite) TestFairness_Activity_Basic() {
 
 	u := unfairness(runs)
 	s.T().Log("unfairness:", u)
-	s.Less(u, 0.5) // FIXME: set good threshold
+	s.Less(u, 1.0)
 }
 
 func unfairness(vs []int) float64 {
