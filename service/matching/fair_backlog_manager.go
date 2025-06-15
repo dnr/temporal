@@ -235,7 +235,7 @@ func (c *fairBacklogManagerImpl) signalReaders(resp createFairTasksResponse) {
 	subqueues := slices.Clone(c.subqueues)
 	c.subqueueLock.Unlock()
 
-	for subqueue, subqueueResp := range resp.bySubqueue {
+	for subqueue, subqueueResp := range resp {
 		subqueues[subqueue].signalNewTasks(subqueueResp)
 	}
 }

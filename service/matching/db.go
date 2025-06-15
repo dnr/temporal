@@ -67,15 +67,7 @@ type (
 		maxReadLevelAfter  int64
 	}
 
-	createFairTasksResponse struct {
-		bySubqueue map[int]subqueueCreateFairTasksResponse
-	}
-
-	subqueueCreateFairTasksResponse struct {
-		tasks              []*persistencespb.AllocatedTaskInfo
-		maxReadLevelBefore fairLevel // FIXME: can we just get rid of these?
-		maxReadLevelAfter  fairLevel
-	}
+	createFairTasksResponse map[int][]*persistencespb.AllocatedTaskInfo // subqueue -> tasks
 )
 
 // newTaskQueueDB returns an instance of an object that represents
@@ -448,10 +440,11 @@ func (db *taskQueueDB) CreateFairTasks(
 	defer db.Unlock()
 
 	if len(reqs) == 0 {
-		return createFairTasksResponse{}, nil
+		return nil, nil
 	}
 
-	updates := make(map[int]subqueueCreateFairTasksResponse)
+	newTasks := make(createFairTasksResponse)
+	newMaxLevel := make(map[int]fairLevel)
 	allTasks := make([]*persistencespb.AllocatedTaskInfo, len(reqs))
 	allSubqueues := make([]int, len(reqs))
 	for i, req := range reqs {
@@ -462,22 +455,25 @@ func (db *taskQueueDB) CreateFairTasks(
 		}
 		allTasks[i] = task
 		allSubqueues[i] = req.subqueue
+		newTasks[req.subqueue] = append(newTasks[req.subqueue], task)
 
 		current := db.subqueues[req.subqueue]
-		u := updates[req.subqueue]
-		updates[req.subqueue] = subqueueCreateFairTasksResponse{
-			tasks:              append(u.tasks, task),
-			maxReadLevelBefore: fairLevel{pass: current.MaxReadLevelPass, id: current.MaxReadLevelId},
-			maxReadLevelAfter:  fairLevelMax(u.maxReadLevelAfter, fairLevel{pass: task.PassNumber, id: task.TaskId}),
-		}
+		currentMaxLevel := fairLevel{pass: current.MaxReadLevelPass, id: current.MaxReadLevelId}
+		newMaxLevel[req.subqueue] = fairLevelMax(
+			fairLevelMax(currentMaxLevel, newMaxLevel[req.subqueue]),
+			fairLevel{pass: task.PassNumber, id: task.TaskId},
+		)
 	}
 
-	for i, update := range updates {
-		db.subqueues[i].ApproximateBacklogCount += int64(len(update.tasks))
+	for i, tasks := range newTasks {
+		db.subqueues[i].ApproximateBacklogCount += int64(len(tasks))
 	}
 
 	resp, err := db.store.CreateTasks(
 		ctx,
+		// FIXME: aw crap, we want to write the new max read level in here, but also not update
+		// it in memory. do we have to clone in cachedQueueInfo? or something else?
+		// sql doesn't update metadata right now anyway, maybe we give up on this?
 		&persistence.CreateTasksRequest{
 			TaskQueueInfo: &persistence.PersistedTaskQueueInfo{
 				Data:    db.cachedQueueInfo(),
@@ -490,9 +486,9 @@ func (db *taskQueueDB) CreateFairTasks(
 	// Update the MaxReadLevel after the writes are completed, but before we send the response,
 	// so that taskReader is guaranteed to see the new read level when SpoolTask wakes it up.
 	// Do this even if the write fails, we won't reuse the task ids.
-	for i, update := range updates {
-		db.subqueues[i].MaxReadLevelPass = update.maxReadLevelAfter.pass
-		db.subqueues[i].MaxReadLevelId = update.maxReadLevelAfter.id
+	for i, level := range newMaxLevel {
+		db.subqueues[i].MaxReadLevelPass = level.pass
+		db.subqueues[i].MaxReadLevelId = level.id
 	}
 
 	if err == nil {
@@ -503,11 +499,11 @@ func (db *taskQueueDB) CreateFairTasks(
 	} else if _, ok := err.(*persistence.ConditionFailedError); ok {
 		// tasks definitely were not created, restore the counter. For other errors tasks may or may not be created.
 		// In those cases we keep the count incremented, hence it may be an overestimate.
-		for i, update := range updates {
-			db.subqueues[i].ApproximateBacklogCount -= int64(len(update.tasks))
+		for i, tasks := range newTasks {
+			db.subqueues[i].ApproximateBacklogCount -= int64(len(tasks))
 		}
 	}
-	return createFairTasksResponse{bySubqueue: updates}, err
+	return newTasks, err
 }
 
 // GetTasks returns a batch of tasks between the given range

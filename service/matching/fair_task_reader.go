@@ -276,9 +276,9 @@ func (tr *fairTaskReader) retryAddAfterError(task *internalTask) {
 	)
 }
 
-func (tr *fairTaskReader) signalNewTasks(resp subqueueCreateFairTasksResponse) {
-	fmt.Printf("@@@ %s signalNewTasks %d\n", tr, len(resp.tasks))
-	tr.mergeTasks(resp.tasks)
+func (tr *fairTaskReader) signalNewTasks(tasks []*persistencespb.AllocatedTaskInfo) {
+	fmt.Printf("@@@ %s signalNewTasks %d\n", tr, len(tasks))
+	tr.mergeTasks(tasks)
 }
 
 func (tr *fairTaskReader) mergeTasks(tasks []*persistencespb.AllocatedTaskInfo) {
