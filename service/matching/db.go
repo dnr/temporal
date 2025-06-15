@@ -432,8 +432,7 @@ func (db *taskQueueDB) CreateTasks(
 // CreateFairTasks creates a batch of given tasks for this task queue
 func (db *taskQueueDB) CreateFairTasks(
 	ctx context.Context,
-	taskIDs []int64,
-	passes []int64,
+	levels []fairLevel,
 	reqs []*writeTaskRequest,
 ) (createFairTasksResponse, error) {
 	db.Lock()
@@ -449,8 +448,8 @@ func (db *taskQueueDB) CreateFairTasks(
 	allSubqueues := make([]int, len(reqs))
 	for i, req := range reqs {
 		task := &persistencespb.AllocatedTaskInfo{
-			TaskId:     taskIDs[i],
-			PassNumber: passes[i],
+			TaskId:     levels[i].id,
+			PassNumber: levels[i].pass,
 			Data:       req.taskInfo,
 		}
 		allTasks[i] = task

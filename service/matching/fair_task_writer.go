@@ -97,9 +97,8 @@ func (w *fairTaskWriter) appendTask(
 	}
 }
 
-// FIXME: return fairLevel instead!
-func (w *fairTaskWriter) allocTaskIDs(count int) ([]int64, error) {
-	result := make([]int64, count)
+func (w *fairTaskWriter) allocTaskIDs(count int) ([]fairLevel, error) {
+	result := make([]fairLevel, count)
 	for i := range result {
 		if w.taskIDBlock.start > w.taskIDBlock.end {
 			// we ran out of current allocation block
@@ -109,17 +108,16 @@ func (w *fairTaskWriter) allocTaskIDs(count int) ([]int64, error) {
 			}
 			w.taskIDBlock = newBlock
 		}
-		result[i] = w.taskIDBlock.start
+		result[i].id = w.taskIDBlock.start
 		w.taskIDBlock.start++
 	}
 	return result, nil
 }
 
-func (w *fairTaskWriter) pickPasses(tasks []*writeTaskRequest, bases []fairLevel) []int64 {
+func (w *fairTaskWriter) pickPasses(tasks []*writeTaskRequest, levels, bases []fairLevel) {
 	// FIXME: get this from config
 	var overrideWeights map[string]float32
 
-	passes := make([]int64, len(tasks))
 	for i, task := range tasks {
 		key := task.taskInfo.Priority.GetFairnessKey()
 
@@ -138,9 +136,8 @@ func (w *fairTaskWriter) pickPasses(tasks []*writeTaskRequest, bases []fairLevel
 		base := bases[task.subqueue].pass
 		base += int64(rand.Float64() * float64(inc)) // randomize keys within "initial" pass
 
-		passes[i] = w.counter.GetPass(key, base, inc)
+		levels[i].pass = w.counter.GetPass(key, base, inc)
 	}
-	return passes
 }
 
 func (w *fairTaskWriter) initState() error {
@@ -183,9 +180,9 @@ func (w *fairTaskWriter) taskWriterLoop() {
 
 		if err == nil {
 			bases, unpin := w.backlogMgr.getAndPinAckLevels()
-			passes := w.pickPasses(reqs, bases)
+			w.pickPasses(reqs, ids, bases)
 			var resp createFairTasksResponse
-			resp, err = w.db.CreateFairTasks(w.backlogMgr.tqCtx, ids, passes, reqs)
+			resp, err = w.db.CreateFairTasks(w.backlogMgr.tqCtx, ids, reqs)
 			if err == nil {
 				w.backlogMgr.signalReaders(resp)
 			} else {
