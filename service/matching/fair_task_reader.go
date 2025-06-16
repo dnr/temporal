@@ -50,8 +50,8 @@ type (
 		// ack manager state
 		outstandingTasks *treemap.Map // fairLevel -> *internalTask, or nil if acked
 		loadedTasks      int          // == number of non-nil entries in outstandingTasks
-		readLevel        fairLevel    // FIXME: reconsider inc/exc
-		ackLevel         fairLevel    // inclusive: task at ackLevel exactly _has_ been acked
+		readLevel        fairLevel    // == highest level in outstandingTasks, or if outstandingTasks is empty, the level we should read next
+		ackLevel         fairLevel    // inclusive: task exactly at ackLevel _has_ been acked
 		ackLevelPinned   bool         // pinned while writing tasks so that we don't delete just-written tasks
 
 		// gc state
@@ -79,7 +79,7 @@ func newFairTaskReader(
 
 		// ack manager
 		outstandingTasks: treemap.NewWith(fairLevelComparator),
-		readLevel:        fairLevelMax(initialAckLevel, fairLevel{pass: 1}), // FIXME: this is awkward, can we improve it?
+		readLevel:        initialAckLevel,
 		ackLevel:         initialAckLevel,
 
 		// gc state
@@ -98,18 +98,41 @@ func (tr *fairTaskReader) getOldestBacklogTime() time.Time {
 }
 
 func (tr *fairTaskReader) completeTask(task *internalTask, res taskResponse) {
-	err := res.startErr
-	if res.forwarded {
-		err = res.forwardErr
+	tr.lock.Lock()
+
+	// We might have a race where mergeTasks tries to a task from matcher (because new tasks
+	// came in under it), but it had already been matched and removed. In that case the
+	// removeFromMatcher will be a no-op, and we'll eventually end up here. We can tell because
+	// the task won't be present in outstandingTasks.
+	//
+	// We can't ack the task, so we'll eventually read it again and then discover that it's a
+	// duplicate when we try to RecordTaskStarted.
+	if task, found := tr.outstandingTasks.Get(allocatedTaskFairLevel(task.event.AllocatedTaskInfo)); !found {
+		// FIXME: add a metric here so we can tell if it's hitting this
+		tr.lock.Unlock()
+		return
+	} else if _, ok := task.(*internalTask); !softassert.That(tr.logger, ok, "completed task was already acked") {
+		tr.lock.Unlock()
+		return
 	}
+
+	// Handle happy path first:
+	err := res.err()
+	if err == nil {
+		tr.completeTaskLocked(task)
+		tr.lock.Unlock()
+		return
+	}
+
+	tr.lock.Unlock()
 
 	// We can handle some transient errors by just putting the task back in the matcher to
 	// match again. Note that for forwarded tasks, it's expected to get DeadlineExceeded when
 	// the task doesn't match on the root after backlogTaskForwardTimeout, and also expected to
 	// get errRemoteSyncMatchFailed, which is a serviceerror.Canceled error.
-	if err != nil && (common.IsServiceClientTransientError(err) ||
+	if common.IsServiceClientTransientError(err) ||
 		common.IsContextDeadlineExceededErr(err) ||
-		common.IsContextCanceledErr(err)) {
+		common.IsContextCanceledErr(err) {
 		// TODO(pri): if this was a start error (not a forwarding error): consider adding a
 		// per-task backoff here, in case the error was workflow busy, we don't want to end up
 		// trying the same task immediately. maybe also: after a few attempts on the same task,
@@ -120,17 +143,23 @@ func (tr *fairTaskReader) completeTask(task *internalTask, res taskResponse) {
 	}
 
 	// On other errors: ask backlog manager to re-spool to persistence
-	if err != nil {
-		if tr.backlogMgr.respoolTaskAfterError(task.event.Data) != nil {
-			return // task queue will unload now
-		}
+	if tr.backlogMgr.respoolTaskAfterError(task.event.Data) != nil {
+		return // task queue will unload now
 	}
 
+	// If we re-spooled successfully, remove the old version of the task.
 	tr.lock.Lock()
 	defer tr.lock.Unlock()
+	tr.completeTaskLocked(task)
+}
 
+func (tr *fairTaskReader) completeTaskLocked(task *internalTask) {
 	tr.backlogAge.record(task.event.Data.CreateTime, -1)
-	tr.ackTaskLocked(allocatedTaskFairLevel(task.event.AllocatedTaskInfo))
+	tr.outstandingTasks.Put(allocatedTaskFairLevel(task.event.AllocatedTaskInfo), nil)
+	tr.loadedTasks--
+	softassert.That(tr.logger, tr.loadedTasks >= 0, "loadedTasks went negative")
+
+	tr.advanceAckLevelLocked()
 
 	// use == so we just signal once when we cross this threshold
 	// TODO(pri): is this safe? maybe we need to improve this
@@ -161,13 +190,14 @@ func (tr *fairTaskReader) readTasksImpl() {
 
 	maxReadLevel := tr.backlogMgr.db.GetMaxFairReadLevel(tr.subqueue)
 
-	if fairLevelLess(maxReadLevel, readLevel) {
+	if !fairLevelLess(readLevel, maxReadLevel) {
 		// we're at the end, don't need to actually do a read
 		return
 	}
 
 	batch := tr.backlogMgr.config.GetTasksBatchSize()
-	res, err := tr.backlogMgr.db.GetFairTasks(tr.backlogMgr.tqCtx, tr.subqueue, readLevel, batch)
+	readFrom := fairLevelPlusOne(fairLevelMax(readLevel, fairLevel{pass: 1}))
+	res, err := tr.backlogMgr.db.GetFairTasks(tr.backlogMgr.tqCtx, tr.subqueue, readFrom, batch)
 	if err != nil {
 		tr.backlogMgr.signalIfFatal(err)
 		// TODO: Should we ever stop retrying on db errors?
@@ -189,8 +219,14 @@ func (tr *fairTaskReader) readTasksImpl() {
 		return false
 	})
 
-	if len(res.Tasks) > 0 {
+	if len(tasks) > 0 {
 		tr.mergeTasks(tasks)
+	} else {
+		tr.lock.Lock()
+		defer tr.lock.Unlock()
+		// FIXME: not sure about this, what if more was written below after the read returned
+		// before we got here? need to mass through mergeTasks with 0 tasks to get end of buffer?
+		tr.readLevel = maxReadLevel
 	}
 }
 
@@ -271,16 +307,20 @@ func (tr *fairTaskReader) wroteNewTasks(tasks []*persistencespb.AllocatedTaskInf
 }
 
 func (tr *fairTaskReader) mergeTasks(tasks []*persistencespb.AllocatedTaskInfo) {
+	if len(tasks) == 0 {
+		return
+	}
+
 	tr.lock.Lock()
 
 	// Take the tasks in the buffer plus the tasks that were just written and sort them by level:
 
-	// Get outstanding tasks. Note these values are *internalTask.
+	// Get currently loaded tasks. Note these values are *internalTask.
 	merged := tr.outstandingTasks.Select(func(k, v any) bool {
 		_, ok := v.(*internalTask)
 		return ok
 	})
-	// Add the tasks we just wrote. Note these values are *AllocatedTaskInfo.
+	// Add the tasks we just read/wrote. Note these values are *AllocatedTaskInfo.
 	for _, t := range tasks {
 		level := allocatedTaskFairLevel(t)
 		if _, have := merged.Get(level); have {
@@ -295,34 +335,34 @@ func (tr *fairTaskReader) mergeTasks(tasks []*persistencespb.AllocatedTaskInfo) 
 	// matcher, we have to add to the matcher.
 	batchSize := tr.backlogMgr.config.GetTasksBatchSize()
 	it := merged.Iterator()
-	var lastLevel fairLevel
-	tasks = tasks[:0]
-	canBuffer := 0
+	var highestLevel fairLevel
+	tasks = tasks[:0] // reuse incoming slice to avoid an allocation
 	for b := 0; it.Next() && b < batchSize; b++ {
-		lastLevel = it.Key().(fairLevel) // nolint:revive
 		if t, ok := it.Value().(*persistencespb.AllocatedTaskInfo); ok {
 			// new task we need to add to the matcher
 			tasks = append(tasks, t)
 		}
-		canBuffer++
+		highestLevel = it.Key().(fairLevel) // nolint:revive
 	}
 
-	// Set read level to the maximum level in that set.
-	tr.readLevel = lastLevel
+	// Set read level to the maximum level in that set. We must have at least one task here.
+	softassert.That(tr.logger, highestLevel != fairLevel{}, "setting read level to zero")
+	tr.readLevel = highestLevel
 
 	// If there are remaining tasks in the merged set, they can't fit in memory. If they came
 	// from the tasks we just wrote, ignore them. If they came from matcher, remove them.
-	toRemove := make([]*internalTask, 0, merged.Size()-canBuffer)
 	for it.Next() {
 		if task, ok := it.Value().(*internalTask); ok {
-			// task that was in the matcher before that we have to remove
+			// task that was in the matcher that we have to remove
 			tr.backlogAge.record(task.event.Data.CreateTime, -1)
 			tr.loadedTasks--
 			softassert.That(tr.logger, tr.loadedTasks >= 0, "loadedTasks went negative")
 			tr.outstandingTasks.Remove(it.Key().(fairLevel))
 
-			// do remove from matcher below
-			toRemove = append(toRemove, task)
+			// Note that the task may have already been matched and removed from the matcher,
+			// but not completed yet. In that case this will be a noop. See comment at the top
+			// of completeTask. Lock order: task reader lock < matcher lock so this is okay.
+			task.removeFromMatcher()
 		}
 	}
 
@@ -337,12 +377,8 @@ func (tr *fairTaskReader) mergeTasks(tasks []*persistencespb.AllocatedTaskInfo) 
 		tr.backlogAge.record(t.Data.CreateTime, 1)
 	}
 
-	// unlock before calling addTaskToMatcher/removeSpooledTask
+	// unlock before calling addTaskToMatcher
 	tr.lock.Unlock()
-
-	for _, task := range toRemove {
-		task.removeFromMatcher()
-	}
 
 	for _, task := range internalTasks {
 		tr.addTaskToMatcher(task)
@@ -370,19 +406,6 @@ func (tr *fairTaskReader) getLoadedTasks() int {
 	tr.lock.Lock()
 	defer tr.lock.Unlock()
 	return tr.loadedTasks
-}
-
-func (tr *fairTaskReader) ackTaskLocked(level fairLevel) {
-	if task, found := tr.outstandingTasks.Get(level); !softassert.That(tr.logger, found, "completed task not found in oustandingTasks") {
-		return
-	} else if _, ok := task.(*internalTask); !softassert.That(tr.logger, ok, "completed task was already acked") {
-		return
-	}
-
-	tr.outstandingTasks.Put(level, nil)
-	tr.loadedTasks--
-
-	tr.advanceAckLevelLocked()
 }
 
 func (tr *fairTaskReader) advanceAckLevelLocked() {

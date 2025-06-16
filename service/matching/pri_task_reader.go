@@ -109,10 +109,7 @@ func (tr *priTaskReader) getOldestBacklogTime() time.Time {
 }
 
 func (tr *priTaskReader) completeTask(task *internalTask, res taskResponse) {
-	err := res.startErr
-	if res.forwarded {
-		err = res.forwardErr
-	}
+	err := res.err()
 
 	// We can handle some transient errors by just putting the task back in the matcher to
 	// match again. Note that for forwarded tasks, it's expected to get DeadlineExceeded when
