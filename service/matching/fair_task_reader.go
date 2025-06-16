@@ -341,8 +341,7 @@ func (tr *fairTaskReader) mergeTasks(tasks []*persistencespb.AllocatedTaskInfo) 
 	tr.lock.Unlock()
 
 	for _, task := range toRemove {
-		// FIXME: ah crap, this might need to go to another matcher
-		tr.backlogMgr.removeSpooledTask(task)
+		task.removeFromMatcher()
 	}
 
 	for _, task := range internalTasks {

@@ -244,10 +244,6 @@ func (c *fairBacklogManagerImpl) addSpooledTask(task *internalTask) error {
 	return c.pqMgr.AddSpooledTask(task)
 }
 
-func (c *fairBacklogManagerImpl) removeSpooledTask(task *internalTask) {
-	c.pqMgr.RemoveSpooledTask(task)
-}
-
 func (c *fairBacklogManagerImpl) BacklogCountHint() (total int64) {
 	c.subqueueLock.Lock()
 	defer c.subqueueLock.Unlock()
