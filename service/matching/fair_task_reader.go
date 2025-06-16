@@ -50,9 +50,9 @@ type (
 		// ack manager state
 		outstandingTasks *treemap.Map // fairLevel -> *internalTask, or nil if acked
 		loadedTasks      int          // == number of non-nil entries in outstandingTasks
-		readLevel        fairLevel
-		ackLevel         fairLevel // FIXME: make this inclusive everywhere
-		ackLevelPinned   bool
+		readLevel        fairLevel    // FIXME: reconsider inc/exc
+		ackLevel         fairLevel    // inclusive: task at ackLevel exactly _has_ been acked
+		ackLevelPinned   bool         // pinned while writing tasks so that we don't delete just-written tasks
 
 		// gc state
 		inGC       bool
@@ -266,7 +266,7 @@ func (tr *fairTaskReader) retryAddAfterError(task *internalTask) {
 	)
 }
 
-func (tr *fairTaskReader) signalNewTasks(tasks []*persistencespb.AllocatedTaskInfo) {
+func (tr *fairTaskReader) wroteNewTasks(tasks []*persistencespb.AllocatedTaskInfo) {
 	tr.mergeTasks(tasks)
 }
 
@@ -463,7 +463,7 @@ func (tr *fairTaskReader) doGC(ackLevel fairLevel) {
 	ctx, cancel := context.WithTimeout(tr.backlogMgr.tqCtx, ioTimeout)
 	defer cancel()
 
-	n, err := tr.backlogMgr.db.CompleteFairTasksLessThan(ctx, ackLevel, batchSize, tr.subqueue)
+	n, err := tr.backlogMgr.db.CompleteFairTasksLessThan(ctx, fairLevelPlusOne(ackLevel), batchSize, tr.subqueue)
 
 	tr.lock.Lock()
 	defer tr.lock.Unlock()

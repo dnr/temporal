@@ -312,7 +312,7 @@ func (db *taskQueueDB) updateFairAckLevelAndBacklogStats(subqueue int, newAckLev
 	dbQueue.AckLevelPass = newAckLevel.pass
 	dbQueue.AckLevel = newAckLevel.id
 
-	// FIXME: does this ever happen? need to change condition?
+	// FIXME: does this ever happen? yes: ack level is inclusive and so is maxreadlevel, but need to make sure maxreadlevel handling is correct
 	if newAckLevel == db.getMaxFairReadLevelLocked(subqueue) {
 		// Reset approximateBacklogCount to fix the count divergence issue
 		dbQueue.ApproximateBacklogCount = 0

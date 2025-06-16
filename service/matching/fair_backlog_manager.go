@@ -230,13 +230,13 @@ func (c *fairBacklogManagerImpl) getAndPinAckLevels() ([]fairLevel, func()) {
 	return levels, unpin
 }
 
-func (c *fairBacklogManagerImpl) signalReaders(resp createFairTasksResponse) {
+func (c *fairBacklogManagerImpl) wroteNewTasks(resp createFairTasksResponse) {
 	c.subqueueLock.Lock()
 	subqueues := slices.Clone(c.subqueues)
 	c.subqueueLock.Unlock()
 
 	for subqueue, subqueueResp := range resp {
-		subqueues[subqueue].signalNewTasks(subqueueResp)
+		subqueues[subqueue].wroteNewTasks(subqueueResp)
 	}
 }
 
