@@ -454,12 +454,10 @@ func (db *taskQueueDB) CreateFairTasks(
 		allSubqueues[i] = req.subqueue
 		newTasks[req.subqueue] = append(newTasks[req.subqueue], task)
 
-		current := db.subqueues[req.subqueue]
-		currentMaxLevel := fairLevel{pass: current.MaxReadLevelPass, id: current.MaxReadLevelId}
-		newMaxLevel[req.subqueue] = fairLevelMax(
-			fairLevelMax(currentMaxLevel, newMaxLevel[req.subqueue]),
-			fairLevel{pass: task.PassNumber, id: task.TaskId},
-		)
+		maxLevel := db.subqueues[req.subqueue].maxReadLevel()
+		maxLevel = fairLevelMax(maxLevel, allocatedTaskFairLevel(task))
+		maxLevel = fairLevelMax(maxLevel, newMaxLevel[req.subqueue])
+		newMaxLevel[req.subqueue] = maxLevel
 	}
 
 	for i, tasks := range newTasks {
@@ -732,4 +730,8 @@ func (db *taskQueueDB) cloneSubqueues() []persistencespb.SubqueueInfo {
 		proto.Merge(&infos[i], &db.subqueues[i].SubqueueInfo)
 	}
 	return infos
+}
+
+func (s *dbSubqueue) maxReadLevel() fairLevel {
+	return fairLevel{pass: s.MaxReadLevelPass, id: s.MaxReadLevelId}
 }

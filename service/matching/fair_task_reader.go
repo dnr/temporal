@@ -130,7 +130,7 @@ func (tr *fairTaskReader) completeTask(task *internalTask, res taskResponse) {
 	defer tr.lock.Unlock()
 
 	tr.backlogAge.record(task.event.Data.CreateTime, -1)
-	tr.ackTaskLocked(fairLevel{pass: task.event.PassNumber, id: task.event.TaskId})
+	tr.ackTaskLocked(allocatedTaskFairLevel(task.event.AllocatedTaskInfo))
 
 	// use == so we just signal once when we cross this threshold
 	// TODO(pri): is this safe? maybe we need to improve this
@@ -273,59 +273,16 @@ func (tr *fairTaskReader) signalNewTasks(tasks []*persistencespb.AllocatedTaskIn
 func (tr *fairTaskReader) mergeTasks(tasks []*persistencespb.AllocatedTaskInfo) {
 	tr.lock.Lock()
 
-	/**
+	// Take the tasks in the buffer plus the tasks that were just written and sort them by level:
 
-	if pump is not busy, then we can send this batch on the channel and pump can figure it out.
-	but what if pump is busy? i.e. it's currenly reading? then we just took from notifyC and
-	it's empty, so we can send one batch and it'll see it when it's done with the current read.
-
-	but... what if we signal more than once while it's reading, so the channel is full?
-	any of these signals may result in read level being moved backwards, so we can't just drop it.
-
-	what if we had a goroutine to manage the read level that isn't the pump?
-	both signalNewTasks and getTasksPump would interact with it.
-	I guess it's not a goroutine, just factored-out read level logic.
-
-	so what is the logic?
-
-	signalNewTasks should:
-	plan 1:
-		1. set read level to Wmin
-		2. drop any tasks in buffer > Wmin
-		3. signal pump
-	plan 2:
-		Take the tasks in the buffer plus the tasks that were just written and sort them by
-		level. Take the first Bt of them (or all of them if < Bt). Set the buffer to that set.
-		Set R to the maximum level in that set. Discard the rest from memory.
-
-	take plan 1 for now. what if this happens concurrently with a read?
-	so we're doing:
-	- start read t >= R0
-	- write new tasks [Wmin, Wmax]
-	- finish read, found some tasks
-
-	are there any other interesting orderings? not really, this signalNewTasks happens all
-	at once. we don't care when the write started since the write doesn't care about R.
-	er.. wait, what's this maxReadLevelBefore?
-
-	one easy option: discard the read results and just try again!
-
-	another option: treat the read results as if they just got written, i.e. do the same logic
-	as signalNewTasks! does this work?!?!
-
-	let's try it...
-	*/
-
-	// Take the tasks in the buffer plus the tasks that were just written and sort them by level.
-
-	// get outstanding tasks. note these values are *internalTask.
+	// Get outstanding tasks. Note these values are *internalTask.
 	merged := tr.outstandingTasks.Select(func(k, v any) bool {
 		_, ok := v.(*internalTask)
 		return ok
 	})
-	// add the tasks we just wrote. note these values are *AllocatedTaskInfo.
+	// Add the tasks we just wrote. Note these values are *AllocatedTaskInfo.
 	for _, t := range tasks {
-		level := fairLevel{pass: t.PassNumber, id: t.TaskId}
+		level := allocatedTaskFairLevel(t)
 		if _, have := merged.Get(level); have {
 			// duplicate: we write something we just read, or read something we just wrote.
 			// either way we have it in the buffer already. FIXME: is this right?
@@ -334,7 +291,8 @@ func (tr *fairTaskReader) mergeTasks(tasks []*persistencespb.AllocatedTaskInfo) 
 		merged.Put(level, t)
 	}
 
-	// Take the first Bt of them (or all of them if < Bt). Set the buffer to that set.
+	// Take as many of those as we want to keep in memory. The ones that are not already in the
+	// matcher, we have to add to the matcher.
 	batchSize := tr.backlogMgr.config.GetTasksBatchSize()
 	it := merged.Iterator()
 	var lastLevel fairLevel
@@ -349,12 +307,11 @@ func (tr *fairTaskReader) mergeTasks(tasks []*persistencespb.AllocatedTaskInfo) 
 		canBuffer++
 	}
 
-	// Set R to the maximum level in that set.
+	// Set read level to the maximum level in that set.
 	tr.readLevel = lastLevel
 
-	// If there are remaining tasks in the merged set, they can't fit in the buffer.
-	// If they came from the tasks we just wrote, ignore them. If they came from the buffer,
-	// remove them from the buffer.
+	// If there are remaining tasks in the merged set, they can't fit in memory. If they came
+	// from the tasks we just wrote, ignore them. If they came from matcher, remove them.
 	toRemove := make([]*internalTask, 0, merged.Size()-canBuffer)
 	for it.Next() {
 		if task, ok := it.Value().(*internalTask); ok {
@@ -371,7 +328,7 @@ func (tr *fairTaskReader) mergeTasks(tasks []*persistencespb.AllocatedTaskInfo) 
 
 	internalTasks := make([]*internalTask, len(tasks))
 	for i, t := range tasks {
-		level := fairLevel{pass: t.PassNumber, id: t.TaskId}
+		level := allocatedTaskFairLevel(t)
 		internalTasks[i] = newInternalTaskFromBacklog(t, tr.completeTask)
 		// After we get to this point, we must eventually call task.finish or
 		// task.finishForwarded, which will call tr.completeTask.
@@ -384,6 +341,7 @@ func (tr *fairTaskReader) mergeTasks(tasks []*persistencespb.AllocatedTaskInfo) 
 	tr.lock.Unlock()
 
 	for _, task := range toRemove {
+		// FIXME: ah crap, this might need to go to another matcher
 		tr.backlogMgr.removeSpooledTask(task)
 	}
 
@@ -555,4 +513,8 @@ func fairLevelMax(a, b fairLevel) fairLevel {
 
 func fairLevelPlusOne(a fairLevel) fairLevel {
 	return fairLevel{pass: a.pass, id: a.id + 1}
+}
+
+func allocatedTaskFairLevel(t *persistencespb.AllocatedTaskInfo) fairLevel {
+	return fairLevel{pass: t.PassNumber, id: t.TaskId}
 }
