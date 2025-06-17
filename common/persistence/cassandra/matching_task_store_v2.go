@@ -31,6 +31,7 @@ const (
 		`and task_queue_type = ? ` +
 		`and type = ? ` +
 		`and (pass, task_id) >= (?, ?)`
+		// FIXME: should we put LIMIT here?
 
 	templateCompleteTasksLessThanQuery_v2 = `DELETE FROM tasks_v2 ` +
 		`WHERE namespace_id = ? ` +
