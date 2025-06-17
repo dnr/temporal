@@ -108,7 +108,7 @@ func (tr *fairTaskReader) completeTask(task *internalTask, res taskResponse) {
 	// We can't ack the task, so we'll eventually read it again and then discover that it's a
 	// duplicate when we try to RecordTaskStarted.
 	if task, found := tr.outstandingTasks.Get(allocatedTaskFairLevel(task.event.AllocatedTaskInfo)); !found {
-		// FIXME: add a metric here so we can tell if it's hitting this
+		metrics.TaskCompletedMissing.With(tr.backlogMgr.metricsHandler).Record(1)
 		tr.lock.Unlock()
 		return
 	} else if _, ok := task.(*internalTask); !softassert.That(tr.logger, ok, "completed task was already acked") {
@@ -139,6 +139,7 @@ func (tr *fairTaskReader) completeTask(task *internalTask, res taskResponse) {
 		// let it get cycled to the end of the queue, in case there's some task/wf-specific
 		// thing.
 		tr.addTaskToMatcher(task)
+		metrics.TaskRetryTransient.With(tr.backlogMgr.metricsHandler).Record(1)
 		return
 	}
 
@@ -382,6 +383,14 @@ func (tr *fairTaskReader) mergeTasks(tasks []*persistencespb.AllocatedTaskInfo) 
 	for _, task := range internalTasks {
 		tr.addTaskToMatcher(task)
 	}
+
+	// TODO: fine-grained metrics for mergeTasks behavior:
+	// we have two sources: currently loaded, and newly read/written.
+	// we have two destinations: loaded and dropped. we could count these four values:
+	// loaded->loaded, loaded->dropped, new->loaded, new->dropped
+	// let's say that's one metric with two labels of two values each.
+	// add another label for whether we're doing this on read or write.
+	// maybe do this as a wide event? we can also throw in loadedTasks then.
 }
 
 func (tr *fairTaskReader) backoffSignal(duration time.Duration) {
