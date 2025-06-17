@@ -153,14 +153,14 @@ func (t *taskPQ) Less(i int, j int) bool {
 
 	// Note: sync match tasks have a fixed negative id.
 	// Query tasks will get 0 here.
-	var aid, bid int64
+	var alevel, blevel fairLevel
 	if a.event != nil && a.event.AllocatedTaskInfo != nil {
-		aid = a.event.AllocatedTaskInfo.TaskId
+		alevel = allocatedTaskFairLevel(a.event.AllocatedTaskInfo)
 	}
 	if b.event != nil && b.event.AllocatedTaskInfo != nil {
-		bid = b.event.AllocatedTaskInfo.TaskId
+		blevel = allocatedTaskFairLevel(b.event.AllocatedTaskInfo)
 	}
-	return aid < bid
+	return fairLevelLess(alevel, blevel)
 }
 
 // implements heap.Interface, do not call directly
