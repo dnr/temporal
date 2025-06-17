@@ -313,7 +313,7 @@ func (tr *fairTaskReader) mergeTasks(tasks []*persistencespb.AllocatedTaskInfo) 
 
 	tr.lock.Lock()
 
-	// Take the tasks in the buffer plus the tasks that were just written and sort them by level:
+	// Take the tasks in the matcher plus the tasks that were just written and sort them by level:
 
 	// Get currently loaded tasks. Note these values are *internalTask.
 	merged := tr.outstandingTasks.Select(func(k, v any) bool {
@@ -323,12 +323,11 @@ func (tr *fairTaskReader) mergeTasks(tasks []*persistencespb.AllocatedTaskInfo) 
 	// Add the tasks we just read/wrote. Note these values are *AllocatedTaskInfo.
 	for _, t := range tasks {
 		level := allocatedTaskFairLevel(t)
-		if _, have := merged.Get(level); have {
-			// duplicate: we write something we just read, or read something we just wrote.
-			// either way we have it in the buffer already. FIXME: is this right?
-			continue
+		// If write/read race in certain ways, we may read something we had already added to
+		// the matcher. Ignore tasks we already have.
+		if _, have := merged.Get(level); !have {
+			merged.Put(level, t)
 		}
-		merged.Put(level, t)
 	}
 
 	// Take as many of those as we want to keep in memory. The ones that are not already in the
