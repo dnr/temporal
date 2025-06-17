@@ -20,19 +20,20 @@ level:
   <-------------A-----R-----------------------M------------->
 ```
 
-A is the ack level (persisted): We have dispatched all tasks < A. Therefore, we never need to
+A is the ack level (persisted): We have dispatched all tasks <= A. Therefore, we never need to
 read below A, and therefore we must never write below A. A can only move forwards within the
 lifetime of a partition. However, we don't write A to persistence on every dispatch, we only
 update it once in a while. So one partition owner may move A forwards in memory, then crash,
 then another owner may load the partition. In that case it will see an old version of A. This
 is allowed to cause repeated dispatch of some tasks.
 
-M is the maximum task level that has ever been written, inclusive (persisted). Whenever we
-write tasks we also write M, so M should always be accurate. If we write below M we don't need
-to update M; if we write above M then we update M to the new level.
+M is the maximum task level that has ever been written, inclusive (best-effort persisted).
+On Cassandra, we can update M every time we write any tasks, so it should always be accurate.
+On SQL it may not be.
 
-R is the level that we have read up to, exclusive (not persisted). I.e. we've read range [A, R)
-and we have them in memory waiting to dispatch. We may write new tasks either above or below R.
+R is the level that we have read up to and are keeping in memory, inclusive (not persisted).
+I.e. We have (A, R] in memory waiting to dispatch. We may write new tasks either above or below
+R.
 
 ## Operation
 
@@ -41,18 +42,9 @@ and we have them in memory waiting to dispatch. We may write new tasks either ab
 When we load the task queue metadata, we get A and M. All non-dispatched backlog tasks should
 be in that range (see Fencing below). Initialize R to A.
 
-When we read: Do a read for tasks with R <= level, limit Bt (batch target size). Note that
-if R > M, then the range must be empty and we can skip the read.
-
-Suppose we get n tasks and the last one is m (n <= Bt). For now, suppose that we're
-not concurrently writing tasks.
-
-Case n == Bt: We've read one full batch. Set R to m+1 so that we can start the next read there.
-
-Case 0 < n < Bt: We read a partial batch and got to the end. Set R to m+1. We won't do another
-read next time since R > M.
-
-Case n == 0: We didn't find any tasks at all. Set R to M+1.
+Reading without concurrent writes: Do a read for tasks with level > R, limit Bt (batch target
+size). Add them to the in-memory buffer and update R to the last task read. If we get no tasks,
+we can leave R where it was.
 
 
 ### Writing
@@ -60,7 +52,7 @@ Case n == 0: We didn't find any tasks at all. Set R to M+1.
 Now add in concurrent writing:
 
 When we write tasks, we allocate ids for them, and choose passes based on their fairness keys,
-which together make the levels of the new tasks. All new task levels must be >= A! (I.e. their
+which together make the levels of the new tasks. All new task levels must be > A! (I.e. their
 pass must be >= A.pass. We know their id is > A.id because ids are assigned sequentially.)
 
 Let [Wmin, Wmax] be the range of task levels we just wrote.
@@ -87,12 +79,13 @@ Take the tasks in the buffer plus the tasks that were just written and sort them
 the first Bt of them (or all of them if < Bt). Set the buffer to that set. Set R to the maximum
 level in that set. Discard the rest from memory.
 
-Note that works whether Wmin is above or below R.
+Note that works whether Wmin is above or below R, and the same logic works whether we're
+merging in tasks that we just read or just wrote.
 
 
 ### GC
 
-At any time we can issue a delete for tasks < A. We'll do this periodically based on time or
+At any time we can issue a delete for tasks <= A. We'll do this periodically based on time or
 when the number of acked tasks passes a threshold.
 
 
@@ -100,7 +93,12 @@ when the number of acked tasks passes a threshold.
 
 In what situations will we scan tombstones, and how many?
 
-We always delete < A, always read > A, and A always moves forward, so in normal operation we
+The Cassandra maximum tombstone limit before a read fails is 100,000, though performance may be
+affected at lower levels (< 10k recommended).
+
+First, explicit range delete tombstones:
+
+We always delete <= A, always read > A, and A always moves forward, so in normal operation we
 should never scan tombstones. We could if A moves backwards: this happens if we crash after
 dispatching some tasks, before persisting the new A.
 
@@ -122,8 +120,11 @@ R, or the maximum practical R.
 re-dispatch 60,000 tasks. With Ng at 100, we'd scan up to ~600 tombstones. We could increase Ng
 to 1000 to reduce that to ~60.)
 
-The Cassandra maximum tombstone limit before a read fails is 100,000, though performance may be
-affected at lower levels.
+Next, TTLs:
+
+Rows with TTLs become effective tombstones past their expiration time. Unfortunately we can't
+control how many of these there will be in any range. So we shouldn't use TTLs on matching
+tasks in the fair task table.
 
 
 ### Fencing
@@ -158,14 +159,13 @@ current metadata at that time. That guarantees that either the write took effect
 owner's update, or it will fail. If it took effect before, then the new owner will definitely
 see the task when it does a read.
 
-TODO: is that enough to prevent all problems in the fairness schema?
+TODO: Is that enough to prevent all problems in the fairness schema? It seems like yes.
 
-TODO: are there any other ways to do it?
-we could just put a uuid "owner" instead of range id
-and then just allocate task ids densely
+TODO: Are there any other ways to do it? We could just put a uuid "owner"
+instead of range id, and then just allocate task ids densely.
 
-can we do it without lwt? that probably means time-based lease, otherwise there's no way to
-force the write to fail
+TODO: Can we do it without lwt? That probably means time-based lease, otherwise
+there's no way to force the write to fail.
 
 
 
@@ -180,9 +180,9 @@ TODO
 
 ## Problems
 
-### ack level could move backwards?
+### Ack level movement while a write is in flight
 
-consider:
+Consider:
 
 - ack level is 10. we have tasks 11, 21, 31 in buffer.
 - task writer chooses levels for some new tasks, e.g. 13, 15, 25.
@@ -192,7 +192,7 @@ consider:
 - write completes. 13, 15, 25 are sent to task reader to merge into buffer.
 - at this point we need to set the ack level backwards?!?
 
-even worse:
+Even worse:
 
 - ack level is 10. we have tasks 11, 21, 31 in buffer.
 - task writer chooses levels for some new tasks, e.g. 13, 15, 25.
@@ -203,19 +203,23 @@ even worse:
 - gc kicks in: deletes <= 21.
 - new tasks are now lost.
 
-fix?
+How to fix it?
 
-at the point where task writer picks those levels, we need to add them to ack manager so that
+At the point where task writer picks those levels, we need to add them to ack manager so that
 ack manager knows it can't move the ack level further.
 
-does it have to add them individually, or just set a minimum "pending write level"?
-pending write level can be cleared if there is no pending write.
+Does it have to add them individually, or just set a minimum "pending write level"?
+Pending write level can be cleared if there is no pending write.
 
-let's try it with just the simple: during a write, the ack level is pinned.
-it's unpinned by either signalNewTasks or by an explicit "write failed" call.
-when unpinned, tr should try moving it more.
+Let's try it with just the simplest: during a write, the ack level is pinned.
+After the write and the new tasks are merged in, we unpin it, and then taskReader can try
+moving the ack level.
 
 
+### TTLs on tasks
+
+We can't use TTLs on tasks so disable that for now.
+We may come up with a better way to do this later.
 
 
 
