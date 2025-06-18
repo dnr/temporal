@@ -391,8 +391,8 @@ func (db *taskQueueDB) CreateTasks(
 		}
 	}
 
-	for i, update := range updates {
-		db.subqueues[i].ApproximateBacklogCount += int64(len(update.tasks))
+	for sq, update := range updates {
+		db.subqueues[sq].ApproximateBacklogCount += int64(len(update.tasks))
 	}
 
 	resp, err := db.store.CreateTasks(
@@ -409,8 +409,8 @@ func (db *taskQueueDB) CreateTasks(
 	// Update the maxReadLevel after the writes are completed, but before we send the response,
 	// so that taskReader is guaranteed to see the new read level when SpoolTask wakes it up.
 	// Do this even if the write fails, we won't reuse the task ids.
-	for i, update := range updates {
-		db.subqueues[i].MaxReadLevelId = update.maxReadLevelAfter
+	for sq, update := range updates {
+		db.subqueues[sq].MaxReadLevelId = update.maxReadLevelAfter
 	}
 
 	if err == nil {
@@ -453,22 +453,19 @@ func (db *taskQueueDB) CreateFairTasks(
 		allTasks[i] = task
 		allSubqueues[i] = req.subqueue
 		newTasks[req.subqueue] = append(newTasks[req.subqueue], task)
-
-		maxLevel := db.subqueues[req.subqueue].maxReadLevel()
-		maxLevel = fairLevelMax(maxLevel, allocatedTaskFairLevel(task))
-		maxLevel = fairLevelMax(maxLevel, newMaxLevel[req.subqueue])
-		newMaxLevel[req.subqueue] = maxLevel
+		newMaxLevel[req.subqueue] = fairLevelMax(newMaxLevel[req.subqueue], allocatedTaskFairLevel(task))
 	}
 
-	for i, tasks := range newTasks {
-		db.subqueues[i].ApproximateBacklogCount += int64(len(tasks))
+	for sq, tasks := range newTasks {
+		db.subqueues[sq].ApproximateBacklogCount += int64(len(tasks))
+	}
+
+	for sq, level := range newMaxLevel {
+		db.subqueues[sq].setMaxReadLevel(fairLevelMax(db.subqueues[sq].maxReadLevel(), level))
 	}
 
 	resp, err := db.store.CreateTasks(
 		ctx,
-		// FIXME: aw crap, we want to write the new max read level in here, but also not update
-		// it in memory. do we have to clone in cachedQueueInfo? or something else?
-		// sql doesn't update metadata right now anyway, maybe we give up on this?
 		&persistence.CreateTasksRequest{
 			TaskQueueInfo: &persistence.PersistedTaskQueueInfo{
 				Data:    db.cachedQueueInfo(),
@@ -478,22 +475,15 @@ func (db *taskQueueDB) CreateFairTasks(
 			Subqueues: allSubqueues,
 		})
 
-	// Update the MaxReadLevel after the writes are completed, but before we send the response,
-	// so that taskReader is guaranteed to see the new read level when SpoolTask wakes it up.
-	// Do this even if the write fails, we won't reuse the task ids.
-	for i, level := range newMaxLevel {
-		db.subqueues[i].MaxReadLevelPass = level.pass
-		db.subqueues[i].MaxReadLevelId = level.id
-	}
-
 	if err == nil {
 		// Only update lastWrite for persistence implementations that update metadata on CreateTasks.
 		if resp.UpdatedMetadata {
 			db.lastWrite = time.Now()
 		}
 	} else if _, ok := err.(*persistence.ConditionFailedError); ok {
-		// tasks definitely were not created, restore the counter. For other errors tasks may or may not be created.
+		// Tasks definitely were not created, restore the counter. For other errors tasks may or may not be created.
 		// In those cases we keep the count incremented, hence it may be an overestimate.
+		// Don't bother restoring MaxReadLevel, it's okay if that's too high.
 		for i, tasks := range newTasks {
 			db.subqueues[i].ApproximateBacklogCount -= int64(len(tasks))
 		}
@@ -735,4 +725,9 @@ func (db *taskQueueDB) cloneSubqueues() []persistencespb.SubqueueInfo {
 
 func (s *dbSubqueue) maxReadLevel() fairLevel {
 	return fairLevel{pass: s.MaxReadLevelPass, id: s.MaxReadLevelId}
+}
+
+func (s *dbSubqueue) setMaxReadLevel(level fairLevel) {
+	s.MaxReadLevelPass = level.pass
+	s.MaxReadLevelId = level.id
 }
