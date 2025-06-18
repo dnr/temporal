@@ -5,24 +5,16 @@ import (
 	"fmt"
 	"math"
 	"strings"
-	"time"
 
-	enumspb "go.temporal.io/api/enums/v1"
 	"go.temporal.io/api/serviceerror"
-	"go.temporal.io/server/common/convert"
 	p "go.temporal.io/server/common/persistence"
 	"go.temporal.io/server/common/persistence/nosql/nosqlplugin/cassandra/gocql"
-	"go.temporal.io/server/common/primitives/timestamp"
 )
 
 const (
 	templateCreateTaskQuery_v2 = `INSERT INTO tasks_v2 (` +
 		`namespace_id, task_queue_name, task_queue_type, type, pass, task_id, task, task_encoding) ` +
 		`VALUES(?, ?, ?, ?, ?, ?, ?, ?)`
-
-	templateCreateTaskWithTTLQuery_v2 = `INSERT INTO tasks_v2 (` +
-		`namespace_id, task_queue_name, task_queue_type, type, pass, task_id, task, task_encoding) ` +
-		`VALUES(?, ?, ?, ?, ?, ?, ?, ?) USING TTL ?`
 
 	templateGetTasksQuery_v2 = `SELECT task_id, task, task_encoding ` +
 		`FROM tasks_v2 ` +
@@ -73,27 +65,6 @@ const (
 		`and task_queue_type = ? ` +
 		`and pass = 0 ` +
 		`and type = ? ` +
-		`and task_id = ? ` +
-		`IF range_id = ?`
-
-	templateUpdateTaskQueueQueryWithTTLPart1_v2 = `INSERT INTO tasks_v2 (` +
-		`namespace_id, ` +
-		`task_queue_name, ` +
-		`task_queue_type, ` +
-		`type, ` +
-		`pass, ` +
-		`task_id ` +
-		`) VALUES (?, ?, ?, ?, 0, ?) USING TTL ?`
-
-	templateUpdateTaskQueueQueryWithTTLPart2_v2 = `UPDATE tasks_v2 USING TTL ? SET ` +
-		`range_id = ?, ` +
-		`task_queue = ?, ` +
-		`task_queue_encoding = ? ` +
-		`WHERE namespace_id = ? ` +
-		`and task_queue_name = ? ` +
-		`and task_queue_type = ? ` +
-		`and type = ? ` +
-		`and pass = 0 ` +
 		`and task_id = ? ` +
 		`IF range_id = ?`
 
@@ -182,53 +153,19 @@ func (d *matchingTaskStoreV2) UpdateTaskQueue(
 	ctx context.Context,
 	request *p.InternalUpdateTaskQueueRequest,
 ) (*p.UpdateTaskQueueResponse, error) {
-	var err error
-	var applied bool
 	previous := make(map[string]interface{})
-	if request.TaskQueueKind == enumspb.TASK_QUEUE_KIND_STICKY { // if task_queue is sticky, then update with TTL
-		if request.ExpiryTime == nil {
-			return nil, serviceerror.NewInternal("ExpiryTime cannot be nil for sticky task queue")
-		}
-		expiryTTL := convert.Int64Ceil(time.Until(timestamp.TimeValue(request.ExpiryTime)).Seconds())
-		if expiryTTL >= maxCassandraTTL {
-			expiryTTL = maxCassandraTTL
-		}
-		batch := d.Session.NewBatch(gocql.LoggedBatch).WithContext(ctx)
-		batch.Query(templateUpdateTaskQueueQueryWithTTLPart1_v2,
-			request.NamespaceID,
-			request.TaskQueue,
-			request.TaskType,
-			rowTypeTaskQueue,
-			taskQueueTaskID,
-			expiryTTL,
-		)
-		batch.Query(templateUpdateTaskQueueQueryWithTTLPart2_v2,
-			expiryTTL,
-			request.RangeID,
-			request.TaskQueueInfo.Data,
-			request.TaskQueueInfo.EncodingType.String(),
-			request.NamespaceID,
-			request.TaskQueue,
-			request.TaskType,
-			rowTypeTaskQueue,
-			taskQueueTaskID,
-			request.PrevRangeID,
-		)
-		applied, _, err = d.Session.MapExecuteBatchCAS(batch, previous)
-	} else {
-		query := d.Session.Query(templateUpdateTaskQueueQuery_v2,
-			request.RangeID,
-			request.TaskQueueInfo.Data,
-			request.TaskQueueInfo.EncodingType.String(),
-			request.NamespaceID,
-			request.TaskQueue,
-			request.TaskType,
-			rowTypeTaskQueue,
-			taskQueueTaskID,
-			request.PrevRangeID,
-		).WithContext(ctx)
-		applied, err = query.MapScanCAS(previous)
-	}
+	query := d.Session.Query(templateUpdateTaskQueueQuery_v2,
+		request.RangeID,
+		request.TaskQueueInfo.Data,
+		request.TaskQueueInfo.EncodingType.String(),
+		request.NamespaceID,
+		request.TaskQueue,
+		request.TaskType,
+		rowTypeTaskQueue,
+		taskQueueTaskID,
+		request.PrevRangeID,
+	).WithContext(ctx)
+	applied, err := query.MapScanCAS(previous)
 
 	if err != nil {
 		return nil, gocql.ConvertError("UpdateTaskQueue", err)
@@ -297,30 +234,15 @@ func (d *matchingTaskStoreV2) CreateTasks(
 			return nil, serviceerror.NewInternal("invalid fair queue task missing pass number")
 		}
 
-		ttl := getTaskTTL(task.ExpiryTime)
-
-		if ttl <= 0 || ttl > maxCassandraTTL {
-			batch.Query(templateCreateTaskQuery_v2,
-				namespaceID,
-				taskQueue,
-				taskQueueType,
-				rowTypeTaskInSubqueue(task.Subqueue),
-				task.Pass,
-				task.TaskId,
-				task.Task.Data,
-				task.Task.EncodingType.String())
-		} else {
-			batch.Query(templateCreateTaskWithTTLQuery_v2,
-				namespaceID,
-				taskQueue,
-				taskQueueType,
-				rowTypeTaskInSubqueue(task.Subqueue),
-				task.Pass,
-				task.TaskId,
-				task.Task.Data,
-				task.Task.EncodingType.String(),
-				ttl)
-		}
+		batch.Query(templateCreateTaskQuery_v2,
+			namespaceID,
+			taskQueue,
+			taskQueueType,
+			rowTypeTaskInSubqueue(task.Subqueue),
+			task.Pass,
+			task.TaskId,
+			task.Task.Data,
+			task.Task.EncodingType.String())
 	}
 
 	// The following query is used to ensure that range_id didn't change
