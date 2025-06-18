@@ -536,6 +536,7 @@ func (db *taskQueueDB) GetFairTasks(
 		ExclusiveMaxTaskID: math.MaxInt64,
 		Subqueue:           subqueue,
 		PageSize:           batchSize,
+		UseLimit:           true,
 	})
 }
 

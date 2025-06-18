@@ -606,6 +606,7 @@ type (
 		ExclusiveMaxTaskID int64
 		Subqueue           int
 		PageSize           int
+		UseLimit           bool // If true, use LIMIT in the query
 		NextPageToken      []byte
 	}
 

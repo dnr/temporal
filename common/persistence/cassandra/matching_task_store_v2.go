@@ -23,7 +23,15 @@ const (
 		`and task_queue_type = ? ` +
 		`and type = ? ` +
 		`and (pass, task_id) >= (?, ?)`
-		// FIXME: should we put LIMIT here?
+
+	templateGetTasksQuery_v2_limit = `SELECT task_id, task, task_encoding ` +
+		`FROM tasks_v2 ` +
+		`WHERE namespace_id = ? ` +
+		`and task_queue_name = ? ` +
+		`and task_queue_type = ? ` +
+		`and type = ? ` +
+		`and (pass, task_id) >= (?, ?) ` +
+		`LIMIT ?`
 
 	templateCompleteTasksLessThanQuery_v2 = `DELETE FROM tasks_v2 ` +
 		`WHERE namespace_id = ? ` +
@@ -285,15 +293,28 @@ func (d *matchingTaskStoreV2) GetTasks(
 	}
 
 	// Reading taskqueue tasks need to be quorum level consistent, otherwise we could lose tasks
-	query := d.Session.Query(templateGetTasksQuery_v2,
-		request.NamespaceID,
-		request.TaskQueue,
-		request.TaskType,
-		rowTypeTaskInSubqueue(request.Subqueue),
-		request.InclusiveMinPass,
-		request.InclusiveMinTaskID,
-	).WithContext(ctx)
-	iter := query.PageSize(request.PageSize).PageState(request.NextPageToken).Iter()
+	var query gocql.Query
+	if request.UseLimit {
+		query = d.Session.Query(templateGetTasksQuery_v2_limit,
+			request.NamespaceID,
+			request.TaskQueue,
+			request.TaskType,
+			rowTypeTaskInSubqueue(request.Subqueue),
+			request.InclusiveMinPass,
+			request.InclusiveMinTaskID,
+			request.PageSize,
+		)
+	} else {
+		query = d.Session.Query(templateGetTasksQuery_v2,
+			request.NamespaceID,
+			request.TaskQueue,
+			request.TaskType,
+			rowTypeTaskInSubqueue(request.Subqueue),
+			request.InclusiveMinPass,
+			request.InclusiveMinTaskID,
+		)
+	}
+	iter := query.WithContext(ctx).PageSize(request.PageSize).PageState(request.NextPageToken).Iter()
 
 	response := &p.InternalGetTasksResponse{}
 	task := make(map[string]interface{})
