@@ -169,14 +169,20 @@ func newPhysicalTaskQueueManager(
 		pqMgr.partitionMgr.engine.historyClient,
 	)
 
+	isSticky := queue.Partition().Kind() == enumspb.TASK_QUEUE_KIND_STICKY
+	isChild := !isSticky && !queue.Partition().IsRoot()
+
 	var fairness, newMatcher bool
-	fairness, pqMgr.cancelFairnessSub = config.EnableFairness(func(bool) {
-		// unload on change so that we can reload with the new setting:
-		pqMgr.UnloadFromPartitionManager(unloadCauseConfigChange)
-	})
+	// Fairness is disabled for sticky queues for now so that we can still use TTLs.
+	if !isSticky {
+		fairness, pqMgr.cancelFairnessSub = config.EnableFairness(func(bool) {
+			// unload on change so that we can reload with the new setting:
+			pqMgr.UnloadFromPartitionManager(unloadCauseConfigChange)
+		})
+	}
 
 	if fairness {
-		cntr := counter.NewMapCounter() // FIXME: configurable
+		cntr := counter.NewMapCounter() // FIXME: make this configurable
 		pqMgr.backlogMgr = newFairBacklogManager(
 			tqCtx,
 			pqMgr,
@@ -190,7 +196,7 @@ func newPhysicalTaskQueueManager(
 		)
 		var fwdr *priForwarder
 		var err error
-		if !queue.Partition().IsRoot() && queue.Partition().Kind() != enumspb.TASK_QUEUE_KIND_STICKY {
+		if isChild {
 			// Every DB Queue needs its own forwarder so that the throttles do not interfere
 			fwdr, err = newPriForwarder(&config.forwarderConfig, queue, e.matchingRawClient)
 			if err != nil {
@@ -228,7 +234,7 @@ func newPhysicalTaskQueueManager(
 		)
 		var fwdr *priForwarder
 		var err error
-		if !queue.Partition().IsRoot() && queue.Partition().Kind() != enumspb.TASK_QUEUE_KIND_STICKY {
+		if isChild {
 			// Every DB Queue needs its own forwarder so that the throttles do not interfere
 			fwdr, err = newPriForwarder(&config.forwarderConfig, queue, e.matchingRawClient)
 			if err != nil {
@@ -260,7 +266,7 @@ func newPhysicalTaskQueueManager(
 	)
 	var fwdr *Forwarder
 	var err error
-	if !queue.Partition().IsRoot() && queue.Partition().Kind() != enumspb.TASK_QUEUE_KIND_STICKY {
+	if isChild {
 		// Every DB Queue needs its own forwarder so that the throttles do not interfere
 		fwdr, err = newForwarder(&config.forwarderConfig, queue, e.matchingRawClient)
 		if err != nil {
