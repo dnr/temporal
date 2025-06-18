@@ -47,11 +47,22 @@ type (
 		ackLevel         fairLevel    // inclusive: task exactly at ackLevel _has_ been acked
 		ackLevelPinned   bool         // pinned while writing tasks so that we don't delete just-written tasks
 
+		// Tracks whether we believe outstandingTasks represents the entire queue right now.
+		atEnd bool
+
 		// gc state
 		inGC       bool
 		numToGC    int       // counts approximately how many tasks we can delete with a GC
 		lastGCTime time.Time // last time GCed
 	}
+
+	mergeMode int
+)
+
+const (
+	mergeReadMiddle mergeMode = iota
+	mergeReadToEnd
+	mergeWrite
 )
 
 func newFairTaskReader(
@@ -171,27 +182,15 @@ func (tr *fairTaskReader) readTasks() {
 func (tr *fairTaskReader) readTasksImpl() {
 	defer tr.readPending.Store(false)
 
-	reloadAt := tr.backlogMgr.config.GetTasksReloadAt()
-
-	tr.lock.Lock()
-	if tr.loadedTasks > reloadAt {
+	readLevel, loadedTasks := tr.readLevelAndLoadedTasks()
+	if loadedTasks > tr.backlogMgr.config.GetTasksReloadAt() {
 		// Too many loaded already. We'll get called again when loadedTasks drops low enough.
-		tr.lock.Unlock()
-		return
-	}
-	readLevel := tr.readLevel
-	tr.lock.Unlock()
-
-	maxReadLevel := tr.backlogMgr.db.GetMaxFairReadLevel(tr.subqueue)
-
-	if !fairLevelLess(readLevel, maxReadLevel) {
-		// we're at the end, don't need to actually do a read
 		return
 	}
 
-	batch := tr.backlogMgr.config.GetTasksBatchSize()
-	readFrom := fairLevelPlusOne(fairLevelMax(readLevel, fairLevel{pass: 1}))
-	res, err := tr.backlogMgr.db.GetFairTasks(tr.backlogMgr.tqCtx, tr.subqueue, readFrom, batch)
+	batchSize := tr.backlogMgr.config.GetTasksBatchSize() - loadedTasks
+	readFrom := fairLevelPlusOne(fairLevelMax(readLevel, fairLevel{pass: 1, id: 0}))
+	res, err := tr.backlogMgr.db.GetFairTasks(tr.backlogMgr.tqCtx, tr.subqueue, readFrom, batchSize)
 	if err != nil {
 		tr.backlogMgr.signalIfFatal(err)
 		// TODO: Should we ever stop retrying on db errors?
@@ -204,7 +203,15 @@ func (tr *fairTaskReader) readTasksImpl() {
 	}
 	tr.retrier.Reset()
 
-	// filter out deleted
+	// If we got less than we asked for, we know we hit the end.
+	mode := mergeReadMiddle
+	if len(res.Tasks) < batchSize {
+		mode = mergeReadToEnd
+	}
+
+	// filter out expired
+	// FIXME: if we have _only_ expired tasks, and we filter them out here, we won't move the
+	// ack level and delete them. maybe we should put them in outstandingTasks as pre-acked.
 	tasks := slices.DeleteFunc(res.Tasks, func(t *persistencespb.AllocatedTaskInfo) bool {
 		if IsTaskExpired(t) {
 			metrics.ExpiredTasksPerTaskQueueCounter.With(tr.backlogMgr.metricsHandler).Record(1)
@@ -213,15 +220,15 @@ func (tr *fairTaskReader) readTasksImpl() {
 		return false
 	})
 
-	if len(tasks) > 0 {
-		tr.mergeTasks(tasks)
-	} else {
-		tr.lock.Lock()
-		defer tr.lock.Unlock()
-		// FIXME: not sure about this, what if more was written below after the read returned
-		// before we got here? need to mass through mergeTasks with 0 tasks to get end of buffer?
-		tr.readLevel = maxReadLevel
-	}
+	// Note: even if (especially if) len(tasks) == 0, we should go through the mergeTasks logic
+	// to update the backlog size estimate.
+	tr.mergeTasks(tasks, mode)
+}
+
+func (tr *fairTaskReader) readLevelAndLoadedTasks() (fairLevel, int) {
+	tr.lock.Lock()
+	defer tr.lock.Unlock()
+	return tr.readLevel, int(tr.loadedTasks)
 }
 
 // call with_out_ lock held
@@ -297,14 +304,10 @@ func (tr *fairTaskReader) retryAddAfterError(task *internalTask) {
 }
 
 func (tr *fairTaskReader) wroteNewTasks(tasks []*persistencespb.AllocatedTaskInfo) {
-	tr.mergeTasks(tasks)
+	tr.mergeTasks(tasks, mergeWrite)
 }
 
-func (tr *fairTaskReader) mergeTasks(tasks []*persistencespb.AllocatedTaskInfo) {
-	if len(tasks) == 0 {
-		return
-	}
-
+func (tr *fairTaskReader) mergeTasks(tasks []*persistencespb.AllocatedTaskInfo, mode mergeMode) {
 	tr.lock.Lock()
 
 	// Take the tasks in the matcher plus the tasks that were just written and sort them by level:
@@ -338,13 +341,17 @@ func (tr *fairTaskReader) mergeTasks(tasks []*persistencespb.AllocatedTaskInfo) 
 		highestLevel = it.Key().(fairLevel) // nolint:revive
 	}
 
-	// Set read level to the maximum level in that set. We must have at least one task here.
-	softassert.That(tr.logger, highestLevel != fairLevel{}, "setting read level to zero")
-	tr.readLevel = highestLevel
+	if highestLevel.id != 0 {
+		// If we have any tasks at all in memory, set readLevel to the maximum of that set.
+		// Otherwise leave readLevel unchanged.
+		tr.readLevel = highestLevel
+	}
 
 	// If there are remaining tasks in the merged set, they can't fit in memory. If they came
 	// from the tasks we just wrote, ignore them. If they came from matcher, remove them.
+	droppedAnyTasks := false
 	for it.Next() {
+		droppedAnyTasks = true
 		if task, ok := it.Value().(*internalTask); ok {
 			// task that was in the matcher that we have to remove
 			tr.backlogAge.record(task.event.Data.CreateTime, -1)
@@ -368,6 +375,22 @@ func (tr *fairTaskReader) mergeTasks(tasks []*persistencespb.AllocatedTaskInfo) 
 		tr.outstandingTasks.Put(level, internalTasks[i])
 		tr.loadedTasks++
 		tr.backlogAge.record(t.Data.CreateTime, 1)
+	}
+
+	// Update atEnd:
+	// If we did a read and didn't get to the end, we can't possibly be at the end.
+	// Also if we dropped anything from memory, we can't either.
+	// If we read to the end and didn't drop anything, then we know we're at the end.
+	// Otherwise (i.e. on write) leave atEnd unchanged.
+	if mode == mergeReadMiddle || droppedAnyTasks {
+		tr.atEnd = false
+	} else if mode == mergeReadToEnd {
+		tr.atEnd = true
+	}
+
+	// If we're at the end, then outstandingTasks is the whole queue so we can set count.
+	if count := tr.knownCountLocked(); count >= 0 {
+		tr.backlogMgr.db.setKnownFairBacklogCount(tr.subqueue, count)
 	}
 
 	// unlock before calling addTaskToMatcher
@@ -432,7 +455,8 @@ func (tr *fairTaskReader) advanceAckLevelLocked() {
 		tr.numToGC += int(numAcked)
 		tr.maybeGCLocked()
 
-		tr.backlogMgr.db.updateFairAckLevelAndBacklogStats(tr.subqueue, tr.ackLevel, -numAcked, tr.backlogAge.oldestTime())
+		tr.backlogMgr.db.updateFairAckLevel(
+			tr.subqueue, tr.ackLevel, -numAcked, tr.knownCountLocked(), tr.backlogAge.oldestTime())
 	}
 }
 
@@ -458,6 +482,13 @@ func (tr *fairTaskReader) getLevels() (readLevel, ackLevel fairLevel) {
 	tr.lock.Lock()
 	defer tr.lock.Unlock()
 	return tr.readLevel, tr.ackLevel
+}
+
+func (tr *fairTaskReader) knownCountLocked() int64 {
+	if tr.atEnd {
+		return int64(tr.loadedTasks)
+	}
+	return -1
 }
 
 // gc

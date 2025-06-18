@@ -122,8 +122,7 @@ func (db *taskQueueDB) getMaxReadLevelLocked(subqueue int) int64 {
 }
 
 func (db *taskQueueDB) getMaxFairReadLevelLocked(subqueue int) fairLevel {
-	s := db.subqueues[subqueue]
-	return fairLevel{pass: s.MaxReadLevelPass, id: s.MaxReadLevelId}
+	return db.subqueues[subqueue].maxReadLevel()
 }
 
 // This is only exposed for testing!
@@ -300,27 +299,37 @@ func (db *taskQueueDB) updateAckLevelAndBacklogStats(subqueue int, newAckLevel i
 	}
 }
 
-func (db *taskQueueDB) updateFairAckLevelAndBacklogStats(subqueue int, newAckLevel fairLevel, countDelta int64, oldestTime time.Time) {
+func (db *taskQueueDB) updateFairAckLevel(subqueue int, newAckLevel fairLevel, countDelta, knownCount int64, oldestTime time.Time) {
 	db.Lock()
 	defer db.Unlock()
 
 	db.lastChange = time.Now()
 	dbQueue := db.subqueues[subqueue]
-	if fairLevelLess(newAckLevel, fairLevel{pass: dbQueue.AckLevelPass, id: dbQueue.AckLevel}) {
+	if fairLevelLess(newAckLevel, dbQueue.ackLevel()) {
 		softassert.Fail(db.logger,
 			fmt.Sprintf("ack level in subqueue %d should not move backwards (from %v to %v)",
-				subqueue, dbQueue.AckLevel, newAckLevel))
+				subqueue, dbQueue.ackLevel(), newAckLevel))
 	}
-	dbQueue.AckLevelPass = newAckLevel.pass
-	dbQueue.AckLevel = newAckLevel.id
+	dbQueue.setAckLevel(newAckLevel)
 
-	// FIXME: does this ever happen? sometimes, but not reliably. need to fix divergence
-	if newAckLevel == db.getMaxFairReadLevelLocked(subqueue) {
+	if knownCount >= 0 {
 		// Reset approximateBacklogCount to fix the count divergence issue
-		dbQueue.ApproximateBacklogCount = 0
+		dbQueue.ApproximateBacklogCount = knownCount
 		dbQueue.oldestTime = oldestTime
 	} else if countDelta != 0 {
 		db.updateBacklogStatsLocked(subqueue, countDelta, oldestTime)
+	}
+}
+
+// Use this to reset ApproximateBacklogCount when the backlog count is known, e.g. when you're
+// read to the end of the backlog.
+func (db *taskQueueDB) setKnownFairBacklogCount(subqueue int, count int64) {
+	db.Lock()
+	defer db.Unlock()
+
+	if db.subqueues[subqueue].ApproximateBacklogCount != count {
+		db.lastChange = time.Now()
+		db.subqueues[subqueue].ApproximateBacklogCount = count
 	}
 }
 
@@ -742,4 +751,13 @@ func (s *dbSubqueue) maxReadLevel() fairLevel {
 func (s *dbSubqueue) setMaxReadLevel(level fairLevel) {
 	s.MaxReadLevelPass = level.pass
 	s.MaxReadLevelId = level.id
+}
+
+func (s *dbSubqueue) ackLevel() fairLevel {
+	return fairLevel{pass: s.AckLevelPass, id: s.AckLevel}
+}
+
+func (s *dbSubqueue) setAckLevel(level fairLevel) {
+	s.AckLevelPass = level.pass
+	s.AckLevel = level.id
 }
