@@ -179,12 +179,15 @@ func (db *taskQueueDB) takeOverTaskQueueLocked(
 			return err
 		}
 		// We took over the task queue and are not sure what tasks may have been written
-		// before. Set max read level of all subqueues to just before our new block.
+		// before. Set max read level id of all subqueues to just before our new block.
+		//
+		// Leave MaxReadLevelPass as it was. This works for both fifo queues (which don't use
+		// pass) and fair queues. Note that for fair queues, MaxReadLevel will not correspond
+		// to any task that has been written.
 		maxReadLevel := rangeIDToTaskIDBlock(db.rangeID, db.config.RangeSize).start - 1
 		for _, s := range db.subqueues {
 			s.MaxReadLevelId = maxReadLevel
 		}
-		// FIXME: need to figure out max read level pass!
 		return nil
 
 	case *serviceerror.NotFound:
@@ -200,9 +203,9 @@ func (db *taskQueueDB) takeOverTaskQueueLocked(
 		db.lastWrite = time.Now()
 		// In this case, ensureDefaultSubqueuesLocked already initialized subqueue 0 to have
 		// ackLevel and maxReadLevel 0, so we don't need to initialize them.
+		softassert.That(db.logger, db.subqueues[0].MaxReadLevelPass == 0, "should have maxReadLevel 0 here")
 		softassert.That(db.logger, db.subqueues[0].MaxReadLevelId == 0, "should have maxReadLevel 0 here")
 		softassert.That(db.logger, db.subqueues[0].AckLevel == 0, "should have ackLevel 0 here")
-		// FIXME: need to figure out max read level pass!
 		return nil
 
 	default:
@@ -311,7 +314,7 @@ func (db *taskQueueDB) updateFairAckLevelAndBacklogStats(subqueue int, newAckLev
 	dbQueue.AckLevelPass = newAckLevel.pass
 	dbQueue.AckLevel = newAckLevel.id
 
-	// FIXME: does this ever happen? yes: ack level is inclusive and so is maxreadlevel, but need to make sure maxreadlevel handling is correct
+	// FIXME: does this ever happen? sometimes, but not reliably. need to fix divergence
 	if newAckLevel == db.getMaxFairReadLevelLocked(subqueue) {
 		// Reset approximateBacklogCount to fix the count divergence issue
 		dbQueue.ApproximateBacklogCount = 0
@@ -709,14 +712,17 @@ func (db *taskQueueDB) ensureDefaultSubqueuesLocked(
 }
 
 func (db *taskQueueDB) newSubqueueLocked(key *persistencespb.SubqueueKey) *dbSubqueue {
-	// start ack level + max read level just before the current block
+	// For fifo queues: start ack level + max read level just before the current block.
+	// For fair queues: ack level and max read level don't really matter here, but set them to
+	// <0, initAckLevel> anyway so we can use the same code in both cases.
 	initAckLevel := rangeIDToTaskIDBlock(db.rangeID, db.config.RangeSize).start - 1
 
 	s := &dbSubqueue{}
-	// FIXME: MaxReadLevelPass???
-	s.MaxReadLevelId = initAckLevel
 	s.Key = key
+	s.AckLevelPass = 0
 	s.AckLevel = initAckLevel
+	s.MaxReadLevelPass = 0
+	s.MaxReadLevelId = initAckLevel
 	return s
 }
 
