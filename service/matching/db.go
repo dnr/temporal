@@ -127,11 +127,10 @@ func (db *taskQueueDB) getMaxFairReadLevelLocked(subqueue int) fairLevel {
 }
 
 // This is only exposed for testing!
-func (db *taskQueueDB) setMaxReadLevelForTesting(subqueue int, pass, level int64) {
+func (db *taskQueueDB) setMaxReadLevelForTesting(subqueue int, level fairLevel) {
 	db.Lock()
 	defer db.Unlock()
-	db.subqueues[subqueue].MaxReadLevelPass = pass
-	db.subqueues[subqueue].MaxReadLevelId = level
+	db.subqueues[subqueue].setMaxReadLevel(level)
 }
 
 // RenewLease renews the lease on a taskqueue. If there is no previous lease,
@@ -349,6 +348,13 @@ func (db *taskQueueDB) getApproximateBacklogCount(subqueue int) int64 {
 	db.Lock()
 	defer db.Unlock()
 	return db.subqueues[subqueue].ApproximateBacklogCount
+}
+
+func (db *taskQueueDB) getApproximateBacklogCountAndMaxReadLevel(subqueue int) (int64, fairLevel) {
+	db.Lock()
+	defer db.Unlock()
+	s := db.subqueues[subqueue]
+	return s.ApproximateBacklogCount, s.maxReadLevel()
 }
 
 func (db *taskQueueDB) getTotalApproximateBacklogCount() (total int64) {

@@ -306,18 +306,20 @@ func (c *fairBacklogManagerImpl) InternalStatus() []*taskqueuespb.InternalTaskQu
 	status := make([]*taskqueuespb.InternalTaskQueueStatus, len(c.subqueues))
 	for i, r := range c.subqueues {
 		readLevel, ackLevel := r.getLevels()
+		count, maxReadLevel := c.db.getApproximateBacklogCountAndMaxReadLevel(i)
 		status[i] = &taskqueuespb.InternalTaskQueueStatus{
-			ReadLevel:     readLevel.id,
 			ReadLevelPass: readLevel.pass,
-			AckLevel:      ackLevel.id,
+			ReadLevel:     readLevel.id,
 			AckLevelPass:  ackLevel.pass,
+			AckLevel:      ackLevel.id,
 			TaskIdBlock: &taskqueuepb.TaskIdBlock{
 				StartId: currentTaskIDBlock.start,
 				EndId:   currentTaskIDBlock.end,
 			},
 			LoadedTasks:             int64(r.getLoadedTasks()),
-			MaxReadLevel:            c.db.GetMaxReadLevel(i),
-			ApproximateBacklogCount: c.db.getApproximateBacklogCount(i),
+			MaxReadLevelPass:        maxReadLevel.pass,
+			MaxReadLevel:            maxReadLevel.id,
+			ApproximateBacklogCount: count,
 		}
 	}
 	return status
