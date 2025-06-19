@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"math/rand"
 	"strconv"
 	"sync"
@@ -11,7 +12,6 @@ import (
 	"time"
 
 	"github.com/emirpasic/gods/maps/treemap"
-	godsutils "github.com/emirpasic/gods/utils"
 	"github.com/pborman/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -88,9 +88,10 @@ type (
 		hostInfoForResolver      membership.HostInfo
 		mockNexusEndpointManager *persistence.MockNexusEndpointManager
 
-		matchingEngine *matchingEngineImpl
-		taskManager    *testTaskManager
-		logger         *testlogger.TestLogger
+		matchingEngine  *matchingEngineImpl
+		taskManager     *testTaskManager
+		fairTaskManager *testTaskManager
+		logger          *testlogger.TestLogger
 	}
 )
 
@@ -105,7 +106,8 @@ func createTestMatchingEngine(
 	matchingClient matchingservice.MatchingServiceClient,
 	namespaceRegistry namespace.Registry,
 ) *matchingEngineImpl {
-	tm := newTestTaskManager(logger)
+	tm := newTestTaskManager(logger, false)
+	ftm := newTestTaskManager(logger, true)
 	mockVisibilityManager := manager.NewMockVisibilityManager(controller)
 	mockVisibilityManager.EXPECT().Close().AnyTimes()
 	mockHistoryClient := historyservicemock.NewMockHistoryServiceClient(controller)
@@ -120,7 +122,7 @@ func createTestMatchingEngine(
 	mockServiceResolver.EXPECT().RemoveListener(gomock.Any()).AnyTimes()
 	mockNexusEndpointManager := persistence.NewMockNexusEndpointManager(controller)
 	mockNexusEndpointManager.EXPECT().ListNexusEndpoints(gomock.Any(), gomock.Any()).Return(&persistence.ListNexusEndpointsResponse{}, nil).AnyTimes()
-	return newMatchingEngine(config, tm, mockHistoryClient, logger, namespaceRegistry, matchingClient, mockVisibilityManager, mockHostInfoProvider, mockServiceResolver, mockNexusEndpointManager)
+	return newMatchingEngine(config, tm, ftm, mockHistoryClient, logger, namespaceRegistry, matchingClient, mockVisibilityManager, mockHostInfoProvider, mockServiceResolver, mockNexusEndpointManager)
 }
 
 func createMockNamespaceCache(controller *gomock.Controller, nsName namespace.Name) (*namespace.Namespace, *namespace.MockRegistry) {
@@ -164,7 +166,8 @@ func (s *matchingEngineSuite) SetupTest() {
 		Return(&matchingservice.ReplicateTaskQueueUserDataResponse{}, nil).AnyTimes()
 	s.mockMatchingClient.EXPECT().ForceLoadTaskQueuePartition(gomock.Any(), gomock.Any()).
 		Return(&matchingservice.ForceLoadTaskQueuePartitionResponse{WasUnloaded: true}, nil).AnyTimes()
-	s.taskManager = newTestTaskManager(s.logger)
+	s.taskManager = newTestTaskManager(s.logger, false)
+	s.fairTaskManager = newTestTaskManager(s.logger, true)
 	s.ns, s.mockNamespaceCache = createMockNamespaceCache(s.controller, matchingTestNamespace)
 	s.mockVisibilityManager = manager.NewMockVisibilityManager(s.controller)
 	s.mockVisibilityManager.EXPECT().Close().AnyTimes()
@@ -181,7 +184,7 @@ func (s *matchingEngineSuite) SetupTest() {
 	s.mockNexusEndpointManager = persistence.NewMockNexusEndpointManager(s.controller)
 	s.mockNexusEndpointManager.EXPECT().ListNexusEndpoints(gomock.Any(), gomock.Any()).Return(&persistence.ListNexusEndpointsResponse{}, nil).AnyTimes()
 
-	s.matchingEngine = s.newMatchingEngine(s.newConfig(), s.taskManager)
+	s.matchingEngine = s.newMatchingEngine(s.newConfig(), s.taskManager, s.fairTaskManager)
 	s.matchingEngine.Start()
 }
 
@@ -200,22 +203,26 @@ func (s *matchingEngineSuite) TearDownTest() {
 }
 
 func (s *matchingEngineSuite) newMatchingEngine(
-	config *Config, taskMgr persistence.TaskManager,
+	config *Config,
+	taskMgr persistence.TaskManager,
+	fairTaskMgr persistence.TaskManager,
 ) *matchingEngineImpl {
-	return newMatchingEngine(config, taskMgr, s.mockHistoryClient, s.logger, s.mockNamespaceCache, s.mockMatchingClient, s.mockVisibilityManager,
+	return newMatchingEngine(config, taskMgr, fairTaskMgr, s.mockHistoryClient, s.logger, s.mockNamespaceCache, s.mockMatchingClient, s.mockVisibilityManager,
 		s.mockHostInfoProvider, s.mockServiceResolver, s.mockNexusEndpointManager)
 }
 
 func newMatchingEngine(
-	config *Config, taskMgr persistence.TaskManager, mockHistoryClient historyservice.HistoryServiceClient,
+	config *Config, taskMgr persistence.TaskManager, fairTaskMgr persistence.FairTaskManager,
+	mockHistoryClient historyservice.HistoryServiceClient,
 	logger log.Logger, mockNamespaceCache namespace.Registry, mockMatchingClient matchingservice.MatchingServiceClient,
 	mockVisibilityManager manager.VisibilityManager, mockHostInfoProvider membership.HostInfoProvider,
 	mockServiceResolver membership.ServiceResolver, nexusEndpointManager persistence.NexusEndpointManager,
 ) *matchingEngineImpl {
 	return &matchingEngineImpl{
-		taskManager:   taskMgr,
-		historyClient: mockHistoryClient,
-		partitions:    make(map[tqid.PartitionKey]taskQueuePartitionManager),
+		taskManager:     taskMgr,
+		fairTaskManager: fairTaskMgr,
+		historyClient:   mockHistoryClient,
+		partitions:      make(map[tqid.PartitionKey]taskQueuePartitionManager),
 		gaugeMetrics: gaugeMetrics{
 			loadedTaskQueueFamilyCount:    make(map[taskQueueCounterKey]int),
 			loadedTaskQueueCount:          make(map[taskQueueCounterKey]int),
@@ -1768,7 +1775,7 @@ func (s *matchingEngineSuite) TestMultipleEnginesActivitiesRangeStealing() {
 
 	engines := make([]*matchingEngineImpl, engineCount)
 	for p := 0; p < engineCount; p++ {
-		e := s.newMatchingEngine(s.newConfig(), s.taskManager)
+		e := s.newMatchingEngine(s.newConfig(), s.taskManager, s.fairTaskManager)
 		e.config.RangeSize = rangeSize
 		engines[p] = e
 		e.Start()
@@ -1929,7 +1936,7 @@ func (s *matchingEngineSuite) TestMultipleEnginesWorkflowTasksRangeStealing() {
 
 	engines := make([]*matchingEngineImpl, engineCount)
 	for p := 0; p < engineCount; p++ {
-		e := s.newMatchingEngine(s.newConfig(), s.taskManager)
+		e := s.newMatchingEngine(s.newConfig(), s.taskManager, s.fairTaskManager)
 		e.config.RangeSize = rangeSize
 		engines[p] = e
 		e.Start()
@@ -2860,7 +2867,8 @@ func (s *matchingEngineSuite) TestUnloadOnMembershipChange() {
 
 	config := s.newConfig()
 	config.MembershipUnloadDelay = dynamicconfig.GetDurationPropertyFn(10 * time.Millisecond)
-	e := s.newMatchingEngine(config, s.taskManager)
+	// FIXME: why is this calling s.newMatchingEngine instead of using s.matchingEngine?
+	e := s.newMatchingEngine(config, s.taskManager, s.fairTaskManager)
 	e.Start()
 	defer e.Stop()
 
@@ -3606,12 +3614,14 @@ func newHistoryEvent(eventID int64, eventType enumspb.EventType) *historypb.Hist
 	return historyEvent
 }
 
-var _ persistence.TaskManager = (*testTaskManager)(nil) // Asserts that interface is indeed implemented
+var _ persistence.TaskManager = (*testTaskManager)(nil)     // Asserts that interface is indeed implemented
+var _ persistence.FairTaskManager = (*testTaskManager)(nil) // Asserts that interface is indeed implemented
 
 type testTaskManager struct {
 	sync.Mutex
 	queues              map[dbTaskQueueKey]*testPhysicalTaskQueueManager
 	logger              log.Logger
+	fairness            bool
 	dbServiceError      bool
 	dbCondFailedErr     bool
 	dbRandCondFailedErr bool
@@ -3623,8 +3633,8 @@ type dbTaskQueueKey struct {
 	taskType        enumspb.TaskQueueType
 }
 
-func newTestTaskManager(logger log.Logger) *testTaskManager {
-	return &testTaskManager{queues: make(map[dbTaskQueueKey]*testPhysicalTaskQueueManager), logger: logger}
+func newTestTaskManager(logger log.Logger, fairness bool) *testTaskManager {
+	return &testTaskManager{queues: make(map[dbTaskQueueKey]*testPhysicalTaskQueueManager), logger: logger, fairness: fairness}
 }
 
 func (m *testTaskManager) GetName() string {
@@ -3681,14 +3691,14 @@ type testPhysicalTaskQueueManager struct {
 	userData                *persistencespb.VersionedTaskQueueUserData
 }
 
+func newTestTaskQueueManager() *testPhysicalTaskQueueManager {
+	return &testPhysicalTaskQueueManager{tasks: treemap.NewWith(fairLevelComparator)}
+}
+
 func (m *testPhysicalTaskQueueManager) RangeID() int64 {
 	m.Lock()
 	defer m.Unlock()
 	return m.rangeID
-}
-
-func newTestTaskQueueManager() *testPhysicalTaskQueueManager {
-	return &testPhysicalTaskQueueManager{tasks: treemap.NewWith(godsutils.Int64Comparator)}
 }
 
 func (m *testTaskManager) CreateTaskQueue(
@@ -3744,6 +3754,7 @@ func (m *testTaskManager) GetTaskQueue(
 	if tlm.rangeID == 0 {
 		return nil, serviceerror.NewNotFound("task queue not found")
 	}
+	// FIXME: this is broken, should just store blob
 	return &persistence.GetTaskQueueResponse{
 		TaskQueueInfo: &persistencespb.TaskQueueInfo{
 			NamespaceId:             request.NamespaceID,
@@ -3765,8 +3776,8 @@ func (m *testTaskManager) minTaskID(dbq *PhysicalTaskQueueKey) (int64, bool) {
 	tlm.Lock()
 	defer tlm.Unlock()
 	minKey, _ := tlm.tasks.Min()
-	key, ok := minKey.(int64)
-	return key, ok
+	key, ok := minKey.(fairLevel)
+	return key.id, ok
 }
 
 // maxTaskID returns the maximum value of the TaskID present in testTaskManager
@@ -3775,22 +3786,33 @@ func (m *testTaskManager) maxTaskID(dbq *PhysicalTaskQueueKey) (int64, bool) {
 	tlm.Lock()
 	defer tlm.Unlock()
 	maxKey, _ := tlm.tasks.Max()
-	key, ok := maxKey.(int64)
-	return key, ok
+	key, ok := maxKey.(fairLevel)
+	return key.id, ok
 }
 
 func (m *testTaskManager) CompleteTasksLessThan(
 	_ context.Context,
 	request *persistence.CompleteTasksLessThanRequest,
 ) (int, error) {
+	if m.fairness {
+		return 0, serviceerror.NewInternal("invalid CompleteTasksLessThan request on fair queue")
+	} else if !m.fairness && request.ExclusiveMaxPass != 0 {
+		return 0, serviceerror.NewInternal("invalid CompleteTasksLessThan request on queue")
+	}
 	tlm := m.getQueueManager(request.TaskQueueName, request.NamespaceID, request.TaskType)
 	tlm.Lock()
 	defer tlm.Unlock()
 	keys := tlm.tasks.Keys()
 	for _, key := range keys {
-		id := key.(int64)
-		if id < request.ExclusiveMaxTaskID {
-			tlm.tasks.Remove(id)
+		level := key.(fairLevel)
+		if m.fairness {
+			if fairLevelLess(level, fairLevel{pass: request.ExclusiveMaxPass, id: request.ExclusiveMaxTaskID}) {
+				tlm.tasks.Remove(level)
+			}
+		} else {
+			if level.id < request.ExclusiveMaxTaskID {
+				tlm.tasks.Remove(level)
+			}
 		}
 	}
 	return persistence.UnknownNumRowsAffected, nil
@@ -3856,9 +3878,16 @@ func (m *testTaskManager) CreateTasks(
 
 	// First validate the entire batch
 	for _, task := range request.Tasks {
-		m.logger.Debug("testTaskManager.CreateTask", tag.TaskID(task.GetTaskId()), tag.ShardRangeID(rangeID))
+		level := allocatedTaskFairLevel(task)
+		m.logger.Debug("testTaskManager.CreateTask", tag.TaskKey(level), tag.ShardRangeID(rangeID))
+
 		if task.GetTaskId() <= 0 {
 			panic(fmt.Errorf("invalid taskID=%v", task.GetTaskId()))
+		}
+		if m.fairness && task.PassNumber == 0 {
+			return nil, serviceerror.NewInternal("invalid fair queue task missing pass number")
+		} else if !m.fairness && task.PassNumber != 0 {
+			return nil, serviceerror.NewInternal("invalid non-fair queue task with pass number")
 		}
 
 		if tlm.rangeID != rangeID {
@@ -3870,17 +3899,19 @@ func (m *testTaskManager) CreateTasks(
 					taskQueue, taskType, rangeID, tlm.rangeID),
 			}
 		}
-		_, ok := tlm.tasks.Get(task.GetTaskId())
+		_, ok := tlm.tasks.Get(level)
 		if ok {
-			panic(fmt.Sprintf("Duplicated TaskID %v", task.GetTaskId()))
+			panic(fmt.Sprintf("Duplicated TaskID %v", level))
 		}
 	}
 
 	// Then insert all tasks if no errors
 	for _, task := range request.Tasks {
-		tlm.tasks.Put(task.GetTaskId(), &persistencespb.AllocatedTaskInfo{
-			Data:   task.Data,
-			TaskId: task.GetTaskId(),
+		level := allocatedTaskFairLevel(task)
+		tlm.tasks.Put(level, &persistencespb.AllocatedTaskInfo{
+			Data:       task.Data,
+			TaskId:     task.GetTaskId(),
+			PassNumber: task.GetPassNumber(),
 		})
 		tlm.createTaskCount++
 		tlm.ApproximateBacklogCount++
@@ -3896,6 +3927,12 @@ func (m *testTaskManager) GetTasks(
 ) (*persistence.GetTasksResponse, error) {
 	m.logger.Debug("testTaskManager.GetTasks", tag.MinLevel(request.InclusiveMinTaskID), tag.MaxLevel(request.ExclusiveMaxTaskID))
 
+	if m.fairness && request.InclusiveMinPass < 1 || request.ExclusiveMaxTaskID != math.MaxInt64 {
+		return nil, serviceerror.NewInternal("invalid GetTasks request on fair queue")
+	} else if !m.fairness && request.InclusiveMinPass != 0 {
+		return nil, serviceerror.NewInternal("invalid GetTasks request on queue")
+	}
+
 	if m.generateErrorRandomly() {
 		return nil, serviceerror.NewUnavailablef("GetTasks operation failed")
 	}
@@ -3906,20 +3943,24 @@ func (m *testTaskManager) GetTasks(
 	var tasks []*persistencespb.AllocatedTaskInfo
 
 	it := tlm.tasks.Iterator()
-	for it.Next() {
-		taskID := it.Key().(int64)
-		if taskID < request.InclusiveMinTaskID {
-			continue
-		}
-		if taskID >= request.ExclusiveMaxTaskID {
-			break
+	for it.Next() && len(tasks) < request.PageSize {
+		level := it.Key().(fairLevel)
+		if m.fairness {
+			if fairLevelLess(level, fairLevel{pass: request.InclusiveMinPass, id: request.InclusiveMinTaskID}) {
+				continue
+			}
+		} else {
+			if level.id < request.InclusiveMinTaskID {
+				continue
+			}
+			if level.id >= request.ExclusiveMaxTaskID {
+				break
+			}
 		}
 		tasks = append(tasks, it.Value().(*persistencespb.AllocatedTaskInfo))
 	}
 	tlm.getTasksCount++
-	return &persistence.GetTasksResponse{
-		Tasks: tasks,
-	}, nil
+	return &persistence.GetTasksResponse{Tasks: tasks}, nil
 }
 
 // getTaskCount returns number of tasks in a task queue
