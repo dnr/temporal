@@ -3794,7 +3794,7 @@ func (m *testTaskManager) CompleteTasksLessThan(
 	_ context.Context,
 	request *persistence.CompleteTasksLessThanRequest,
 ) (int, error) {
-	if m.fairness {
+	if m.fairness && request.ExclusiveMaxPass < 1 {
 		return 0, serviceerror.NewInternal("invalid CompleteTasksLessThan request on fair queue")
 	} else if !m.fairness && request.ExclusiveMaxPass != 0 {
 		return 0, serviceerror.NewInternal("invalid CompleteTasksLessThan request on queue")
@@ -3850,7 +3850,6 @@ func (m *testTaskManager) generateErrorRandomly() bool {
 	return false
 }
 
-// CreateTask provides a mock function with given fields: request
 func (m *testTaskManager) CreateTasks(
 	_ context.Context,
 	request *persistence.CreateTasksRequest,
@@ -3879,7 +3878,7 @@ func (m *testTaskManager) CreateTasks(
 	// First validate the entire batch
 	for _, task := range request.Tasks {
 		level := allocatedTaskFairLevel(task)
-		m.logger.Debug("testTaskManager.CreateTask", tag.TaskKey(level), tag.ShardRangeID(rangeID))
+		m.logger.Debug("testTaskManager.CreateTask", tag.ShardRangeID(rangeID), tag.TaskKey(level), tag.Value(task.Data))
 
 		if task.GetTaskId() <= 0 {
 			panic(fmt.Errorf("invalid taskID=%v", task.GetTaskId()))
@@ -3899,35 +3898,28 @@ func (m *testTaskManager) CreateTasks(
 					taskQueue, taskType, rangeID, tlm.rangeID),
 			}
 		}
-		_, ok := tlm.tasks.Get(level)
-		if ok {
+		if _, ok := tlm.tasks.Get(level); ok {
 			panic(fmt.Sprintf("Duplicated TaskID %v", level))
 		}
 	}
 
 	// Then insert all tasks if no errors
 	for _, task := range request.Tasks {
-		level := allocatedTaskFairLevel(task)
-		tlm.tasks.Put(level, &persistencespb.AllocatedTaskInfo{
-			Data:       task.Data,
-			TaskId:     task.GetTaskId(),
-			PassNumber: task.GetPassNumber(),
-		})
+		tlm.tasks.Put(allocatedTaskFairLevel(task), common.CloneProto(task))
 		tlm.createTaskCount++
-		tlm.ApproximateBacklogCount++
+		tlm.ApproximateBacklogCount++ // FIXME ???
 	}
 
 	return &persistence.CreateTasksResponse{}, nil
 }
 
-// GetTasks provides a mock function with given fields: request
 func (m *testTaskManager) GetTasks(
 	_ context.Context,
 	request *persistence.GetTasksRequest,
 ) (*persistence.GetTasksResponse, error) {
-	m.logger.Debug("testTaskManager.GetTasks", tag.MinLevel(request.InclusiveMinTaskID), tag.MaxLevel(request.ExclusiveMaxTaskID))
+	m.logger.Debug("testTaskManager.GetTasks", tag.Value(request))
 
-	if m.fairness && request.InclusiveMinPass < 1 || request.ExclusiveMaxTaskID != math.MaxInt64 {
+	if m.fairness && (request.InclusiveMinPass < 1 || request.ExclusiveMaxTaskID != math.MaxInt64) {
 		return nil, serviceerror.NewInternal("invalid GetTasks request on fair queue")
 	} else if !m.fairness && request.InclusiveMinPass != 0 {
 		return nil, serviceerror.NewInternal("invalid GetTasks request on queue")
