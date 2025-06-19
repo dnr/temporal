@@ -213,7 +213,7 @@ func (c *fairBacklogManagerImpl) SpoolTask(taskInfo *persistencespb.TaskInfo) er
 	return err
 }
 
-func (c *fairBacklogManagerImpl) getAndPinAckLevels() ([]fairLevel, func()) {
+func (c *fairBacklogManagerImpl) getAndPinAckLevels() ([]fairLevel, func(error)) {
 	c.subqueueLock.Lock()
 	subqueues := slices.Clone(c.subqueues)
 	c.subqueueLock.Unlock()
@@ -222,9 +222,9 @@ func (c *fairBacklogManagerImpl) getAndPinAckLevels() ([]fairLevel, func()) {
 	for i, s := range subqueues {
 		levels[i] = s.getAndPinAckLevel()
 	}
-	unpin := func() {
+	unpin := func(writeErr error) {
 		for _, s := range subqueues {
-			s.unpinAckLevel()
+			s.unpinAckLevel(writeErr)
 		}
 	}
 	return levels, unpin

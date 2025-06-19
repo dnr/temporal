@@ -188,7 +188,7 @@ func (w *fairTaskWriter) taskWriterLoop() {
 				w.logger.Error("Persistent store operation failure", tag.StoreOperationCreateTask, tag.Error(err))
 				w.backlogMgr.signalIfFatal(err)
 			}
-			unpin() // note this must be called after wroteNewTasks!
+			unpin(err) // note this must be called after wroteNewTasks!
 		}
 		for _, req := range reqs {
 			req.responseCh <- err

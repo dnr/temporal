@@ -469,9 +469,15 @@ func (tr *fairTaskReader) getAndPinAckLevel() fairLevel {
 	return tr.ackLevel
 }
 
-func (tr *fairTaskReader) unpinAckLevel() {
+func (tr *fairTaskReader) unpinAckLevel(writeErr error) {
 	tr.lock.Lock()
 	defer tr.lock.Unlock()
+
+	if writeErr != nil {
+		// We got an error writing but the write may have succeeded anyway.
+		// We can't assume we know where the end is anymore.
+		tr.atEnd = false
+	}
 
 	softassert.That(tr.logger, tr.ackLevelPinned, "ack level wasn't pinned")
 	tr.ackLevelPinned = false
