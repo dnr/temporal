@@ -13,6 +13,7 @@ import (
 	"go.temporal.io/server/common/primitives/timestamp"
 	"go.temporal.io/server/common/testing/testlogger"
 	"go.temporal.io/server/common/tqid"
+	"go.temporal.io/server/service/matching/counter"
 	"go.uber.org/mock/gomock"
 )
 
@@ -20,6 +21,7 @@ type BacklogManagerTestSuite struct {
 	suite.Suite
 
 	newMatcher bool
+	fairness   bool
 	logger     *testlogger.TestLogger
 	blm        backlogManager
 	controller *gomock.Controller
@@ -28,14 +30,19 @@ type BacklogManagerTestSuite struct {
 	ptqMgr     *MockphysicalTaskQueueManager
 }
 
-func TestBacklogManagerTestSuite(t *testing.T) {
+func TestBacklogManager_Suite(t *testing.T) {
 	t.Parallel()
 	suite.Run(t, &BacklogManagerTestSuite{newMatcher: false})
 }
 
-func TestBacklogManagerWithNewMatcherTestSuite(t *testing.T) {
+func TestBacklogManager_Pri_Suite(t *testing.T) {
 	t.Parallel()
 	suite.Run(t, &BacklogManagerTestSuite{newMatcher: true})
+}
+
+func TestBacklogManager_Fair_TestSuite(t *testing.T) {
+	t.Parallel()
+	suite.Run(t, &BacklogManagerTestSuite{newMatcher: true, fairness: true})
 }
 
 func (s *BacklogManagerTestSuite) SetupTest() {
@@ -57,7 +64,19 @@ func (s *BacklogManagerTestSuite) SetupTest() {
 	ctx, s.cancelCtx = context.WithCancel(context.Background())
 	s.T().Cleanup(s.cancelCtx)
 
-	if s.newMatcher {
+	if s.fairness {
+		s.blm = newFairBacklogManager(
+			ctx,
+			s.ptqMgr,
+			tlCfg,
+			s.taskMgr,
+			s.logger,
+			s.logger,
+			nil,
+			metrics.NoopMetricsHandler,
+			counter.NewMapCounter(),
+		)
+	} else if s.newMatcher {
 		s.blm = newPriBacklogManager(
 			ctx,
 			s.ptqMgr,
@@ -167,7 +186,7 @@ func (s *BacklogManagerTestSuite) TestReadBatchDone() {
 	s.NoError(blm.WaitUntilInitialized(context.Background()))
 
 	blm.taskAckManager.setReadLevel(0)
-	blm.getDB().setMaxReadLevelForTesting(subqueueZero, maxReadLevel)
+	blm.getDB().setMaxReadLevelForTesting(subqueueZero, fairLevel{id: maxReadLevel})
 	batch, err := blm.taskReader.getTaskBatch(context.Background())
 	s.NoError(err)
 	s.Empty(batch.tasks)

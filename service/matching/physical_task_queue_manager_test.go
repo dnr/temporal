@@ -44,6 +44,7 @@ type PhysicalTaskQueueManagerTestSuite struct {
 	suite.Suite
 
 	newMatcher           bool
+	fairness             bool
 	config               *Config
 	controller           *gomock.Controller
 	physicalTaskQueueKey *PhysicalTaskQueueKey
@@ -52,17 +53,23 @@ type PhysicalTaskQueueManagerTestSuite struct {
 }
 
 // TODO(pri): cleanup; delete this
-func TestPhysicalTaskQueueManagerTestSuite(t *testing.T) {
+func TestPhysicalTaskQueueManagerSuite(t *testing.T) {
 	suite.Run(t, &PhysicalTaskQueueManagerTestSuite{newMatcher: false})
 }
 
-func TestPhysicalTaskQueueManagerWithNewMatcherTestSuite(t *testing.T) {
+func TestPhysicalTaskQueueManager_Pri_Suite(t *testing.T) {
 	suite.Run(t, &PhysicalTaskQueueManagerTestSuite{newMatcher: true})
+}
+
+func TestPhysicalTaskQueueManager_Fair_TestSuite(t *testing.T) {
+	suite.Run(t, &PhysicalTaskQueueManagerTestSuite{newMatcher: true, fairness: true})
 }
 
 func (s *PhysicalTaskQueueManagerTestSuite) SetupTest() {
 	s.config = defaultTestConfig()
-	if s.newMatcher {
+	if s.fairness {
+		useFairness(s.config)
+	} else if s.newMatcher {
 		useNewMatcher(s.config)
 	}
 	s.controller = gomock.NewController(s.T())

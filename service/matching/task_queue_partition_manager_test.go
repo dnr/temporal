@@ -41,6 +41,7 @@ type PartitionManagerTestSuite struct {
 	protorequire.ProtoAssertions
 
 	newMatcher   bool
+	fairness     bool
 	controller   *gomock.Controller
 	userDataMgr  *mockUserDataManager
 	partitionMgr *taskQueuePartitionManagerImpl
@@ -52,9 +53,14 @@ func TestTaskQueuePartitionManagerSuite(t *testing.T) {
 	suite.Run(t, &PartitionManagerTestSuite{newMatcher: false})
 }
 
-func TestTaskQueuePartitionManagerWithNewMatcherSuite(t *testing.T) {
+func TestTaskQueuePartitionManager_Pri_Suite(t *testing.T) {
 	t.Parallel()
 	suite.Run(t, &PartitionManagerTestSuite{newMatcher: true})
+}
+
+func TestTaskQueuePartitionManager_Fair_Suite(t *testing.T) {
+	t.Parallel()
+	suite.Run(t, &PartitionManagerTestSuite{newMatcher: true, fairness: true})
 }
 
 func (s *PartitionManagerTestSuite) SetupTest() {
@@ -64,7 +70,9 @@ func (s *PartitionManagerTestSuite) SetupTest() {
 
 	ns, registry := createMockNamespaceCache(s.controller, namespace.Name(namespaceName))
 	config := NewConfig(dynamicconfig.NewNoopCollection())
-	if s.newMatcher {
+	if s.fairness {
+		useFairness(config)
+	} else if s.newMatcher {
 		useNewMatcher(config)
 	}
 

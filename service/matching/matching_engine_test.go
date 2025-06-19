@@ -76,6 +76,7 @@ type (
 		*require.Assertions
 
 		newMatcher               bool
+		fairness                 bool
 		controller               *gomock.Controller
 		mockHistoryClient        *historyservicemock.MockHistoryServiceClient
 		mockMatchingClient       *matchingservicemock.MockMatchingServiceClient
@@ -135,8 +136,12 @@ func TestMatchingEngineSuite(t *testing.T) {
 	suite.Run(t, &matchingEngineSuite{newMatcher: false})
 }
 
-func TestMatchingEngineWithNewMatcherSuite(t *testing.T) {
+func TestMatchingEngine_Pri_Suite(t *testing.T) {
 	suite.Run(t, &matchingEngineSuite{newMatcher: true})
+}
+
+func TestMatchingEngine_Fair_Suite(t *testing.T) {
+	suite.Run(t, &matchingEngineSuite{newMatcher: true, fairness: true})
 }
 
 func (s *matchingEngineSuite) SetupSuite() {
@@ -182,7 +187,9 @@ func (s *matchingEngineSuite) SetupTest() {
 
 func (s *matchingEngineSuite) newConfig() *Config {
 	res := defaultTestConfig()
-	if s.newMatcher {
+	if s.fairness {
+		useFairness(res)
+	} else if s.newMatcher {
 		useNewMatcher(res)
 	}
 	return res
@@ -3320,7 +3327,7 @@ func (s *matchingEngineSuite) resetBacklogCounter(numWorkers int, taskCount int,
 
 	// Overwrite the maxReadLevel since it could have increased if the previous taskWriter was
 	// stopped (which would not result in resetting).
-	pqMgr.backlogMgr.getDB().setMaxReadLevelForTesting(subqueueZero, maxTaskId)
+	pqMgr.backlogMgr.getDB().setMaxReadLevelForTesting(subqueueZero, fairLevel{id: maxTaskId})
 
 	s.EqualValues(0, s.taskManager.getTaskCount(ptq))
 	s.EventuallyWithT(func(collect *assert.CollectT) {
@@ -4067,6 +4074,12 @@ func (d *dynamicRateBurstWrapper) Burst() int {
 // TODO(pri): cleanup; delete this
 func useNewMatcher(config *Config) {
 	config.NewMatcher = func(_ string, _ string, _ enumspb.TaskQueueType, callback func(bool)) (v bool, cancel func()) {
+		return true, func() {}
+	}
+}
+
+func useFairness(config *Config) {
+	config.EnableFairness = func(_ string, _ string, _ enumspb.TaskQueueType, callback func(bool)) (v bool, cancel func()) {
 		return true, func() {}
 	}
 }
