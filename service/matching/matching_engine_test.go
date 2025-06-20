@@ -57,6 +57,7 @@ import (
 	"go.temporal.io/server/common/quotas"
 	serviceerrors "go.temporal.io/server/common/serviceerror"
 	"go.temporal.io/server/common/tasktoken"
+	"go.temporal.io/server/common/testing/protoassert"
 	"go.temporal.io/server/common/testing/testlogger"
 	"go.temporal.io/server/common/tqid"
 	"go.temporal.io/server/common/worker_versioning"
@@ -89,7 +90,8 @@ type (
 		mockNexusEndpointManager *persistence.MockNexusEndpointManager
 
 		matchingEngine  *matchingEngineImpl
-		taskManager     *testTaskManager
+		taskManager     *testTaskManager // points to oldTaskManager or fairTaskManager
+		oldTaskManager  *testTaskManager
 		fairTaskManager *testTaskManager
 		logger          *testlogger.TestLogger
 	}
@@ -166,8 +168,17 @@ func (s *matchingEngineSuite) SetupTest() {
 		Return(&matchingservice.ReplicateTaskQueueUserDataResponse{}, nil).AnyTimes()
 	s.mockMatchingClient.EXPECT().ForceLoadTaskQueuePartition(gomock.Any(), gomock.Any()).
 		Return(&matchingservice.ForceLoadTaskQueuePartitionResponse{WasUnloaded: true}, nil).AnyTimes()
-	s.taskManager = newTestTaskManager(s.logger, false)
+
+	// create and supply two task managers, but only one is expected to be used at a time since
+	// we run tests with fairness enabled in separate suite.
+	s.oldTaskManager = newTestTaskManager(s.logger, false)
 	s.fairTaskManager = newTestTaskManager(s.logger, true)
+	if s.fairness {
+		s.taskManager = s.fairTaskManager
+	} else {
+		s.taskManager = s.oldTaskManager
+	}
+
 	s.ns, s.mockNamespaceCache = createMockNamespaceCache(s.controller, matchingTestNamespace)
 	s.mockVisibilityManager = manager.NewMockVisibilityManager(s.controller)
 	s.mockVisibilityManager.EXPECT().Close().AnyTimes()
@@ -184,7 +195,7 @@ func (s *matchingEngineSuite) SetupTest() {
 	s.mockNexusEndpointManager = persistence.NewMockNexusEndpointManager(s.controller)
 	s.mockNexusEndpointManager.EXPECT().ListNexusEndpoints(gomock.Any(), gomock.Any()).Return(&persistence.ListNexusEndpointsResponse{}, nil).AnyTimes()
 
-	s.matchingEngine = s.newMatchingEngine(s.newConfig(), s.taskManager, s.fairTaskManager)
+	s.matchingEngine = s.newMatchingEngine(s.newConfig(), s.oldTaskManager, s.fairTaskManager)
 	s.matchingEngine.Start()
 }
 
@@ -1775,7 +1786,7 @@ func (s *matchingEngineSuite) TestMultipleEnginesActivitiesRangeStealing() {
 
 	engines := make([]*matchingEngineImpl, engineCount)
 	for p := 0; p < engineCount; p++ {
-		e := s.newMatchingEngine(s.newConfig(), s.taskManager, s.fairTaskManager)
+		e := s.newMatchingEngine(s.newConfig(), s.oldTaskManager, s.fairTaskManager)
 		e.config.RangeSize = rangeSize
 		engines[p] = e
 		e.Start()
@@ -1936,7 +1947,7 @@ func (s *matchingEngineSuite) TestMultipleEnginesWorkflowTasksRangeStealing() {
 
 	engines := make([]*matchingEngineImpl, engineCount)
 	for p := 0; p < engineCount; p++ {
-		e := s.newMatchingEngine(s.newConfig(), s.taskManager, s.fairTaskManager)
+		e := s.newMatchingEngine(s.newConfig(), s.oldTaskManager, s.fairTaskManager)
 		e.config.RangeSize = rangeSize
 		engines[p] = e
 		e.Start()
@@ -2459,7 +2470,7 @@ func (s *matchingEngineSuite) TestGetTaskQueueUserData_ReturnsData() {
 		Version: 1,
 		Data:    &persistencespb.TaskQueueUserData{Clock: &clockspb.HybridLogicalClock{WallClock: 123456}},
 	}
-	s.NoError(s.taskManager.UpdateTaskQueueUserData(context.Background(),
+	s.NoError(s.oldTaskManager.UpdateTaskQueueUserData(context.Background(),
 		&persistence.UpdateTaskQueueUserDataRequest{
 			NamespaceID: namespaceID.String(),
 			Updates: map[string]*persistence.SingleTaskQueueUserDataUpdate{
@@ -2477,7 +2488,7 @@ func (s *matchingEngineSuite) TestGetTaskQueueUserData_ReturnsData() {
 		LastKnownUserDataVersion: 0,
 	})
 	s.NoError(err)
-	s.Equal(res.UserData, userData)
+	protoassert.ProtoEqual(s.T(), res.UserData, userData)
 }
 
 func (s *matchingEngineSuite) TestGetTaskQueueUserData_ReturnsEmpty() {
@@ -2488,7 +2499,7 @@ func (s *matchingEngineSuite) TestGetTaskQueueUserData_ReturnsEmpty() {
 		Version: 1,
 		Data:    &persistencespb.TaskQueueUserData{Clock: &clockspb.HybridLogicalClock{WallClock: 123456}},
 	}
-	s.NoError(s.taskManager.UpdateTaskQueueUserData(context.Background(),
+	s.NoError(s.oldTaskManager.UpdateTaskQueueUserData(context.Background(),
 		&persistence.UpdateTaskQueueUserDataRequest{
 			NamespaceID: namespaceID.String(),
 			Updates: map[string]*persistence.SingleTaskQueueUserDataUpdate{
@@ -2517,7 +2528,7 @@ func (s *matchingEngineSuite) TestGetTaskQueueUserData_LongPoll_Expires() {
 		Version: 1,
 		Data:    &persistencespb.TaskQueueUserData{Clock: &clockspb.HybridLogicalClock{WallClock: 123456}},
 	}
-	s.NoError(s.taskManager.UpdateTaskQueueUserData(context.Background(),
+	s.NoError(s.oldTaskManager.UpdateTaskQueueUserData(context.Background(),
 		&persistence.UpdateTaskQueueUserDataRequest{
 			NamespaceID: namespaceID.String(),
 			Updates: map[string]*persistence.SingleTaskQueueUserDataUpdate{
@@ -2593,7 +2604,7 @@ func (s *matchingEngineSuite) TestGetTaskQueueUserData_LongPoll_WakesUp_From2to3
 		Version: 1,
 		Data:    &persistencespb.TaskQueueUserData{Clock: &clockspb.HybridLogicalClock{WallClock: 123456}},
 	}
-	s.NoError(s.taskManager.UpdateTaskQueueUserData(context.Background(),
+	s.NoError(s.oldTaskManager.UpdateTaskQueueUserData(context.Background(),
 		&persistence.UpdateTaskQueueUserDataRequest{
 			NamespaceID: namespaceID.String(),
 			Updates: map[string]*persistence.SingleTaskQueueUserDataUpdate{
@@ -2677,7 +2688,7 @@ func (s *matchingEngineSuite) TestUpdateUserData_FailsOnKnownVersionMismatch() {
 		Data:    &persistencespb.TaskQueueUserData{Clock: &clockspb.HybridLogicalClock{WallClock: 123456}},
 	}
 
-	err := s.taskManager.UpdateTaskQueueUserData(context.Background(),
+	err := s.oldTaskManager.UpdateTaskQueueUserData(context.Background(),
 		&persistence.UpdateTaskQueueUserDataRequest{
 			NamespaceID: namespaceID.String(),
 			Updates: map[string]*persistence.SingleTaskQueueUserDataUpdate{
@@ -2777,7 +2788,7 @@ func (s *matchingEngineSuite) TestDemotedMatch() {
 		},
 	}
 
-	err := s.taskManager.UpdateTaskQueueUserData(ctx, &persistence.UpdateTaskQueueUserDataRequest{
+	err := s.oldTaskManager.UpdateTaskQueueUserData(ctx, &persistence.UpdateTaskQueueUserDataRequest{
 		NamespaceID: namespaceId,
 		Updates: map[string]*persistence.SingleTaskQueueUserDataUpdate{
 			tq: &persistence.SingleTaskQueueUserDataUpdate{
@@ -2830,7 +2841,7 @@ func (s *matchingEngineSuite) TestDemotedMatch() {
 		},
 	}
 
-	err = s.taskManager.UpdateTaskQueueUserData(ctx, &persistence.UpdateTaskQueueUserDataRequest{
+	err = s.oldTaskManager.UpdateTaskQueueUserData(ctx, &persistence.UpdateTaskQueueUserDataRequest{
 		NamespaceID: namespaceId,
 		Updates: map[string]*persistence.SingleTaskQueueUserDataUpdate{
 			tq: &persistence.SingleTaskQueueUserDataUpdate{
@@ -2868,7 +2879,7 @@ func (s *matchingEngineSuite) TestUnloadOnMembershipChange() {
 	config := s.newConfig()
 	config.MembershipUnloadDelay = dynamicconfig.GetDurationPropertyFn(10 * time.Millisecond)
 	// FIXME: why is this calling s.newMatchingEngine instead of using s.matchingEngine?
-	e := s.newMatchingEngine(config, s.taskManager, s.fairTaskManager)
+	e := s.newMatchingEngine(config, s.oldTaskManager, s.fairTaskManager)
 	e.Start()
 	defer e.Stop()
 
@@ -4022,6 +4033,9 @@ func (m *testTaskManager) String() string {
 
 // GetTaskQueueData implements persistence.TaskManager
 func (m *testTaskManager) GetTaskQueueUserData(_ context.Context, request *persistence.GetTaskQueueUserDataRequest) (*persistence.GetTaskQueueUserDataResponse, error) {
+	if m.fairness {
+		panic("userdata calls should not to go fair task manager")
+	}
 	tlm := m.getQueueManager(request.TaskQueue, request.NamespaceID, enumspb.TASK_QUEUE_TYPE_WORKFLOW)
 	tlm.Lock()
 	defer tlm.Unlock()
@@ -4033,6 +4047,9 @@ func (m *testTaskManager) GetTaskQueueUserData(_ context.Context, request *persi
 
 // UpdateTaskQueueUserData implements persistence.TaskManager
 func (m *testTaskManager) UpdateTaskQueueUserData(_ context.Context, request *persistence.UpdateTaskQueueUserDataRequest) error {
+	if m.fairness {
+		panic("userdata calls should not to go fair task manager")
+	}
 	for tq, update := range request.Updates {
 		tlm := m.getQueueManager(tq, request.NamespaceID, enumspb.TASK_QUEUE_TYPE_WORKFLOW)
 		tlm.Lock()

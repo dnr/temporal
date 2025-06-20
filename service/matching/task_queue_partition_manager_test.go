@@ -185,6 +185,10 @@ func (s *PartitionManagerTestSuite) TestDescribeTaskQueuePartition_MultipleBuild
 			ApproximateBacklogCount: 1,
 		},
 	}
+	if s.fairness {
+		expectedInternalStatsInfo[0].MaxReadLevelPass = 1000
+		expectedInternalStatsInfo[0].ReadLevelPass = 1000
+	}
 
 	status1 := resp.VersionsInfoInternal[bld1].PhysicalTaskQueueInfo.GetInternalTaskQueueStatus()
 	s.Equal(1, len(status1))
