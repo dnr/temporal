@@ -191,6 +191,7 @@ func newPhysicalTaskQueueManager(
 			logger,
 			throttledLogger,
 			e.matchingRawClient,
+			// FIXME: use "fair_" prefix for metrics
 			newPriMetricsHandler(taggedMetricsHandler),
 			cntr,
 		)
