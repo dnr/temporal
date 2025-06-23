@@ -182,7 +182,7 @@ func newPhysicalTaskQueueManager(
 	}
 
 	if fairness {
-		cntr := counter.NewMapCounter() // FIXME: make this configurable
+		cntr := counter.NewMapCounter() // TODO(fairness): make this configurable
 		pqMgr.backlogMgr = newFairBacklogManager(
 			tqCtx,
 			pqMgr,
@@ -191,7 +191,7 @@ func newPhysicalTaskQueueManager(
 			logger,
 			throttledLogger,
 			e.matchingRawClient,
-			// FIXME: use "fair_" prefix for metrics
+			// TODO(fairness): use "fair_" prefix for metrics
 			newPriMetricsHandler(taggedMetricsHandler),
 			cntr,
 		)

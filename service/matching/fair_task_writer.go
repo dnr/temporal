@@ -114,7 +114,7 @@ func (w *fairTaskWriter) allocTaskIDs(reqs []*writeTaskRequest) error {
 }
 
 func (w *fairTaskWriter) pickPasses(tasks []*writeTaskRequest, bases []fairLevel) {
-	// FIXME: get this from config
+	// TODO(fairness): get this from config
 	var overrideWeights map[string]float32
 
 	for i, task := range tasks {

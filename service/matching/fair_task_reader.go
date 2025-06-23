@@ -210,8 +210,8 @@ func (tr *fairTaskReader) readTasksImpl() {
 	}
 
 	// filter out expired
-	// FIXME: if we have _only_ expired tasks, and we filter them out here, we won't move the
-	// ack level and delete them. maybe we should put them in outstandingTasks as pre-acked.
+	// TODO(fairness): if we have _only_ expired tasks, and we filter them out here, we won't move
+	// the ack level and delete them. maybe we should put them in outstandingTasks as pre-acked.
 	tasks := slices.DeleteFunc(res.Tasks, func(t *persistencespb.AllocatedTaskInfo) bool {
 		if IsTaskExpired(t) {
 			metrics.ExpiredTasksPerTaskQueueCounter.With(tr.backlogMgr.metricsHandler).Record(1)
