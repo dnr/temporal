@@ -3614,6 +3614,7 @@ type testTaskManager struct {
 	updateMetadataOnCreateTasks bool
 
 	faultInjection map[string]float32 // "op:error" -> fraction of time
+	delayInjection time.Duration
 }
 
 type dbTaskQueueKey struct {
@@ -3715,6 +3716,10 @@ func (m *testTaskManager) CreateTaskQueue(
 ) (*persistence.CreateTaskQueueResponse, error) {
 	tli := request.TaskQueueInfo
 	tlm := m.getQueueData(tli.Name, tli.NamespaceId, tli.TaskType)
+
+	m.delay()
+	defer m.delay()
+
 	tlm.Lock()
 	defer tlm.Unlock()
 
@@ -3734,6 +3739,10 @@ func (m *testTaskManager) UpdateTaskQueue(
 ) (*persistence.UpdateTaskQueueResponse, error) {
 	tli := request.TaskQueueInfo
 	tlm := m.getQueueData(tli.Name, tli.NamespaceId, tli.TaskType)
+
+	m.delay()
+	defer m.delay()
+
 	tlm.Lock()
 	defer tlm.Unlock()
 
@@ -3795,6 +3804,10 @@ func (m *testTaskManager) CompleteTasksLessThan(
 	} else if !m.fairness && request.ExclusiveMaxPass != 0 {
 		return 0, serviceerror.NewInternal("invalid CompleteTasksLessThan request on queue")
 	}
+
+	m.delay()
+	defer m.delay()
+
 	tlm := m.getQueueData(request.TaskQueueName, request.NamespaceID, request.TaskType)
 	tlm.Lock()
 	defer tlm.Unlock()
@@ -3832,6 +3845,12 @@ func (m *testTaskManager) DeleteTaskQueue(
 	return nil
 }
 
+func (m *testTaskManager) delay() {
+	if m.delayInjection > 0 {
+		time.Sleep(time.Duration(rand.Float32() * float32(m.delayInjection)))
+	}
+}
+
 // all calls to addFault should be done before starting to call methods on testTaskManager
 func (m *testTaskManager) addFault(method, err string, fraction float32) {
 	if m.faultInjection == nil {
@@ -3852,6 +3871,9 @@ func (m *testTaskManager) CreateTasks(
 	taskQueue := request.TaskQueueInfo.Data.Name
 	taskType := request.TaskQueueInfo.Data.TaskType
 	rangeID := request.TaskQueueInfo.RangeID
+
+	m.delay()
+	defer m.delay()
 
 	if m.fault("CreateTasks", "ConditionFailed") {
 		return nil, &persistence.ConditionFailedError{Msg: "Fake ConditionFailedError"}
@@ -3916,6 +3938,9 @@ func (m *testTaskManager) GetTasks(
 	} else if !m.fairness && request.InclusiveMinPass != 0 {
 		return nil, serviceerror.NewInternal("invalid GetTasks request on queue")
 	}
+
+	m.delay()
+	defer m.delay()
 
 	if m.fault("GetTasks", "Unavailable") {
 		return nil, serviceerror.NewUnavailablef("GetTasks operation failed")
