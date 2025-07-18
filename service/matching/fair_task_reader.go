@@ -460,6 +460,7 @@ func (tr *fairTaskReader) mergeTasksLocked(tasks []*persistencespb.AllocatedTask
 	tr.outstandingTasks.Select(func(k, v any) bool {
 		return v == nil && tr.readLevel.less(k.(fairLevel))
 	}).Each(func(k, v any) {
+		evictedAnyTasks = true
 		fmt.Printf("@@@ dropping ack %s\n", k.(fairLevel))
 		tr.outstandingTasks.Remove(k)
 		// TODO: metric for this?
