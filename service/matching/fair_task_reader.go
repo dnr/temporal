@@ -441,6 +441,17 @@ func (tr *fairTaskReader) mergeTasksLocked(tasks []*persistencespb.AllocatedTask
 		}
 	}
 
+	// We also have to remove any acked levels (nils) in outstandingTasks that are above our
+	// new read level (and accept reprocessing those tasks when we see them again), otherwise
+	// we may use these acks to increment our ack level across dropped ranges of tasks.
+	// TODO: we could add an additional cache to improve this
+	tr.outstandingTasks.Select(func(k, v any) bool {
+		return v == nil && tr.readLevel.less(k.(fairLevel))
+	}).Each(func(k, v any) {
+		tr.outstandingTasks.Remove(k)
+		// TODO: metric for this?
+	})
+
 	internalTasks := make([]*internalTask, len(tasks))
 	for i, t := range tasks {
 		level := fairLevelFromAllocatedTask(t)
