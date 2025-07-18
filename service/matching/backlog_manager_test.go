@@ -414,6 +414,15 @@ func (s *BacklogManagerTestSuite) TestStandingBacklog_ManyKeysUniform() {
 	s.testStandingBacklog(p)
 }
 
+func (s *BacklogManagerTestSuite) TestStandingBacklog_FullyDrain() {
+	testutil.LongTest(s)
+	p := defaultStandingBacklogParams
+	p.lower = -20 // FIXME
+	p.period = 3 * time.Second
+	p.duration = 15 * time.Second
+	s.testStandingBacklog(p)
+}
+
 func (s *BacklogManagerTestSuite) TestStandingBacklog_WideRange() {
 	testutil.LongTest(s)
 	p := defaultStandingBacklogParams
@@ -474,9 +483,9 @@ func (s *BacklogManagerTestSuite) testStandingBacklog(p standingBacklogParams) {
 			lock.Lock()
 			defer lock.Unlock()
 			tasks.Remove(e)
-			// fmt.Printf("buf evict -> %d\n", tasks.Len())
+			fmt.Printf("buf evict %s -> %d\n", t.fairLevel(), tasks.Len())
 		}
-		// fmt.Printf("buf add -> %d\n", tasks.Len())
+		fmt.Printf("buf add %s -> %d\n", t.fairLevel(), tasks.Len())
 		return nil
 	}
 	getTask := func() *internalTask {
@@ -487,8 +496,19 @@ func (s *BacklogManagerTestSuite) testStandingBacklog(p standingBacklogParams) {
 			// fmt.Printf("buf was empty\n")
 			return nil
 		}
-		// fmt.Printf("buf remove -> %d\n", tasks.Len()-1)
-		return tasks.Remove(e).(*internalTask) //nolint:revive
+		t := tasks.Remove(e).(*internalTask)
+		fmt.Printf("buf remove %s -> %d\n", t.fairLevel(), tasks.Len())
+		return t
+	}
+	makeNewTask := func() *persistencespb.TaskInfo {
+		return &persistencespb.TaskInfo{
+			CreateTime:       timestamppb.Now(),
+			ScheduledEventId: index.Add(1),
+			Priority: &commonpb.Priority{
+				// TODO: add priority key option too
+				FairnessKey: fmt.Sprintf("fkey-%02d", zipf.Uint64()),
+			},
+		}
 	}
 	delta := func() int64 {
 		return inflight.Load() - target.Load()
@@ -496,7 +516,7 @@ func (s *BacklogManagerTestSuite) testStandingBacklog(p standingBacklogParams) {
 	sleep := func() error {
 		return util.InterruptibleSleep(ctx, time.Duration(10+rand.Intn(5))*time.Millisecond)
 	}
-	finished := func() bool { return ctx.Err() != nil || target.Load() == 0 && inflight.Load() == 0 }
+	finished := func() bool { return ctx.Err() != nil || target.Load() < 0 && inflight.Load() == 0 }
 	sleepUntil := func(cond func() bool) bool {
 		for !finished() && !cond() {
 			sleep()
@@ -514,16 +534,7 @@ func (s *BacklogManagerTestSuite) testStandingBacklog(p standingBacklogParams) {
 	go func() {
 		defer wg.Done()
 		for sleepUntil(func() bool { return delta() <= p.gap }) {
-			info := &persistencespb.TaskInfo{
-				CreateTime:       timestamppb.Now(),
-				ScheduledEventId: index.Add(1),
-				Priority: &commonpb.Priority{
-					// TODO: add priority key option too
-					FairnessKey: fmt.Sprintf("fkey-%02d", zipf.Uint64()),
-				},
-			}
-			err := s.blm.SpoolTask(info)
-			if err == nil {
+			if info := makeNewTask(); s.blm.SpoolTask(info) == nil {
 				tracker.Store(info.ScheduledEventId, info.Priority.FairnessKey)
 				inflight.Add(1)
 				fmt.Printf("spool %5d@ -> %3d inflight\n", info.ScheduledEventId, inflight.Load())
@@ -545,23 +556,33 @@ func (s *BacklogManagerTestSuite) testStandingBacklog(p standingBacklogParams) {
 				inflight.Add(-1)
 				tindex := t.event.Data.ScheduledEventId
 				lag := index.Load() - tindex
-				fmt.Printf("finish %5d -> %3d  %v  %5d\n", tindex, inflight.Load(), t.getPriority().GetFairnessKey(), lag)
+				fmt.Printf("finish %5d@ -> %3d inf %v  %5d lag\n", tindex, inflight.Load(), t.getPriority().GetFairnessKey(), lag)
 				processed.Add(1)
-				tracker.Delete(tindex)
+				if _, loaded := tracker.LoadAndDelete(tindex); !loaded {
+					fmt.Printf("finished task was not in tracker! %d\n", tindex)
+				}
+			} else {
+				sleep()
 			}
 		}
 	}()
 
 	// adjust target over time
+	t := target.Load()
 	for time.Since(start) < p.duration {
 		factor := (math.Sin(2*math.Pi*time.Since(start).Seconds()/p.period.Seconds()) + 1.0) / 2
-		target.Store(p.lower + int64(factor*float64(p.upper-p.lower+1)))
+		next := p.lower + int64(factor*float64(p.upper-p.lower+1))
+		if t != next {
+			t = next
+			target.Store(max(0, t))
+			fmt.Printf("TARGET %d\n", t)
+		}
 		sleep()
 	}
 
 	// drain and wait until exited
 	s.T().Log("draining")
-	target.Store(0)
+	target.Store(-1)
 	wg.Wait()
 
 	if !s.Zero(inflight.Load(), "did not drain all tasks!") {

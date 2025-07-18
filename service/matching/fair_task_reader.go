@@ -3,6 +3,7 @@ package matching
 import (
 	"context"
 	"errors"
+	"fmt"
 	"slices"
 	"sync"
 	"time"
@@ -147,6 +148,7 @@ func (tr *fairTaskReader) completeTask(task *internalTask, res taskResponse) {
 		// trying the same task immediately. maybe also: after a few attempts on the same task,
 		// let it get cycled to the end of the queue, in case there's some task/wf-specific
 		// thing.
+		fmt.Printf("--addTaskToMatcher READD %s\n", fairLevelFromAllocatedTask(task.event.AllocatedTaskInfo))
 		tr.addTaskToMatcher(task)
 		metrics.TaskRetryTransient.With(tr.backlogMgr.metricsHandler).Record(1)
 		return
@@ -197,6 +199,8 @@ func (tr *fairTaskReader) shouldReadMoreLocked() bool {
 }
 
 func (tr *fairTaskReader) readTasksImpl() {
+	fmt.Printf("RRRR read cycle start\n")
+	defer fmt.Printf("RRRR read cycle end\n")
 	var lastErr error
 	for {
 		tr.lock.Lock()
@@ -207,6 +211,7 @@ func (tr *fairTaskReader) readTasksImpl() {
 		tr.lock.Unlock()
 
 		lastErr = tr.readTaskBatch(readLevel, loadedTasks)
+		fmt.Printf("RR complete %v\n", lastErr)
 	}
 
 	// note tr.lock is still held here!
@@ -228,6 +233,7 @@ func (tr *fairTaskReader) readTasksImpl() {
 	tr.lock.Unlock()
 
 	for _, task := range newTasks {
+		fmt.Printf("--addTaskToMatcher newlyWritten %s\n", fairLevelFromAllocatedTask(task.event.AllocatedTaskInfo))
 		tr.addTaskToMatcher(task)
 	}
 }
@@ -235,8 +241,10 @@ func (tr *fairTaskReader) readTasksImpl() {
 func (tr *fairTaskReader) readTaskBatch(readLevel fairLevel, loadedTasks int) error {
 	batchSize := tr.backlogMgr.config.GetTasksBatchSize() - loadedTasks
 	readFrom := readLevel.max(fairLevel{pass: 1, id: 0}).inc()
+	fmt.Printf("RR read starting from %s\n", readFrom)
 	res, err := tr.backlogMgr.db.GetFairTasks(tr.backlogMgr.tqCtx, tr.subqueue, readFrom, batchSize)
 	if err != nil {
+		fmt.Printf("RR err %v\n", err)
 		// TODO: Should we ever stop retrying on db errors?
 		if tr.backlogMgr.signalIfFatal(err) || common.IsContextCanceledErr(err) {
 			// don't retry
@@ -247,6 +255,7 @@ func (tr *fairTaskReader) readTaskBatch(readLevel fairLevel, loadedTasks int) er
 		}
 		return err
 	}
+	fmt.Printf("RR complete %d tasks\n", len(res.Tasks))
 	tr.retrier.Reset()
 
 	// If we got less than we asked for, we know we hit the end.
@@ -368,6 +377,7 @@ func (tr *fairTaskReader) mergeTasks(tasks []*persistencespb.AllocatedTaskInfo, 
 	tr.lock.Unlock()
 
 	for _, task := range newTasks {
+		fmt.Printf("--addTaskToMatcher merge %s\n", fairLevelFromAllocatedTask(task.event.AllocatedTaskInfo))
 		tr.addTaskToMatcher(task)
 	}
 }
@@ -416,9 +426,11 @@ func (tr *fairTaskReader) mergeTasksLocked(tasks []*persistencespb.AllocatedTask
 	if highestLevel.id != 0 {
 		// If we have any tasks at all in memory, set readLevel to the maximum of that set.
 		tr.readLevel = highestLevel
+		fmt.Printf("RRRR move read to end of buffer %s\n", tr.readLevel)
 	} else {
 		// Otherwise start reading at ack level next. We should not move backwards here.
 		softassert.That(tr.logger, !tr.ackLevel.less(tr.readLevel), "read level moved backwards on empty buffer")
+		fmt.Printf("RRRR move read to ack %s -> %s\n", tr.readLevel, tr.ackLevel)
 		tr.readLevel = tr.ackLevel
 	}
 
@@ -448,6 +460,7 @@ func (tr *fairTaskReader) mergeTasksLocked(tasks []*persistencespb.AllocatedTask
 	tr.outstandingTasks.Select(func(k, v any) bool {
 		return v == nil && tr.readLevel.less(k.(fairLevel))
 	}).Each(func(k, v any) {
+		fmt.Printf("@@@ dropping ack %s\n", k.(fairLevel))
 		tr.outstandingTasks.Remove(k)
 		// TODO: metric for this?
 	})
@@ -524,16 +537,20 @@ func (tr *fairTaskReader) advanceAckLevelLocked() {
 	}
 
 	// Adjust the ack level as far as we can
+	fmt.Printf("adjusting ack level, was %s, %d in outstanding, %d loaded\n", tr.ackLevel, tr.outstandingTasks.Size(), tr.loadedTasks)
 	var numAcked int64
 	for {
 		minLevel, v := tr.outstandingTasks.Min()
 		if minLevel == nil {
+			fmt.Printf("adjusting ack level, stopping on empty at %s, %d in outstanding, %d loaded\n", tr.ackLevel, tr.outstandingTasks.Size(), tr.loadedTasks)
 			break
 		} else if _, ok := v.(*internalTask); ok {
+			fmt.Printf("adjusting ack level, stopping on unacked at %s, %d in outstanding, %d loaded\n", tr.ackLevel, tr.outstandingTasks.Size(), tr.loadedTasks)
 			break
 		}
 		tr.ackLevel = minLevel.(fairLevel) // nolint:revive
 		tr.outstandingTasks.Remove(minLevel)
+		fmt.Printf("adjusting ack level, moving up to %s, %d in outstanding, %d loaded\n", tr.ackLevel, tr.outstandingTasks.Size(), tr.loadedTasks)
 		numAcked += 1
 	}
 
