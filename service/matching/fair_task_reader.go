@@ -383,7 +383,11 @@ func (tr *fairTaskReader) mergeTasksLocked(tasks []*persistencespb.AllocatedTask
 	// (2) Note these values are *AllocatedTaskInfo.
 	for _, t := range tasks {
 		level := fairLevelFromAllocatedTask(t)
-		if mode == mergeWrite && !tr.atEnd && tr.readLevel.less(level) {
+		if !tr.ackLevel.less(level) {
+			// Reads may race with completes/acks such that we read some tasks that are already
+			// acked. We should ignore these.
+			continue
+		} else if mode == mergeWrite && !tr.atEnd && tr.readLevel.less(level) {
 			// If we're writing and we're not at the end, then we have to ignore tasks
 			// above readLevel since we don't know what's in between readLevel and there.
 			continue
@@ -411,8 +415,11 @@ func (tr *fairTaskReader) mergeTasksLocked(tasks []*persistencespb.AllocatedTask
 
 	if highestLevel.id != 0 {
 		// If we have any tasks at all in memory, set readLevel to the maximum of that set.
-		// Otherwise leave readLevel unchanged.
 		tr.readLevel = highestLevel
+	} else {
+		// Otherwise start reading at ack level next. We should not move backwards here.
+		softassert.That(tr.logger, !tr.ackLevel.less(tr.readLevel), "read level moved backwards on empty buffer")
+		tr.readLevel = tr.ackLevel
 	}
 
 	// If there are remaining tasks in the merged set, they can't fit in memory. If they came
