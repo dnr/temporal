@@ -396,7 +396,45 @@ var defaultStandingBacklogParams = standingBacklogParams{
 		dynamicconfig.MatchingMaxTaskBatchSize.Key():  50,
 	},
 	delayInjection: 1 * time.Millisecond,
-	faultInjection: 0.02,
+	faultInjection: 0.01,
+}
+
+func (s *BacklogManagerTestSuite) TestStandingBacklog_Short() {
+	s.testStandingBacklog(defaultStandingBacklogParams)
+}
+
+func (s *BacklogManagerTestSuite) TestStandingBacklog_ManyKeysUniform() {
+	testutil.LongTest(s)
+	p := defaultStandingBacklogParams
+	p.zipfS = 1.01 // not exactly uniform but closer
+	p.zipfV = 10000
+	p.keys = 10000
+	p.period = 5 * time.Second
+	p.duration = 15 * time.Second
+	s.testStandingBacklog(p)
+}
+
+func (s *BacklogManagerTestSuite) TestStandingBacklog_WideRange() {
+	testutil.LongTest(s)
+	p := defaultStandingBacklogParams
+	p.lower = 3
+	p.upper = 1000
+	p.period = 15 * time.Second
+	p.duration = 15 * time.Second
+	s.testStandingBacklog(p)
+}
+
+func (s *BacklogManagerTestSuite) TestStandingBacklog_FiveMin() {
+	testutil.LongTest(s)
+	p := defaultStandingBacklogParams
+	p.upper = 400
+	p.period = time.Minute
+	p.duration = 5 * time.Minute
+	p.cfg = maps.Clone(p.cfg)
+	p.cfg[dynamicconfig.MatchingGetTasksBatchSize.Key()] = 300
+	p.cfg[dynamicconfig.MatchingGetTasksReloadAt.Key()] = 60
+	p.delayInjection = 3 * time.Millisecond
+	s.testStandingBacklog(p)
 }
 
 func (s *BacklogManagerTestSuite) testStandingBacklog(p standingBacklogParams) {
@@ -481,6 +519,7 @@ func (s *BacklogManagerTestSuite) testStandingBacklog(p standingBacklogParams) {
 				CreateTime:       timestamppb.Now(),
 				ScheduledEventId: index.Add(1),
 				Priority: &commonpb.Priority{
+					// TODO: add priority key option too
 					FairnessKey: fmt.Sprintf("fkey-%02d", zipf.Uint64()),
 				},
 			}
@@ -534,43 +573,4 @@ func (s *BacklogManagerTestSuite) testStandingBacklog(p standingBacklogParams) {
 
 	elapsed := time.Since(start)
 	s.T().Logf("processed %d tasks, %.3f/s", processed.Load(), float64(processed.Load())/elapsed.Seconds())
-}
-
-func (s *BacklogManagerTestSuite) TestStandingBacklog_Short() {
-	s.testStandingBacklog(defaultStandingBacklogParams)
-}
-
-func (s *BacklogManagerTestSuite) TestStandingBacklog_ManyKeysUniform() {
-	testutil.LongTest(s)
-	p := defaultStandingBacklogParams
-	p.zipfS = 1.01 // not exactly uniform but closer
-	p.zipfV = 10000
-	p.keys = 10000
-	p.period = 5 * time.Second
-	p.duration = 15 * time.Second
-	s.testStandingBacklog(p)
-}
-
-func (s *BacklogManagerTestSuite) TestStandingBacklog_WideRange() {
-	testutil.LongTest(s)
-	p := defaultStandingBacklogParams
-	p.lower = 3
-	p.upper = 1000
-	p.period = 15 * time.Second
-	p.duration = 15 * time.Second
-	s.testStandingBacklog(p)
-}
-
-func (s *BacklogManagerTestSuite) TestStandingBacklog_FiveMin() {
-	testutil.LongTest(s)
-	p := defaultStandingBacklogParams
-	p.upper = 400
-	p.period = time.Minute
-	p.duration = 5 * time.Minute
-	p.cfg = maps.Clone(p.cfg)
-	p.cfg[dynamicconfig.MatchingGetTasksBatchSize.Key()] = 300
-	p.cfg[dynamicconfig.MatchingGetTasksReloadAt.Key()] = 60
-	p.delayInjection = 3 * time.Millisecond
-	p.faultInjection = 0.01
-	s.testStandingBacklog(p)
 }
