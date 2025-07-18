@@ -418,7 +418,7 @@ func (s *BacklogManagerTestSuite) testStandingBacklog(p standingBacklogParams) {
 		s.logger.Expect(testlogger.Error, "Persistent store operation failure")
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), p.duration+5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*p.duration)
 	defer cancel()
 
 	var wg sync.WaitGroup
