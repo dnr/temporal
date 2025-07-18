@@ -469,14 +469,13 @@ func (s *BacklogManagerTestSuite) testStandingBacklog(p standingBacklogParams) {
 	s.addSpooledTask = func(t *internalTask) error {
 		lock.Lock()
 		defer lock.Unlock()
-		var e *list.Element
+		e := tasks.PushBack(t)
 		t.removeFromMatcher = func() {
 			lock.Lock()
 			defer lock.Unlock()
 			tasks.Remove(e)
 			// fmt.Printf("buf evict -> %d\n", tasks.Len())
 		}
-		e = tasks.PushBack(t)
 		// fmt.Printf("buf add -> %d\n", tasks.Len())
 		return nil
 	}
@@ -500,7 +499,7 @@ func (s *BacklogManagerTestSuite) testStandingBacklog(p standingBacklogParams) {
 	finished := func() bool { return ctx.Err() != nil || target.Load() == 0 && inflight.Load() == 0 }
 	sleepUntil := func(cond func() bool) bool {
 		for !finished() && !cond() {
-			_ = sleep()
+			sleep()
 		}
 		return !finished()
 	}
@@ -527,8 +526,9 @@ func (s *BacklogManagerTestSuite) testStandingBacklog(p standingBacklogParams) {
 			if err == nil {
 				tracker.Store(info.ScheduledEventId, info.Priority.FairnessKey)
 				inflight.Add(1)
-				fmt.Printf("spool %5d -> %3d\n", info.ScheduledEventId, inflight.Load())
+				fmt.Printf("spool %5d@ -> %3d inflight\n", info.ScheduledEventId, inflight.Load())
 			} else {
+				fmt.Printf("spool %5d@ failed -> %d inflight\n", info.ScheduledEventId, inflight.Load())
 				sleep()
 			}
 		}
