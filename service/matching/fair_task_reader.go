@@ -391,9 +391,9 @@ func (tr *fairTaskReader) mergeTasksLocked(tasks []*persistencespb.AllocatedTask
 			// If we're writing and we're not at the end, then we have to ignore tasks
 			// above readLevel since we don't know what's in between readLevel and there.
 			continue
-		} else if _, have := merged.Get(level); have {
-			// If write/read race in certain ways, we may read something we had already
-			// added to the matcher. Ignore tasks we already have.
+		} else if _, have := tr.outstandingTasks.Get(level); have {
+			// If write/read race or we have to re-read a range, we may read something we had
+			// already added to the matcher or acked. Ignore tasks we already have.
 			continue
 		}
 		merged.Put(level, t)
