@@ -2,7 +2,6 @@ package matching
 
 import (
 	"context"
-	"fmt"
 	"sync/atomic"
 	"time"
 
@@ -131,7 +130,6 @@ func (w *fairTaskWriter) pickPasses(tasks []*writeTaskRequest, bases []fairLevel
 		pass := counter.GetPass(key, base, inc)
 		softassert.That(w.logger, pass >= base, "counter returned pass below base")
 		tasks[i].pass = pass
-		fmt.Printf("assigning %d@ level %s (base %s)\n", task.taskInfo.ScheduledEventId, tasks[i], bases[task.subqueue])
 	}
 }
 

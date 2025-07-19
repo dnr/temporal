@@ -485,9 +485,7 @@ func (s *BacklogManagerTestSuite) testStandingBacklog(p standingBacklogParams) {
 			lock.Lock()
 			defer lock.Unlock()
 			tasks.Remove(e)
-			fmt.Printf("buf evict %s -> %d\n", t.fairLevel(), tasks.Len())
 		}
-		fmt.Printf("buf add %s -> %d\n", t.fairLevel(), tasks.Len())
 		return nil
 	}
 	getTask := func() *internalTask {
@@ -495,11 +493,9 @@ func (s *BacklogManagerTestSuite) testStandingBacklog(p standingBacklogParams) {
 		defer lock.Unlock()
 		e := tasks.Front()
 		if e == nil {
-			// fmt.Printf("buf was empty\n")
 			return nil
 		}
 		t := tasks.Remove(e).(*internalTask)
-		fmt.Printf("buf remove %s -> %d\n", t.fairLevel(), tasks.Len())
 		return t
 	}
 	makeNewTask := func() *persistencespb.TaskInfo {
@@ -539,9 +535,7 @@ func (s *BacklogManagerTestSuite) testStandingBacklog(p standingBacklogParams) {
 			if info := makeNewTask(); s.blm.SpoolTask(info) == nil {
 				tracker.Store(info.ScheduledEventId, info.Priority.FairnessKey)
 				inflight.Add(1)
-				fmt.Printf("spool %5d@ -> %3d inflight\n", info.ScheduledEventId, inflight.Load())
 			} else {
-				fmt.Printf("spool %5d@ failed -> %d inflight\n", info.ScheduledEventId, inflight.Load())
 				sleep()
 			}
 		}
@@ -556,13 +550,7 @@ func (s *BacklogManagerTestSuite) testStandingBacklog(p standingBacklogParams) {
 				// TODO: error sometimes?
 				t.finish(nil, true)
 				inflight.Add(-1)
-				tindex := t.event.Data.ScheduledEventId
-				lag := index.Load() - tindex
-				fmt.Printf("finish %5d@ -> %3d inf %v  %5d lag\n", tindex, inflight.Load(), t.getPriority().GetFairnessKey(), lag)
 				processed.Add(1)
-				if _, loaded := tracker.LoadAndDelete(tindex); !loaded {
-					fmt.Printf("finished task was not in tracker! %d\n", tindex)
-				}
 			} else {
 				sleep()
 			}
@@ -577,7 +565,6 @@ func (s *BacklogManagerTestSuite) testStandingBacklog(p standingBacklogParams) {
 		if t != next {
 			t = next
 			target.Store(t)
-			fmt.Printf("TARGET %d\n", t)
 		}
 		sleep()
 	}
