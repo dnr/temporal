@@ -483,9 +483,13 @@ func (tr *fairTaskReader) mergeTasksLocked(tasks []*persistencespb.AllocatedTask
 	// If we read to the end and didn't evict anything, then we know we're at the end.
 	// Otherwise (i.e. on write) leave atEnd unchanged.
 	if mode == mergeReadMiddle || evictedAnyTasks {
+		fmt.Printf("@@@ setting atEnd false %v %v\n", mode, evictedAnyTasks)
 		tr.atEnd = false
 	} else if mode == mergeReadToEnd {
+		fmt.Printf("@@@ setting atEnd true\n")
 		tr.atEnd = true
+	} else {
+		fmt.Printf("@@@ atEnd unchanged %v\n", tr.atEnd)
 	}
 
 	// If we're at the end, then outstandingTasks is the whole queue so we can set count.

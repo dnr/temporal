@@ -396,7 +396,7 @@ var defaultStandingBacklogParams = standingBacklogParams{
 		dynamicconfig.MatchingMaxTaskBatchSize.Key():  50,
 	},
 	delayInjection: 1 * time.Millisecond,
-	faultInjection: 0.01,
+	faultInjection: 0.015,
 }
 
 func (s *BacklogManagerTestSuite) TestStandingBacklog_Short() {
@@ -417,7 +417,7 @@ func (s *BacklogManagerTestSuite) TestStandingBacklog_ManyKeysUniform() {
 func (s *BacklogManagerTestSuite) TestStandingBacklog_FullyDrain() {
 	testutil.LongTest(s)
 	p := defaultStandingBacklogParams
-	p.lower = -20 // FIXME
+	p.lower = -20
 	p.period = 3 * time.Second
 	p.duration = 15 * time.Second
 	s.testStandingBacklog(p)
@@ -436,6 +436,7 @@ func (s *BacklogManagerTestSuite) TestStandingBacklog_WideRange() {
 func (s *BacklogManagerTestSuite) TestStandingBacklog_FiveMin() {
 	testutil.LongTest(s)
 	p := defaultStandingBacklogParams
+	p.lower = -10
 	p.upper = 400
 	p.period = time.Minute
 	p.duration = 5 * time.Minute
@@ -474,6 +475,7 @@ func (s *BacklogManagerTestSuite) testStandingBacklog(p standingBacklogParams) {
 	var target, inflight, processed, index atomic.Int64
 	var tracker sync.Map // tracks tasks so we can find missing ones
 	target.Store((p.lower + p.upper) / 2)
+	const testIsOver = int64(-1000000)
 
 	s.addSpooledTask = func(t *internalTask) error {
 		lock.Lock()
@@ -516,7 +518,7 @@ func (s *BacklogManagerTestSuite) testStandingBacklog(p standingBacklogParams) {
 	sleep := func() error {
 		return util.InterruptibleSleep(ctx, time.Duration(10+rand.Intn(5))*time.Millisecond)
 	}
-	finished := func() bool { return ctx.Err() != nil || target.Load() < 0 && inflight.Load() == 0 }
+	finished := func() bool { return ctx.Err() != nil || target.Load() == testIsOver && inflight.Load() == 0 }
 	sleepUntil := func(cond func() bool) bool {
 		for !finished() && !cond() {
 			sleep()
@@ -574,7 +576,7 @@ func (s *BacklogManagerTestSuite) testStandingBacklog(p standingBacklogParams) {
 		next := p.lower + int64(factor*float64(p.upper-p.lower+1))
 		if t != next {
 			t = next
-			target.Store(max(0, t))
+			target.Store(t)
 			fmt.Printf("TARGET %d\n", t)
 		}
 		sleep()
@@ -582,7 +584,7 @@ func (s *BacklogManagerTestSuite) testStandingBacklog(p standingBacklogParams) {
 
 	// drain and wait until exited
 	s.T().Log("draining")
-	target.Store(-1)
+	target.Store(testIsOver)
 	wg.Wait()
 
 	if !s.Zero(inflight.Load(), "did not drain all tasks!") {
