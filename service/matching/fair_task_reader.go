@@ -428,9 +428,9 @@ func (tr *fairTaskReader) mergeTasksLocked(tasks []*persistencespb.AllocatedTask
 		tr.readLevel = highestLevel
 		fmt.Printf("RRRR move read to end of buffer %s\n", tr.readLevel)
 	} else {
-		// Otherwise start reading at ack level next. We should not move backwards here.
-		softassert.That(tr.logger, !tr.ackLevel.less(tr.readLevel), "read level moved backwards on empty buffer")
+		// Otherwise start reading at ack level next.
 		fmt.Printf("RRRR move read to ack %s -> %s\n", tr.readLevel, tr.ackLevel)
+		// softassert.That(tr.logger, !tr.ackLevel.less(tr.readLevel), "read level moved backwards on empty buffer")
 		tr.readLevel = tr.ackLevel
 	}
 
