@@ -2,6 +2,7 @@ package matching
 
 import (
 	"context"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -25,12 +26,17 @@ type (
 		db             *taskQueueDB
 		logger         log.Logger
 		counterFactory func() counter.Counter
-		appendCh       chan *writeTaskRequest
 
-		// state:
+		// state protected by lock:
+		lock         sync.Mutex
+		writePending bool
+		toWrite      []*writeTaskRequest
+		writeTimer   *time.Timer
+
+		// state maintained by doWrite:
 		taskIDBlock        taskIDBlock
-		currentTaskIDBlock taskIDBlock                       // copy of taskIDBlock for safe concurrent access via getCurrentTaskIDBlock()
-		counters           map[subqueueIndex]counter.Counter // only used in taskWriterLoop.
+		currentTaskIDBlock taskIDBlock // copy of taskIDBlock for safe concurrent access via getCurrentTaskIDBlock()
+		counters           map[subqueueIndex]counter.Counter
 	}
 )
 
@@ -44,55 +50,110 @@ func newFairTaskWriter(
 		db:             backlogMgr.db,
 		logger:         backlogMgr.logger,
 		counterFactory: counterFactory,
-		appendCh:       make(chan *writeTaskRequest, backlogMgr.config.OutstandingTaskAppendsThreshold()),
 
 		taskIDBlock: noTaskIDs,
 		counters:    make(map[subqueueIndex]counter.Counter),
 	}
 }
 
-// Start fairTaskWriter background goroutine.
 func (w *fairTaskWriter) Start() {
-	go w.taskWriterLoop()
+	go w.initState()
 }
 
 func (w *fairTaskWriter) appendTask(
 	subqueue subqueueIndex,
 	taskInfo *persistencespb.TaskInfo,
 ) error {
-	select {
-	case <-w.backlogMgr.tqCtx.Done():
+	if w.backlogMgr.tqCtx.Err() != nil {
 		return errShutdown
-	default:
-		// noop
 	}
 
-	startTime := time.Now().UTC()
-	ch := make(chan error)
+	startTime := time.Now()
 	req := &writeTaskRequest{
 		taskInfo:   taskInfo,
-		responseCh: ch,
+		responseCh: make(chan error),
 		subqueue:   subqueue,
 	}
 
+	if err := w.submitReq(req); err != nil {
+		return err
+	}
+
 	select {
-	case w.appendCh <- req:
-		select {
-		case err := <-ch:
-			metrics.TaskWriteLatencyPerTaskQueue.With(w.backlogMgr.metricsHandler).Record(time.Since(startTime))
-			return err
-		case <-w.backlogMgr.tqCtx.Done():
-			// if we are shutting down, this request will never make
-			// it to persistence, just bail out and fail this request
-			return errShutdown
-		}
-	default: // channel is full, throttle
+	case err := <-req.responseCh:
+		metrics.TaskWriteLatencyPerTaskQueue.With(w.backlogMgr.metricsHandler).Record(time.Since(startTime))
+		return err
+	case <-w.backlogMgr.tqCtx.Done():
+		// if we are shutting down, this request will never make
+		// it to persistence, just bail out and fail this request
+		return errShutdown
+	}
+}
+
+func (w *fairTaskWriter) submitReq(req *writeTaskRequest) error {
+	w.lock.Lock()
+	defer w.lock.Unlock()
+
+	if len(w.toWrite) >= 100 /*FIXME*/ {
 		metrics.TaskWriteThrottlePerTaskQueueCounter.With(w.backlogMgr.metricsHandler).Record(1)
 		return &serviceerror.ResourceExhausted{
 			Cause:   enumspb.RESOURCE_EXHAUSTED_CAUSE_SYSTEM_OVERLOADED,
 			Scope:   enumspb.RESOURCE_EXHAUSTED_SCOPE_NAMESPACE,
 			Message: "Too many outstanding appends to the task queue",
 		}
+	}
+
+	w.toWrite = append(w.toWrite, req)
+
+	if w.writePending {
+		return nil
+	} else if len(w.toWrite) >= 100 /*FIXME*/ {
+		w.writePending = true
+		w.writeTimer.Stop()
+		w.writeTimer = nil
+		reqs := w.toWrite
+		w.toWrite = nil
+		go w.doWrite(reqs)
+		return nil
+	} else if w.writeTimer == nil {
+		w.writeTimer = time.AfterFunc(50*time.Millisecond /*FIXME*/, w.doWriteTimer)
+	}
+	return nil
+}
+
+func (w *fairTaskWriter) doWriteTimer() {
+	w.lock.Lock()
+	if w.writePending {
+		// race with write due to filling buffer
+		w.lock.Unlock()
+		return
+	}
+	w.writePending = true
+	w.writeTimer = nil
+	reqs := w.toWrite
+	w.toWrite = nil
+	w.lock.Unlock()
+
+	w.doWrite(reqs)
+}
+
+func (w *fairTaskWriter) doWrite(reqs []*writeTaskRequest) {
+	defer func() {
+		w.lock.Lock()
+		defer w.lock.Unlock()
+		w.writePending = false
+	}()
+
+	atomic.StoreInt64(&w.currentTaskIDBlock.start, w.taskIDBlock.start)
+	atomic.StoreInt64(&w.currentTaskIDBlock.end, w.taskIDBlock.end)
+
+	err := w.allocTaskIDs(reqs)
+	if err == nil {
+		err = w.writeBatch(reqs)
+	}
+
+	for _, req := range reqs {
+		req.responseCh <- err
 	}
 }
 
@@ -143,52 +204,6 @@ func (w *fairTaskWriter) initState() error {
 	w.currentTaskIDBlock = w.taskIDBlock
 	w.backlogMgr.initState(state, nil)
 	return nil
-}
-
-func (w *fairTaskWriter) taskWriterLoop() {
-	if w.initState() != nil {
-		return
-	}
-
-	var reqs []*writeTaskRequest
-	for {
-		atomic.StoreInt64(&w.currentTaskIDBlock.start, w.taskIDBlock.start)
-		atomic.StoreInt64(&w.currentTaskIDBlock.end, w.taskIDBlock.end)
-
-		// prepare slice for reuse
-		clear(reqs)
-		reqs = reqs[:0]
-
-		select {
-		case <-w.backlogMgr.tqCtx.Done():
-			return
-		case req := <-w.appendCh:
-			// read a batch of requests from the channel
-			reqs = append(reqs, req)
-			reqs = w.getWriteBatch(reqs)
-		}
-
-		err := w.allocTaskIDs(reqs)
-		if err == nil {
-			err = w.writeBatch(reqs)
-		}
-
-		for _, req := range reqs {
-			req.responseCh <- err
-		}
-	}
-}
-
-func (w *fairTaskWriter) getWriteBatch(reqs []*writeTaskRequest) []*writeTaskRequest {
-	for range w.config.MaxTaskBatchSize() - 1 {
-		select {
-		case req := <-w.appendCh:
-			reqs = append(reqs, req)
-		default: // channel is empty, don't block
-			return reqs
-		}
-	}
-	return reqs
 }
 
 func (w *fairTaskWriter) writeBatch(reqs []*writeTaskRequest) (retErr error) {
