@@ -20,7 +20,7 @@ import (
 type (
 	writeTaskRequest struct {
 		taskInfo   *persistencespb.TaskInfo
-		responseCh chan<- error
+		responseCh chan<- error  // for taskWriter and priTaskWriter only, remove later
 		subqueue   subqueueIndex // for priTaskWriter only
 		fairLevel                // filled in by taskWriterLoop
 	}

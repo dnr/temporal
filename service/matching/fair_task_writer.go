@@ -11,6 +11,7 @@ import (
 	persistencespb "go.temporal.io/server/api/persistence/v1"
 	"go.temporal.io/server/common"
 	"go.temporal.io/server/common/backoff"
+	"go.temporal.io/server/common/future"
 	"go.temporal.io/server/common/log"
 	"go.temporal.io/server/common/log/tag"
 	"go.temporal.io/server/common/metrics"
@@ -31,6 +32,7 @@ type (
 		lock         sync.Mutex
 		writePending bool
 		toWrite      []*writeTaskRequest
+		writeResult  *future.FutureImpl[error]
 		writeTimer   *time.Timer
 
 		// state maintained by doWrite:
@@ -53,6 +55,7 @@ func newFairTaskWriter(
 
 		taskIDBlock: noTaskIDs,
 		counters:    make(map[subqueueIndex]counter.Counter),
+		writeResult: future.NewFuture[error](),
 	}
 }
 
@@ -70,75 +73,67 @@ func (w *fairTaskWriter) appendTask(
 
 	startTime := time.Now()
 	req := &writeTaskRequest{
-		taskInfo:   taskInfo,
-		responseCh: make(chan error),
-		subqueue:   subqueue,
+		taskInfo: taskInfo,
+		subqueue: subqueue,
 	}
 
-	if err := w.submitReq(req); err != nil {
-		return err
-	}
-
-	select {
-	case err := <-req.responseCh:
+	fut := w.submitReq(req)
+	if err, ctxErr := fut.Get(w.backlogMgr.tqCtx); ctxErr == nil {
 		metrics.TaskWriteLatencyPerTaskQueue.With(w.backlogMgr.metricsHandler).Record(time.Since(startTime))
 		return err
-	case <-w.backlogMgr.tqCtx.Done():
+	} else {
 		// if we are shutting down, this request will never make
 		// it to persistence, just bail out and fail this request
 		return errShutdown
 	}
 }
 
-func (w *fairTaskWriter) submitReq(req *writeTaskRequest) error {
+func (w *fairTaskWriter) submitReq(req *writeTaskRequest) future.Future[error] {
 	w.lock.Lock()
 	defer w.lock.Unlock()
 
 	if len(w.toWrite) >= 100 /*FIXME*/ {
 		metrics.TaskWriteThrottlePerTaskQueueCounter.With(w.backlogMgr.metricsHandler).Record(1)
-		return &serviceerror.ResourceExhausted{
+		return future.NewReadyFuture[error](&serviceerror.ResourceExhausted{
 			Cause:   enumspb.RESOURCE_EXHAUSTED_CAUSE_SYSTEM_OVERLOADED,
 			Scope:   enumspb.RESOURCE_EXHAUSTED_SCOPE_NAMESPACE,
 			Message: "Too many outstanding appends to the task queue",
-		}
+		}, nil)
 	}
 
 	w.toWrite = append(w.toWrite, req)
 
 	if w.writePending {
-		return nil
-	} else if len(w.toWrite) >= 100 /*FIXME*/ {
-		w.writePending = true
-		w.writeTimer.Stop()
-		w.writeTimer = nil
-		reqs := w.toWrite
-		w.toWrite = nil
-		go w.doWrite(reqs)
-		return nil
-	} else if w.writeTimer == nil {
-		w.writeTimer = time.AfterFunc(50*time.Millisecond /*FIXME*/, w.doWriteTimer)
+		// don't start another write yet. FIXME: oops, probably wrong
+	} else {
+		if w.writeTimer == nil {
+			w.writeTimer = time.AfterFunc(50*time.Millisecond /*FIXME*/, w.doWriteTimer)
+		}
+		if len(w.toWrite) >= 100 /*FIXME*/ {
+			w.writeTimer.Reset(0)
+		}
 	}
-	return nil
+	return w.writeResult
 }
 
 func (w *fairTaskWriter) doWriteTimer() {
 	w.lock.Lock()
 	if w.writePending {
-		// race with write due to filling buffer
-		w.lock.Unlock()
-		return
+		panic("oops")
 	}
 	w.writePending = true
 	w.writeTimer = nil
-	reqs := w.toWrite
-	w.toWrite = nil
+	reqs, fut := w.toWrite, w.writeResult
+	w.toWrite, w.writeResult = nil, future.NewFuture[error]()
 	w.lock.Unlock()
 
-	w.doWrite(reqs)
+	w.doWrite(reqs, fut)
 }
 
-func (w *fairTaskWriter) doWrite(reqs []*writeTaskRequest) {
+func (w *fairTaskWriter) doWrite(reqs []*writeTaskRequest, fut *future.FutureImpl[error]) (retErr error) {
 	defer func() {
+		fut.Set(retErr, nil)
+
 		w.lock.Lock()
 		defer w.lock.Unlock()
 		w.writePending = false
@@ -147,14 +142,11 @@ func (w *fairTaskWriter) doWrite(reqs []*writeTaskRequest) {
 	atomic.StoreInt64(&w.currentTaskIDBlock.start, w.taskIDBlock.start)
 	atomic.StoreInt64(&w.currentTaskIDBlock.end, w.taskIDBlock.end)
 
-	err := w.allocTaskIDs(reqs)
-	if err == nil {
-		err = w.writeBatch(reqs)
+	retErr = w.allocTaskIDs(reqs)
+	if retErr == nil {
+		retErr = w.writeBatch(reqs)
 	}
-
-	for _, req := range reqs {
-		req.responseCh <- err
-	}
+	return
 }
 
 func (w *fairTaskWriter) allocTaskIDs(reqs []*writeTaskRequest) error {
