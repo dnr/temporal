@@ -1126,7 +1126,7 @@ Note: this should be greater than matching.longPollExpirationInterval and matchi
 	)
 	MatchingTaskWriteDelay = NewTaskQueueDurationSetting(
 		"matching.taskWriteDelay",
-		100*time.Millisecond,
+		10*time.Millisecond,
 		`How long to wait for more tasks after we get a task to write.`,
 	)
 	MatchingMaxTaskDeleteBatchSize = NewTaskQueueIntSetting(

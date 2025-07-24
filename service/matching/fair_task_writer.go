@@ -94,7 +94,7 @@ func (w *fairTaskWriter) bufferedTasksLocked() (total int) {
 	return
 }
 
-func (w *fairTaskWriter) findOpenBatchLocked(batchSize int) *writeBatch {
+func (w *fairTaskWriter) getOpenBatchLocked(batchSize int) *writeBatch {
 	if l := len(w.toWrite); l > 0 {
 		if batch := w.toWrite[l-1]; len(batch.tasks) < batchSize {
 			return batch
@@ -108,15 +108,18 @@ func (w *fairTaskWriter) findOpenBatchLocked(batchSize int) *writeBatch {
 	return batch
 }
 
-func (w *fairTaskWriter) getReadyBatchLocked(batchSize int, delay time.Duration, now time.Time) *writeBatch {
+func (w *fairTaskWriter) getReadyBatchLocked(batchSize int, delay time.Duration, now time.Time, pop bool) *writeBatch {
 	if len(w.toWrite) == 0 {
 		return nil
 	}
 	batch := w.toWrite[0]
-	if len(batch.tasks) >= batchSize || now.Sub(batch.start) > delay {
-		return batch
+	if len(batch.tasks) < batchSize && now.Sub(batch.start) < delay {
+		return nil
 	}
-	return nil
+	if pop {
+		w.toWrite = w.toWrite[1:]
+	}
+	return batch
 }
 
 func (w *fairTaskWriter) setTimerLocked(delay time.Duration) {
@@ -142,12 +145,12 @@ func (w *fairTaskWriter) submitReq(taskInfo *persistencespb.TaskInfo, subqueue s
 		}, nil)
 	}
 
-	batch := w.findOpenBatchLocked(batchSize)
+	batch := w.getOpenBatchLocked(batchSize)
 	batch.tasks = append(batch.tasks, writeTaskRequest{taskInfo: taskInfo, subqueue: subqueue})
 
 	if !w.writePending {
 		w.setTimerLocked(delay)
-		if w.getReadyBatchLocked(batchSize, delay, time.Now()) != nil {
+		if w.getReadyBatchLocked(batchSize, delay, time.Now(), false) != nil {
 			w.writeTimer.Reset(0)
 		}
 	}
@@ -161,17 +164,13 @@ func (w *fairTaskWriter) doWriteTimer() {
 	w.lock.Lock()
 	defer w.lock.Unlock()
 
-	w.writeTimer = nil
-	softassert.That(w.logger, !w.writePending, "write should not be pending")
-	w.writePending = true
-
-	nextBatch := func() *writeBatch {
-		batch := w.getReadyBatchLocked(batchSize, delay, time.Now())
-		if batch != nil {
-			w.toWrite = w.toWrite[1:]
-		}
-		return batch
+	if w.writePending {
+		return // we could get run twice from the Reset
 	}
+	w.writePending = true
+	w.writeTimer = nil
+
+	nextBatch := func() *writeBatch { return w.getReadyBatchLocked(batchSize, delay, time.Now(), true) }
 
 	for batch := nextBatch(); batch != nil; batch = nextBatch() {
 		w.lock.Unlock()
