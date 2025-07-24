@@ -30,15 +30,20 @@ type (
 
 		// state protected by lock:
 		lock         sync.Mutex
-		writePending bool
-		toWrite      []*writeTaskRequest
-		writeResult  *future.FutureImpl[error]
+		toWrite      []*writeBatch
 		writeTimer   *time.Timer
+		writePending bool
 
-		// state maintained by doWrite:
+		// state maintained by doWrite (only <= 1 should run at once):
 		taskIDBlock        taskIDBlock
 		currentTaskIDBlock taskIDBlock // copy of taskIDBlock for safe concurrent access via getCurrentTaskIDBlock()
 		counters           map[subqueueIndex]counter.Counter
+	}
+
+	writeBatch struct {
+		fut   future.FutureImpl[error]
+		tasks []writeTaskRequest
+		start time.Time
 	}
 )
 
@@ -55,7 +60,6 @@ func newFairTaskWriter(
 
 		taskIDBlock: noTaskIDs,
 		counters:    make(map[subqueueIndex]counter.Counter),
-		writeResult: future.NewFuture[error](),
 	}
 }
 
@@ -72,15 +76,10 @@ func (w *fairTaskWriter) appendTask(
 	}
 
 	startTime := time.Now()
-	req := &writeTaskRequest{
-		taskInfo: taskInfo,
-		subqueue: subqueue,
-	}
-
-	fut := w.submitReq(req)
-	if err, ctxErr := fut.Get(w.backlogMgr.tqCtx); ctxErr == nil {
+	fut := w.submitReq(taskInfo, subqueue)
+	if writeErr, ctxErr := fut.Get(w.backlogMgr.tqCtx); ctxErr == nil {
 		metrics.TaskWriteLatencyPerTaskQueue.With(w.backlogMgr.metricsHandler).Record(time.Since(startTime))
-		return err
+		return writeErr
 	} else {
 		// if we are shutting down, this request will never make
 		// it to persistence, just bail out and fail this request
@@ -88,11 +87,53 @@ func (w *fairTaskWriter) appendTask(
 	}
 }
 
-func (w *fairTaskWriter) submitReq(req *writeTaskRequest) future.Future[error] {
+func (w *fairTaskWriter) bufferedTasksLocked() (total int) {
+	for _, batch := range w.toWrite {
+		total += len(batch.tasks)
+	}
+	return
+}
+
+func (w *fairTaskWriter) findOpenBatchLocked(batchSize int) *writeBatch {
+	if l := len(w.toWrite); l > 0 {
+		if batch := w.toWrite[l-1]; len(batch.tasks) < batchSize {
+			return batch
+		}
+	}
+	batch := &writeBatch{
+		fut:   *future.NewFuture[error](),
+		start: time.Now(),
+	}
+	w.toWrite = append(w.toWrite, batch)
+	return batch
+}
+
+func (w *fairTaskWriter) getReadyBatchLocked(batchSize int, delay time.Duration, now time.Time) *writeBatch {
+	if len(w.toWrite) == 0 {
+		return nil
+	}
+	batch := w.toWrite[0]
+	if len(batch.tasks) >= batchSize || now.Sub(batch.start) > delay {
+		return batch
+	}
+	return nil
+}
+
+func (w *fairTaskWriter) setTimerLocked(delay time.Duration) {
+	if !w.writePending && w.writeTimer == nil && len(w.toWrite) > 0 && len(w.toWrite[0].tasks) > 0 {
+		w.writeTimer = time.AfterFunc(delay-time.Since(w.toWrite[0].start), w.doWriteTimer)
+	}
+}
+
+func (w *fairTaskWriter) submitReq(taskInfo *persistencespb.TaskInfo, subqueue subqueueIndex) future.Future[error] {
+	batchSize := w.config.MaxWriteBatchSize()
+	bufferSize := w.config.OutstandingTaskAppendsThreshold()
+	delay := w.config.TaskWriteDelay()
+
 	w.lock.Lock()
 	defer w.lock.Unlock()
 
-	if len(w.toWrite) >= 100 /*FIXME*/ {
+	if w.bufferedTasksLocked() >= bufferSize {
 		metrics.TaskWriteThrottlePerTaskQueueCounter.With(w.backlogMgr.metricsHandler).Record(1)
 		return future.NewReadyFuture[error](&serviceerror.ResourceExhausted{
 			Cause:   enumspb.RESOURCE_EXHAUSTED_CAUSE_SYSTEM_OVERLOADED,
@@ -101,55 +142,57 @@ func (w *fairTaskWriter) submitReq(req *writeTaskRequest) future.Future[error] {
 		}, nil)
 	}
 
-	w.toWrite = append(w.toWrite, req)
+	batch := w.findOpenBatchLocked(batchSize)
+	batch.tasks = append(batch.tasks, writeTaskRequest{taskInfo: taskInfo, subqueue: subqueue})
 
-	if w.writePending {
-		// don't start another write yet. FIXME: oops, probably wrong
-	} else {
-		if w.writeTimer == nil {
-			w.writeTimer = time.AfterFunc(50*time.Millisecond /*FIXME*/, w.doWriteTimer)
-		}
-		if len(w.toWrite) >= 100 /*FIXME*/ {
+	if !w.writePending {
+		w.setTimerLocked(delay)
+		if w.getReadyBatchLocked(batchSize, delay, time.Now()) != nil {
 			w.writeTimer.Reset(0)
 		}
 	}
-	return w.writeResult
+	return &batch.fut
 }
 
 func (w *fairTaskWriter) doWriteTimer() {
+	batchSize := w.config.MaxWriteBatchSize()
+	delay := w.config.TaskWriteDelay()
+
 	w.lock.Lock()
-	if w.writePending {
-		panic("oops")
-	}
-	w.writePending = true
+	defer w.lock.Unlock()
+
 	w.writeTimer = nil
-	reqs, fut := w.toWrite, w.writeResult
-	w.toWrite, w.writeResult = nil, future.NewFuture[error]()
-	w.lock.Unlock()
+	softassert.That(w.logger, !w.writePending, "write should not be pending")
+	w.writePending = true
 
-	w.doWrite(reqs, fut)
-}
+	nextBatch := func() *writeBatch {
+		batch := w.getReadyBatchLocked(batchSize, delay, time.Now())
+		if batch != nil {
+			w.toWrite = w.toWrite[1:]
+		}
+		return batch
+	}
 
-func (w *fairTaskWriter) doWrite(reqs []*writeTaskRequest, fut *future.FutureImpl[error]) (retErr error) {
-	defer func() {
-		fut.Set(retErr, nil)
+	for batch := nextBatch(); batch != nil; batch = nextBatch() {
+		w.lock.Unlock()
+
+		atomic.StoreInt64(&w.currentTaskIDBlock.start, w.taskIDBlock.start)
+		atomic.StoreInt64(&w.currentTaskIDBlock.end, w.taskIDBlock.end)
+
+		err := w.allocTaskIDs(batch.tasks)
+		if err == nil {
+			err = w.writeBatch(batch.tasks)
+		}
+		batch.fut.Set(err, nil)
 
 		w.lock.Lock()
-		defer w.lock.Unlock()
-		w.writePending = false
-	}()
-
-	atomic.StoreInt64(&w.currentTaskIDBlock.start, w.taskIDBlock.start)
-	atomic.StoreInt64(&w.currentTaskIDBlock.end, w.taskIDBlock.end)
-
-	retErr = w.allocTaskIDs(reqs)
-	if retErr == nil {
-		retErr = w.writeBatch(reqs)
 	}
-	return
+
+	w.writePending = false
+	w.setTimerLocked(delay)
 }
 
-func (w *fairTaskWriter) allocTaskIDs(reqs []*writeTaskRequest) error {
+func (w *fairTaskWriter) allocTaskIDs(reqs []writeTaskRequest) error {
 	for i := range reqs {
 		if w.taskIDBlock.start > w.taskIDBlock.end {
 			// we ran out of current allocation block
@@ -165,7 +208,7 @@ func (w *fairTaskWriter) allocTaskIDs(reqs []*writeTaskRequest) error {
 	return nil
 }
 
-func (w *fairTaskWriter) pickPasses(tasks []*writeTaskRequest, bases []fairLevel) {
+func (w *fairTaskWriter) pickPasses(tasks []writeTaskRequest, bases []fairLevel) {
 	// TODO(fairness): get this from config
 	var overrides fairnessWeightOverrides
 
@@ -198,7 +241,7 @@ func (w *fairTaskWriter) initState() error {
 	return nil
 }
 
-func (w *fairTaskWriter) writeBatch(reqs []*writeTaskRequest) (retErr error) {
+func (w *fairTaskWriter) writeBatch(reqs []writeTaskRequest) (retErr error) {
 	bases, unpin := w.backlogMgr.getAndPinAckLevels()
 	defer func() { unpin(retErr) }()
 

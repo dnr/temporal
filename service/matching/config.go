@@ -86,7 +86,8 @@ type (
 
 		// taskWriter configuration
 		OutstandingTaskAppendsThreshold dynamicconfig.IntPropertyFnWithTaskQueueFilter
-		MaxTaskBatchSize                dynamicconfig.IntPropertyFnWithTaskQueueFilter
+		MaxWriteBatchSize               dynamicconfig.IntPropertyFnWithTaskQueueFilter
+		TaskWriteDelay                  dynamicconfig.DurationPropertyFnWithTaskQueueFilter
 
 		ThrottledLogRPS dynamicconfig.IntPropertyFn
 
@@ -151,7 +152,8 @@ type (
 
 		// taskWriter configuration
 		OutstandingTaskAppendsThreshold func() int
-		MaxTaskBatchSize                func() int
+		MaxWriteBatchSize               func() int
+		TaskWriteDelay                  func() time.Duration
 		NumWritePartitions              func() int
 		NumReadPartitions               func() int
 		NumReadPartitionsSub            func(func(int)) (int, func())
@@ -250,7 +252,8 @@ func NewConfig(
 		MaxTaskDeleteBatchSize:                   dynamicconfig.MatchingMaxTaskDeleteBatchSize.Get(dc),
 		TaskDeleteInterval:                       dynamicconfig.MatchingTaskDeleteInterval.Get(dc),
 		OutstandingTaskAppendsThreshold:          dynamicconfig.MatchingOutstandingTaskAppendsThreshold.Get(dc),
-		MaxTaskBatchSize:                         dynamicconfig.MatchingMaxTaskBatchSize.Get(dc),
+		MaxWriteBatchSize:                        dynamicconfig.MatchingMaxTaskWriteBatchSize.Get(dc),
+		TaskWriteDelay:                           dynamicconfig.MatchingTaskWriteDelay.Get(dc),
 		ThrottledLogRPS:                          dynamicconfig.MatchingThrottledLogRPS.Get(dc),
 		NumTaskqueueWritePartitions:              dynamicconfig.MatchingNumTaskqueueWritePartitions.Get(dc),
 		NumTaskqueueReadPartitions:               dynamicconfig.MatchingNumTaskqueueReadPartitions.Get(dc),
@@ -374,8 +377,11 @@ func newTaskQueueConfig(tq *tqid.TaskQueue, config *Config, ns namespace.Name) *
 		OutstandingTaskAppendsThreshold: func() int {
 			return config.OutstandingTaskAppendsThreshold(ns.String(), taskQueueName, taskType)
 		},
-		MaxTaskBatchSize: func() int {
-			return config.MaxTaskBatchSize(ns.String(), taskQueueName, taskType)
+		MaxWriteBatchSize: func() int {
+			return config.MaxWriteBatchSize(ns.String(), taskQueueName, taskType)
+		},
+		TaskWriteDelay: func() time.Duration {
+			return config.TaskWriteDelay(ns.String(), taskQueueName, taskType)
 		},
 		NumWritePartitions: func() int {
 			return max(1, config.NumTaskqueueWritePartitions(ns.String(), taskQueueName, taskType))

@@ -180,7 +180,7 @@ func (w *priTaskWriter) taskWriterLoop() {
 }
 
 func (w *priTaskWriter) getWriteBatch(reqs []*writeTaskRequest) []*writeTaskRequest {
-	for range w.config.MaxTaskBatchSize() - 1 {
+	for range w.config.MaxWriteBatchSize() - 1 {
 		select {
 		case req := <-w.appendCh:
 			reqs = append(reqs, req)

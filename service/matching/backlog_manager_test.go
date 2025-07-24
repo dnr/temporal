@@ -382,9 +382,9 @@ var defaultStandingBacklogParams = standingBacklogParams{
 	zipfV:    1,
 	cfg: map[dynamicconfig.Key]any{
 		// reduce these for better coverage
-		dynamicconfig.MatchingGetTasksBatchSize.Key(): 100,
-		dynamicconfig.MatchingGetTasksReloadAt.Key():  40,
-		dynamicconfig.MatchingMaxTaskBatchSize.Key():  50,
+		dynamicconfig.MatchingGetTasksBatchSize.Key():     100,
+		dynamicconfig.MatchingGetTasksReloadAt.Key():      40,
+		dynamicconfig.MatchingMaxTaskWriteBatchSize.Key(): 50,
 	},
 	delayInjection: 1 * time.Millisecond,
 	faultInjection: 0.015,

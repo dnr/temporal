@@ -1119,10 +1119,15 @@ Note: this should be greater than matching.longPollExpirationInterval and matchi
 		250,
 		`MatchingOutstandingTaskAppendsThreshold is the threshold for outstanding task appends`,
 	)
-	MatchingMaxTaskBatchSize = NewTaskQueueIntSetting(
-		"matching.maxTaskBatchSize",
+	MatchingMaxTaskWriteBatchSize = NewTaskQueueIntSetting(
+		"matching.maxTaskBatchSize", // keep old name for compatibility
 		100,
-		`MatchingMaxTaskBatchSize is max batch size for task writer`,
+		`MatchingMaxTaskWriteBatchSize is max batch size for task writer`,
+	)
+	MatchingTaskWriteDelay = NewTaskQueueDurationSetting(
+		"matching.taskWriteDelay",
+		100*time.Millisecond,
+		`How long to wait for more tasks after we get a task to write.`,
 	)
 	MatchingMaxTaskDeleteBatchSize = NewTaskQueueIntSetting(
 		"matching.maxTaskDeleteBatchSize",

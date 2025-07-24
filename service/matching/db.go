@@ -465,7 +465,7 @@ func (db *taskQueueDB) CreateTasks(
 // CreateFairTasks creates a batch of given tasks for this task queue
 func (db *taskQueueDB) CreateFairTasks(
 	ctx context.Context,
-	reqs []*writeTaskRequest,
+	reqs []writeTaskRequest,
 ) (createFairTasksResponse, error) {
 	db.Lock()
 	defer db.Unlock()

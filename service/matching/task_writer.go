@@ -21,7 +21,7 @@ type (
 	writeTaskRequest struct {
 		taskInfo   *persistencespb.TaskInfo
 		responseCh chan<- error  // for taskWriter and priTaskWriter only, remove later
-		subqueue   subqueueIndex // for priTaskWriter only
+		subqueue   subqueueIndex // for priTaskWriter and fairTaskWriter only
 		fairLevel                // filled in by taskWriterLoop
 	}
 
@@ -179,7 +179,7 @@ func (w *taskWriter) taskWriterLoop() {
 
 func (w *taskWriter) getWriteBatch(reqs []*writeTaskRequest) []*writeTaskRequest {
 readLoop:
-	for i := 0; i < w.config.MaxTaskBatchSize(); i++ {
+	for i := 0; i < w.config.MaxWriteBatchSize(); i++ {
 		select {
 		case req := <-w.appendCh:
 			reqs = append(reqs, req)
