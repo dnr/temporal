@@ -369,6 +369,8 @@ type standingBacklogParams struct {
 	cfg            map[dynamicconfig.Key]any
 	delayInjection time.Duration
 	faultInjection float32
+	nWriters       int
+	nPollers       int
 }
 
 var defaultStandingBacklogParams = standingBacklogParams{
@@ -388,6 +390,8 @@ var defaultStandingBacklogParams = standingBacklogParams{
 	},
 	delayInjection: 1 * time.Millisecond,
 	faultInjection: 0.015,
+	nWriters:       3,
+	nPollers:       3,
 }
 
 func (s *BacklogManagerTestSuite) TestStandingBacklog_Short() {
@@ -435,6 +439,8 @@ func (s *BacklogManagerTestSuite) TestStandingBacklog_FiveMin() {
 	p.cfg[dynamicconfig.MatchingGetTasksBatchSize.Key()] = 300
 	p.cfg[dynamicconfig.MatchingGetTasksReloadAt.Key()] = 60
 	p.delayInjection = 3 * time.Millisecond
+	p.nWriters = 10
+	p.nPollers = 10
 	s.testStandingBacklog(p)
 }
 
@@ -530,47 +536,51 @@ func (s *BacklogManagerTestSuite) testStandingBacklog(p standingBacklogParams) {
 	s.NoError(s.blm.WaitUntilInitialized(context.Background()))
 
 	// writer
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		for sleepUntil(func() bool { return delta() <= p.gap }) {
-			info := makeNewTask()
-			tracker.Store(info.ScheduledEventId, info.Priority.FairnessKey)
-			inflight.Add(1)
-			if s.blm.SpoolTask(info) == nil {
-				log("spool %5d -> %3d\n", info.ScheduledEventId, inflight.Load())
-			} else {
-				log("spool %5d failed\n", info.ScheduledEventId, inflight.Load())
-				tracker.Delete(info.ScheduledEventId)
-				inflight.Add(-1)
-				sleep()
+	for range p.nWriters {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for sleepUntil(func() bool { return delta() <= p.gap }) {
+				info := makeNewTask()
+				tracker.Store(info.ScheduledEventId, info.Priority.FairnessKey)
+				inflight.Add(1)
+				if s.blm.SpoolTask(info) == nil {
+					log("spool %5d -> %3d\n", info.ScheduledEventId, inflight.Load())
+				} else {
+					log("spool %5d failed\n", info.ScheduledEventId, inflight.Load())
+					tracker.Delete(info.ScheduledEventId)
+					inflight.Add(-1)
+					sleep()
+				}
 			}
-		}
-	}()
+		}()
+	}
 
 	// poller
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		for sleepUntil(func() bool { return delta() >= -p.gap }) {
-			if t := getTask(); t != nil {
-				// TODO: error sometimes?
-				t.finish(nil, true)
+	for range p.nPollers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for sleepUntil(func() bool { return delta() >= -p.gap }) {
+				if t := getTask(); t != nil {
+					// TODO: error sometimes?
+					t.finish(nil, true)
 
-				tindex := t.event.Data.ScheduledEventId
-				if _, loaded := tracker.LoadAndDelete(tindex); loaded {
-					inflight.Add(-1)
+					tindex := t.event.Data.ScheduledEventId
+					if _, loaded := tracker.LoadAndDelete(tindex); loaded {
+						inflight.Add(-1)
+					} else {
+						// this is a duplicate task (as if matching called RecordTaskStarted twice)
+						log("finished task was not in tracker: %d\n", tindex)
+					}
+					log("finish %s -> %3d  %v  lag %5d\n", t.fairLevel(), inflight.Load(), t.getPriority().GetFairnessKey(), index.Load()-tindex)
+					processed.Add(1)
 				} else {
-					// this is a duplicate task (as if matching called RecordTaskStarted twice)
-					log("finished task was not in tracker: %d\n", tindex)
+					sleep()
 				}
-				log("finish %s -> %3d  %v  lag %5d\n", t.fairLevel(), inflight.Load(), t.getPriority().GetFairnessKey(), index.Load()-tindex)
-				processed.Add(1)
-			} else {
-				sleep()
 			}
-		}
-	}()
+		}()
+	}
 
 	// adjust target over time
 	for t := target.Load(); time.Since(start) < p.duration; sleep() {
