@@ -100,8 +100,8 @@ func RunTool(args []string) error {
 	}
 
 	// pop all tasks and print
-	for t, ok := state.popTask(rnd); ok; t, ok = state.popTask(rnd) {
-		fmt.Printf("task id=%d, pri=%d, fkey=%q, fweight: %g\n", t.id, t.pri, t.fkey, t.fweight)
+	for t, partition, ok := state.popTask(rnd); ok; t, partition, ok = state.popTask(rnd) {
+		fmt.Printf("task id=%d, pri=%d, fkey=%q, fweight: %g, partition=%d\n", t.id, t.pri, t.fkey, t.fweight, partition)
 		// TODO: compute some notion of logical "latency" based on position (not real time)
 		// TODO: track some latency statistics by key and across all tasks
 	}
@@ -168,7 +168,7 @@ func (s *state) addTask(t task, counterFactory func() counter.Counter, rnd *rand
 }
 
 // popTask returns the task with minimum (pri, pass, id) from a random partition
-func (s *state) popTask(rnd *rand.Rand) (task, bool) {
+func (s *state) popTask(rnd *rand.Rand) (task, int, bool) {
 	// Pick a random partition and try to pop from it
 	// If it's empty, try other partitions in order
 	startIdx := rnd.IntN(len(s.partitions))
@@ -178,9 +178,9 @@ func (s *state) popTask(rnd *rand.Rand) (task, bool) {
 
 		if partition.heap.Len() > 0 {
 			t := heap.Pop(&partition.heap).(*task)
-			return *t, true
+			return *t, partitionIdx, true
 		}
 	}
 
-	return task{}, false
+	return task{}, -1, false
 }
