@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math"
 	"math/rand/v2"
+	"sort"
 
 	"go.temporal.io/server/service/matching/counter"
 )
@@ -16,15 +17,21 @@ type (
 	taskGenFunc func() (task, bool)
 
 	task struct {
-		id      int
-		pri     int
-		fkey    string
-		fweight float32
-		pass    int64
+		id           int
+		pri          int
+		fkey         string
+		fweight      float32
+		pass         int64
+		arrivalIndex int64
 	}
 
 	state struct {
 		partitions []partitionState
+	}
+
+	latencyStats struct {
+		byKey   map[string][]int64 // latencies by fairness key
+		overall []int64            // all latencies
 	}
 
 	partitionState struct {
@@ -64,6 +71,11 @@ func RunTool(args []string) error {
 	var state state
 	state.partitions = make([]partitionState, partitions)
 
+	var stats latencyStats
+	stats.byKey = make(map[string][]int64)
+	
+	var arrivalCounter, dispatchCounter int64
+
 	const tasks = 10000
 	const defaultPriority = 3
 
@@ -96,19 +108,82 @@ func RunTool(args []string) error {
 		t.id = nextid()
 		t.pri = cmp.Or(t.pri, defaultPriority)
 		t.fweight = cmp.Or(t.fweight, 1.0)
+		t.arrivalIndex = arrivalCounter
+		arrivalCounter++
 		state.addTask(t, counterFactory, rnd)
 	}
 
 	// pop all tasks and print
 	for t, partition, ok := state.popTask(rnd); ok; t, partition, ok = state.popTask(rnd) {
-		fmt.Printf("task id=%d, pri=%d, fkey=%q, fweight: %g, partition=%d\n", t.id, t.pri, t.fkey, t.fweight, partition)
-		// TODO: compute some notion of logical "latency" based on position (not real time)
-		// TODO: track some latency statistics by key and across all tasks
+		// Calculate logical latency
+		latency := dispatchCounter - t.arrivalIndex
+		dispatchCounter++
+		
+		// Track latency statistics
+		stats.byKey[t.fkey] = append(stats.byKey[t.fkey], latency)
+		stats.overall = append(stats.overall, latency)
+		
+		fmt.Printf("task id=%d, pri=%d, fkey=%q, fweight: %g, partition=%d, latency=%d\n", t.id, t.pri, t.fkey, t.fweight, partition, latency)
 	}
 
-	// TODO: print final latency stats
+	// Print final latency stats
+	printLatencyStats(&stats)
 
 	return nil
+}
+
+func printLatencyStats(stats *latencyStats) {
+	fmt.Printf("\n=== Latency Statistics ===\n")
+	
+	// Overall stats
+	if len(stats.overall) > 0 {
+		sort.Slice(stats.overall, func(i, j int) bool { return stats.overall[i] < stats.overall[j] })
+		mean := float64(sum(stats.overall)) / float64(len(stats.overall))
+		median := stats.overall[len(stats.overall)/2]
+		p95 := stats.overall[int(float64(len(stats.overall))*0.95)]
+		
+		fmt.Printf("Overall: mean=%.2f, median=%d, p95=%d, min=%d, max=%d\n", 
+			mean, median, p95, stats.overall[0], stats.overall[len(stats.overall)-1])
+	}
+	
+	// Per-key stats (sorted by mean latency)
+	type keyStats struct {
+		key    string
+		mean   float64
+		median int64
+		count  int
+	}
+	
+	var keyStatsList []keyStats
+	for key, latencies := range stats.byKey {
+		if len(latencies) == 0 {
+			continue
+		}
+		sort.Slice(latencies, func(i, j int) bool { return latencies[i] < latencies[j] })
+		mean := float64(sum(latencies)) / float64(len(latencies))
+		median := latencies[len(latencies)/2]
+		keyStatsList = append(keyStatsList, keyStats{
+			key:    key,
+			mean:   mean,
+			median: median,
+			count:  len(latencies),
+		})
+	}
+	
+	sort.Slice(keyStatsList, func(i, j int) bool { return keyStatsList[i].mean < keyStatsList[j].mean })
+	
+	fmt.Printf("\nPer-key stats (sorted by mean latency):\n")
+	for _, ks := range keyStatsList {
+		fmt.Printf("  %s: mean=%.2f, median=%d, count=%d\n", ks.key, ks.mean, ks.median, ks.count)
+	}
+}
+
+func sum(slice []int64) int64 {
+	var total int64
+	for _, v := range slice {
+		total += v
+	}
+	return total
 }
 
 // Implement heap.Interface for taskHeap
