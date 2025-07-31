@@ -5,7 +5,7 @@ import (
 	"container/heap"
 	"fmt"
 	"math/rand/v2"
-	"sort"
+	"slices"
 
 	"go.temporal.io/server/service/matching/counter"
 )
@@ -76,7 +76,7 @@ func RunTool(args []string) error {
 
 	var nextIndex, dispatchCounter int64
 
-	const tasks = 1000
+	const tasks = 10000
 	const defaultPriority = 3
 
 	var gen taskGenFunc
@@ -85,7 +85,7 @@ func RunTool(args []string) error {
 		// TODO: add flags to override these
 		const zipf_s = 2.0
 		const zipf_v = 2.0
-		const keys = 10
+		const keys = 100
 
 		zipf := rand.NewZipf(rnd, zipf_s, zipf_v, keys-1)
 
@@ -137,7 +137,7 @@ func (stats *latencyStats) print() {
 
 	// Overall stats
 	if len(stats.overall) > 0 {
-		sort.Slice(stats.overall, func(i, j int) bool { return stats.overall[i] < stats.overall[j] })
+		slices.Sort(stats.overall)
 		mean := float64(sum(stats.overall)) / float64(len(stats.overall))
 		median := stats.overall[len(stats.overall)/2]
 		p95 := stats.overall[int(float64(len(stats.overall))*0.95)]
@@ -159,7 +159,7 @@ func (stats *latencyStats) print() {
 		if len(latencies) == 0 {
 			continue
 		}
-		sort.Slice(latencies, func(i, j int) bool { return latencies[i] < latencies[j] })
+		slices.Sort(latencies)
 		mean := float64(sum(latencies)) / float64(len(latencies))
 		median := latencies[len(latencies)/2]
 		keyStatsList = append(keyStatsList, keyStats{
@@ -170,19 +170,23 @@ func (stats *latencyStats) print() {
 		})
 	}
 
-	sort.Slice(keyStatsList, func(i, j int) bool { return keyStatsList[i].mean < keyStatsList[j].mean })
+	slices.SortFunc(keyStatsList, func(a, b keyStats) int { return cmp.Compare(a.mean, b.mean) })
 
 	fmt.Printf("\nPer-key stats (sorted by mean latency):\n")
 	for _, ks := range keyStatsList {
 		fmt.Printf("  %s: mean=%.2f, median=%d, count=%d\n", ks.key, ks.mean, ks.median, ks.count)
 	}
-	
+
 	// Fairness metrics (percentile of percentiles)
 	fmt.Printf("\nFairness metrics (percentile of per-key percentiles):\n")
-	fmt.Printf("  p90 of p90s: %.2f\n", stats.percentileOfPercentiles(90, 90))
-	fmt.Printf("  p95 of p95s: %.2f\n", stats.percentileOfPercentiles(95, 95))
-	fmt.Printf("  p99 of p95s: %.2f\n", stats.percentileOfPercentiles(95, 99))
-	fmt.Printf("  p95 of p99s: %.2f\n", stats.percentileOfPercentiles(99, 95))
+	ps := []float64{20, 50, 80, 90, 95}
+	fmt.Printf("         @%-4.0f  @%-4.0f  @%-4.0f  @%-4.0f  @%-4.0f\n",
+		ps[0], ps[1], ps[2], ps[3], ps[4])
+	for _, p := range ps {
+		pofps := stats.percentileOfPercentiles(p, ps)
+		fmt.Printf("  p%2.0fs: %5.0f  %5.0f  %5.0f  %5.0f  %5.0f\n",
+			p, pofps[0], pofps[1], pofps[2], pofps[3], pofps[4])
+	}
 }
 
 func sum(slice []int64) int64 {
@@ -197,41 +201,37 @@ func sum(slice []int64) int64 {
 // keyPercentile: percentile to calculate within each key (e.g., 95 for p95)
 // crossPercentile: percentile to calculate across keys (e.g., 90 for p90)
 // Returns the crossPercentile'th percentile of the keyPercentile values from each key
-func (stats *latencyStats) percentileOfPercentiles(keyPercentile, crossPercentile float64) float64 {
+func (stats *latencyStats) percentileOfPercentiles(keyPercentile float64, crossPercentile []float64) []float64 {
 	var keyPercentiles []float64
-	
+
 	for _, latencies := range stats.byKey {
 		if len(latencies) == 0 {
 			continue
 		}
-		
+
 		// Sort latencies for this key
 		sorted := make([]int64, len(latencies))
 		copy(sorted, latencies)
-		sort.Slice(sorted, func(i, j int) bool { return sorted[i] < sorted[j] })
-		
+		slices.Sort(sorted)
+
 		// Calculate the keyPercentile for this key
-		idx := int(keyPercentile/100.0 * float64(len(sorted)))
-		if idx >= len(sorted) {
-			idx = len(sorted) - 1
-		}
+		idx := int(keyPercentile / 100.0 * float64(len(sorted)-1))
 		keyPercentiles = append(keyPercentiles, float64(sorted[idx]))
 	}
-	
+
 	if len(keyPercentiles) == 0 {
-		return 0
+		return nil
 	}
-	
+
 	// Sort the per-key percentiles
-	sort.Float64s(keyPercentiles)
-	
-	// Calculate the crossPercentile of the per-key percentiles
-	idx := int(crossPercentile/100.0 * float64(len(keyPercentiles)))
-	if idx >= len(keyPercentiles) {
-		idx = len(keyPercentiles) - 1
+	slices.Sort(keyPercentiles)
+
+	out := make([]float64, len(crossPercentile))
+	for i, p := range crossPercentile {
+		idx := int(p / 100.0 * float64(len(keyPercentiles)-1))
+		out[i] = keyPercentiles[idx]
 	}
-	
-	return keyPercentiles[idx]
+	return out
 }
 
 // Implement heap.Interface for taskHeap
