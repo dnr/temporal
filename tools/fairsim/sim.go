@@ -1,6 +1,7 @@
 package fairsim
 
 import (
+	"cmp"
 	"fmt"
 	"math/rand/v2"
 
@@ -19,7 +20,10 @@ type (
 
 	state struct {
 		perPri map[int]perPriState
+		heap   taskHeap
 	}
+
+	taskHeap []*task
 
 	perPriState struct {
 		c counter.Counter
@@ -48,6 +52,7 @@ func RunTool(args []string) error {
 	var state state
 
 	const tasks = 10000
+	const defaultPriority = 3
 
 	var gen taskGenFunc
 
@@ -74,6 +79,8 @@ func RunTool(args []string) error {
 	// add all tasks
 	for t, ok := gen(); ok; t, ok = gen() {
 		t.id = nextid()
+		t.pri = cmp.Or(t.pri, defaultPriority)
+		t.fweight = cmp.Or(t.fweight, 1.0)
 		state.addTask(t)
 	}
 
