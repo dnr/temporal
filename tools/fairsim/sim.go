@@ -58,7 +58,6 @@ func RunTool(args []string) error {
 		return counter.NewHybridCounter(params, src)
 	}
 
-	// TODO: implement partitions
 	// TODO: set number of partitions from command line
 	const partitions = 4
 
@@ -170,28 +169,18 @@ func (s *state) addTask(t task, counterFactory func() counter.Counter, rnd *rand
 
 // popTask returns the task with minimum (pri, pass, id) from a random partition
 func (s *state) popTask(rnd *rand.Rand) (task, bool) {
-	// Check if any partition has tasks
-	totalTasks := 0
-	for i := range s.partitions {
-		totalTasks += s.partitions[i].heap.Len()
-	}
-	if totalTasks == 0 {
-		return task{}, false
-	}
-
 	// Pick a random partition and try to pop from it
 	// If it's empty, try other partitions in order
 	startIdx := rnd.IntN(len(s.partitions))
 	for i := 0; i < len(s.partitions); i++ {
 		partitionIdx := (startIdx + i) % len(s.partitions)
 		partition := &s.partitions[partitionIdx]
-		
+
 		if partition.heap.Len() > 0 {
 			t := heap.Pop(&partition.heap).(*task)
 			return *t, true
 		}
 	}
-	
-	// This should never happen since we checked totalTasks > 0
+
 	return task{}, false
 }
