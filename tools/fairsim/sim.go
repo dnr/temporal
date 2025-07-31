@@ -2,6 +2,7 @@ package fairsim
 
 import (
 	"cmp"
+	"container/heap"
 	"fmt"
 	"math/rand/v2"
 
@@ -16,6 +17,7 @@ type (
 		pri     int
 		fkey    string
 		fweight float32
+		pass    int64
 	}
 
 	state struct {
@@ -81,7 +83,7 @@ func RunTool(args []string) error {
 		t.id = nextid()
 		t.pri = cmp.Or(t.pri, defaultPriority)
 		t.fweight = cmp.Or(t.fweight, 1.0)
-		state.addTask(t)
+		state.addTask(t, counterFactory)
 	}
 
 	// pop all tasks and print
@@ -94,4 +96,65 @@ func RunTool(args []string) error {
 	// TODO: print final latency stats
 
 	return nil
+}
+
+// Implement heap.Interface for taskHeap
+func (h taskHeap) Len() int {
+	return len(h)
+}
+
+func (h taskHeap) Less(i, j int) bool {
+	// Order by (pri, pass, id)
+	if h[i].pri != h[j].pri {
+		return h[i].pri < h[j].pri
+	}
+	if h[i].pass != h[j].pass {
+		return h[i].pass < h[j].pass
+	}
+	return h[i].id < h[j].id
+}
+
+func (h taskHeap) Swap(i, j int) {
+	h[i], h[j] = h[j], h[i]
+}
+
+func (h *taskHeap) Push(x interface{}) {
+	*h = append(*h, x.(*task))
+}
+
+func (h *taskHeap) Pop() interface{} {
+	old := *h
+	n := len(old)
+	item := old[n-1]
+	*h = old[0 : n-1]
+	return item
+}
+
+// addTask adds a task to the state, picking a pass using the counter
+func (s *state) addTask(t task, counterFactory func() counter.Counter) {
+	if s.perPri == nil {
+		s.perPri = make(map[int]perPriState)
+	}
+	
+	priState, exists := s.perPri[t.pri]
+	if !exists {
+		priState = perPriState{c: counterFactory()}
+		s.perPri[t.pri] = priState
+	}
+	
+	// Pick pass using counter like fairTaskWriter does
+	// Baseline is 0 (current ack level assumed to be zero)
+	pass := priState.c.Count(t.fkey, 0)
+	t.pass = pass
+	
+	heap.Push(&s.heap, &t)
+}
+
+// popTask returns the task with minimum (pri, pass, id)
+func (s *state) popTask() (task, bool) {
+	if s.heap.Len() == 0 {
+		return task{}, false
+	}
+	t := heap.Pop(&s.heap).(*task)
+	return *t, true
 }
