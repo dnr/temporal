@@ -24,6 +24,10 @@ type (
 	}
 
 	state struct {
+		partitions []partitionState
+	}
+
+	partitionState struct {
 		perPri map[int]perPriState
 		heap   taskHeap
 	}
@@ -54,7 +58,12 @@ func RunTool(args []string) error {
 		return counter.NewHybridCounter(params, src)
 	}
 
+	// TODO: implement partitions
+	// TODO: set number of partitions from command line
+	const partitions = 4
+
 	var state state
+	state.partitions = make([]partitionState, partitions)
 
 	const tasks = 10000
 	const defaultPriority = 3
@@ -88,11 +97,11 @@ func RunTool(args []string) error {
 		t.id = nextid()
 		t.pri = cmp.Or(t.pri, defaultPriority)
 		t.fweight = cmp.Or(t.fweight, 1.0)
-		state.addTask(t, counterFactory)
+		state.addTask(t, counterFactory, rnd)
 	}
 
 	// pop all tasks and print
-	for t, ok := state.popTask(); ok; t, ok = state.popTask() {
+	for t, ok := state.popTask(rnd); ok; t, ok = state.popTask(rnd) {
 		fmt.Printf("task id=%d, pri=%d, fkey=%q, fweight: %g\n", t.id, t.pri, t.fkey, t.fweight)
 		// TODO: compute some notion of logical "latency" based on position (not real time)
 		// TODO: track some latency statistics by key and across all tasks
@@ -135,16 +144,20 @@ func (h *taskHeap) Pop() interface{} {
 	return item
 }
 
-// addTask adds a task to the state, picking a pass using the counter
-func (s *state) addTask(t task, counterFactory func() counter.Counter) {
-	if s.perPri == nil {
-		s.perPri = make(map[int]perPriState)
+// addTask adds a task to the state, picking a random partition and pass using the counter
+func (s *state) addTask(t task, counterFactory func() counter.Counter, rnd *rand.Rand) {
+	// Pick a random partition
+	partitionIdx := rnd.IntN(len(s.partitions))
+	partition := &s.partitions[partitionIdx]
+
+	if partition.perPri == nil {
+		partition.perPri = make(map[int]perPriState)
 	}
 
-	priState, exists := s.perPri[t.pri]
+	priState, exists := partition.perPri[t.pri]
 	if !exists {
 		priState = perPriState{c: counterFactory()}
-		s.perPri[t.pri] = priState
+		partition.perPri[t.pri] = priState
 	}
 
 	// Pick pass using counter like fairTaskWriter does
@@ -152,14 +165,33 @@ func (s *state) addTask(t task, counterFactory func() counter.Counter) {
 	pass := priState.c.GetPass(t.fkey, 0, int64(float32(stride)/t.fweight))
 	t.pass = pass
 
-	heap.Push(&s.heap, &t)
+	heap.Push(&partition.heap, &t)
 }
 
-// popTask returns the task with minimum (pri, pass, id)
-func (s *state) popTask() (task, bool) {
-	if s.heap.Len() == 0 {
+// popTask returns the task with minimum (pri, pass, id) from a random partition
+func (s *state) popTask(rnd *rand.Rand) (task, bool) {
+	// Check if any partition has tasks
+	totalTasks := 0
+	for i := range s.partitions {
+		totalTasks += s.partitions[i].heap.Len()
+	}
+	if totalTasks == 0 {
 		return task{}, false
 	}
-	t := heap.Pop(&s.heap).(*task)
-	return *t, true
+
+	// Pick a random partition and try to pop from it
+	// If it's empty, try other partitions in order
+	startIdx := rnd.IntN(len(s.partitions))
+	for i := 0; i < len(s.partitions); i++ {
+		partitionIdx := (startIdx + i) % len(s.partitions)
+		partition := &s.partitions[partitionIdx]
+		
+		if partition.heap.Len() > 0 {
+			t := heap.Pop(&partition.heap).(*task)
+			return *t, true
+		}
+	}
+	
+	// This should never happen since we checked totalTasks > 0
+	return task{}, false
 }
