@@ -3,8 +3,11 @@ package fairsim
 import (
 	"cmp"
 	"container/heap"
+	"encoding/json"
+	"flag"
 	"fmt"
 	"math/rand/v2"
+	"os"
 	"slices"
 
 	"go.temporal.io/server/service/matching/counter"
@@ -51,26 +54,41 @@ type (
 )
 
 func RunTool(args []string) error {
-	params := counter.DefaultCounterParams
-	// TODO: be able to load params from a json file specified by a flag
+	var (
+		seed        = flag.Int64("seed", rand.Int64(), "Random seed")
+		fair        = flag.Bool("fair", true, "Enable fairness (false for FIFO)")
+		partitions  = flag.Int("partitions", 4, "Number of partitions")
+		tasks       = flag.Int("tasks", 10000, "Number of tasks to generate")
+		zipf_s      = flag.Float64("zipf-s", 2.0, "Zipf distribution s parameter")
+		zipf_v      = flag.Float64("zipf-v", 2.0, "Zipf distribution v parameter")
+		numKeys     = flag.Int("keys", 100, "Number of unique fairness keys")
+		counterFile = flag.String("counter-params", "", "JSON file with CounterParams")
+	)
+	flag.CommandLine.Parse(args)
 
-	// TODO: be able to specify seed from a flag
-	src := rand.NewPCG(rand.Uint64(), rand.Uint64())
+	// Load counter params
+	params := counter.DefaultCounterParams
+	if *counterFile != "" {
+		data, err := os.ReadFile(*counterFile)
+		if err != nil {
+			return fmt.Errorf("failed to load counter params: %w", err)
+		} else if err = json.Unmarshal(data, &params); err != nil {
+			return fmt.Errorf("failed to load counter params: %w", err)
+		}
+	}
+
+	src := rand.NewPCG(uint64(*seed), uint64(*seed+1))
 	rnd := rand.New(src)
 
 	counterFactory := func() counter.Counter { return unfairCounter{} }
-	// TODO: allow turning on/off fairness by flag
-	if true {
+	if *fair {
 		counterFactory = func() counter.Counter { return counter.NewHybridCounter(params, src) }
 	}
-
-	// TODO: set number of partitions from command line
-	const partitions = 4
 
 	state := state{
 		rnd:            rnd,
 		counterFactory: counterFactory,
-		partitions:     make([]partitionState, partitions),
+		partitions:     make([]partitionState, *partitions),
 	}
 
 	stats := latencyStats{
@@ -80,20 +98,14 @@ func RunTool(args []string) error {
 
 	var nextIndex, dispatchCounter int64
 
-	const tasks = 10000
 	const defaultPriority = 3
 
 	var gen taskGenFunc
 
 	if true {
-		// TODO: add flags to override these
-		const zipf_s = 2.0
-		const zipf_v = 2.0
-		const keys = 100
+		zipf := rand.NewZipf(rnd, *zipf_s, *zipf_v, uint64(*numKeys-1))
 
-		zipf := rand.NewZipf(rnd, zipf_s, zipf_v, keys-1)
-
-		tasksLeft := tasks
+		tasksLeft := *tasks
 		gen = func() (task, bool) {
 			tasksLeft--
 			if tasksLeft < 0 {
