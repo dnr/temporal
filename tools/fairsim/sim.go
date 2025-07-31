@@ -4,7 +4,6 @@ import (
 	"cmp"
 	"container/heap"
 	"fmt"
-	"math"
 	"math/rand/v2"
 	"sort"
 
@@ -45,6 +44,8 @@ type (
 	perPriState struct {
 		c counter.Counter
 	}
+
+	unfairCounter struct{}
 )
 
 func RunTool(args []string) error {
@@ -55,8 +56,10 @@ func RunTool(args []string) error {
 	src := rand.NewPCG(rand.Uint64(), rand.Uint64())
 	rnd := rand.New(src)
 
-	counterFactory := func() counter.Counter {
-		return counter.NewHybridCounter(params, src)
+	counterFactory := func() counter.Counter { return unfairCounter{} }
+	// TODO: allow turning on/off fairness by flag
+	if true {
+		counterFactory = func() counter.Counter { return counter.NewHybridCounter(params, src) }
 	}
 
 	// TODO: set number of partitions from command line
@@ -73,7 +76,7 @@ func RunTool(args []string) error {
 
 	var nextIndex, dispatchCounter int64
 
-	const tasks = 10000
+	const tasks = 1000
 	const defaultPriority = 3
 
 	var gen taskGenFunc
@@ -82,7 +85,7 @@ func RunTool(args []string) error {
 		// TODO: add flags to override these
 		const zipf_s = 2.0
 		const zipf_v = 2.0
-		const keys = 100
+		const keys = 10
 
 		zipf := rand.NewZipf(rnd, zipf_s, zipf_v, keys-1)
 
@@ -93,7 +96,8 @@ func RunTool(args []string) error {
 				return task{}, false
 			}
 			fkey := fmt.Sprintf("fkey%d", zipf.Uint64())
-			pri := min(5, max(1, defaultPriority+int(math.Round(rnd.NormFloat64()*0.5))))
+			var pri int
+			// pri = min(5, max(1, defaultPriority+int(math.Round(rnd.NormFloat64()*0.5))))
 			return task{pri: pri, fkey: fkey}, true
 		}
 	} else {
@@ -119,7 +123,7 @@ func RunTool(args []string) error {
 		stats.byKey[t.fkey] = append(stats.byKey[t.fkey], latency)
 		stats.overall = append(stats.overall, latency)
 
-		fmt.Printf("task idx-dispatch: %d-%d = %d, pri: %d, fkey: %q, fweight: %g, partition: %d\n", t.index, dispatchCounter, latency, t.pri, t.fkey, t.fweight, partition)
+		fmt.Printf("task idx-dsp:%6d-%6d = %6d  pri:%2d  fkey:%10q  fweight:%3g  part:%2d\n", t.index, dispatchCounter, latency, t.pri, t.fkey, t.fweight, partition)
 	}
 
 	// Print final latency stats
@@ -254,3 +258,6 @@ func (s *state) popTask(rnd *rand.Rand) (*task, int) {
 
 	return nil, -1
 }
+
+func (u unfairCounter) GetPass(key string, base int64, inc int64) int64 { return base }
+func (u unfairCounter) EstimateDistinctKeys() int                       { return 0 }
