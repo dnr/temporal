@@ -30,8 +30,10 @@ type (
 	}
 
 	latencyStats struct {
-		byKey   map[string][]int64 // latencies by fairness key
-		overall []int64            // all latencies
+		byKey             map[string][]int64   // latencies by fairness key
+		byKeyNormalized   map[string][]float64 // normalized latencies by fairness key
+		overall           []int64              // all latencies
+		overallNormalized []float64            // all normalized latencies
 	}
 
 	partitionState struct {
@@ -71,8 +73,10 @@ func RunTool(args []string) error {
 		partitions:     make([]partitionState, partitions),
 	}
 
-	var stats latencyStats
-	stats.byKey = make(map[string][]int64)
+	stats := latencyStats{
+		byKey:           make(map[string][]int64),
+		byKeyNormalized: make(map[string][]float64),
+	}
 
 	var nextIndex, dispatchCounter int64
 
@@ -126,32 +130,63 @@ func RunTool(args []string) error {
 		fmt.Printf("task idx-dsp:%6d-%6d = %6d  pri:%2d  fkey:%10q  fweight:%3g  part:%2d\n", t.index, dispatchCounter, latency, t.pri, t.fkey, t.fweight, partition)
 	}
 
+	// Calculate normalized latencies
+	stats.calculateNormalized()
+
 	// Print final latency stats
 	stats.print()
 
 	return nil
 }
 
-func (stats *latencyStats) print() {
-	fmt.Printf("\n=== Latency Statistics ===\n")
+func (stats *latencyStats) calculateNormalized() {
+	// Calculate normalized latencies: raw_latency / task_count_for_key
+	for key, latencies := range stats.byKey {
+		taskCount := float64(len(latencies))
+		normalizedLatencies := make([]float64, len(latencies))
 
-	// Overall stats
+		for i, rawLatency := range latencies {
+			normalizedLatencies[i] = float64(rawLatency) / taskCount
+			stats.overallNormalized = append(stats.overallNormalized, normalizedLatencies[i])
+		}
+
+		stats.byKeyNormalized[key] = normalizedLatencies
+	}
+}
+
+func (stats *latencyStats) print() {
+	// Overall raw stats
 	if len(stats.overall) > 0 {
 		slices.Sort(stats.overall)
 		mean := float64(sum(stats.overall)) / float64(len(stats.overall))
 		median := stats.overall[len(stats.overall)/2]
 		p95 := stats.overall[int(float64(len(stats.overall))*0.95)]
 
+		fmt.Printf("\n=== Raw Latency Statistics ===\n")
 		fmt.Printf("Overall: mean=%.2f, median=%d, p95=%d, min=%d, max=%d\n",
 			mean, median, p95, stats.overall[0], stats.overall[len(stats.overall)-1])
 	}
 
-	// Per-key stats (sorted by mean latency)
+	// Overall normalized stats
+	if len(stats.overallNormalized) > 0 {
+		slices.Sort(stats.overallNormalized)
+		mean := sum(stats.overallNormalized) / float64(len(stats.overallNormalized))
+		median := stats.overallNormalized[len(stats.overallNormalized)/2]
+		p95 := stats.overallNormalized[int(float64(len(stats.overallNormalized))*0.95)]
+
+		fmt.Printf("\n=== Normalized Latency Statistics ===\n")
+		fmt.Printf("Overall: mean=%.4f, median=%.4f, p95=%.4f, min=%.4f, max=%.4f\n",
+			mean, median, p95, stats.overallNormalized[0], stats.overallNormalized[len(stats.overallNormalized)-1])
+	}
+
+	// Per-key stats (sorted by mean normalized latency)
 	type keyStats struct {
-		key    string
-		mean   float64
-		median int64
-		count  int
+		key              string
+		meanRaw          float64
+		medianRaw        int64
+		meanNormalized   float64
+		medianNormalized float64
+		count            int
 	}
 
 	var keyStatsList []keyStats
@@ -159,38 +194,61 @@ func (stats *latencyStats) print() {
 		if len(latencies) == 0 {
 			continue
 		}
+
+		// Raw stats
 		slices.Sort(latencies)
-		mean := float64(sum(latencies)) / float64(len(latencies))
-		median := latencies[len(latencies)/2]
+		meanRaw := float64(sum(latencies)) / float64(len(latencies))
+		medianRaw := latencies[len(latencies)/2]
+
+		// Normalized stats
+		normalizedLatencies := stats.byKeyNormalized[key]
+		slices.Sort(normalizedLatencies)
+		meanNormalized := sum(normalizedLatencies) / float64(len(normalizedLatencies))
+		medianNormalized := normalizedLatencies[len(normalizedLatencies)/2]
+
 		keyStatsList = append(keyStatsList, keyStats{
-			key:    key,
-			mean:   mean,
-			median: median,
-			count:  len(latencies),
+			key:              key,
+			meanRaw:          meanRaw,
+			medianRaw:        medianRaw,
+			meanNormalized:   meanNormalized,
+			medianNormalized: medianNormalized,
+			count:            len(latencies),
 		})
 	}
 
-	slices.SortFunc(keyStatsList, func(a, b keyStats) int { return cmp.Compare(a.mean, b.mean) })
+	slices.SortFunc(keyStatsList, func(a, b keyStats) int { return cmp.Compare(a.medianNormalized, b.medianNormalized) })
 
-	fmt.Printf("\nPer-key stats (sorted by mean latency):\n")
+	fmt.Printf("\nPer-key stats (sorted by median normalized latency):\n")
 	for _, ks := range keyStatsList {
-		fmt.Printf("  %s: mean=%.2f, median=%d, count=%d\n", ks.key, ks.mean, ks.median, ks.count)
+		fmt.Printf("  %s: raw(mean=%.2f, median=%d) norm(mean=%.4f, median=%.4f) count=%d\n",
+			ks.key, ks.meanRaw, ks.medianRaw, ks.meanNormalized, ks.medianNormalized, ks.count)
 	}
 
-	// Fairness metrics (percentile of percentiles)
-	fmt.Printf("\nFairness metrics (percentile of per-key percentiles):\n")
+	// Raw fairness metrics (percentile of percentiles)
 	ps := []float64{20, 50, 80, 90, 95}
+
+	fmt.Printf("\nRaw fairness metrics (percentile of per-key percentiles):\n")
 	fmt.Printf("         @%-4.0f  @%-4.0f  @%-4.0f  @%-4.0f  @%-4.0f\n",
 		ps[0], ps[1], ps[2], ps[3], ps[4])
 	for _, p := range ps {
-		pofps := stats.percentileOfPercentiles(p, ps)
+		pofps := percentileOfPercentiles(stats.byKey, p, ps)
+		fmt.Printf("  p%2.0fs: %5.0f  %5.0f  %5.0f  %5.0f  %5.0f\n",
+			p, pofps[0], pofps[1], pofps[2], pofps[3], pofps[4])
+	}
+
+	// Normalized fairness metrics (percentile of percentiles)
+	fmt.Printf("\nNormalized fairness metrics (percentile of per-key percentiles):\n")
+	fmt.Printf("         @%-4.0f  @%-4.0f  @%-4.0f  @%-4.0f  @%-4.0f\n",
+		ps[0], ps[1], ps[2], ps[3], ps[4])
+	for _, p := range ps {
+		pofps := percentileOfPercentiles(stats.byKeyNormalized, p, ps)
 		fmt.Printf("  p%2.0fs: %5.0f  %5.0f  %5.0f  %5.0f  %5.0f\n",
 			p, pofps[0], pofps[1], pofps[2], pofps[3], pofps[4])
 	}
 }
 
-func sum(slice []int64) int64 {
-	var total int64
+func sum[T int64 | float64](slice []T) T {
+	var total T
 	for _, v := range slice {
 		total += v
 	}
@@ -198,25 +256,25 @@ func sum(slice []int64) int64 {
 }
 
 // percentileOfPercentiles calculates the cross-key percentile of per-key percentiles
-// keyPercentile: percentile to calculate within each key (e.g., 95 for p95)
-// crossPercentile: percentile to calculate across keys (e.g., 90 for p90)
-// Returns the crossPercentile'th percentile of the keyPercentile values from each key
-func (stats *latencyStats) percentileOfPercentiles(keyPercentile float64, crossPercentile []float64) []float64 {
+// Works with both int64 and float64 maps by converting everything to float64
+func percentileOfPercentiles[T int64 | float64](dataByKey map[string][]T, keyPercentile float64, crossPercentile []float64) []float64 {
 	var keyPercentiles []float64
 
-	for _, latencies := range stats.byKey {
-		if len(latencies) == 0 {
+	for _, values := range dataByKey {
+		if len(values) == 0 {
 			continue
 		}
 
-		// Sort latencies for this key
-		sorted := make([]int64, len(latencies))
-		copy(sorted, latencies)
+		// Convert to float64 and sort
+		sorted := make([]float64, len(values))
+		for i, v := range values {
+			sorted[i] = float64(v)
+		}
 		slices.Sort(sorted)
 
 		// Calculate the keyPercentile for this key
 		idx := int(keyPercentile / 100.0 * float64(len(sorted)-1))
-		keyPercentiles = append(keyPercentiles, float64(sorted[idx]))
+		keyPercentiles = append(keyPercentiles, sorted[idx])
 	}
 
 	if len(keyPercentiles) == 0 {
