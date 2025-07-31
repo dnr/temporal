@@ -16,7 +16,7 @@ import (
 const stride = 10000
 
 type (
-	taskGenFunc func() (task, bool)
+	taskGenFunc func() *task
 
 	task struct {
 		pri     int
@@ -106,22 +106,22 @@ func RunTool(args []string) error {
 		zipf := rand.NewZipf(rnd, *zipf_s, *zipf_v, uint64(*numKeys-1))
 
 		tasksLeft := *tasks
-		gen = func() (task, bool) {
+		gen = func() *task {
 			tasksLeft--
 			if tasksLeft < 0 {
-				return task{}, false
+				return nil
 			}
 			fkey := fmt.Sprintf("fkey%d", zipf.Uint64())
 			var pri int
 			// pri = min(5, max(1, defaultPriority+int(math.Round(rnd.NormFloat64()*0.5))))
-			return task{pri: pri, fkey: fkey}, true
+			return &task{pri: pri, fkey: fkey}
 		}
 	} else {
 		// TODO: option to read keys/weights from file
 	}
 
 	// add all tasks
-	for t, ok := gen(); ok; t, ok = gen() {
+	for t := gen(); t != nil; t = gen() {
 		t.pri = cmp.Or(t.pri, defaultPriority)
 		t.fweight = cmp.Or(t.fweight, 1.0)
 		t.index = nextIndex
@@ -337,7 +337,7 @@ func (h *taskHeap) Pop() interface{} {
 }
 
 // addTask adds a task to the state, picking a random partition and pass using the counter
-func (s *state) addTask(t task) {
+func (s *state) addTask(t *task) {
 	// Pick a random partition
 	partition := &s.partitions[s.rnd.IntN(len(s.partitions))]
 
@@ -356,7 +356,7 @@ func (s *state) addTask(t task) {
 	pass := priState.c.GetPass(t.fkey, 0, int64(float32(stride)/t.fweight))
 	t.pass = pass
 
-	heap.Push(&partition.heap, &t)
+	heap.Push(&partition.heap, t)
 }
 
 // popTask returns the task with minimum (pri, pass, id) from a random partition
