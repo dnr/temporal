@@ -361,19 +361,13 @@ func (s *state) addTask(t *task) {
 
 // popTask returns the task with minimum (pri, pass, id) from a random partition
 func (s *state) popTask(rnd *rand.Rand) (*task, int) {
-	// Pick a random partition and try to pop from it
-	// If it's empty, try other partitions in order
-	startIdx := rnd.IntN(len(s.partitions))
-	for i := range len(s.partitions) {
-		idx := (startIdx + i) % len(s.partitions)
+	for _, idx := range rnd.Perm(len(s.partitions)) {
 		partition := &s.partitions[idx]
-
 		if partition.heap.Len() > 0 {
 			t := heap.Pop(&partition.heap).(*task)
 			return t, idx
 		}
 	}
-
 	return nil, -1
 }
 
