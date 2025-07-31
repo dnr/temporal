@@ -176,6 +176,13 @@ func (stats *latencyStats) print() {
 	for _, ks := range keyStatsList {
 		fmt.Printf("  %s: mean=%.2f, median=%d, count=%d\n", ks.key, ks.mean, ks.median, ks.count)
 	}
+	
+	// Fairness metrics (percentile of percentiles)
+	fmt.Printf("\nFairness metrics (percentile of per-key percentiles):\n")
+	fmt.Printf("  p90 of p90s: %.2f\n", stats.percentileOfPercentiles(90, 90))
+	fmt.Printf("  p95 of p95s: %.2f\n", stats.percentileOfPercentiles(95, 95))
+	fmt.Printf("  p99 of p95s: %.2f\n", stats.percentileOfPercentiles(95, 99))
+	fmt.Printf("  p95 of p99s: %.2f\n", stats.percentileOfPercentiles(99, 95))
 }
 
 func sum(slice []int64) int64 {
@@ -184,6 +191,47 @@ func sum(slice []int64) int64 {
 		total += v
 	}
 	return total
+}
+
+// percentileOfPercentiles calculates the cross-key percentile of per-key percentiles
+// keyPercentile: percentile to calculate within each key (e.g., 95 for p95)
+// crossPercentile: percentile to calculate across keys (e.g., 90 for p90)
+// Returns the crossPercentile'th percentile of the keyPercentile values from each key
+func (stats *latencyStats) percentileOfPercentiles(keyPercentile, crossPercentile float64) float64 {
+	var keyPercentiles []float64
+	
+	for _, latencies := range stats.byKey {
+		if len(latencies) == 0 {
+			continue
+		}
+		
+		// Sort latencies for this key
+		sorted := make([]int64, len(latencies))
+		copy(sorted, latencies)
+		sort.Slice(sorted, func(i, j int) bool { return sorted[i] < sorted[j] })
+		
+		// Calculate the keyPercentile for this key
+		idx := int(keyPercentile/100.0 * float64(len(sorted)))
+		if idx >= len(sorted) {
+			idx = len(sorted) - 1
+		}
+		keyPercentiles = append(keyPercentiles, float64(sorted[idx]))
+	}
+	
+	if len(keyPercentiles) == 0 {
+		return 0
+	}
+	
+	// Sort the per-key percentiles
+	sort.Float64s(keyPercentiles)
+	
+	// Calculate the crossPercentile of the per-key percentiles
+	idx := int(crossPercentile/100.0 * float64(len(keyPercentiles)))
+	if idx >= len(keyPercentiles) {
+		idx = len(keyPercentiles) - 1
+	}
+	
+	return keyPercentiles[idx]
 }
 
 // Implement heap.Interface for taskHeap
