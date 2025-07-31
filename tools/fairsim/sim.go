@@ -4,10 +4,13 @@ import (
 	"cmp"
 	"container/heap"
 	"fmt"
+	"math"
 	"math/rand/v2"
 
 	"go.temporal.io/server/service/matching/counter"
 )
+
+const stride = 10000
 
 type (
 	taskGenFunc func() (task, bool)
@@ -45,12 +48,12 @@ func RunTool(args []string) error {
 
 	// TODO: be able to specify seed from a flag
 	src := rand.NewPCG(rand.Uint64(), rand.Uint64())
+	rnd := rand.New(src)
 
 	counterFactory := func() counter.Counter {
 		return counter.NewHybridCounter(params, src)
 	}
 
-	// FIXME: put state here
 	var state state
 
 	const tasks = 10000
@@ -64,7 +67,7 @@ func RunTool(args []string) error {
 		const zipf_v = 2.0
 		const keys = 1000
 
-		zipf := rand.NewZipf(rand.New(src), zipf_s, zipf_v, keys-1)
+		zipf := rand.NewZipf(rnd, zipf_s, zipf_v, keys-1)
 
 		tasksLeft := tasks
 		gen = func() (task, bool) {
@@ -72,7 +75,9 @@ func RunTool(args []string) error {
 			if tasksLeft < 0 {
 				return task{}, false
 			}
-			return task{fkey: fmt.Sprintf("fkey%d", zipf.Uint64())}, true
+			fkey := fmt.Sprintf("fkey%d", zipf.Uint64())
+			pri := min(5, max(1, defaultPriority+int(math.Round(rnd.NormFloat64()*0.5))))
+			return task{pri: pri, fkey: fkey}, true
 		}
 	} else {
 		// TODO: option to read keys/weights from file
@@ -135,18 +140,18 @@ func (s *state) addTask(t task, counterFactory func() counter.Counter) {
 	if s.perPri == nil {
 		s.perPri = make(map[int]perPriState)
 	}
-	
+
 	priState, exists := s.perPri[t.pri]
 	if !exists {
 		priState = perPriState{c: counterFactory()}
 		s.perPri[t.pri] = priState
 	}
-	
+
 	// Pick pass using counter like fairTaskWriter does
 	// Baseline is 0 (current ack level assumed to be zero)
-	pass := priState.c.Count(t.fkey, 0)
+	pass := priState.c.GetPass(t.fkey, 0, int64(float32(stride)/t.fweight))
 	t.pass = pass
-	
+
 	heap.Push(&s.heap, &t)
 }
 
