@@ -10,7 +10,6 @@ import (
 	"math/rand/v2"
 	"os"
 	"slices"
-	"strconv"
 	"strings"
 
 	"go.temporal.io/server/service/matching/counter"
@@ -65,18 +64,21 @@ type (
 )
 
 func RunTool(args []string) error {
-	var (
-		seed        = flag.Int64("seed", rand.Int64(), "Random seed")
-		fair        = flag.Bool("fair", true, "Enable fairness (false for FIFO)")
-		partitions  = flag.Int("partitions", 4, "Number of partitions")
-		tasks       = flag.Int("tasks", 10000, "Number of tasks to generate")
-		zipf_s      = flag.Float64("zipf-s", 2.0, "Zipf distribution s parameter")
-		zipf_v      = flag.Float64("zipf-v", 2.0, "Zipf distribution v parameter")
-		numKeys     = flag.Int("keys", 100, "Number of unique fairness keys")
-		counterFile = flag.String("counter-params", "", "JSON file with CounterParams")
-		scriptFile  = flag.String("script", "", "Script file to execute instead of generating tasks")
-	)
-	flag.CommandLine.Parse(args)
+	fs := flag.NewFlagSet("fairsim", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+
+	seed := fs.Int64("seed", rand.Int64(), "Random seed")
+	fair := fs.Bool("fair", true, "Enable fairness (false for FIFO)")
+	partitions := fs.Int("partitions", 4, "Number of partitions")
+	counterFile := fs.String("counter-params", "", "JSON file with CounterParams")
+	scriptFile := fs.String("script", "", "Script file to execute instead of generating tasks")
+
+	if err := fs.Parse(args); err != nil {
+		return fmt.Errorf("flag parsing: %w", err)
+	}
+
+	// Get remaining unparsed args for gentasks
+	remainingArgs := fs.Args()
 
 	// Load counter params
 	params := counter.DefaultCounterParams
@@ -110,11 +112,15 @@ func RunTool(args []string) error {
 		return sim.runScript(*scriptFile)
 	}
 
-	// Default behavior: run gentasks command with flags from command line
-	genTasksCmd := fmt.Sprintf("gentasks -tasks=%d -keys=%d -zipf_s=%g -zipf_v=%g",
-		*tasks, *numKeys, *zipf_s, *zipf_v)
+	// Default behavior: run gentasks command with remaining args from command line
+	if err := sim.executeGenTasksCommand(remainingArgs); err != nil {
+		return err
+	}
 
-	return sim.runCommands([]string{genTasksCmd})
+	// Finish simulation
+	sim.finish()
+
+	return nil
 }
 
 func (stats *latencyStats) calculateNormalized() {
@@ -436,7 +442,7 @@ func (sim *simulator) executeCommand(line string) error {
 func (sim *simulator) executeTaskCommand(args []string) error {
 	fs := flag.NewFlagSet("task", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr) // Send flag errors to stderr
-	
+
 	fkey := fs.String("fkey", "default", "fairness key")
 	fweight := fs.Float64("fweight", 1.0, "fairness weight")
 	pri := fs.Int("pri", sim.defaultPriority, "priority")
@@ -452,7 +458,7 @@ func (sim *simulator) executeTaskCommand(args []string) error {
 		pri:     *pri,
 		payload: *payload,
 	}
-	
+
 	sim.addTask(t)
 	return nil
 }
@@ -507,7 +513,7 @@ func (sim *simulator) finish() {
 func (sim *simulator) executeGenTasksCommand(args []string) error {
 	fs := flag.NewFlagSet("gentasks", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
-	
+
 	tasks := fs.Int("tasks", 0, "number of tasks to generate")
 	keys := fs.Int("keys", 0, "number of unique fairness keys")
 	keyprefix := fs.String("keyprefix", "key", "prefix for generated fairness keys")
