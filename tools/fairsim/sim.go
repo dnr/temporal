@@ -113,19 +113,8 @@ func RunTool(args []string) error {
 	// Default behavior: run gentasks command with flags from command line
 	genTasksCmd := fmt.Sprintf("gentasks -tasks=%d -keys=%d -zipf_s=%g -zipf_v=%g",
 		*tasks, *numKeys, *zipf_s, *zipf_v)
-	
-	if err := sim.executeCommand(genTasksCmd); err != nil {
-		return err
-	}
 
-	// pop all tasks and print
-	sim.drainAndPrintTasks()
-
-	// Calculate normalized latencies and print stats
-	sim.stats.calculateNormalized()
-	sim.stats.print()
-
-	return nil
+	return sim.runCommands([]string{genTasksCmd})
 }
 
 func (stats *latencyStats) calculateNormalized() {
@@ -392,28 +381,32 @@ func (sim *simulator) runScript(scriptFile string) error {
 	}
 	defer file.Close()
 
+	var commands []string
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue
 		}
-
-		if err := sim.executeCommand(line); err != nil {
-			return fmt.Errorf("error executing command '%s': %w", line, err)
-		}
+		commands = append(commands, line)
 	}
 
 	if err := scanner.Err(); err != nil {
 		return fmt.Errorf("error reading script file: %w", err)
 	}
 
-	// After script is done, pop and print all remaining tasks
-	sim.drainAndPrintTasks()
+	return sim.runCommands(commands)
+}
 
-	// Calculate normalized latencies and print stats
-	sim.stats.calculateNormalized()
-	sim.stats.print()
+func (sim *simulator) runCommands(commands []string) error {
+	for _, cmd := range commands {
+		if err := sim.executeCommand(cmd); err != nil {
+			return fmt.Errorf("error executing command '%s': %w", cmd, err)
+		}
+	}
+
+	// After commands are done, finish simulation
+	sim.finish()
 
 	return nil
 }
@@ -510,6 +503,15 @@ func (sim *simulator) processAndPrintTask(t *task, partition int) {
 	sim.stats.overall = append(sim.stats.overall, latency)
 
 	fmt.Printf("task idx-dsp:%6d-%6d = %6d  pri:%2d  fkey:%10q  fweight:%3g  part:%2d  payload:%q\n", t.index, sim.dispatchCounter, latency, t.pri, t.fkey, t.fweight, partition, t.payload)
+}
+
+func (sim *simulator) finish() {
+	// Pop and print all remaining tasks
+	sim.drainAndPrintTasks()
+
+	// Calculate normalized latencies and print stats
+	sim.stats.calculateNormalized()
+	sim.stats.print()
 }
 
 func (sim *simulator) executeGenTasksCommand(args []string) error {
