@@ -514,8 +514,8 @@ func (sim *simulator) executeGenTasksCommand(args []string) error {
 	fs := flag.NewFlagSet("gentasks", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 
-	tasks := fs.Int("tasks", 0, "number of tasks to generate")
-	keys := fs.Int("keys", 0, "number of unique fairness keys")
+	tasks := fs.Int("tasks", 100, "number of tasks to generate")
+	keys := fs.Int("keys", 10, "number of unique fairness keys")
 	keyprefix := fs.String("keyprefix", "key", "prefix for generated fairness keys")
 	zipf_s := fs.Float64("zipf_s", 2.0, "zipf distribution s parameter")
 	zipf_v := fs.Float64("zipf_v", 2.0, "zipf distribution v parameter")
