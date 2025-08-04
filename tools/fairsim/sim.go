@@ -19,8 +19,6 @@ import (
 const stride = 10000
 
 type (
-	taskGenFunc func() *task
-
 	task struct {
 		pri     int
 		fkey    string
@@ -112,29 +110,12 @@ func RunTool(args []string) error {
 		return sim.runScript(*scriptFile)
 	}
 
-	var gen taskGenFunc
-
-	if true {
-		zipf := rand.NewZipf(rnd, *zipf_s, *zipf_v, uint64(*numKeys-1))
-
-		tasksLeft := *tasks
-		gen = func() *task {
-			tasksLeft--
-			if tasksLeft < 0 {
-				return nil
-			}
-			fkey := fmt.Sprintf("fkey%d", zipf.Uint64())
-			var pri int
-			// pri = min(5, max(1, defaultPriority+int(math.Round(rnd.NormFloat64()*0.5))))
-			return &task{pri: pri, fkey: fkey}
-		}
-	} else {
-		// TODO: option to read keys/weights from file
-	}
-
-	// add all tasks
-	for t := gen(); t != nil; t = gen() {
-		sim.addTask(t)
+	// Default behavior: run gentasks command with flags from command line
+	genTasksCmd := fmt.Sprintf("gentasks -tasks=%d -keys=%d -zipf_s=%g -zipf_v=%g",
+		*tasks, *numKeys, *zipf_s, *zipf_v)
+	
+	if err := sim.executeCommand(genTasksCmd); err != nil {
+		return err
 	}
 
 	// pop all tasks and print
@@ -453,6 +434,8 @@ func (sim *simulator) executeCommand(line string) error {
 		return sim.executeStatsCommand()
 	case "clearstats":
 		return sim.executeClearStatsCommand()
+	case "gentasks":
+		return sim.executeGenTasksCommand(parts[1:])
 	default:
 		return fmt.Errorf("unknown command: %s", cmd)
 	}
@@ -527,4 +510,63 @@ func (sim *simulator) processAndPrintTask(t *task, partition int) {
 	sim.stats.overall = append(sim.stats.overall, latency)
 
 	fmt.Printf("task idx-dsp:%6d-%6d = %6d  pri:%2d  fkey:%10q  fweight:%3g  part:%2d  payload:%q\n", t.index, sim.dispatchCounter, latency, t.pri, t.fkey, t.fweight, partition, t.payload)
+}
+
+func (sim *simulator) executeGenTasksCommand(args []string) error {
+	// Parse gentasks arguments
+	var tasks, keys int
+	var fkeyprefix string = "fkey"
+	var zipf_s, zipf_v float64 = 2.0, 2.0
+
+	for _, arg := range args {
+		if strings.HasPrefix(arg, "-tasks=") {
+			var err error
+			tasks, err = strconv.Atoi(arg[7:])
+			if err != nil {
+				return fmt.Errorf("invalid tasks: %w", err)
+			}
+		} else if strings.HasPrefix(arg, "-keys=") {
+			var err error
+			keys, err = strconv.Atoi(arg[6:])
+			if err != nil {
+				return fmt.Errorf("invalid keys: %w", err)
+			}
+		} else if strings.HasPrefix(arg, "-fkeyprefix=") {
+			fkeyprefix = arg[12:]
+		} else if strings.HasPrefix(arg, "-zipf_s=") {
+			var err error
+			zipf_s, err = strconv.ParseFloat(arg[8:], 64)
+			if err != nil {
+				return fmt.Errorf("invalid zipf_s: %w", err)
+			}
+		} else if strings.HasPrefix(arg, "-zipf_v=") {
+			var err error
+			zipf_v, err = strconv.ParseFloat(arg[8:], 64)
+			if err != nil {
+				return fmt.Errorf("invalid zipf_v: %w", err)
+			}
+		} else {
+			return fmt.Errorf("unknown gentasks argument: %s", arg)
+		}
+	}
+
+	if tasks <= 0 {
+		return fmt.Errorf("tasks must be positive, got %d", tasks)
+	}
+	if keys <= 0 {
+		return fmt.Errorf("keys must be positive, got %d", keys)
+	}
+
+	// Generate tasks using zipf distribution
+	zipf := rand.NewZipf(sim.rnd, zipf_s, zipf_v, uint64(keys-1))
+
+	for i := 0; i < tasks; i++ {
+		fkey := fmt.Sprintf("%s%d", fkeyprefix, zipf.Uint64())
+		t := &task{
+			fkey: fkey,
+		}
+		sim.addTask(t)
+	}
+
+	return nil
 }
