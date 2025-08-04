@@ -99,29 +99,13 @@ func RunTool(args []string) error {
 		counterFactory = func() counter.Counter { return counter.NewHybridCounter(params, src) }
 	}
 
-	state := state{
-		rnd:            rnd,
-		counterFactory: counterFactory,
-		partitions:     make([]partitionState, *partitions),
-	}
+	state := newState(rnd, counterFactory, *partitions)
 
-	stats := latencyStats{
-		byKey:           make(map[string][]int64),
-		byKeyNormalized: make(map[string][]float64),
-	}
-
-	var nextIndex, dispatchCounter int64
+	stats := newLatencyStats()
 
 	const defaultPriority = 3
 
-	sim := &simulator{
-		state:           &state,
-		stats:           &stats,
-		nextIndex:       nextIndex,
-		dispatchCounter: dispatchCounter,
-		defaultPriority: defaultPriority,
-		rnd:             rnd,
-	}
+	sim := newSimulator(state, stats, defaultPriority, rnd)
 
 	// Check if script mode
 	if *scriptFile != "" {
@@ -150,11 +134,7 @@ func RunTool(args []string) error {
 
 	// add all tasks
 	for t := gen(); t != nil; t = gen() {
-		t.pri = cmp.Or(t.pri, defaultPriority)
-		t.fweight = cmp.Or(t.fweight, 1.0)
-		t.index = sim.nextIndex
-		sim.nextIndex++
-		sim.state.addTask(t)
+		sim.addTask(t)
 	}
 
 	// pop all tasks and print
@@ -390,6 +370,40 @@ func (s *state) popTask(rnd *rand.Rand) (*task, int) {
 func (u unfairCounter) GetPass(key string, base int64, inc int64) int64 { return base }
 func (u unfairCounter) EstimateDistinctKeys() int                       { return 0 }
 
+func newLatencyStats() *latencyStats {
+	return &latencyStats{
+		byKey:           make(map[string][]int64),
+		byKeyNormalized: make(map[string][]float64),
+	}
+}
+
+func newState(rnd *rand.Rand, counterFactory func() counter.Counter, partitions int) *state {
+	return &state{
+		rnd:            rnd,
+		counterFactory: counterFactory,
+		partitions:     make([]partitionState, partitions),
+	}
+}
+
+func newSimulator(state *state, stats *latencyStats, defaultPriority int, rnd *rand.Rand) *simulator {
+	return &simulator{
+		state:           state,
+		stats:           stats,
+		nextIndex:       0,
+		dispatchCounter: 0,
+		defaultPriority: defaultPriority,
+		rnd:             rnd,
+	}
+}
+
+func (sim *simulator) addTask(t *task) {
+	t.pri = cmp.Or(t.pri, sim.defaultPriority)
+	t.fweight = cmp.Or(t.fweight, 1.0)
+	t.index = sim.nextIndex
+	sim.nextIndex++
+	sim.state.addTask(t)
+}
+
 func (sim *simulator) runScript(scriptFile string) error {
 	file, err := os.Open(scriptFile)
 	if err != nil {
@@ -445,12 +459,7 @@ func (sim *simulator) executeCommand(line string) error {
 }
 
 func (sim *simulator) executeTaskCommand(args []string) error {
-	t := &task{
-		pri:     sim.defaultPriority,
-		fweight: 1.0,
-		index:   sim.nextIndex,
-	}
-	sim.nextIndex++
+	t := &task{}
 
 	for _, arg := range args {
 		if strings.HasPrefix(arg, "-fkey=") {
@@ -478,7 +487,7 @@ func (sim *simulator) executeTaskCommand(args []string) error {
 		t.fkey = "default"
 	}
 
-	sim.state.addTask(t)
+	sim.addTask(t)
 	return nil
 }
 
@@ -500,10 +509,7 @@ func (sim *simulator) executeStatsCommand() error {
 }
 
 func (sim *simulator) executeClearStatsCommand() error {
-	sim.stats.byKey = make(map[string][]int64)
-	sim.stats.byKeyNormalized = make(map[string][]float64)
-	sim.stats.overall = nil
-	sim.stats.overallNormalized = nil
+	sim.stats = newLatencyStats()
 	return nil
 }
 
