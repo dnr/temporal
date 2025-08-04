@@ -1,6 +1,7 @@
 package fairsim
 
 import (
+	"bufio"
 	"cmp"
 	"container/heap"
 	"encoding/json"
@@ -9,6 +10,8 @@ import (
 	"math/rand/v2"
 	"os"
 	"slices"
+	"strconv"
+	"strings"
 
 	"go.temporal.io/server/service/matching/counter"
 )
@@ -24,12 +27,22 @@ type (
 		fweight float32
 		pass    int64
 		index   int64
+		payload string
 	}
 
 	state struct {
 		rnd            *rand.Rand
 		counterFactory func() counter.Counter
 		partitions     []partitionState
+	}
+
+	simulator struct {
+		state           *state
+		stats           *latencyStats
+		nextIndex       int64
+		dispatchCounter int64
+		defaultPriority int
+		rnd             *rand.Rand
 	}
 
 	latencyStats struct {
@@ -63,6 +76,7 @@ func RunTool(args []string) error {
 		zipf_v      = flag.Float64("zipf-v", 2.0, "Zipf distribution v parameter")
 		numKeys     = flag.Int("keys", 100, "Number of unique fairness keys")
 		counterFile = flag.String("counter-params", "", "JSON file with CounterParams")
+		scriptFile  = flag.String("script", "", "Script file to execute instead of generating tasks")
 	)
 	flag.CommandLine.Parse(args)
 
@@ -100,6 +114,20 @@ func RunTool(args []string) error {
 
 	const defaultPriority = 3
 
+	sim := &simulator{
+		state:           &state,
+		stats:           &stats,
+		nextIndex:       nextIndex,
+		dispatchCounter: dispatchCounter,
+		defaultPriority: defaultPriority,
+		rnd:             rnd,
+	}
+
+	// Check if script mode
+	if *scriptFile != "" {
+		return sim.runScript(*scriptFile)
+	}
+
 	var gen taskGenFunc
 
 	if true {
@@ -124,29 +152,17 @@ func RunTool(args []string) error {
 	for t := gen(); t != nil; t = gen() {
 		t.pri = cmp.Or(t.pri, defaultPriority)
 		t.fweight = cmp.Or(t.fweight, 1.0)
-		t.index = nextIndex
-		nextIndex++
-		state.addTask(t)
+		t.index = sim.nextIndex
+		sim.nextIndex++
+		sim.state.addTask(t)
 	}
 
 	// pop all tasks and print
-	for t, partition := state.popTask(rnd); t != nil; t, partition = state.popTask(rnd) {
-		// Calculate logical latency
-		latency := dispatchCounter - t.index
-		dispatchCounter++
+	sim.drainAndPrintTasks()
 
-		// Track latency statistics
-		stats.byKey[t.fkey] = append(stats.byKey[t.fkey], latency)
-		stats.overall = append(stats.overall, latency)
-
-		fmt.Printf("task idx-dsp:%6d-%6d = %6d  pri:%2d  fkey:%10q  fweight:%3g  part:%2d\n", t.index, dispatchCounter, latency, t.pri, t.fkey, t.fweight, partition)
-	}
-
-	// Calculate normalized latencies
-	stats.calculateNormalized()
-
-	// Print final latency stats
-	stats.print()
+	// Calculate normalized latencies and print stats
+	sim.stats.calculateNormalized()
+	sim.stats.print()
 
 	return nil
 }
@@ -373,3 +389,136 @@ func (s *state) popTask(rnd *rand.Rand) (*task, int) {
 
 func (u unfairCounter) GetPass(key string, base int64, inc int64) int64 { return base }
 func (u unfairCounter) EstimateDistinctKeys() int                       { return 0 }
+
+func (sim *simulator) runScript(scriptFile string) error {
+	file, err := os.Open(scriptFile)
+	if err != nil {
+		return fmt.Errorf("failed to open script file: %w", err)
+	}
+	defer file.Close()
+
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+
+		if err := sim.executeCommand(line); err != nil {
+			return fmt.Errorf("error executing command '%s': %w", line, err)
+		}
+	}
+
+	if err := scanner.Err(); err != nil {
+		return fmt.Errorf("error reading script file: %w", err)
+	}
+
+	// After script is done, pop and print all remaining tasks
+	sim.drainAndPrintTasks()
+
+	// Calculate normalized latencies and print stats
+	sim.stats.calculateNormalized()
+	sim.stats.print()
+
+	return nil
+}
+
+func (sim *simulator) executeCommand(line string) error {
+	parts := strings.Fields(line)
+	if len(parts) == 0 {
+		return nil
+	}
+
+	cmd := parts[0]
+	switch cmd {
+	case "task":
+		return sim.executeTaskCommand(parts[1:])
+	case "poll":
+		return sim.executePollCommand()
+	case "stats":
+		return sim.executeStatsCommand()
+	case "clearstats":
+		return sim.executeClearStatsCommand()
+	default:
+		return fmt.Errorf("unknown command: %s", cmd)
+	}
+}
+
+func (sim *simulator) executeTaskCommand(args []string) error {
+	t := &task{
+		pri:     sim.defaultPriority,
+		fweight: 1.0,
+		index:   sim.nextIndex,
+	}
+	sim.nextIndex++
+
+	for _, arg := range args {
+		if strings.HasPrefix(arg, "-fkey=") {
+			t.fkey = arg[6:]
+		} else if strings.HasPrefix(arg, "-fweight=") {
+			weight, err := strconv.ParseFloat(arg[9:], 32)
+			if err != nil {
+				return fmt.Errorf("invalid fweight: %w", err)
+			}
+			t.fweight = float32(weight)
+		} else if strings.HasPrefix(arg, "-pri=") {
+			pri, err := strconv.Atoi(arg[5:])
+			if err != nil {
+				return fmt.Errorf("invalid priority: %w", err)
+			}
+			t.pri = pri
+		} else if strings.HasPrefix(arg, "-payload=") {
+			t.payload = arg[9:]
+		} else {
+			return fmt.Errorf("unknown task argument: %s", arg)
+		}
+	}
+
+	if t.fkey == "" {
+		t.fkey = "default"
+	}
+
+	sim.state.addTask(t)
+	return nil
+}
+
+func (sim *simulator) executePollCommand() error {
+	t, partition := sim.state.popTask(sim.rnd)
+	if t == nil {
+		fmt.Println("No tasks in queue")
+		return nil
+	}
+
+	sim.processAndPrintTask(t, partition)
+	return nil
+}
+
+func (sim *simulator) executeStatsCommand() error {
+	sim.stats.calculateNormalized()
+	sim.stats.print()
+	return nil
+}
+
+func (sim *simulator) executeClearStatsCommand() error {
+	sim.stats.byKey = make(map[string][]int64)
+	sim.stats.byKeyNormalized = make(map[string][]float64)
+	sim.stats.overall = nil
+	sim.stats.overallNormalized = nil
+	return nil
+}
+
+func (sim *simulator) drainAndPrintTasks() {
+	for t, partition := sim.state.popTask(sim.rnd); t != nil; t, partition = sim.state.popTask(sim.rnd) {
+		sim.processAndPrintTask(t, partition)
+	}
+}
+
+func (sim *simulator) processAndPrintTask(t *task, partition int) {
+	latency := sim.dispatchCounter - t.index
+	sim.dispatchCounter++
+
+	sim.stats.byKey[t.fkey] = append(sim.stats.byKey[t.fkey], latency)
+	sim.stats.overall = append(sim.stats.overall, latency)
+
+	fmt.Printf("task idx-dsp:%6d-%6d = %6d  pri:%2d  fkey:%10q  fweight:%3g  part:%2d  payload:%q\n", t.index, sim.dispatchCounter, latency, t.pri, t.fkey, t.fweight, partition, t.payload)
+}
