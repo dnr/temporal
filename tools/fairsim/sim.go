@@ -319,8 +319,7 @@ func (s *state) addTask(t *task) {
 
 	// Pick pass using counter like fairTaskWriter does
 	// Baseline is 0 (current ack level assumed to be zero)
-	pass := priState.c.GetPass(t.fkey, 0, int64(float32(stride)/t.fweight))
-	t.pass = pass
+	t.pass = priState.c.GetPass(t.fkey, 0, int64(float32(stride)/t.fweight))
 
 	heap.Push(&partition.heap, t)
 }
@@ -401,7 +400,7 @@ func (sim *simulator) runScript(scriptFile string) error {
 func (sim *simulator) runCommands(commands []string) error {
 	for _, cmd := range commands {
 		if err := sim.executeCommand(cmd); err != nil {
-			return fmt.Errorf("error executing command '%s': %w", cmd, err)
+			return fmt.Errorf("error executing command %q: %w", cmd, err)
 		}
 	}
 
@@ -430,7 +429,7 @@ func (sim *simulator) executeCommand(line string) error {
 	case "gentasks":
 		return sim.executeGenTasksCommand(parts[1:])
 	default:
-		return fmt.Errorf("unknown command: %s", cmd)
+		return fmt.Errorf("unknown command: %q", cmd)
 	}
 }
 
@@ -457,10 +456,6 @@ func (sim *simulator) executeTaskCommand(args []string) error {
 		} else {
 			return fmt.Errorf("unknown task argument: %s", arg)
 		}
-	}
-
-	if t.fkey == "" {
-		t.fkey = "default"
 	}
 
 	sim.addTask(t)
@@ -517,7 +512,7 @@ func (sim *simulator) finish() {
 func (sim *simulator) executeGenTasksCommand(args []string) error {
 	// Parse gentasks arguments
 	var tasks, keys int
-	var fkeyprefix string = "fkey"
+	var keyprefix string = "key"
 	var zipf_s, zipf_v float64 = 2.0, 2.0
 
 	for _, arg := range args {
@@ -533,8 +528,8 @@ func (sim *simulator) executeGenTasksCommand(args []string) error {
 			if err != nil {
 				return fmt.Errorf("invalid keys: %w", err)
 			}
-		} else if strings.HasPrefix(arg, "-fkeyprefix=") {
-			fkeyprefix = arg[12:]
+		} else if strings.HasPrefix(arg, "-keyprefix=") {
+			keyprefix = arg[11:]
 		} else if strings.HasPrefix(arg, "-zipf_s=") {
 			var err error
 			zipf_s, err = strconv.ParseFloat(arg[8:], 64)
@@ -562,12 +557,10 @@ func (sim *simulator) executeGenTasksCommand(args []string) error {
 	// Generate tasks using zipf distribution
 	zipf := rand.NewZipf(sim.rnd, zipf_s, zipf_v, uint64(keys-1))
 
-	for i := 0; i < tasks; i++ {
-		fkey := fmt.Sprintf("%s%d", fkeyprefix, zipf.Uint64())
-		t := &task{
-			fkey: fkey,
-		}
-		sim.addTask(t)
+	for range tasks {
+		sim.addTask(&task{
+			fkey: fmt.Sprintf("%s%d", keyprefix, zipf.Uint64()),
+		})
 	}
 
 	return nil
