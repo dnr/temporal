@@ -95,8 +95,8 @@ func (w *fairTaskWriter) bufferedTasksLocked() (total int) {
 }
 
 func (w *fairTaskWriter) getOpenBatchLocked(batchSize int) *writeBatch {
-	if l := len(w.toWrite); l > 0 {
-		if batch := w.toWrite[l-1]; len(batch.tasks) < batchSize {
+	if last := len(w.toWrite) - 1; last >= 0 {
+		if batch := w.toWrite[last]; len(batch.tasks) < batchSize {
 			return batch
 		}
 	}
