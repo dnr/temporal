@@ -37,7 +37,7 @@ type (
 		state           *state
 		stats           *latencyStats
 		nextIndex       int64
-		dispatchCounter int64
+		dispatchIndex   int64
 		defaultPriority int
 		rnd             *rand.Rand
 	}
@@ -85,14 +85,17 @@ func RunTool(args []string) error {
 	remainingArgs := fs.Args()
 
 	// Load counter params
-	params := counter.DefaultCounterParams
-	if *counterFile != "" {
+	var params counter.CounterParams
+	if *counterFile == "" {
+		params = counter.DefaultCounterParams
+	} else {
 		data, err := os.ReadFile(*counterFile)
 		if err != nil {
 			return fmt.Errorf("failed to load counter params: %w", err)
 		} else if err = json.Unmarshal(data, &params); err != nil {
 			return fmt.Errorf("failed to load counter params: %w", err)
 		}
+		fmt.Printf("Using counter params: %#v\n\n", params)
 	}
 
 	src := rand.NewPCG(uint64(*seed), uint64(*seed+1))
@@ -216,21 +219,21 @@ func (stats *latencyStats) print() {
 	ps := []float64{20, 50, 80, 90, 95}
 
 	fmt.Printf("\nRaw fairness metrics (percentile of per-key percentiles):\n")
-	fmt.Printf("         @%-4.0f  @%-4.0f  @%-4.0f  @%-4.0f  @%-4.0f\n",
+	fmt.Printf("            @%2.0f      @%2.0f      @%2.0f      @%2.0f      @%2.0f\n",
 		ps[0], ps[1], ps[2], ps[3], ps[4])
 	for _, p := range ps {
 		pofps := percentileOfPercentiles(stats.byKey, p, ps)
-		fmt.Printf("  p%2.0fs: %5.0f  %5.0f  %5.0f  %5.0f  %5.0f\n",
+		fmt.Printf("  p%2.0fs: %7.0f  %7.0f  %7.0f  %7.0f  %7.0f\n",
 			p, pofps[0], pofps[1], pofps[2], pofps[3], pofps[4])
 	}
 
 	// Normalized fairness metrics (percentile of percentiles)
 	fmt.Printf("\nNormalized fairness metrics (percentile of per-key percentiles):\n")
-	fmt.Printf("         @%-4.0f  @%-4.0f  @%-4.0f  @%-4.0f  @%-4.0f\n",
+	fmt.Printf("            @%2.0f      @%2.0f      @%2.0f      @%2.0f      @%2.0f\n",
 		ps[0], ps[1], ps[2], ps[3], ps[4])
 	for _, p := range ps {
 		pofps := percentileOfPercentiles(stats.byKeyNormalized, p, ps)
-		fmt.Printf("  p%2.0fs: %5.0f  %5.0f  %5.0f  %5.0f  %5.0f\n",
+		fmt.Printf("  p%2.0fs: %7.0f  %7.0f  %7.0f  %7.0f  %7.0f\n",
 			p, pofps[0], pofps[1], pofps[2], pofps[3], pofps[4])
 	}
 }
@@ -369,7 +372,7 @@ func newSimulator(state *state, stats *latencyStats, defaultPriority int, rnd *r
 		state:           state,
 		stats:           stats,
 		nextIndex:       0,
-		dispatchCounter: 0,
+		dispatchIndex:   0,
 		defaultPriority: defaultPriority,
 		rnd:             rnd,
 	}
@@ -448,7 +451,7 @@ func (sim *simulator) executeTaskCommand(args []string) error {
 	var flagErrors strings.Builder
 	fs.SetOutput(&flagErrors)
 
-	fkey := fs.String("fkey", "default", "fairness key")
+	fkey := fs.String("fkey", "", "fairness key")
 	fweight := fs.Float64("fweight", 1.0, "fairness weight")
 	pri := fs.Int("pri", sim.defaultPriority, "priority")
 	payload := fs.String("payload", "", "payload")
@@ -500,13 +503,15 @@ func (sim *simulator) drainAndPrintTasks() {
 }
 
 func (sim *simulator) processAndPrintTask(t *task, partition int) {
-	latency := sim.dispatchCounter - t.index
-	sim.dispatchCounter++
+	latency := sim.dispatchIndex - t.index
 
 	sim.stats.byKey[t.fkey] = append(sim.stats.byKey[t.fkey], latency)
 	sim.stats.overall = append(sim.stats.overall, latency)
 
-	fmt.Printf("task idx-dsp:%6d-%6d = %6d  pri:%2d  fkey:%10q  fweight:%3g  part:%2d  payload:%q\n", t.index, sim.dispatchCounter, latency, t.pri, t.fkey, t.fweight, partition, t.payload)
+	fmt.Printf("task idx:%6d  dsp:%6d  lat:%6d  pri:%2d  fkey:%10q  fweight:%3g  part:%2d  payload:%q\n",
+		t.index, sim.dispatchIndex, latency, t.pri, t.fkey, t.fweight, partition, t.payload)
+
+	sim.dispatchIndex++
 }
 
 func (sim *simulator) finish() {
@@ -526,8 +531,8 @@ func (sim *simulator) executeGenTasksCommand(args []string) error {
 	tasks := fs.Int("tasks", 100, "number of tasks to generate")
 	keys := fs.Int("keys", 10, "number of unique fairness keys")
 	keyprefix := fs.String("keyprefix", "key", "prefix for generated fairness keys")
-	zipf_s := fs.Float64("zipf_s", 2.0, "zipf distribution s parameter")
-	zipf_v := fs.Float64("zipf_v", 2.0, "zipf distribution v parameter")
+	zipf_s := fs.Float64("zipf-s", 2.0, "zipf distribution s parameter")
+	zipf_v := fs.Float64("zipf-v", 2.0, "zipf distribution v parameter")
 
 	if err := fs.Parse(args); err != nil {
 		if flagErrors.Len() > 0 {

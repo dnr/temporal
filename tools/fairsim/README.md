@@ -1,178 +1,147 @@
-# fairsim - Fair Task Queue Simulator
 
-A tool for simulating task queue fairness behavior using Temporal's fairness algorithms. This simulator helps analyze how different task priorities, fairness keys, and weights affect task scheduling and latency.
+# fairsim
 
-## Overview
-
-The simulator creates tasks with configurable fairness keys and weights, processes them through a priority queue system with fairness counters, and outputs detailed statistics about task latencies and fairness metrics.
+This tool simulates the behavior of Temporal's fair task queues, for use in
+evaluating different parameters.
 
 ## Usage
 
-fairsim supports two modes: **default mode** (generates tasks) and **script mode** (executes commands from a file).
+There are two main modes:
 
-### Command Line Syntax
+- **Generation**: Generates tasks by random distribution and then dispatches
+  them.
+- **Script**: Process a script with queue pushes and pops. This can be used to
+  test with actual data or a custom distribution, and with continuous task
+  creation/dispatch.
 
-```bash
-fairsim [main-flags] [-- gentasks-flags]
-fairsim [main-flags] -- -script=<file>
-```
+### Generation
 
-### Main Flags
+By default, fairsim generates tasks with fairness keys following a Zipf
+distribution.
 
-These flags configure the simulator itself:
-
-- `-seed=<int>` - Random seed (default: random)  
-- `-fair=<bool>` - Enable fairness algorithm (default: true, false = FIFO)
-- `-partitions=<int>` - Number of task queue partitions (default: 4)
-- `-counter-params=<file>` - JSON file with fairness counter parameters
-- `-script=<file>` - Execute script file instead of generating tasks
-
-## Default Mode (Task Generation)
-
-By default, fairsim generates tasks using a Zipf distribution and processes them through the fairness algorithm.
-
-### Basic Usage
+Examples:
 
 ```bash
-# Generate 100 tasks with 10 unique fairness keys (default)
-fairsim
+# Generate a million tasks with 20 keys
+fairsim -- -tasks=1000000 -keys=20
 
-# Generate with custom parameters  
-fairsim -- -tasks=1000 -keys=50 -keyprefix=test
+# Generate a million tasks with a much more lopsided distribution
+fairsim -- -tasks=1000000 -keys=50 -zipf-s=3 -zipf-v=1.1
 
-# Disable fairness (FIFO mode)
-fairsim -fair=false -- -tasks=500
+# Tru alternate counter paramters
+for w in 1 10 100 1000 10000; do
+  fairsim -counter-params <(echo '{"CMS":{"W":'$w'}}') -- -tasks=1000000 -keys=1000 | grep p90s: | tail -1
+done
+
+# Disable fairness to compare to fifo
+fairsim -fair=0 -- -tasks=500
+
+# Use only one partition (default is 4)
+fairsim -partitions=1 -- -tasks=500
 ```
 
-### Task Generation Flags (after `--`)
+### Script
 
-- `-tasks=<int>` - Number of tasks to generate (default: 100)
-- `-keys=<int>` - Number of unique fairness keys (default: 10)  
-- `-keyprefix=<string>` - Prefix for generated fairness keys (default: "key")
-- `-zipf_s=<float>` - Zipf distribution s parameter (default: 2.0)
-- `-zipf_v=<float>` - Zipf distribution v parameter (default: 2.0)
-
-## Script Mode
-
-Script mode allows you to execute a sequence of commands to precisely control task creation and processing.
+Examples:
 
 ```bash
-fairsim -- -script=myscript.txt
+# Priority order
+{
+  echo "task -pri=4 -payload four"
+  echo "task -pri=2 -payload two"
+  echo "task -pri=3 -payload three"
+  echo "task -pri=5 -payload five"
+  echo "task -pri=1 -payload one"
+} | fairsim -script=/dev/stdin -partitions=1
+# should see one, two, three, four, five
+
+# Fairness
+{
+  echo "task -fkey a"
+  echo "task -fkey a"
+  echo "task -fkey a"
+  echo "task -fkey a"
+  echo "task -fkey b"
+} | fairsim -script=/dev/stdin -partitions=1
+# should see a, b, a, a, a
+
+# Alternating
+{
+  echo "task -fkey a"
+  echo "task -fkey a"
+  echo "task -fkey a"
+  echo "task -fkey a"
+  echo "task -fkey b"
+  echo poll # gets a
+  echo poll # gets b
+  echo "task -fkey c"
+  echo "task -fkey c"
+} | fairsim -script=/dev/stdin -partitions=1
+# should see a, b, c, a, c, a, a
+
+# Weight
+{
+  for i in {1..20}; do echo "task -fkey a"; done
+  for i in {1..20}; do echo "task -fkey b -fweight 5"; done
+} | fairsim -script=/dev/stdin -partitions=1
+# should see five b's for each a until b's are done
 ```
 
-### Script Commands
+## Interpreting output
 
-Scripts support these commands (one per line):
+### Task section
 
-#### `task` - Add a single task
-```bash
-task [-fkey=<key>] [-fweight=<weight>] [-pri=<priority>] [-payload=<payload>]
+First, fairsim will print one line for each task dispatched:
+
+```
+task idx:    33  dsp:    15  lat:   -18  pri: 3  fkey:    "key1"  fweight:  1  part: 2  payload:"external-key-32"
+
 ```
 
-- `-fkey=<string>` - Fairness key (default: "default")
-- `-fweight=<float>` - Fairness weight (default: 1.0)  
-- `-pri=<int>` - Priority (default: 3)
-- `-payload=<string>` - Arbitrary payload for identification
-
-#### `poll` - Process next task
-```bash
-poll
-```
-Removes and prints the next task from the queue.
-
-#### `gentasks` - Generate multiple tasks  
-```bash
-gentasks -tasks=<num> -keys=<num> [-keyprefix=<string>] [-zipf_s=<float>] [-zipf_v=<float>]
-```
-Same parameters as default mode.
-
-#### `stats` - Print current statistics
-```bash
-stats
-```
-Shows latency statistics for tasks processed so far.
-
-#### `clearstats` - Reset statistics
-```bash
-clearstats  
-```
-Clears all recorded latency data.
-
-### Example Script
-
-```bash
-# script.txt
-gentasks -tasks=50 -keys=5 -keyprefix=batch1
-poll
-poll
-stats
-
-task -fkey=priority1 -pri=1 -payload="high priority"
-task -fkey=priority5 -pri=5 -payload="low priority"  
-poll
-poll
-
-clearstats
-gentasks -tasks=20 -keys=3
-```
-
-Comments (lines starting with `#`) and empty lines are ignored.
-
-## Output
-
-### Task Output Format
-```
-task idx-dsp:     0-     1 =      0  pri: 3  fkey:    "key1"  fweight:  1  part: 2  payload:"test"
-```
-
-- `idx-dsp`: task index when created - dispatch order  
-- Latency: dispatch order - creation index
-- `pri`: task priority
-- `fkey`: fairness key
-- `fweight`: fairness weight  
-- `part`: partition where task was processed
-- `payload`: user-defined payload
+- `idx`: Creation index. Tasks are assigned an incrementing index as they are created.
+- `dsp`: Dispatch index. Order this task was dispatched in.
+- `lat`: "Latency": dispatch index minus creation index. For a FIFO queue this
+  would always be zero. Negative means the task was moved earlier compared to
+  FIFO, positive means it was penalized.
+- `pri`: Task priority.
+- `fkey`: Fairness key.
+- `fweight`: Fairness weight.
+- `part`: Partition task was assigned to.
+- `payload`: User-defined payload (could be used for correlation).
 
 ### Statistics
 
-The tool outputs comprehensive fairness metrics:
+Next are statistics on the "latency" values. In general, lower numbers are
+better, since that means more tasks were moved ahead of where they would be in a
+FIFO queue.
 
-- **Raw Latency Statistics**: Basic latency percentiles
-- **Normalized Latency Statistics**: Latencies normalized by task count per key
-- **Per-key Statistics**: Detailed breakdown by fairness key
-- **Fairness Metrics**: Cross-key percentile analysis
+**Raw Latency Statistics**
 
-## Examples
+Basic stats on the "latency" values. Mean must always be zero since it's a
+permutation.
 
-```bash
-# Basic simulation
-fairsim
+**Normalized Latency Statistics**
 
-# Large simulation with custom seed
-fairsim -seed=12345 -- -tasks=10000 -keys=100
+When looking at per-key latencies, we expect a "heavy" fairness key with more
+tasks to have worse latency than a "light" key, since the light key's tasks get
+pushed in front of the heavy one. This is desirable, though, and doesn't really
+reflect how much the heavy one was "penalized". We can normalize the latency by
+dividing by the number of tasks for that key.
 
-# Test unfair vs fair behavior  
-fairsim -fair=false -- -tasks=1000 > unfair.out
-fairsim -fair=true -- -tasks=1000 > fair.out
+Both the raw and normalized can be useful to look at.
 
-# Custom script execution
-echo "gentasks -tasks=10 -keys=2
-poll
-poll  
-stats" > test.txt
-fairsim -- -script=test.txt
+**Per-task Statistics**
 
-# Multiple partitions
-fairsim -partitions=8 -- -tasks=5000 -keys=200
-```
+The raw and normalized latency stats are printed for each key, along with the
+count.
 
-## Algorithm Details
+**Percentile of percentiles**
 
-The simulator implements Temporal's fairness algorithm using:
+Raw and normalized percentile stats are printed to give a summary of latency
+across different keys:
 
-- **Priority Queues**: Tasks ordered by (priority, fairness_pass, creation_index)
-- **Fairness Counters**: Track fairness "debt" per key to ensure balanced processing  
-- **Partitioning**: Distributes tasks across partitions for scalability
-- **Zipf Distribution**: Models realistic key popularity patterns
+Rows are percentiles of latency for each key, and columns are percentiles across
+those percentiles (counting each key once). E.g. the "p90s" row describes the
+90th percentile latency for each key. The "@50" column of that is the median of
+those 90th percentile latencies.
 
-The fairness algorithm ensures that tasks with the same priority are processed proportionally to their fairness weights, preventing starvation of less popular keys.
