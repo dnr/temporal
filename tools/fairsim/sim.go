@@ -65,7 +65,8 @@ type (
 
 func RunTool(args []string) error {
 	fs := flag.NewFlagSet("fairsim", flag.ContinueOnError)
-	fs.SetOutput(os.Stderr)
+	var flagErrors strings.Builder
+	fs.SetOutput(&flagErrors)
 
 	seed := fs.Int64("seed", rand.Int64(), "Random seed")
 	fair := fs.Bool("fair", true, "Enable fairness (false for FIFO)")
@@ -74,6 +75,9 @@ func RunTool(args []string) error {
 	scriptFile := fs.String("script", "", "Script file to execute instead of generating tasks")
 
 	if err := fs.Parse(args); err != nil {
+		if flagErrors.Len() > 0 {
+			return fmt.Errorf("flag parsing: %w\n%s", err, flagErrors.String())
+		}
 		return fmt.Errorf("flag parsing: %w", err)
 	}
 
@@ -441,7 +445,8 @@ func (sim *simulator) executeCommand(line string) error {
 
 func (sim *simulator) executeTaskCommand(args []string) error {
 	fs := flag.NewFlagSet("task", flag.ContinueOnError)
-	fs.SetOutput(os.Stderr) // Send flag errors to stderr
+	var flagErrors strings.Builder
+	fs.SetOutput(&flagErrors)
 
 	fkey := fs.String("fkey", "default", "fairness key")
 	fweight := fs.Float64("fweight", 1.0, "fairness weight")
@@ -449,6 +454,9 @@ func (sim *simulator) executeTaskCommand(args []string) error {
 	payload := fs.String("payload", "", "payload")
 
 	if err := fs.Parse(args); err != nil {
+		if flagErrors.Len() > 0 {
+			return fmt.Errorf("task command: %w\n%s", err, flagErrors.String())
+		}
 		return fmt.Errorf("task command: %w", err)
 	}
 
@@ -512,7 +520,8 @@ func (sim *simulator) finish() {
 
 func (sim *simulator) executeGenTasksCommand(args []string) error {
 	fs := flag.NewFlagSet("gentasks", flag.ContinueOnError)
-	fs.SetOutput(os.Stderr)
+	var flagErrors strings.Builder
+	fs.SetOutput(&flagErrors)
 
 	tasks := fs.Int("tasks", 100, "number of tasks to generate")
 	keys := fs.Int("keys", 10, "number of unique fairness keys")
@@ -521,6 +530,9 @@ func (sim *simulator) executeGenTasksCommand(args []string) error {
 	zipf_v := fs.Float64("zipf_v", 2.0, "zipf distribution v parameter")
 
 	if err := fs.Parse(args); err != nil {
+		if flagErrors.Len() > 0 {
+			return fmt.Errorf("gentasks command: %w\n%s", err, flagErrors.String())
+		}
 		return fmt.Errorf("gentasks command: %w", err)
 	}
 
