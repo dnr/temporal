@@ -1,0 +1,42 @@
+BRANCHES
+  sched92: not sure it's a good idea
+  dc22cache: sent, replied
+  matching-spread: need to get approval
+
+  pollretry2: sent
+  fair14: try taskwriter with no permanent goroutine
+  fair15: use ilist for waiting pollers
+  fairsim: sent draft
+  dc25: refactor. sent draft
+  dc27case: case folding. > dc25. needs more work (bench)
+
+TO START
+  fair18: ...
+  fair22: ... evicted ack cache
+
+NOW
+  priority/fairness
+    do end to end test in cloud again!
+    extra cache for evicted acks
+    cms:
+      hybrid should keep top k
+      persist top k so reload+grow is better
+      do reseeding
+      uint32 + overflow
+        nextafter: https://go.dev/play/p/eRZuU-paKJH
+      ability to handover whole sketch
+        cache in external memcache?
+        proper handoff?
+    taskreader data structures:
+      rewrite the eviction loop to go across loaded+acked together?
+      switch to btree?
+    taskwriter structure without goroutine too (fair14)
+    use lists for pollers (fair15)
+    dual read!!
+
+    metrics for fairness stuff
+    add back dithering
+    priority for schedules
+    consider manual sharding idea
+    eager activity interaction? should do rpc to matching
+    oops, passes from different readers are incomparable in primatcher
