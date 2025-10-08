@@ -418,10 +418,10 @@ func (tr *priTaskReader) getLoadedTasks() int {
 
 func (tr *priTaskReader) ackTaskLocked(taskId int64) int64 {
 	wasAlreadyAcked, found := tr.outstandingTasks.Get(taskId)
-	if !softassert.That(tr.logger, found, "completed task not found in oustandingTasks") {
+	if softassert.Not(tr.logger, !found, "completed task not found in oustandingTasks") {
 		return 0
 	}
-	if !softassert.That(tr.logger, !wasAlreadyAcked.(bool), "completed task was already acked") {
+	if softassert.Not(tr.logger, wasAlreadyAcked.(bool), "completed task was already acked") {
 		return 0
 	}
 

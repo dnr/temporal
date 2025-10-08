@@ -18,7 +18,7 @@ import (
 
 // That performs a soft assertion by logging an error if the given condition is false.
 // It is meant to indicate a condition is always expected to be true.
-// Returns true if the condition is met, otherwise false.
+// Returns true if the condition is met, otherwise false (i.e. true in the expected case).
 //
 // `staticMessage` is expected to be a static string to help with grouping and searching logs.
 // Dynamic information should be passed via `tags`.
@@ -31,6 +31,19 @@ func That(logger log.Logger, condition bool, staticMessage string, tags ...tag.T
 		logger.Error("failed assertion: "+staticMessage, append([]tag.Tag{tag.FailedAssertion}, tags...)...)
 	}
 	return condition
+}
+
+// Not performs a soft assertion by logging an error if the given condition is true.
+// It is meant to indicate a condition is always expected to be false.
+// Returns true if the condition is true, otherwise false (i.e. true in the error case).
+//
+// `staticMessage` is expected to be a static string to help with grouping and searching logs.
+// Dynamic information should be passed via `tags`.
+//
+// Example:
+// softassert.Not(logger, index < 0, "index must be non-negative")
+func Not(logger log.Logger, condition bool, staticMessage string, tags ...tag.Tag) bool {
+	return !That(logger, !condition, staticMessage, tags...)
 }
 
 // Fail logs an error using `staticMessage` to indicate a failed assertion.

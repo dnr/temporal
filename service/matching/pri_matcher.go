@@ -137,7 +137,7 @@ func (tm *priTaskMatcher) forwardTasks(lim quotas.RateLimiter, retrier backoff.R
 		if res.ctxErr != nil {
 			return // task queue closing
 		}
-		if !softassert.That(tm.logger, res.task != nil, "expected a task from match") {
+		if softassert.Not(tm.logger, res.task == nil, "expected a task from match") {
 			continue
 		}
 
@@ -215,14 +215,14 @@ func (tm *priTaskMatcher) validateTasksOnRoot(lim quotas.RateLimiter, retrier ba
 		if res.ctxErr != nil {
 			return // task queue closing
 		}
-		if !softassert.That(tm.logger, res.task != nil, "expected a task from match") {
+		if softassert.Not(tm.logger, res.task == nil, "expected a task from match") {
 			continue
 		}
 
 		task := res.task
-		if !softassert.That(tm.logger, task.forwardCtx == nil, "expected non-forwarded task") ||
-			!softassert.That(tm.logger, !task.isSyncMatchTask(), "expected non-sync match task") ||
-			!softassert.That(tm.logger, task.source == enumsspb.TASK_SOURCE_DB_BACKLOG, "expected backlog task") {
+		if softassert.Not(tm.logger, task.forwardCtx != nil, "expected non-forwarded task") ||
+			softassert.Not(tm.logger, task.isSyncMatchTask(), "expected non-sync match task") ||
+			softassert.Not(tm.logger, task.source != enumsspb.TASK_SOURCE_DB_BACKLOG, "expected backlog task") {
 			continue
 		}
 
@@ -255,7 +255,7 @@ func (tm *priTaskMatcher) forwardPolls() {
 		if res.ctxErr != nil {
 			return // task queue closing
 		}
-		if !softassert.That(tm.logger, res.poller != nil, "expected a poller from match") {
+		if softassert.Not(tm.logger, res.poller == nil, "expected a poller from match") {
 			continue
 		}
 
@@ -346,7 +346,7 @@ func (tm *priTaskMatcher) Offer(ctx context.Context, task *internalTask) (bool, 
 	if res.ctxErr != nil {
 		return false, res.ctxErr
 	}
-	if !softassert.That(tm.logger, res.poller != nil, "expeced poller from match") {
+	if softassert.Not(tm.logger, res.poller == nil, "expeced poller from match") {
 		return false, nil
 	}
 
@@ -388,11 +388,11 @@ again:
 		}
 		return nil, res.ctxErr
 	}
-	if !softassert.That(tm.logger, res.poller != nil, "expected poller from match") {
+	if softassert.Not(tm.logger, res.poller == nil, "expected poller from match") {
 		return nil, errInternalMatchError
 	}
 	response, ok := task.getResponse()
-	if !softassert.That(tm.logger, ok, "expected a sync match task") {
+	if softassert.Not(tm.logger, !ok, "expected a sync match task") {
 		return nil, errInternalMatchError
 	}
 	// Note: if task was not forwarded, this will just be the zero value and nil.
@@ -509,7 +509,7 @@ func (tm *priTaskMatcher) poll(
 		}
 		return nil, errNoTasks
 	}
-	if !softassert.That(tm.logger, res.task != nil, "expected task from match") {
+	if softassert.Not(tm.logger, res.task == nil, "expected task from match") {
 		return nil, errInternalMatchError
 	}
 
