@@ -2854,8 +2854,9 @@ If the service configures with archival feature enabled, update worker.historySc
 		1,
 		`WorkerPerNamespaceWorkerCount controls number of per-ns (scheduler, batcher, etc.) workers to run per namespace`,
 	)
-	WorkerPerNamespaceWorkerOptions = NewNamespaceTypedSetting(
+	WorkerPerNamespaceWorkerOptions = NewNamespaceTypedSettingWithConverter(
 		"worker.perNamespaceWorkerOptions",
+		convertSdkWorkerOptions,
 		sdkworker.Options{},
 		`WorkerPerNamespaceWorkerOptions are SDK worker options for per-namespace workers`,
 	)
