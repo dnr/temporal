@@ -88,6 +88,9 @@ type (
 	// ConstrainedValue with only Namespace set, or with no fields set. (Or return one of
 	// each.) If you return a ConstrainedValue with Namespace and ShardID set, for example,
 	// that value will never be used, even if the Namespace matches.
+	//
+	// EffectiveAtTime makes a Constraints match only after that absolute timestamp (in unix
+	// seconds). This can be used to improve alignment of dynamic config changes across nodes.
 	Constraints struct {
 		Namespace     string
 		NamespaceID   string
@@ -96,9 +99,15 @@ type (
 		ShardID       int32
 		TaskType      enumsspb.TaskType
 		Destination   string
+
+		EffectiveAtTime int64 // unix seconds
 	}
 )
 
 func (k Key) String() string {
 	return string(k)
+}
+
+func (c Constraints) effectiveAt(now int64) bool {
+	return c.EffectiveAtTime == 0 || c.EffectiveAtTime >= now
 }

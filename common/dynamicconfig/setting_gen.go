@@ -838,13 +838,14 @@ func (s GlobalTypedSetting[T]) Subscribe(c *Collection) TypedSubscribable[T] {
 	}
 }
 
-func (s GlobalTypedSetting[T]) dispatchUpdate(c *Collection, sub any, cvs []ConstrainedValue) {
+func (s GlobalTypedSetting[T]) dispatchUpdate(c *Collection, sub any, cvs []ConstrainedValue, now int64) {
 	dispatchUpdate(
 		c,
 		s.key,
 		s.convert,
 		sub.(*subscription[T]),
 		cvs,
+		now,
 	)
 }
 
@@ -855,13 +856,14 @@ func (s GlobalTypedConstrainedDefaultSetting[T]) Subscribe(c *Collection) TypedS
 	}
 }
 
-func (s GlobalTypedConstrainedDefaultSetting[T]) dispatchUpdate(c *Collection, sub any, cvs []ConstrainedValue) {
+func (s GlobalTypedConstrainedDefaultSetting[T]) dispatchUpdate(c *Collection, sub any, cvs []ConstrainedValue, now int64) {
 	dispatchUpdateWithConstrainedDefault(
 		c,
 		s.key,
 		s.convert,
 		sub.(*subscription[T]),
 		cvs,
+		now,
 	)
 }
 
@@ -974,13 +976,14 @@ func (s NamespaceTypedSetting[T]) Subscribe(c *Collection) TypedSubscribableWith
 	}
 }
 
-func (s NamespaceTypedSetting[T]) dispatchUpdate(c *Collection, sub any, cvs []ConstrainedValue) {
+func (s NamespaceTypedSetting[T]) dispatchUpdate(c *Collection, sub any, cvs []ConstrainedValue, now int64) {
 	dispatchUpdate(
 		c,
 		s.key,
 		s.convert,
 		sub.(*subscription[T]),
 		cvs,
+		now,
 	)
 }
 
@@ -991,13 +994,14 @@ func (s NamespaceTypedConstrainedDefaultSetting[T]) Subscribe(c *Collection) Typ
 	}
 }
 
-func (s NamespaceTypedConstrainedDefaultSetting[T]) dispatchUpdate(c *Collection, sub any, cvs []ConstrainedValue) {
+func (s NamespaceTypedConstrainedDefaultSetting[T]) dispatchUpdate(c *Collection, sub any, cvs []ConstrainedValue, now int64) {
 	dispatchUpdateWithConstrainedDefault(
 		c,
 		s.key,
 		s.convert,
 		sub.(*subscription[T]),
 		cvs,
+		now,
 	)
 }
 
@@ -1110,13 +1114,14 @@ func (s NamespaceIDTypedSetting[T]) Subscribe(c *Collection) TypedSubscribableWi
 	}
 }
 
-func (s NamespaceIDTypedSetting[T]) dispatchUpdate(c *Collection, sub any, cvs []ConstrainedValue) {
+func (s NamespaceIDTypedSetting[T]) dispatchUpdate(c *Collection, sub any, cvs []ConstrainedValue, now int64) {
 	dispatchUpdate(
 		c,
 		s.key,
 		s.convert,
 		sub.(*subscription[T]),
 		cvs,
+		now,
 	)
 }
 
@@ -1127,13 +1132,14 @@ func (s NamespaceIDTypedConstrainedDefaultSetting[T]) Subscribe(c *Collection) T
 	}
 }
 
-func (s NamespaceIDTypedConstrainedDefaultSetting[T]) dispatchUpdate(c *Collection, sub any, cvs []ConstrainedValue) {
+func (s NamespaceIDTypedConstrainedDefaultSetting[T]) dispatchUpdate(c *Collection, sub any, cvs []ConstrainedValue, now int64) {
 	dispatchUpdateWithConstrainedDefault(
 		c,
 		s.key,
 		s.convert,
 		sub.(*subscription[T]),
 		cvs,
+		now,
 	)
 }
 
@@ -1264,13 +1270,14 @@ func (s TaskQueueTypedSetting[T]) Subscribe(c *Collection) TypedSubscribableWith
 	}
 }
 
-func (s TaskQueueTypedSetting[T]) dispatchUpdate(c *Collection, sub any, cvs []ConstrainedValue) {
+func (s TaskQueueTypedSetting[T]) dispatchUpdate(c *Collection, sub any, cvs []ConstrainedValue, now int64) {
 	dispatchUpdate(
 		c,
 		s.key,
 		s.convert,
 		sub.(*subscription[T]),
 		cvs,
+		now,
 	)
 }
 
@@ -1287,13 +1294,14 @@ func (s TaskQueueTypedConstrainedDefaultSetting[T]) Subscribe(c *Collection) Typ
 	}
 }
 
-func (s TaskQueueTypedConstrainedDefaultSetting[T]) dispatchUpdate(c *Collection, sub any, cvs []ConstrainedValue) {
+func (s TaskQueueTypedConstrainedDefaultSetting[T]) dispatchUpdate(c *Collection, sub any, cvs []ConstrainedValue, now int64) {
 	dispatchUpdateWithConstrainedDefault(
 		c,
 		s.key,
 		s.convert,
 		sub.(*subscription[T]),
 		cvs,
+		now,
 	)
 }
 
@@ -1406,13 +1414,14 @@ func (s ShardIDTypedSetting[T]) Subscribe(c *Collection) TypedSubscribableWithSh
 	}
 }
 
-func (s ShardIDTypedSetting[T]) dispatchUpdate(c *Collection, sub any, cvs []ConstrainedValue) {
+func (s ShardIDTypedSetting[T]) dispatchUpdate(c *Collection, sub any, cvs []ConstrainedValue, now int64) {
 	dispatchUpdate(
 		c,
 		s.key,
 		s.convert,
 		sub.(*subscription[T]),
 		cvs,
+		now,
 	)
 }
 
@@ -1423,13 +1432,14 @@ func (s ShardIDTypedConstrainedDefaultSetting[T]) Subscribe(c *Collection) Typed
 	}
 }
 
-func (s ShardIDTypedConstrainedDefaultSetting[T]) dispatchUpdate(c *Collection, sub any, cvs []ConstrainedValue) {
+func (s ShardIDTypedConstrainedDefaultSetting[T]) dispatchUpdate(c *Collection, sub any, cvs []ConstrainedValue, now int64) {
 	dispatchUpdateWithConstrainedDefault(
 		c,
 		s.key,
 		s.convert,
 		sub.(*subscription[T]),
 		cvs,
+		now,
 	)
 }
 
@@ -1542,13 +1552,14 @@ func (s TaskTypeTypedSetting[T]) Subscribe(c *Collection) TypedSubscribableWithT
 	}
 }
 
-func (s TaskTypeTypedSetting[T]) dispatchUpdate(c *Collection, sub any, cvs []ConstrainedValue) {
+func (s TaskTypeTypedSetting[T]) dispatchUpdate(c *Collection, sub any, cvs []ConstrainedValue, now int64) {
 	dispatchUpdate(
 		c,
 		s.key,
 		s.convert,
 		sub.(*subscription[T]),
 		cvs,
+		now,
 	)
 }
 
@@ -1559,13 +1570,14 @@ func (s TaskTypeTypedConstrainedDefaultSetting[T]) Subscribe(c *Collection) Type
 	}
 }
 
-func (s TaskTypeTypedConstrainedDefaultSetting[T]) dispatchUpdate(c *Collection, sub any, cvs []ConstrainedValue) {
+func (s TaskTypeTypedConstrainedDefaultSetting[T]) dispatchUpdate(c *Collection, sub any, cvs []ConstrainedValue, now int64) {
 	dispatchUpdateWithConstrainedDefault(
 		c,
 		s.key,
 		s.convert,
 		sub.(*subscription[T]),
 		cvs,
+		now,
 	)
 }
 
@@ -1693,13 +1705,14 @@ func (s DestinationTypedSetting[T]) Subscribe(c *Collection) TypedSubscribableWi
 	}
 }
 
-func (s DestinationTypedSetting[T]) dispatchUpdate(c *Collection, sub any, cvs []ConstrainedValue) {
+func (s DestinationTypedSetting[T]) dispatchUpdate(c *Collection, sub any, cvs []ConstrainedValue, now int64) {
 	dispatchUpdate(
 		c,
 		s.key,
 		s.convert,
 		sub.(*subscription[T]),
 		cvs,
+		now,
 	)
 }
 
@@ -1715,13 +1728,14 @@ func (s DestinationTypedConstrainedDefaultSetting[T]) Subscribe(c *Collection) T
 	}
 }
 
-func (s DestinationTypedConstrainedDefaultSetting[T]) dispatchUpdate(c *Collection, sub any, cvs []ConstrainedValue) {
+func (s DestinationTypedConstrainedDefaultSetting[T]) dispatchUpdate(c *Collection, sub any, cvs []ConstrainedValue, now int64) {
 	dispatchUpdateWithConstrainedDefault(
 		c,
 		s.key,
 		s.convert,
 		sub.(*subscription[T]),
 		cvs,
+		now,
 	)
 }
 

@@ -177,6 +177,7 @@ func (c *Collection) pollOnce() {
 		return
 	}
 
+	now := time.Now().Unix()
 	for key, subs := range c.subscriptions {
 		setting := queryRegistry(key)
 		if setting == nil {
@@ -184,7 +185,7 @@ func (c *Collection) pollOnce() {
 		}
 		for _, sub := range subs {
 			cvs := c.client.GetValue(key)
-			setting.dispatchUpdate(c, sub, cvs)
+			setting.dispatchUpdate(c, sub, cvs, now)
 		}
 	}
 }
@@ -196,6 +197,7 @@ func (c *Collection) keysChanged(changed map[Key][]ConstrainedValue) {
 		return
 	}
 
+	now := time.Now().Unix()
 	for key, cvs := range changed {
 		setting := queryRegistry(key)
 		if setting == nil {
@@ -203,7 +205,7 @@ func (c *Collection) keysChanged(changed map[Key][]ConstrainedValue) {
 		}
 		// use setting.Key instead of key to avoid changing case again
 		for _, sub := range c.subscriptions[setting.Key()] {
-			setting.dispatchUpdate(c, sub, cvs)
+			setting.dispatchUpdate(c, sub, cvs, now)
 		}
 	}
 }
@@ -216,13 +218,13 @@ func (c *Collection) throttleLog() bool {
 	return errCount < errCountLogThreshold || errCount%errCountLogThreshold == 0
 }
 
-func findMatch(cvs []ConstrainedValue, precedence []Constraints) (*ConstrainedValue, error) {
+func findMatch(cvs []ConstrainedValue, precedence []Constraints, now int64) (*ConstrainedValue, error) {
 	if len(cvs) == 0 {
 		return nil, errKeyNotPresent
 	}
 	for _, m := range precedence {
 		for idx, cv := range cvs {
-			if m == cv.Constraints {
+			if m == cv.Constraints && cv.Constraints.effectiveAt(now) {
 				// Note: cvs here is the slice returned by Client.GetValue. We want to return a
 				// pointer into that slice so that the converted value is cached as long as the
 				// Client keeps the []ConstrainedValue alive. See the comment on
@@ -257,7 +259,8 @@ func matchAndConvertCvs[T any](
 	precedence []Constraints,
 	cvs []ConstrainedValue,
 ) (T, any) {
-	cvp, err := findMatch(cvs, precedence)
+	now := time.Now().Unix()
+	cvp, err := findMatch(cvs, precedence, now)
 	if err != nil {
 		// couldn't find a constrained match, use default
 		return def, usingDefaultValue
@@ -276,7 +279,7 @@ func matchAndConvertCvs[T any](
 
 // Returns matched value out of cvs, matched default out of defaultCVs, and also the priorities
 // of each of the matches (lower matched first). For no match, order will be 0.
-func findMatchWithConstrainedDefaults[T any](cvs []ConstrainedValue, defaultCVs []TypedConstrainedValue[T], precedence []Constraints) (
+func findMatchWithConstrainedDefaults[T any](cvs []ConstrainedValue, defaultCVs []TypedConstrainedValue[T], precedence []Constraints, now int64) (
 	matchedValue *ConstrainedValue,
 	matchedDefault T,
 	valueOrder int,
@@ -286,7 +289,7 @@ func findMatchWithConstrainedDefaults[T any](cvs []ConstrainedValue, defaultCVs 
 	for _, m := range precedence {
 		for idx, cv := range cvs {
 			order++
-			if m == cv.Constraints {
+			if m == cv.Constraints && cv.Constraints.effectiveAt(now) {
 				if valueOrder == 0 {
 					valueOrder = order
 					// Note: cvs here is the slice returned by Client.GetValue. We want to
@@ -316,8 +319,9 @@ func findAndResolveWithConstrainedDefaults[T any](
 	cvs []ConstrainedValue,
 	defaultCVs []TypedConstrainedValue[T],
 	precedence []Constraints,
+	now int64,
 ) (value T, raw any) {
-	cvp, defVal, valOrder, defOrder := findMatchWithConstrainedDefaults(cvs, defaultCVs, precedence)
+	cvp, defVal, valOrder, defOrder := findMatchWithConstrainedDefaults(cvs, defaultCVs, precedence, now)
 
 	if defOrder == 0 {
 		// This is a server bug: all precedence lists must end with no-constraints, and all
@@ -350,7 +354,8 @@ func matchAndConvertWithConstrainedDefault[T any](
 	precedence []Constraints,
 ) T {
 	cvs := c.client.GetValue(key)
-	value, _ := findAndResolveWithConstrainedDefaults(c, key, convert, cvs, cdef, precedence)
+	now := time.Now().Unix()
+	value, _ := findAndResolveWithConstrainedDefaults(c, key, convert, cvs, cdef, precedence, now)
 	return value
 }
 
@@ -411,7 +416,8 @@ func subscribeWithConstrainedDefault[T any](
 	// get one value immediately (note that subscriptionLock is held here so we can't race with
 	// an update)
 	cvs := c.client.GetValue(key)
-	init, raw := findAndResolveWithConstrainedDefaults(c, key, convert, cvs, cdef, prec)
+	now := time.Now().Unix()
+	init, raw := findAndResolveWithConstrainedDefaults(c, key, convert, cvs, cdef, prec, now)
 
 	// As a convenience (and for efficiency), you can pass in a nil callback; we just return the
 	// current value and skip the subscription. The cancellation func returned is also nil.
@@ -447,9 +453,10 @@ func dispatchUpdate[T any](
 	convert func(value any) (T, error),
 	sub *subscription[T],
 	cvs []ConstrainedValue,
+	now int64,
 ) {
 	var raw any
-	cvp, err := findMatch(cvs, sub.prec)
+	cvp, err := findMatch(cvs, sub.prec, now)
 	if err != nil {
 		raw = usingDefaultValue
 	} else {
@@ -491,12 +498,13 @@ func dispatchUpdateWithConstrainedDefault[T any](
 	convert func(value any) (T, error),
 	sub *subscription[T],
 	cvs []ConstrainedValue,
+	now int64,
 ) {
 	// Note: This performs the conversion even if the raw value is unchanged. This isn't ideal,
 	// but so far constrained default settings are only used for primitive values so it's okay.
 	// If we have a constrained default value with a complex conversion function, this could be
 	// optimized to delay conversion until after we check DeepEqual.
-	newVal, raw := findAndResolveWithConstrainedDefaults(c, key, convert, cvs, sub.cdef, sub.prec)
+	newVal, raw := findAndResolveWithConstrainedDefaults(c, key, convert, cvs, sub.cdef, sub.prec, now)
 
 	// compare raw (pre-conversion) values, if unchanged, skip this update. note that
 	// `usingDefaultValue` is equal to itself but nothing else.

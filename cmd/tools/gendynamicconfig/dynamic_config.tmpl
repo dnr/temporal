@@ -148,13 +148,14 @@ func (s {{$P.Name}}TypedSetting[T]) Subscribe(c *Collection) TypedSubscribableWi
 	}
 }
 
-func (s {{$P.Name}}TypedSetting[T]) dispatchUpdate(c *Collection, sub any, cvs []ConstrainedValue) {
+func (s {{$P.Name}}TypedSetting[T]) dispatchUpdate(c *Collection, sub any, cvs []ConstrainedValue, now int64) {
 	dispatchUpdate(
 		c,
 		s.key,
 		s.convert,
 		sub.(*subscription[T]),
 		cvs,
+		now,
 	)
 }
 
@@ -174,13 +175,14 @@ func (s {{$P.Name}}TypedConstrainedDefaultSetting[T]) Subscribe(c *Collection) T
 }
 {{- end}}
 
-func (s {{$P.Name}}TypedConstrainedDefaultSetting[T]) dispatchUpdate(c *Collection, sub any, cvs []ConstrainedValue) {
+func (s {{$P.Name}}TypedConstrainedDefaultSetting[T]) dispatchUpdate(c *Collection, sub any, cvs []ConstrainedValue, now int64) {
 	dispatchUpdateWithConstrainedDefault(
 		c,
 		s.key,
 		s.convert,
 		sub.(*subscription[T]),
 		cvs,
+		now,
 	)
 }
 
