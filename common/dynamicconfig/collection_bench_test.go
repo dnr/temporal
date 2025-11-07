@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"testing"
 
+	"go.temporal.io/server/common/clock"
 	"go.temporal.io/server/common/dynamicconfig"
 	"go.temporal.io/server/common/log"
 )
@@ -16,7 +17,7 @@ func BenchmarkCollection(b *testing.B) {
 		dynamicconfig.BlobSizeLimitWarn.Key():             []dynamicconfig.ConstrainedValue{{Value: 100}},
 		dynamicconfig.MatchingShutdownDrainDuration.Key(): []dynamicconfig.ConstrainedValue{{Value: "100s"}},
 	}
-	cln1 := dynamicconfig.NewCollection(client1, log.NewNoopLogger())
+	cln1 := dynamicconfig.NewCollection(client1, log.NewNoopLogger(), clock.NewEventTimeSource())
 	b.Run("global int default", func(b *testing.B) {
 		b.ReportAllocs()
 		size := dynamicconfig.MatchingThrottledLogRPS.Get(cln1)
@@ -101,7 +102,7 @@ func BenchmarkCollection(b *testing.B) {
 			},
 		},
 	}
-	cln2 := dynamicconfig.NewCollection(client2, log.NewNoopLogger())
+	cln2 := dynamicconfig.NewCollection(client2, log.NewNoopLogger(), clock.NewEventTimeSource())
 	b.Run("single default", func(b *testing.B) {
 		b.ReportAllocs()
 		size := dynamicconfig.MatchingMaxTaskBatchSize.Get(cln2)
@@ -150,7 +151,7 @@ func BenchmarkCollectionIndexed(b *testing.B) {
 			cli := dynamicconfig.StaticClient{
 				dynamicconfig.FrontendGlobalNamespaceRPS.Key(): cvs,
 			}
-			cln := dynamicconfig.NewCollection(cli, log.NewNoopLogger())
+			cln := dynamicconfig.NewCollection(cli, log.NewNoopLogger(), clock.NewEventTimeSource())
 			get := dynamicconfig.FrontendGlobalNamespaceRPS.Get(cln)
 			query := fmt.Sprintf("namespace%d", queryNs)
 

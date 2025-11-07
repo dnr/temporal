@@ -36,7 +36,7 @@ type (
 		Validate(v any) error
 
 		// for internal use:
-		dispatchUpdate(*Collection, any, []ConstrainedValue)
+		dispatchUpdate(*Collection, any, []ConstrainedValue, int64)
 	}
 
 	// GenericParseHook is an interface that may be implemented by a setting type or a field

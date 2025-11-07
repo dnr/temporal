@@ -1,9 +1,12 @@
 package dynamicconfig
 
 import (
+	"cmp"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
+	"time"
 
 	enumspb "go.temporal.io/api/enums/v1"
 	enumsspb "go.temporal.io/server/api/enums/v1"
@@ -29,7 +32,10 @@ type (
 
 	yamlConstrainedValue []struct {
 		Constraints map[string]any
-		Value       any
+		// Note that we read EffectiveAtTime from the Constraints map even though it goes in a
+		// different place in the ConstrainedValues struct. TODO: check if we really need to do
+		// it this way
+		Value any
 	}
 )
 
@@ -104,8 +110,15 @@ func (lr *YamlLoader) add(key Key, yamlCV yamlConstrainedValue) {
 		}
 
 		cvs[i].Value = val
-		cvs[i].Constraints = convertYamlConstraints(key, cv.Constraints, precedence, lr)
+		cvs[i].Constraints, cvs[i].EffectiveAtTime = convertYamlConstraints(
+			key, cv.Constraints, precedence, lr)
 	}
+
+	// sort in decreasing order by EffectiveAtTime so that "later" values override "earlier" values
+	slices.SortStableFunc(cvs, func(a, b ConstrainedValue) int {
+		return cmp.Compare(b.EffectiveAtTime, a.EffectiveAtTime)
+	})
+
 	lr.Map[key] = cvs
 }
 
@@ -165,8 +178,9 @@ func convertKeyTypeToStringSlice(s []interface{}) ([]interface{}, error) {
 }
 
 // nolint:revive // cognitive-complexity, it's just a big switch
-func convertYamlConstraints(key Key, m map[string]any, precedence Precedence, lr *YamlLoader) Constraints {
+func convertYamlConstraints(key Key, m map[string]any, precedence Precedence, lr *YamlLoader) (Constraints, int64) {
 	var cs Constraints
+	var effectiveAtTime int64
 	for k, v := range m {
 		validConstraint := true
 		switch strings.ToLower(k) {
@@ -241,6 +255,19 @@ func convertYamlConstraints(key Key, m map[string]any, precedence Precedence, lr
 				lr.errorf("destination constraint must be string")
 			}
 			validConstraint = precedence == PrecedenceDestination
+		case "effectiveattime":
+			switch v := v.(type) {
+			case string:
+				if t, err := time.Parse(time.RFC3339, v); err == nil {
+					effectiveAtTime = t.Unix()
+				} else {
+					lr.errorf("effectiveattime parse error: %w", err)
+				}
+			case int:
+				effectiveAtTime = int64(v)
+			default:
+				lr.errorf("effectiveattime %T is not supported", v)
+			}
 		default:
 			lr.errorf("unknown constraint type %q", k)
 		}
@@ -249,8 +276,8 @@ func convertYamlConstraints(key Key, m map[string]any, precedence Precedence, lr
 		// unregistered key above
 		// TODO: raise this to error level
 		if !validConstraint && precedence != PrecedenceUnknown {
-			lr.warnf("constraint %q isn't valid for dynamic config key %q", k, key)
+			lr.warnf("constraint %q isn't valid for dynamic config key %q", k, key.String())
 		}
 	}
-	return cs
+	return cs, effectiveAtTime
 }

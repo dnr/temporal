@@ -58,7 +58,7 @@ func TestFindMatch(t *testing.T) {
 
 	for _, tc := range testCases {
 		var cache sync.Map
-		_, err := findMatch(&cache, tc.v, tc.filters)
+		_, err := findMatch(&cache, tc.v, tc.filters, 0)
 		assert.Equal(t, tc.matched, err == nil)
 	}
 }
@@ -78,13 +78,13 @@ func TestFindMatchIndexed(t *testing.T) {
 	notHave := []Constraints{{Namespace: "othernamespace"}}
 
 	var cache sync.Map
-	v, err := findMatch(&cache, cvs, have)
+	v, err := findMatch(&cache, cvs, have, 0)
 	require.NoError(t, err)
 	require.NotNil(t, v)
 	assert.EqualValues(t, 1075, v.Value)
 	assert.Equal(t, &cvs[75], v)
 
-	_, err = findMatch(&cache, cvs, notHave)
+	_, err = findMatch(&cache, cvs, notHave, 0)
 	assert.Error(t, err)
 }
 
@@ -175,7 +175,7 @@ func TestFindMatchWithTyped(t *testing.T) {
 	}
 
 	for _, tc := range testCases {
-		_, _, valOrder, defOrder := findMatchWithConstrainedDefaults(tc.val, tc.tv, tc.filters)
+		_, _, valOrder, defOrder := findMatchWithConstrainedDefaults(tc.val, tc.tv, tc.filters, 0)
 		assert.Equal(t, tc.valOrder, valOrder)
 		assert.Equal(t, tc.defOrder, defOrder)
 	}

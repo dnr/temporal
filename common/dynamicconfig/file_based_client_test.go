@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/suite"
 	enumspb "go.temporal.io/api/enums/v1"
 	enumsspb "go.temporal.io/server/api/enums/v1"
+	"go.temporal.io/server/common/clock"
 	"go.temporal.io/server/common/dynamicconfig"
 	"go.temporal.io/server/common/log"
 	"go.temporal.io/server/common/retrypolicy"
@@ -39,7 +40,7 @@ func (s *fileBasedClientSuite) SetupSuite() {
 		PollInterval: time.Second * 5,
 	}, logger, s.doneCh)
 	s.Require().NoError(err)
-	s.collection = dynamicconfig.NewCollection(s.client, logger)
+	s.collection = dynamicconfig.NewCollection(s.client, logger, clock.NewEventTimeSource())
 	s.collection.Start()
 }
 
@@ -342,7 +343,7 @@ testGetBoolPropertyKey:
 		}, mockLogger, doneCh)
 	s.NoError(err)
 
-	c := dynamicconfig.NewCollection(client, mockLogger)
+	c := dynamicconfig.NewCollection(client, mockLogger, clock.NewEventTimeSource())
 	c.Start()
 	sub := setting.Subscribe(c)
 

@@ -13,6 +13,7 @@ import (
 	"github.com/stretchr/testify/suite"
 	enumspb "go.temporal.io/api/enums/v1"
 	enumsspb "go.temporal.io/server/api/enums/v1"
+	"go.temporal.io/server/common/clock"
 	"go.temporal.io/server/common/dynamicconfig"
 	"go.temporal.io/server/common/log"
 	"go.temporal.io/server/common/namespace"
@@ -59,7 +60,7 @@ func (s *collectionSuite) SetupTest() {
 	dynamicconfig.ResetRegistryForTest()
 	s.client = newTestSubscribableClient()
 	logger := log.NewNoopLogger()
-	s.cln = dynamicconfig.NewCollection(s.client, logger)
+	s.cln = dynamicconfig.NewCollection(s.client, logger, clock.NewEventTimeSource())
 	s.cln.Start()
 }
 
@@ -572,7 +573,7 @@ func TestSubscriptionSuite(t *testing.T) {
 func (s *subscriptionSuite) SetupSuite() {
 	s.client = newTestSubscribableClient()
 	logger := log.NewNoopLogger()
-	s.cln = dynamicconfig.NewCollection(s.client, logger)
+	s.cln = dynamicconfig.NewCollection(s.client, logger, clock.NewEventTimeSource())
 	s.cln.Start()
 }
 

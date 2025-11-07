@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"reflect"
 	"strings"
+	"time"
 
 	enumspb "go.temporal.io/api/enums/v1"
 	enumsspb "go.temporal.io/server/api/enums/v1"
@@ -117,6 +118,9 @@ func appendConstrainedValue(logLine *strings.Builder, value *ConstrainedValue) {
 		}
 		if value.Constraints.Destination != "" {
 			fmt.Fprintf(logLine, "{Destination:%s}", value.Constraints.Destination)
+		}
+		if value.EffectiveAtTime > 0 {
+			logLine.WriteString(fmt.Sprintf("{EffectiveAt:%s}", time.Unix(value.EffectiveAtTime, 0).Format(time.RFC3339)))
 		}
 		fmt.Fprint(logLine, "} value: ", value.Value, " }")
 	}

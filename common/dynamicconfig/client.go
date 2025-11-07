@@ -13,9 +13,15 @@ type (
 		// GetValue returns a set of values and associated constraints for a key. Not all
 		// constraints are valid for all keys.
 		//
-		// The returned slice of ConstrainedValues is treated as a set, and order does not
-		// matter. The effective order of constraints is determined by server logic. See the
-		// comment on Constraints below.
+		// ConstrainedValues are searched from more specific to less specific, so the order of
+		// ConstrainedValues usually doesn't matter. The only cases where it does matter are
+		// when multiple ConstrainedValues have the exact same Constraints. In that case, the
+		// first one will be chosen.
+		//
+		// That's true even if the ConstrainedValues have different EffectiveAtTimes: the first
+		// value that matches both Constraints and EffectiveAtTime will be chosen, even if a
+		// later one has a _later_ EffectiveAtTime. For the most sensible semantics, then,
+		// ConstrainedValues should be sorted in decreasing order of EffectiveAtTime.
 		//
 		// If none of the ConstrainedValues match the constraints being used for the key, then
 		// the server default value will be used.
@@ -55,11 +61,18 @@ type (
 	// type, it will be ignored.
 	ConstrainedValue struct {
 		Constraints Constraints
-		Value       any
+		// EffectiveAtTime is an additional constraint: time.Now().Unix() >= EffectiveAtTime
+		// It can be used to help synchronize dynamic config changes closer in time across
+		// nodes. It's an additional "constraint", but is not included in Constraints so that
+		// that can easily be compared for equality.
+		EffectiveAtTime int64 // unix seconds
+		Value           any
 	}
 	TypedConstrainedValue[T any] struct {
 		Constraints Constraints
-		Value       T
+		// We don't need EffectiveAtTime here because TypedConstrainedValue are only used for
+		// defaults, where time-based constraints wouldn't make sense.
+		Value T
 	}
 
 	// Constraints describe under what conditions a ConstrainedValue should be used.
@@ -94,3 +107,7 @@ type (
 		TaskType      enumsspb.TaskType
 	}
 )
+
+func (cv ConstrainedValue) matches(c Constraints, now int64) bool {
+	return cv.Constraints == c && (cv.EffectiveAtTime == 0 || cv.EffectiveAtTime >= now)
+}
