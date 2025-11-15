@@ -40,6 +40,7 @@ type (
 		subscriptions    map[Key]map[int]any // final "any" is *subscription[T]
 		subscriptionIdx  int
 		callbackPool     *goro.AdaptivePool
+		timers           map[keyTimePair]struct{}
 
 		poller goro.Group
 
@@ -67,6 +68,11 @@ type (
 
 	// sentinel type that doesn't compare equal to anything else
 	defaultValue struct{}
+
+	keyTimePair struct {
+		k Key
+		t int64
+	}
 
 	// These function types follow a similar pattern:
 	//   {X}PropertyFn - returns a value of type X that is global (no filters)
@@ -185,8 +191,8 @@ func (c *Collection) pollOnce() {
 		if setting == nil {
 			continue
 		}
+		cvs := c.client.GetValue(key)
 		for _, sub := range subs {
-			cvs := c.client.GetValue(key)
 			setting.dispatchUpdate(c, sub, cvs, now)
 		}
 	}
@@ -209,6 +215,44 @@ func (c *Collection) keysChanged(changed map[Key][]ConstrainedValue) {
 		for _, sub := range c.subscriptions[setting.Key()] {
 			setting.dispatchUpdate(c, sub, cvs, now)
 		}
+	}
+}
+
+// Ensure that subscriptions for key are reevaluated at any future EffectiveAtTime mentioned in
+// ConstrainedValue.
+// Call with subscriptionLock.
+func (c *Collection) ensureTimersLocked(key Key, cvs []ConstrainedValue, now int64) {
+	for _, cv := range cvs {
+		delay := time.Duration(cv.EffectiveAtTime-now) * time.Second
+		if delay <= 0 {
+			continue
+		}
+		pair := keyTimePair{k: key, t: cv.EffectiveAtTime}
+		if _, ok := c.timers[pair]; ok {
+			continue
+		}
+		c.timers[pair] = struct{}{}
+		c.clock.AfterFunc(delay, func() {
+			c.subscriptionLock.Lock()
+			defer c.subscriptionLock.Unlock()
+			delete(c.timers, pair)
+			c.reevaluateSubscriptionsLocked(pair.k)
+		})
+	}
+}
+
+func (c *Collection) reevaluateSubscriptionsLocked(key Key) {
+	if c.callbackPool == nil {
+		return
+	}
+	setting := queryRegistry(key)
+	if setting == nil {
+		return
+	}
+	now := c.clock.Now().Unix()
+	cvs := c.client.GetValue(key)
+	for _, sub := range c.subscriptions[key] {
+		setting.dispatchUpdate(c, sub, cvs, now)
 	}
 }
 
@@ -399,6 +443,8 @@ func subscribe[T any](
 		raw:  raw,
 	}
 
+	c.ensureTimersLocked(key, cvs, now)
+
 	return init, func() {
 		c.subscriptionLock.Lock()
 		defer c.subscriptionLock.Unlock()
@@ -442,6 +488,8 @@ func subscribeWithConstrainedDefault[T any](
 		cdef: cdef,
 		raw:  raw,
 	}
+
+	c.ensureTimersLocked(key, cvs, now)
 
 	return init, func() {
 		c.subscriptionLock.Lock()
