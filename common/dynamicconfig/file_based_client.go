@@ -212,7 +212,10 @@ func loadFile(contents []byte) (configValueMap, *LoadResult) {
 
 	var yamlValues map[string][]struct {
 		Constraints map[string]any
-		Value       any
+		// Note that we read EffectiveAtTime from the Constraints map even though it goes in a
+		// different place in the ConstrainedValues struct. TODO: chekc if we really need to do
+		// it this way
+		Value any
 	}
 	if err := yaml.Unmarshal(contents, &yamlValues); err != nil {
 		return nil, lr.errorf("decode error: %w", err)
@@ -247,7 +250,7 @@ func loadFile(contents []byte) (configValueMap, *LoadResult) {
 			}
 
 			cvs[i].Value = val
-			cvs[i].Constraints = convertYamlConstraints(key, cv.Constraints, precedence, lr)
+			cvs[i].Constraints, cvs[i].EffectiveAtTime = convertYamlConstraints(key, cv.Constraints, precedence, lr)
 		}
 		newValues[strings.ToLower(key)] = cvs
 	}
@@ -416,8 +419,9 @@ func convertKeyTypeToStringSlice(s []interface{}) ([]interface{}, error) {
 	return stringKeySlice, nil
 }
 
-func convertYamlConstraints(key string, m map[string]any, precedence Precedence, lr *LoadResult) Constraints {
+func convertYamlConstraints(key string, m map[string]any, precedence Precedence, lr *LoadResult) (Constraints, int64) {
 	var cs Constraints
+	var effectiveAtTime int64
 	for k, v := range m {
 		validConstraint := true
 		switch strings.ToLower(k) {
@@ -492,6 +496,19 @@ func convertYamlConstraints(key string, m map[string]any, precedence Precedence,
 				lr.errorf("destination constraint must be string")
 			}
 			validConstraint = precedence == PrecedenceDestination
+		case "effectiveattime":
+			switch v := v.(type) {
+			case string:
+				if t, err := time.Parse(time.RFC3339, v); err == nil {
+					effectiveAtTime = t.Unix()
+				} else {
+					lr.errorf("effectiveattime parse error: %w", err)
+				}
+			case int:
+				effectiveAtTime = int64(v)
+			default:
+				lr.errorf("effectiveattime %T is not supported", v)
+			}
 		default:
 			lr.errorf("unknown constraint type %q", k)
 		}
@@ -503,7 +520,7 @@ func convertYamlConstraints(key string, m map[string]any, precedence Precedence,
 			lr.warnf("constraint %q isn't valid for dynamic config key %q", k, key)
 		}
 	}
-	return cs
+	return cs, effectiveAtTime
 }
 
 func (r *osReader) ReadFile() ([]byte, error) {
