@@ -59,11 +59,18 @@ type (
 	// type, it will be ignored.
 	ConstrainedValue struct {
 		Constraints Constraints
-		Value       any
+		// EffectiveAtTime is an additional constraint: time.Now().Unix() >= EffectiveAtTime
+		// It can be used to help synchronize dynamic config changes closer in time. It's an
+		// additional "constraint", but is not included in Constraints so that that can easily
+		// be compared for equality and indexed.
+		EffectiveAtTime int64 // unix seconds
+		Value           any
 	}
 	TypedConstrainedValue[T any] struct {
 		Constraints Constraints
-		Value       T
+		// We don't need EffectiveAtTime here because TypedConstrainedValue are only used for
+		// defaults, where time-based constraints wouldn't make sense.
+		Value T
 	}
 
 	// Constraints describe under what conditions a ConstrainedValue should be used.
@@ -99,9 +106,6 @@ type (
 		ShardID       int32
 		TaskType      enumsspb.TaskType
 		Destination   string
-		// update `matches` when adding fields here
-
-		EffectiveAtTime int64 // unix seconds
 	}
 )
 
@@ -109,18 +113,6 @@ func (k Key) String() string {
 	return string(k)
 }
 
-func (c Constraints) matches(d Constraints) bool {
-	// Unfortunately, we can't use an embedded struct with only the fields to exact match (the
-	// ones other than EffectiveAtTime) because it's not quite source-compatible with literal
-	return c.Namespace == d.Namespace &&
-		c.NamespaceID == d.NamespaceID &&
-		c.TaskQueueName == d.TaskQueueName &&
-		c.TaskQueueType == d.TaskQueueType &&
-		c.ShardID == d.ShardID &&
-		c.TaskType == d.TaskType &&
-		c.Destination == d.Destination
-}
-
-func (c Constraints) effectiveAt(now int64) bool {
-	return c.EffectiveAtTime == 0 || c.EffectiveAtTime >= now
+func (cv ConstrainedValue) matches(c Constraints, now int64) bool {
+	return cv.Constraints == c && (cv.EffectiveAtTime == 0 || cv.EffectiveAtTime >= now)
 }
