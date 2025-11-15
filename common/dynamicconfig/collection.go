@@ -249,7 +249,8 @@ func matchAndConvert[T any](
 	precedence []Constraints,
 ) T {
 	cvs := c.client.GetValue(key)
-	v, _ := matchAndConvertCvs(c, key, def, convert, precedence, cvs)
+	now := c.clock.Now().Unix()
+	v, _ := matchAndConvertCvs(c, key, def, convert, precedence, cvs, now)
 	return v
 }
 
@@ -260,8 +261,8 @@ func matchAndConvertCvs[T any](
 	convert func(value any) (T, error),
 	precedence []Constraints,
 	cvs []ConstrainedValue,
+	now int64,
 ) (T, any) {
-	now := c.clock.Now().Unix()
 	cvp, err := findMatch(cvs, precedence, now)
 	if err != nil {
 		// couldn't find a constrained match, use default
@@ -375,7 +376,8 @@ func subscribe[T any](
 	// get one value immediately (note that subscriptionLock is held here so we can't race with
 	// an update)
 	cvs := c.client.GetValue(key)
-	init, raw := matchAndConvertCvs(c, key, def, convert, prec, cvs)
+	now := c.clock.Now().Unix()
+	init, raw := matchAndConvertCvs(c, key, def, convert, prec, cvs, now)
 
 	// As a convenience (and for efficiency), you can pass in a nil callback; we just return the
 	// current value and skip the subscription.  The cancellation func returned is also nil.

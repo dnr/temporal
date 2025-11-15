@@ -1,6 +1,7 @@
 package dynamicconfig
 
 import (
+	"go.temporal.io/server/common/clock"
 	"go.temporal.io/server/common/log"
 	"go.temporal.io/server/common/pingable"
 	"go.uber.org/fx"
@@ -8,7 +9,7 @@ import (
 
 var Module = fx.Options(
 	fx.Provide(func(client Client, logger log.Logger, lc fx.Lifecycle) *Collection {
-		col := NewCollection(client, logger)
+		col := NewCollection(client, logger, clock.NewRealTimeSource())
 		lc.Append(fx.StartStopHook(col.Start, col.Stop))
 		return col
 	}),

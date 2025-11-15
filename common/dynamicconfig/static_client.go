@@ -1,6 +1,9 @@
 package dynamicconfig
 
-import "go.temporal.io/server/common/log"
+import (
+	"go.temporal.io/server/common/clock"
+	"go.temporal.io/server/common/log"
+)
 
 type (
 	// StaticClient is a simple implementation of Client that just looks up in a map.
@@ -27,5 +30,5 @@ func NewNoopClient() Client {
 
 // NewNoopCollection creates a new noop collection.
 func NewNoopCollection() *Collection {
-	return NewCollection(NewNoopClient(), log.NewNoopLogger())
+	return NewCollection(NewNoopClient(), log.NewNoopLogger(), clock.NewRealTimeSource())
 }
