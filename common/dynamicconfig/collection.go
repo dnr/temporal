@@ -30,6 +30,7 @@ type (
 	// instead of the low-level Client.
 	Collection struct {
 		client   Client
+		clock    clock.TimeSource
 		logger   log.Logger
 		errCount int64
 
@@ -103,12 +104,13 @@ var (
 
 // NewCollection creates a new collection. For subscriptions to work, you must call Start/Stop.
 // Get will work without Start/Stop.
-func NewCollection(client Client, logger log.Logger) *Collection {
+func NewCollection(client Client, logger log.Logger, clock clock.TimeSource) *Collection {
 	// Do this at the first convenient place we have a logger:
 	logSharedStructureWarnings(logger)
 
 	return &Collection{
 		client:        client,
+		clock:         clock,
 		logger:        logger,
 		errCount:      -1,
 		subscriptions: make(map[Key]map[int]any),
@@ -177,7 +179,7 @@ func (c *Collection) pollOnce() {
 		return
 	}
 
-	now := time.Now().Unix()
+	now := c.clock.Now().Unix()
 	for key, subs := range c.subscriptions {
 		setting := queryRegistry(key)
 		if setting == nil {
@@ -197,7 +199,7 @@ func (c *Collection) keysChanged(changed map[Key][]ConstrainedValue) {
 		return
 	}
 
-	now := time.Now().Unix()
+	now := c.clock.Now().Unix()
 	for key, cvs := range changed {
 		setting := queryRegistry(key)
 		if setting == nil {
@@ -259,7 +261,7 @@ func matchAndConvertCvs[T any](
 	precedence []Constraints,
 	cvs []ConstrainedValue,
 ) (T, any) {
-	now := time.Now().Unix()
+	now := c.clock.Now().Unix()
 	cvp, err := findMatch(cvs, precedence, now)
 	if err != nil {
 		// couldn't find a constrained match, use default
@@ -354,7 +356,7 @@ func matchAndConvertWithConstrainedDefault[T any](
 	precedence []Constraints,
 ) T {
 	cvs := c.client.GetValue(key)
-	now := time.Now().Unix()
+	now := c.clock.Now().Unix()
 	value, _ := findAndResolveWithConstrainedDefaults(c, key, convert, cvs, cdef, precedence, now)
 	return value
 }
@@ -416,7 +418,7 @@ func subscribeWithConstrainedDefault[T any](
 	// get one value immediately (note that subscriptionLock is held here so we can't race with
 	// an update)
 	cvs := c.client.GetValue(key)
-	now := time.Now().Unix()
+	now := c.clock.Now().Unix()
 	init, raw := findAndResolveWithConstrainedDefaults(c, key, convert, cvs, cdef, prec, now)
 
 	// As a convenience (and for efficiency), you can pass in a nil callback; we just return the
