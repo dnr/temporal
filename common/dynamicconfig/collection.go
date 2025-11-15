@@ -66,23 +66,6 @@ type (
 
 	// sentinel type that doesn't compare equal to anything else
 	defaultValue struct{}
-
-	// These function types follow a similar pattern:
-	//   {X}PropertyFn - returns a value of type X that is global (no filters)
-	//   {X}PropertyFnWith{Y}Filter - returns a value of type X with the given filters
-	// Available value types:
-	//   Bool: bool
-	//   Duration: time.Duration
-	//   Float: float64
-	//   Int: int
-	//   Map: map[string]any
-	//   String: string
-	// Available filters:
-	//   Namespace func(namespace string)
-	//   NamespaceID func(namespaceID string)
-	//   TaskQueue func(namespace string, taskQueue string, taskType enumspb.TaskQueueType)  (matching task queue)
-	//   TaskType func(taskType enumspsb.TaskType)  (history task type)
-	//   ShardID func(shardID int32)
 )
 
 const (

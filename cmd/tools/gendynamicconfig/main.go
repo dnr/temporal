@@ -72,11 +72,6 @@ var (
 				Expr:   "[]Constraints{{Namespace: namespace}, {}}",
 			},
 			{
-				Name:   "NamespaceID",
-				GoArgs: "namespaceID namespace.ID",
-				Expr:   "[]Constraints{{NamespaceID: namespaceID.String()}, {}}",
-			},
-			{
 				Name:   "TaskQueue",
 				GoArgs: "namespace string, taskQueue string, taskQueueType enumspb.TaskQueueType",
 				// A task-queue-name-only filter applies to a single task queue name across all

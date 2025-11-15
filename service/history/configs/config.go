@@ -669,9 +669,9 @@ func NewConfig(
 		MutableStateChecksumVerifyProbability: dynamicconfig.MutableStateChecksumVerifyProbability.Get(dc),
 		MutableStateChecksumInvalidateBefore:  dynamicconfig.MutableStateChecksumInvalidateBefore.Get(dc),
 
-		StandbyTaskReReplicationContextTimeout: dynamicconfig.StandbyTaskReReplicationContextTimeout.Get(dc),
+		StandbyTaskReReplicationContextTimeout: dynamicconfig.StandbyTaskReReplicationContextTimeout.GetByID(dc),
 
-		SkipReapplicationByNamespaceID: dynamicconfig.SkipReapplicationByNamespaceID.Get(dc),
+		SkipReapplicationByNamespaceID: dynamicconfig.SkipReapplicationByNamespaceID.GetByID(dc),
 
 		// ===== Visibility related =====
 		VisibilityTaskBatchSize:                               dynamicconfig.VisibilityTaskBatchSize.Get(dc),

@@ -2298,12 +2298,12 @@ the number of children greater than or equal to this threshold`,
 		primitives.DefaultWorkflowTaskTimeout,
 		`DefaultWorkflowTaskTimeout for a workflow task`,
 	)
-	SkipReapplicationByNamespaceID = NewNamespaceIDBoolSetting(
+	SkipReapplicationByNamespaceID = NewNamespaceBoolSetting(
 		"history.SkipReapplicationByNamespaceID",
 		false,
 		`SkipReapplicationByNamespaceID is whether skipping a event re-application for a namespace`,
 	)
-	StandbyTaskReReplicationContextTimeout = NewNamespaceIDDurationSetting(
+	StandbyTaskReReplicationContextTimeout = NewNamespaceDurationSetting(
 		"history.standbyTaskReReplicationContextTimeout",
 		30*time.Second,
 		`StandbyTaskReReplicationContextTimeout is the context timeout for standby task re-replication`,

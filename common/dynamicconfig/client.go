@@ -3,6 +3,7 @@ package dynamicconfig
 import (
 	enumspb "go.temporal.io/api/enums/v1"
 	enumsspb "go.temporal.io/server/api/enums/v1"
+	"go.temporal.io/server/common/namespace"
 )
 
 type (
@@ -38,6 +39,19 @@ type (
 		// change to the current value set. The caller should call `cancel` to cancel the
 		// subscription.
 		Subscribe(update ClientUpdateFunc) (cancel func())
+	}
+
+	// A Client may support mapping namespace names to IDs so that settings that are queried by
+	// ID can be given in the config as names, which is more convenient.
+	NamespaceMappingClient interface {
+		// Sets the registry used to map names (found in the config source) to IDs (which can
+		// be queried by server code). Should only be called once.
+		SetNamespaceRegistry(nsRegistry)
+	}
+
+	// subset of namespace.Registry
+	nsRegistry interface {
+		GetNamespaceID(namespace.Name) (namespace.ID, error)
 	}
 
 	// Called with modified keys on any change to the current value set.
@@ -85,12 +99,11 @@ type (
 	// each.) If you return a ConstrainedValue with Namespace and ShardID set, for example,
 	// that value will never be used, even if the Namespace matches.
 	Constraints struct {
-		Namespace     string
-		NamespaceID   string
+		Namespace     string // can also contain ID wrapped with NamespaceIDAsName
 		TaskQueueName string
+		Destination   string
 		TaskQueueType enumspb.TaskQueueType
 		ShardID       int32
 		TaskType      enumsspb.TaskType
-		Destination   string
 	}
 )

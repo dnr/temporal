@@ -5,15 +5,18 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"sync"
 	"sync/atomic"
 	"time"
 
 	"go.temporal.io/server/common/log"
 	"go.temporal.io/server/common/log/tag"
+	"go.temporal.io/server/common/namespace"
 )
 
 var _ Client = (*fileBasedClient)(nil)
 var _ NotifyingClient = (*fileBasedClient)(nil)
+var _ NamespaceMappingClient = (*fileBasedClient)(nil)
 
 const (
 	minPollInterval = time.Second * 5
@@ -34,11 +37,19 @@ type (
 	}
 
 	fileBasedClient struct {
-		values          atomic.Value // ConfigValueMap
-		logger          log.Logger
-		reader          FileReader
+		logger     log.Logger
+		reader     FileReader
+		config     *FileBasedClientConfig
+		nsRegistry atomic.Value // nsRegistry
+
+		// Hold updateLock to read+write `preMapValues` and write `values`. `values` can be
+		// read without updateLock. This is only needed to synchronize SetNamespaceRegistry
+		// with the update loop, otherwise Update is always called from one goroutine.
+		updateLock   sync.Mutex
+		preMapValues ConfigValueMap
+		values       atomic.Value // configValueMap
+
 		lastUpdatedTime time.Time
-		config          *FileBasedClientConfig
 		doneCh          <-chan interface{}
 
 		NotifyingClientImpl
@@ -137,13 +148,11 @@ func (fc *fileBasedClient) Update() error {
 			len(lr.Errors), len(lr.Warnings))
 	}
 
-	prev := fc.values.Swap(lr.Map)
-	oldValues, _ := prev.(ConfigValueMap) // nolint:revive // unchecked-type-assertion
-	changedMap := DiffAndLogConfigs(fc.logger, oldValues, lr.Map)
-	fc.logger.Info("Updated dynamic config")
+	fc.updateLock.Lock()
+	defer fc.updateLock.Unlock()
 
-	fc.PublishUpdates(changedMap)
-	return nil
+	fc.preMapValues = lr.Map
+	return fc.mapAndUpdateLocked()
 }
 
 func (fc *fileBasedClient) validateStaticConfig(config *FileBasedClientConfig) error {
@@ -157,6 +166,59 @@ func (fc *fileBasedClient) validateStaticConfig(config *FileBasedClientConfig) e
 		return fmt.Errorf("poll interval should be at least %v", minPollInterval)
 	}
 	return nil
+}
+
+// call with updateLock held
+func (fc *fileBasedClient) mapAndUpdateLocked() error {
+	newValues := fc.mapNamespacesToID(fc.preMapValues)
+
+	prev := fc.values.Swap(newValues)
+	oldValues, _ := prev.(ConfigValueMap) // nolint:revive // unchecked-type-assertion
+	changedMap := DiffAndLogConfigs(fc.logger, oldValues, newValues)
+	fc.logger.Info("Updated dynamic config")
+
+	fc.PublishUpdates(changedMap)
+	return nil
+}
+
+func (fc *fileBasedClient) mapNamespacesToID(in ConfigValueMap) ConfigValueMap {
+	registry, ok := fc.nsRegistry.Load().(nsRegistry)
+	if !ok {
+		return in
+	}
+
+	out := make(ConfigValueMap, len(in))
+	for key, cvs := range in {
+		newCVs := cvs
+		for _, cv := range cvs {
+			if cv.Constraints.Namespace == "" || isIDAsName(cv.Constraints.Namespace) {
+				continue
+			}
+			nsID, err := registry.GetNamespaceID(namespace.Name(cv.Constraints.Namespace))
+			if err != nil {
+				fc.logger.Warn("error mapping namespace to id", tag.Error(err))
+				continue
+			}
+			newCV := cv
+			newCV.Constraints.Namespace = NamespaceIDAsName(nsID)
+			newCVs = append(newCVs, newCV)
+		}
+		out[key] = newCVs
+	}
+
+	return out
+}
+
+func (fc *fileBasedClient) SetNamespaceRegistry(registry nsRegistry) {
+	if !fc.nsRegistry.CompareAndSwap(nil, registry) {
+		return
+	}
+	// TODO: maybe subscribe to updates and re-evaluate
+
+	// if we already had loaded values, expand once
+	fc.updateLock.Lock()
+	defer fc.updateLock.Unlock()
+	fc.mapAndUpdateLocked()
 }
 
 func (r *osReader) ReadFile() ([]byte, error) {

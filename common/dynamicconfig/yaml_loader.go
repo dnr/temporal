@@ -7,6 +7,7 @@ import (
 
 	enumspb "go.temporal.io/api/enums/v1"
 	enumsspb "go.temporal.io/server/api/enums/v1"
+	"go.temporal.io/server/common/namespace"
 	"gopkg.in/yaml.v3"
 )
 
@@ -179,11 +180,11 @@ func convertYamlConstraints(key Key, m map[string]any, precedence Precedence, lr
 			validConstraint = precedence == PrecedenceNamespace || precedence == PrecedenceTaskQueue || precedence == PrecedenceDestination
 		case "namespaceid":
 			if v, ok := v.(string); ok {
-				cs.NamespaceID = v
+				cs.Namespace = NamespaceIDAsName(namespace.ID(v))
 			} else {
 				lr.errorf("namespaceID constraint must be string")
 			}
-			validConstraint = precedence == PrecedenceNamespaceID
+			validConstraint = precedence == PrecedenceNamespace
 		case "taskqueuename":
 			if v, ok := v.(string); ok {
 				cs.TaskQueueName = v

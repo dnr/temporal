@@ -100,9 +100,6 @@ func appendConstrainedValue(logLine *strings.Builder, value *ConstrainedValue) {
 		if value.Constraints.Namespace != "" {
 			fmt.Fprintf(logLine, "{Namespace:%s}", value.Constraints.Namespace)
 		}
-		if value.Constraints.NamespaceID != "" {
-			fmt.Fprintf(logLine, "{NamespaceID:%s}", value.Constraints.NamespaceID)
-		}
 		if value.Constraints.TaskQueueName != "" {
 			fmt.Fprintf(logLine, "{TaskQueueName:%s}", value.Constraints.TaskQueueName)
 		}

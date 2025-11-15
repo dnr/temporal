@@ -7,14 +7,12 @@ import (
 
 	enumspb "go.temporal.io/api/enums/v1"
 	enumsspb "go.temporal.io/server/api/enums/v1"
-	"go.temporal.io/server/common/namespace"
 )
 
 const (
 	PrecedenceUnknown Precedence = iota
 	PrecedenceGlobal
 	PrecedenceNamespace
-	PrecedenceNamespaceID
 	PrecedenceTaskQueue
 	PrecedenceShardID
 	PrecedenceTaskType
@@ -53,23 +51,6 @@ type BoolPropertyFnWithNamespaceFilter = TypedPropertyFnWithNamespaceFilter[bool
 
 func GetBoolPropertyFnFilteredByNamespace(value bool) BoolPropertyFnWithNamespaceFilter {
 	return GetTypedPropertyFnFilteredByNamespace(value)
-}
-
-type NamespaceIDBoolSetting = NamespaceIDTypedSetting[bool]
-type NamespaceIDBoolConstrainedDefaultSetting = NamespaceIDTypedConstrainedDefaultSetting[bool]
-
-func NewNamespaceIDBoolSetting(key string, def bool, description string) NamespaceIDBoolSetting {
-	return NewNamespaceIDTypedSettingWithConverter[bool](key, convertBool, def, description)
-}
-
-func NewNamespaceIDBoolSettingWithConstrainedDefault(key string, cdef []TypedConstrainedValue[bool], description string) NamespaceIDBoolConstrainedDefaultSetting {
-	return NewNamespaceIDTypedSettingWithConstrainedDefault[bool](key, convertBool, cdef, description)
-}
-
-type BoolPropertyFnWithNamespaceIDFilter = TypedPropertyFnWithNamespaceIDFilter[bool]
-
-func GetBoolPropertyFnFilteredByNamespaceID(value bool) BoolPropertyFnWithNamespaceIDFilter {
-	return GetTypedPropertyFnFilteredByNamespaceID(value)
 }
 
 type TaskQueueBoolSetting = TaskQueueTypedSetting[bool]
@@ -174,23 +155,6 @@ func GetIntPropertyFnFilteredByNamespace(value int) IntPropertyFnWithNamespaceFi
 	return GetTypedPropertyFnFilteredByNamespace(value)
 }
 
-type NamespaceIDIntSetting = NamespaceIDTypedSetting[int]
-type NamespaceIDIntConstrainedDefaultSetting = NamespaceIDTypedConstrainedDefaultSetting[int]
-
-func NewNamespaceIDIntSetting(key string, def int, description string) NamespaceIDIntSetting {
-	return NewNamespaceIDTypedSettingWithConverter[int](key, convertInt, def, description)
-}
-
-func NewNamespaceIDIntSettingWithConstrainedDefault(key string, cdef []TypedConstrainedValue[int], description string) NamespaceIDIntConstrainedDefaultSetting {
-	return NewNamespaceIDTypedSettingWithConstrainedDefault[int](key, convertInt, cdef, description)
-}
-
-type IntPropertyFnWithNamespaceIDFilter = TypedPropertyFnWithNamespaceIDFilter[int]
-
-func GetIntPropertyFnFilteredByNamespaceID(value int) IntPropertyFnWithNamespaceIDFilter {
-	return GetTypedPropertyFnFilteredByNamespaceID(value)
-}
-
 type TaskQueueIntSetting = TaskQueueTypedSetting[int]
 type TaskQueueIntConstrainedDefaultSetting = TaskQueueTypedConstrainedDefaultSetting[int]
 
@@ -291,23 +255,6 @@ type FloatPropertyFnWithNamespaceFilter = TypedPropertyFnWithNamespaceFilter[flo
 
 func GetFloatPropertyFnFilteredByNamespace(value float64) FloatPropertyFnWithNamespaceFilter {
 	return GetTypedPropertyFnFilteredByNamespace(value)
-}
-
-type NamespaceIDFloatSetting = NamespaceIDTypedSetting[float64]
-type NamespaceIDFloatConstrainedDefaultSetting = NamespaceIDTypedConstrainedDefaultSetting[float64]
-
-func NewNamespaceIDFloatSetting(key string, def float64, description string) NamespaceIDFloatSetting {
-	return NewNamespaceIDTypedSettingWithConverter[float64](key, convertFloat, def, description)
-}
-
-func NewNamespaceIDFloatSettingWithConstrainedDefault(key string, cdef []TypedConstrainedValue[float64], description string) NamespaceIDFloatConstrainedDefaultSetting {
-	return NewNamespaceIDTypedSettingWithConstrainedDefault[float64](key, convertFloat, cdef, description)
-}
-
-type FloatPropertyFnWithNamespaceIDFilter = TypedPropertyFnWithNamespaceIDFilter[float64]
-
-func GetFloatPropertyFnFilteredByNamespaceID(value float64) FloatPropertyFnWithNamespaceIDFilter {
-	return GetTypedPropertyFnFilteredByNamespaceID(value)
 }
 
 type TaskQueueFloatSetting = TaskQueueTypedSetting[float64]
@@ -412,23 +359,6 @@ func GetStringPropertyFnFilteredByNamespace(value string) StringPropertyFnWithNa
 	return GetTypedPropertyFnFilteredByNamespace(value)
 }
 
-type NamespaceIDStringSetting = NamespaceIDTypedSetting[string]
-type NamespaceIDStringConstrainedDefaultSetting = NamespaceIDTypedConstrainedDefaultSetting[string]
-
-func NewNamespaceIDStringSetting(key string, def string, description string) NamespaceIDStringSetting {
-	return NewNamespaceIDTypedSettingWithConverter[string](key, convertString, def, description)
-}
-
-func NewNamespaceIDStringSettingWithConstrainedDefault(key string, cdef []TypedConstrainedValue[string], description string) NamespaceIDStringConstrainedDefaultSetting {
-	return NewNamespaceIDTypedSettingWithConstrainedDefault[string](key, convertString, cdef, description)
-}
-
-type StringPropertyFnWithNamespaceIDFilter = TypedPropertyFnWithNamespaceIDFilter[string]
-
-func GetStringPropertyFnFilteredByNamespaceID(value string) StringPropertyFnWithNamespaceIDFilter {
-	return GetTypedPropertyFnFilteredByNamespaceID(value)
-}
-
 type TaskQueueStringSetting = TaskQueueTypedSetting[string]
 type TaskQueueStringConstrainedDefaultSetting = TaskQueueTypedConstrainedDefaultSetting[string]
 
@@ -531,23 +461,6 @@ func GetDurationPropertyFnFilteredByNamespace(value time.Duration) DurationPrope
 	return GetTypedPropertyFnFilteredByNamespace(value)
 }
 
-type NamespaceIDDurationSetting = NamespaceIDTypedSetting[time.Duration]
-type NamespaceIDDurationConstrainedDefaultSetting = NamespaceIDTypedConstrainedDefaultSetting[time.Duration]
-
-func NewNamespaceIDDurationSetting(key string, def time.Duration, description string) NamespaceIDDurationSetting {
-	return NewNamespaceIDTypedSettingWithConverter[time.Duration](key, convertDuration, def, description)
-}
-
-func NewNamespaceIDDurationSettingWithConstrainedDefault(key string, cdef []TypedConstrainedValue[time.Duration], description string) NamespaceIDDurationConstrainedDefaultSetting {
-	return NewNamespaceIDTypedSettingWithConstrainedDefault[time.Duration](key, convertDuration, cdef, description)
-}
-
-type DurationPropertyFnWithNamespaceIDFilter = TypedPropertyFnWithNamespaceIDFilter[time.Duration]
-
-func GetDurationPropertyFnFilteredByNamespaceID(value time.Duration) DurationPropertyFnWithNamespaceIDFilter {
-	return GetTypedPropertyFnFilteredByNamespaceID(value)
-}
-
 type TaskQueueDurationSetting = TaskQueueTypedSetting[time.Duration]
 type TaskQueueDurationConstrainedDefaultSetting = TaskQueueTypedConstrainedDefaultSetting[time.Duration]
 
@@ -648,23 +561,6 @@ type MapPropertyFnWithNamespaceFilter = TypedPropertyFnWithNamespaceFilter[map[s
 
 func GetMapPropertyFnFilteredByNamespace(value map[string]any) MapPropertyFnWithNamespaceFilter {
 	return GetTypedPropertyFnFilteredByNamespace(value)
-}
-
-type NamespaceIDMapSetting = NamespaceIDTypedSetting[map[string]any]
-type NamespaceIDMapConstrainedDefaultSetting = NamespaceIDTypedConstrainedDefaultSetting[map[string]any]
-
-func NewNamespaceIDMapSetting(key string, def map[string]any, description string) NamespaceIDMapSetting {
-	return NewNamespaceIDTypedSettingWithConverter[map[string]any](key, convertMap, def, description)
-}
-
-func NewNamespaceIDMapSettingWithConstrainedDefault(key string, cdef []TypedConstrainedValue[map[string]any], description string) NamespaceIDMapConstrainedDefaultSetting {
-	return NewNamespaceIDTypedSettingWithConstrainedDefault[map[string]any](key, convertMap, cdef, description)
-}
-
-type MapPropertyFnWithNamespaceIDFilter = TypedPropertyFnWithNamespaceIDFilter[map[string]any]
-
-func GetMapPropertyFnFilteredByNamespaceID(value map[string]any) MapPropertyFnWithNamespaceIDFilter {
-	return GetTypedPropertyFnFilteredByNamespaceID(value)
 }
 
 type TaskQueueMapSetting = TaskQueueTypedSetting[map[string]any]
@@ -1003,142 +899,6 @@ func (s NamespaceTypedConstrainedDefaultSetting[T]) dispatchUpdate(c *Collection
 
 func GetTypedPropertyFnFilteredByNamespace[T any](value T) TypedPropertyFnWithNamespaceFilter[T] {
 	return func(namespace string) T {
-		return value
-	}
-}
-
-type NamespaceIDTypedSetting[T any] setting[T, func(namespaceID namespace.ID)]
-type NamespaceIDTypedConstrainedDefaultSetting[T any] constrainedDefaultSetting[T, func(namespaceID namespace.ID)]
-
-// NewNamespaceIDTypedSetting creates a setting that uses mapstructure to handle complex structured
-// values. The value from dynamic config will be _merged_ over a deep copy of 'def'. Be very careful
-// when using non-empty maps or slices as defaults, the result may not be what you want.
-func NewNamespaceIDTypedSetting[T any](key string, def T, description string) NamespaceIDTypedSetting[T] {
-	// Warn on any shared structure used with ConvertStructure, even though we handle it by deep copying.
-	warnDefaultSharedStructure(key, def)
-	// If even deep copy won't even work, we should panic early. Do that by calling deep copy once here.
-	_ = deepCopyForMapstructure(def)
-
-	s := NamespaceIDTypedSetting[T]{
-		key:         MakeKey(key),
-		def:         def,
-		convert:     ConvertStructure[T](def),
-		description: description,
-	}
-	register(s)
-	return s
-}
-
-// NewNamespaceIDTypedSettingWithConverter creates a setting with a custom converter function.
-func NewNamespaceIDTypedSettingWithConverter[T any](key string, convert func(any) (T, error), def T, description string) NamespaceIDTypedSetting[T] {
-	s := NamespaceIDTypedSetting[T]{
-		key:         MakeKey(key),
-		def:         def,
-		convert:     convert,
-		description: description,
-	}
-	register(s)
-	return s
-}
-
-// NewNamespaceIDTypedSettingWithConstrainedDefault creates a setting with a compound default value.
-func NewNamespaceIDTypedSettingWithConstrainedDefault[T any](key string, convert func(any) (T, error), cdef []TypedConstrainedValue[T], description string) NamespaceIDTypedConstrainedDefaultSetting[T] {
-	s := NamespaceIDTypedConstrainedDefaultSetting[T]{
-		key:         MakeKey(key),
-		cdef:        cdef,
-		convert:     convert,
-		description: description,
-	}
-	register(s)
-	return s
-}
-
-func (s NamespaceIDTypedSetting[T]) Key() Key               { return s.key }
-func (s NamespaceIDTypedSetting[T]) Precedence() Precedence { return PrecedenceNamespaceID }
-func (s NamespaceIDTypedSetting[T]) Validate(v any) error {
-	_, err := s.convert(v)
-	return err
-}
-
-func (s NamespaceIDTypedConstrainedDefaultSetting[T]) Key() Key               { return s.key }
-func (s NamespaceIDTypedConstrainedDefaultSetting[T]) Precedence() Precedence { return PrecedenceNamespaceID }
-func (s NamespaceIDTypedConstrainedDefaultSetting[T]) Validate(v any) error {
-	_, err := s.convert(v)
-	return err
-}
-
-func (s NamespaceIDTypedSetting[T]) WithDefault(v T) NamespaceIDTypedSetting[T] {
-	newS := s
-	newS.def = v
-	return newS
-}
-
-type TypedPropertyFnWithNamespaceIDFilter[T any] func(namespaceID namespace.ID) T
-
-func (s NamespaceIDTypedSetting[T]) Get(c *Collection) TypedPropertyFnWithNamespaceIDFilter[T] {
-	return func(namespaceID namespace.ID) T {
-		prec := []Constraints{{NamespaceID: namespaceID.String()}, {}}
-		return matchAndConvert(
-			c,
-			s.key,
-			s.def,
-			s.convert,
-			prec,
-		)
-	}
-}
-
-func (s NamespaceIDTypedConstrainedDefaultSetting[T]) Get(c *Collection) TypedPropertyFnWithNamespaceIDFilter[T] {
-	return func(namespaceID namespace.ID) T {
-		prec := []Constraints{{NamespaceID: namespaceID.String()}, {}}
-		return matchAndConvertWithConstrainedDefault(
-			c,
-			s.key,
-			s.cdef,
-			s.convert,
-			prec,
-		)
-	}
-}
-
-type TypedSubscribableWithNamespaceIDFilter[T any] func(namespaceID namespace.ID, callback func(T)) (v T, cancel func())
-
-func (s NamespaceIDTypedSetting[T]) Subscribe(c *Collection) TypedSubscribableWithNamespaceIDFilter[T] {
-	return func(namespaceID namespace.ID, callback func(T)) (T, func()) {
-		prec := []Constraints{{NamespaceID: namespaceID.String()}, {}}
-		return subscribe(c, s.key, s.def, s.convert, prec, callback)
-	}
-}
-
-func (s NamespaceIDTypedSetting[T]) dispatchUpdate(c *Collection, sub any, cvs []ConstrainedValue) {
-	dispatchUpdate(
-		c,
-		s.key,
-		s.convert,
-		sub.(*subscription[T]),
-		cvs,
-	)
-}
-
-func (s NamespaceIDTypedConstrainedDefaultSetting[T]) Subscribe(c *Collection) TypedSubscribableWithNamespaceIDFilter[T] {
-	return func(namespaceID namespace.ID, callback func(T)) (T, func()) {
-		prec := []Constraints{{NamespaceID: namespaceID.String()}, {}}
-		return subscribeWithConstrainedDefault(c, s.key, s.cdef, s.convert, prec, callback)
-	}
-}
-
-func (s NamespaceIDTypedConstrainedDefaultSetting[T]) dispatchUpdate(c *Collection, sub any, cvs []ConstrainedValue) {
-	dispatchUpdateWithConstrainedDefault(
-		c,
-		s.key,
-		s.convert,
-		sub.(*subscription[T]),
-		cvs,
-	)
-}
-
-func GetTypedPropertyFnFilteredByNamespaceID[T any](value T) TypedPropertyFnWithNamespaceIDFilter[T] {
-	return func(namespaceID namespace.ID) T {
 		return value
 	}
 }
