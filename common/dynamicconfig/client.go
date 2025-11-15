@@ -99,6 +99,7 @@ type (
 		ShardID       int32
 		TaskType      enumsspb.TaskType
 		Destination   string
+		// update `matches` when adding fields here
 
 		EffectiveAtTime int64 // unix seconds
 	}
@@ -106,6 +107,18 @@ type (
 
 func (k Key) String() string {
 	return string(k)
+}
+
+func (c Constraints) matches(d Constraints) bool {
+	// Unfortunately, we can't use an embedded struct with only the fields to exact match (the
+	// ones other than EffectiveAtTime) because it's not quite source-compatible with literal
+	return c.Namespace == d.Namespace &&
+		c.NamespaceID == d.NamespaceID &&
+		c.TaskQueueName == d.TaskQueueName &&
+		c.TaskQueueType == d.TaskQueueType &&
+		c.ShardID == d.ShardID &&
+		c.TaskType == d.TaskType &&
+		c.Destination == d.Destination
 }
 
 func (c Constraints) effectiveAt(now int64) bool {

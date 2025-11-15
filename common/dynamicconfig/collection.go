@@ -224,7 +224,7 @@ func findMatch(cvs []ConstrainedValue, precedence []Constraints, now int64) (*Co
 	}
 	for _, m := range precedence {
 		for idx, cv := range cvs {
-			if m == cv.Constraints && cv.Constraints.effectiveAt(now) {
+			if cv.Constraints.matches(m) && cv.Constraints.effectiveAt(now) {
 				// Note: cvs here is the slice returned by Client.GetValue. We want to return a
 				// pointer into that slice so that the converted value is cached as long as the
 				// Client keeps the []ConstrainedValue alive. See the comment on
@@ -289,7 +289,7 @@ func findMatchWithConstrainedDefaults[T any](cvs []ConstrainedValue, defaultCVs 
 	for _, m := range precedence {
 		for idx, cv := range cvs {
 			order++
-			if m == cv.Constraints && cv.Constraints.effectiveAt(now) {
+			if cv.Constraints.matches(m) && cv.Constraints.effectiveAt(now) {
 				if valueOrder == 0 {
 					valueOrder = order
 					// Note: cvs here is the slice returned by Client.GetValue. We want to
