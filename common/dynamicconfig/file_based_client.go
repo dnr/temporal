@@ -3,10 +3,12 @@
 package dynamicconfig
 
 import (
+	"cmp"
 	"errors"
 	"fmt"
 	"os"
 	"reflect"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -250,8 +252,15 @@ func loadFile(contents []byte) (configValueMap, *LoadResult) {
 			}
 
 			cvs[i].Value = val
-			cvs[i].Constraints, cvs[i].EffectiveAtTime = convertYamlConstraints(key, cv.Constraints, precedence, lr)
+			cvs[i].Constraints, cvs[i].EffectiveAtTime = convertYamlConstraints(
+				key, cv.Constraints, precedence, lr)
 		}
+
+		// sort in decreasing order by EffectiveAtTime so that "later" values override "earlier" values
+		slices.SortStableFunc(cvs, func(a, b ConstrainedValue) int {
+			return cmp.Compare(b.EffectiveAtTime, a.EffectiveAtTime)
+		})
+
 		newValues[strings.ToLower(key)] = cvs
 	}
 
