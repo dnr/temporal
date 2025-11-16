@@ -213,7 +213,7 @@ func loadFile(contents []byte) (configValueMap, *LoadResult) {
 	var yamlValues map[string][]struct {
 		Constraints map[string]any
 		// Note that we read EffectiveAtTime from the Constraints map even though it goes in a
-		// different place in the ConstrainedValues struct. TODO: chekc if we really need to do
+		// different place in the ConstrainedValues struct. TODO: check if we really need to do
 		// it this way
 		Value any
 	}
@@ -375,6 +375,9 @@ func (fc *fileBasedClient) appendConstrainedValue(logLine *strings.Builder, valu
 		}
 		if value.Constraints.Destination != "" {
 			logLine.WriteString(fmt.Sprintf("{Destination:%s}", value.Constraints.Destination))
+		}
+		if value.EffectiveAtTime > 0 {
+			logLine.WriteString(fmt.Sprintf("{EffectiveAt:%s}", time.Unix(value.EffectiveAtTime, 0).Format(time.RFC3339)))
 		}
 		logLine.WriteString(fmt.Sprint("} value: ", value.Value, " }"))
 	}
