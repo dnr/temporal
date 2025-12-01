@@ -37,6 +37,8 @@ type simStats struct {
 	avgStdDev      float64
 	// Distribution of unique node counts
 	uniqueNodesDist map[int]int
+	// Distribution of max load
+	maxLoadDist map[int]int
 }
 
 type removalStats struct {
@@ -392,6 +394,7 @@ func computeResult(placements []string, numNodes int) simResult {
 func computeStats(results []simResult) simStats {
 	stats := simStats{
 		uniqueNodesDist: make(map[int]int),
+		maxLoadDist:     make(map[int]int),
 	}
 
 	for _, r := range results {
@@ -400,6 +403,7 @@ func computeStats(results []simResult) simStats {
 		stats.avgMinLoad += float64(r.minLoad)
 		stats.avgStdDev += r.stdDev
 		stats.uniqueNodesDist[r.uniqueNodes]++
+		stats.maxLoadDist[r.maxLoad]++
 	}
 
 	n := float64(len(results))
@@ -415,23 +419,25 @@ func printStats(stats simStats, numNodes, k int) {
 	expectedPerNode := float64(k) / float64(numNodes)
 
 	fmt.Printf("Average unique nodes used: %.2f / %d\n", stats.avgUniqueNodes, numNodes)
-	fmt.Printf("Average max load on any node: %.2f\n", stats.avgMaxLoad)
-	fmt.Printf("Average min load on used nodes: %.2f\n", stats.avgMinLoad)
 	fmt.Printf("Expected load per node: %.2f\n", expectedPerNode)
-	fmt.Printf("Average std dev from expected: %.2f\n", stats.avgStdDev)
+	fmt.Printf("Average max load on any node: %.2f\n", stats.avgMaxLoad)
 
-	// Print distribution of unique node counts
-	fmt.Printf("Distribution of unique nodes used:\n")
-	maxUnique := 0
-	for u := range stats.uniqueNodesDist {
-		if u > maxUnique {
-			maxUnique = u
+	// Print distribution of max load (this is what we care about for tail behavior)
+	fmt.Printf("Distribution of max load:\n")
+	maxLoad := 0
+	for m := range stats.maxLoadDist {
+		if m > maxLoad {
+			maxLoad = m
 		}
 	}
-	for u := 1; u <= maxUnique; u++ {
-		if count, ok := stats.uniqueNodesDist[u]; ok {
-			pct := float64(count) / float64(sumValues(stats.uniqueNodesDist)) * 100
-			fmt.Printf("  %d nodes: %d (%.1f%%)\n", u, count, pct)
+	total := sumValues(stats.maxLoadDist)
+	cumulative := 0
+	for m := 1; m <= maxLoad; m++ {
+		if count, ok := stats.maxLoadDist[m]; ok {
+			cumulative += count
+			pct := float64(count) / float64(total) * 100
+			cumulativePct := float64(cumulative) / float64(total) * 100
+			fmt.Printf("  max=%d: %d (%.1f%%, cumulative %.1f%%)\n", m, count, pct, cumulativePct)
 		}
 	}
 }
