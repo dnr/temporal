@@ -79,7 +79,7 @@ type (
 		// The scale of effectivePriority is 10× the normal scale to allow inserting forwards
 		// in between priority levels.
 		effectivePriority priorityKey
-		isPollForwarder   bool
+		pollForwarderType pollForwarderType
 	}
 
 	// taskResponse is used to report the result of either a match with a local poller,
@@ -189,8 +189,12 @@ func newInternalStartedTask(info *startedTaskInfo) *internalTask {
 	return &internalTask{started: info}
 }
 
-func newPollForwarderTask(effectivePriority priorityKey) *internalTask {
-	return &internalTask{effectivePriority: effectivePriority, isPollForwarder: true}
+func newPollForwarderTask(p priorityKey, t pollForwarderType) *internalTask {
+	return &internalTask{effectivePriority: p, pollForwarderType: t}
+}
+
+func (task *internalTask) isPollForwarder() bool {
+	return task.pollForwarderType != notPollForwarder
 }
 
 // isQuery returns true if the underlying task is a query task

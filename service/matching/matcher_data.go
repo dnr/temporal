@@ -20,6 +20,12 @@ const (
 	pollForwarderPriority   = 1000000 // lower than any other priority. must be > maxPriorityLevels*effectivePriorityFactor.
 )
 
+const (
+	notPollForwarder pollForwarderType = iota
+	normalPollForwarder
+	priorityBacklogPollForwarder
+)
+
 // maxTokens is the maximum number of tokens we might consume at a time for simpleLimiter. This
 // is used to update ready times after a rate is changed from very low (or zero) to higher: we
 // may have set a ready time far in the future and need to clip it to something reasonable so
@@ -178,7 +184,7 @@ func (t *taskPQ) Pop() any {
 // pred and post must not make any other calls on taskPQ until ForEachTask returns!
 func (t *taskPQ) ForEachTask(pred func(*internalTask) bool, post func(*internalTask)) {
 	t.heap = slices.DeleteFunc(t.heap, func(task *internalTask) bool {
-		if task.isPollForwarder || !pred(task) {
+		if task.isPollForwarder() || !pred(task) {
 			return false
 		}
 		task.matchHeapIndex = invalidHeapIndex - 1 // maintain heap/index invariant
@@ -374,15 +380,17 @@ func (d *matcherData) findMatch(allowForwarding bool) (*internalTask, *waitingPo
 	// TODO(pri): optimize so it's not O(d*n) worst case
 	// TODO(pri): this iterates over heap as slice, which isn't quite correct, but okay for now
 	for _, task := range d.tasks.heap {
-		if !allowForwarding && task.isPollForwarder {
+		// disallow normal poll forwarding when allowForwarding is false, but allow the
+		// "priority backlog poll forwarders".
+		if !allowForwarding && task.pollForwarderType == normalPollForwarder {
 			continue
 		}
 
 		for _, poller := range d.pollers.heap {
 			// can't match cases:
-			if poller.queryOnly && !task.isQuery() && !task.isPollForwarder {
+			if poller.queryOnly && !task.isQuery() && !task.isPollForwarder() {
 				continue
-			} else if task.isPollForwarder && poller.forwardCtx == nil {
+			} else if task.isPollForwarder() && poller.forwardCtx == nil {
 				continue
 			} else if poller.isTaskForwarder && !allowForwarding {
 				continue
@@ -463,7 +471,7 @@ func (d *matcherData) findAndWakeMatches() {
 		res := &matchResult{task: task, poller: poller}
 		task.wake(d.logger, res)
 		// for poll forwarder: skip waking poller, forwarder will call finishMatchAfterPollForward
-		if !task.isPollForwarder {
+		if !task.isPollForwarder() {
 			poller.wake(d.logger, res)
 		}
 		// TODO(pri): consider having task forwarding work the same way, with a half-match,

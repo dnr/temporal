@@ -69,6 +69,8 @@ type priorityBacklogForwarderKey struct {
 	priority  priorityKey
 }
 
+type pollForwarderType int32
+
 var (
 	// TODO(pri): old matcher cleanup, move to here
 	// errNoRecentPoller = status.Error(codes.FailedPrecondition, "no poller seen for task queue recently, worker may be down")
@@ -139,7 +141,7 @@ func (tm *priTaskMatcher) Start() {
 		degree := tm.config.ForwarderMaxChildrenPerNode()
 		if parent, err := normal.ParentPartition(degree); err == nil {
 			for range tm.config.ForwarderMaxOutstandingPolls() {
-				go tm.forwardPolls(tm.tqCtx, pollForwarderPriority, parent)
+				go tm.forwardPolls(tm.tqCtx, pollForwarderPriority, normalPollForwarder, parent)
 			}
 		}
 	}
@@ -275,8 +277,8 @@ func (tm *priTaskMatcher) validateTasksOnRoot(retrier backoff.Retrier) {
 	}
 }
 
-func (tm *priTaskMatcher) forwardPolls(ctx context.Context, effectivePriority priorityKey, target *tqid.NormalPartition) {
-	forwarderTask := newPollForwarderTask(effectivePriority)
+func (tm *priTaskMatcher) forwardPolls(ctx context.Context, p priorityKey, ft pollForwarderType, target *tqid.NormalPartition) {
+	forwarderTask := newPollForwarderTask(p, ft)
 	ctxs := []context.Context{ctx} // ctx should be child of tm.tqCtx
 	for {
 		res := tm.data.EnqueueTaskAndWait(ctxs, forwarderTask)
@@ -519,7 +521,7 @@ func (tm *priTaskMatcher) UpdateMaxPriorityBacklogs(levels map[int32]priorityKey
 		// +1 to make it match only after local backlog tasks at that priority
 		effectivePriority := effectivePriorityFactor*priority + 1
 		target := tm.partition.TaskQueue().NormalPartition(int(partition))
-		go tm.forwardPolls(ctx, effectivePriority, target)
+		go tm.forwardPolls(ctx, effectivePriority, priorityBacklogPollForwarder, target)
 	}
 
 	// clear unwanted forwarders
