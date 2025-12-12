@@ -3,6 +3,7 @@ package matching
 import (
 	"context"
 	"strconv"
+	"sync"
 	"time"
 
 	"go.temporal.io/api/serviceerror"
@@ -34,12 +35,16 @@ type priTaskMatcher struct {
 
 	partition        tqid.Partition
 	fwdr             *priForwarder
+	client           matchingservice.MatchingServiceClient
 	validator        taskValidator
 	rateLimitManager *rateLimitManager
 	metricsHandler   metrics.Handler // namespace metric scope
 	logger           log.Logger
 	numPartitions    func() int // number of task queue partitions
 	markAlive        func()     // function to mark the physical task queue alive
+
+	priorityBacklogForwardersLock sync.Mutex
+	priorityBacklogForwarders     map[priorityBacklogForwarderKey]context.CancelFunc
 }
 
 type waitingPoller struct {
@@ -57,6 +62,11 @@ type matchResult struct {
 	poller    *waitingPoller
 	ctxErr    error // set if context timed out/canceled or reprocess task
 	ctxErrIdx int   // index of context that closed first
+}
+
+type priorityBacklogForwarderKey struct {
+	partition int32
+	priority  priorityKey
 }
 
 var (
@@ -78,6 +88,7 @@ func newPriTaskMatcher(
 	config *taskQueueConfig,
 	partition tqid.Partition,
 	fwdr *priForwarder,
+	client matchingservice.MatchingServiceClient,
 	validator taskValidator,
 	logger log.Logger,
 	metricsHandler metrics.Handler,
@@ -85,17 +96,19 @@ func newPriTaskMatcher(
 	markAlive func(),
 ) *priTaskMatcher {
 	tm := &priTaskMatcher{
-		config:           config,
-		data:             newMatcherData(config, logger, clock.NewRealTimeSource(), fwdr != nil, rateLimitManager),
-		tqCtx:            tqCtx,
-		logger:           logger,
-		metricsHandler:   metricsHandler,
-		partition:        partition,
-		fwdr:             fwdr,
-		validator:        validator,
-		rateLimitManager: rateLimitManager,
-		numPartitions:    config.NumReadPartitions,
-		markAlive:        markAlive,
+		config:                    config,
+		data:                      newMatcherData(config, logger, clock.NewRealTimeSource(), fwdr != nil, rateLimitManager),
+		tqCtx:                     tqCtx,
+		logger:                    logger,
+		metricsHandler:            metricsHandler,
+		partition:                 partition,
+		fwdr:                      fwdr,
+		client:                    client,
+		validator:                 validator,
+		rateLimitManager:          rateLimitManager,
+		numPartitions:             config.NumReadPartitions,
+		markAlive:                 markAlive,
+		priorityBacklogForwarders: make(map[priorityBacklogForwarderKey]context.CancelFunc),
 	}
 
 	return tm
@@ -109,23 +122,37 @@ func (tm *priTaskMatcher) Start() {
 	lim := quotas.NewDefaultOutgoingRateLimiter(tm.config.ForwarderMaxRatePerSecond)
 
 	if tm.fwdr == nil {
-		// Root doesn't forward. But it does need something to validate tasks.
+		// Root/sticky doesn't forward. But it does need something to validate tasks.
 		go tm.validateTasksOnRoot(retrier)
 		return
 	}
 
-	// Child partitions:
+	// Non-root normal partitions:
+
 	// TODO(pri): ForwarderMaxOutstandingTasks > 1 is not supported: it will cause alternating
 	// tasks to be sent to the validator, which will make the validator not validate anything.
 	for range tm.config.ForwarderMaxOutstandingTasks() {
 		go tm.forwardTasks(lim, retrier)
 	}
-	for range tm.config.ForwarderMaxOutstandingPolls() {
-		go tm.forwardPolls()
+
+	if normal, ok := tm.partition.(*tqid.NormalPartition); ok { // always true here, sticky has nil tm.fwdr
+		degree := tm.config.ForwarderMaxChildrenPerNode()
+		if parent, err := normal.ParentPartition(degree); err == nil {
+			for range tm.config.ForwarderMaxOutstandingPolls() {
+				go tm.forwardPolls(tm.tqCtx, pollForwarderPriority, parent)
+			}
+		}
 	}
 }
 
-func (tm *priTaskMatcher) Stop() {}
+func (tm *priTaskMatcher) Stop() {
+	tm.priorityBacklogForwardersLock.Lock()
+	defer tm.priorityBacklogForwardersLock.Unlock()
+	for _, cancel := range tm.priorityBacklogForwarders {
+		cancel()
+	}
+	clear(tm.priorityBacklogForwarders)
+}
 
 // TODO(pri): access to retrier is not synchronized
 func (tm *priTaskMatcher) forwardTasks(lim quotas.RateLimiter, retrier backoff.Retrier) {
@@ -248,9 +275,9 @@ func (tm *priTaskMatcher) validateTasksOnRoot(retrier backoff.Retrier) {
 	}
 }
 
-func (tm *priTaskMatcher) forwardPolls() {
-	forwarderTask := newPollForwarderTask()
-	ctxs := []context.Context{tm.tqCtx}
+func (tm *priTaskMatcher) forwardPolls(ctx context.Context, effectivePriority priorityKey, target *tqid.NormalPartition) {
+	forwarderTask := newPollForwarderTask(effectivePriority)
+	ctxs := []context.Context{ctx} // ctx should be child of tm.tqCtx
 	for {
 		res := tm.data.EnqueueTaskAndWait(ctxs, forwarderTask)
 		if res.ctxErr != nil {
@@ -263,7 +290,7 @@ func (tm *priTaskMatcher) forwardPolls() {
 		poller := res.poller
 		// We need to use the real source poller context since it has the poller id and
 		// identity, plus the right deadline.
-		task, err := tm.fwdr.ForwardPoll(poller.forwardCtx, poller.pollMetadata)
+		task, err := ForwardPollWithTarget(poller.forwardCtx, poller.pollMetadata, tm.client, tm.partition, target)
 		if err == nil {
 			tm.data.FinishMatchAfterPollForward(poller, task)
 		} else {
@@ -473,10 +500,35 @@ func (tm *priTaskMatcher) ReprocessAllTasks() {
 
 func (tm *priTaskMatcher) UpdateMaxPriorityBacklogs(levels map[int32]priorityKey) {
 	// note that only sticky queues get here (for now).
-	// we want to create poll forwarders for these levels, to send polls to normal partitions
-	// if they have backlog at higher priority than our backlog. (and clear previous forwarders.)
+	// we want to set up poll forwarders for these levels to send polls to normal partitions
+	// if they have backlog at higher priority than our backlog.
 
-	// FIXME
+	tm.priorityBacklogForwardersLock.Lock()
+	defer tm.priorityBacklogForwardersLock.Unlock()
+
+	want := make(map[priorityBacklogForwarderKey]struct{})
+	// create new forwarders
+	for partition, priority := range levels {
+		key := priorityBacklogForwarderKey{partition: partition, priority: priority}
+		want[key] = struct{}{}
+		if _, ok := tm.priorityBacklogForwarders[key]; ok {
+			continue
+		}
+		ctx, cancel := context.WithCancel(tm.tqCtx)
+		tm.priorityBacklogForwarders[key] = cancel
+		// +1 to make it match only after local backlog tasks at that priority
+		effectivePriority := effectivePriorityFactor*priority + 1
+		target := tm.partition.TaskQueue().NormalPartition(int(partition))
+		go tm.forwardPolls(ctx, effectivePriority, target)
+	}
+
+	// clear unwanted forwarders
+	for key, cancel := range tm.priorityBacklogForwarders {
+		if _, ok := want[key]; !ok {
+			cancel()
+			delete(tm.priorityBacklogForwarders, key)
+		}
+	}
 }
 
 func (tm *priTaskMatcher) poll(

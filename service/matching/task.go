@@ -189,8 +189,8 @@ func newInternalStartedTask(info *startedTaskInfo) *internalTask {
 	return &internalTask{started: info}
 }
 
-func newPollForwarderTask() *internalTask {
-	return &internalTask{effectivePriority: pollForwarderPriority, isPollForwarder: true}
+func newPollForwarderTask(effectivePriority priorityKey) *internalTask {
+	return &internalTask{effectivePriority: effectivePriority, isPollForwarder: true}
 }
 
 // isQuery returns true if the underlying task is a query task
