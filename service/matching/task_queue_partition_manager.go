@@ -3,6 +3,7 @@ package matching
 import (
 	"context"
 	"errors"
+	"maps"
 	"sync"
 	"time"
 
@@ -16,6 +17,7 @@ import (
 	persistencespb "go.temporal.io/server/api/persistence/v1"
 	taskqueuespb "go.temporal.io/server/api/taskqueue/v1"
 	"go.temporal.io/server/common/cache"
+	"go.temporal.io/server/common/goro"
 	"go.temporal.io/server/common/headers"
 	"go.temporal.io/server/common/log"
 	"go.temporal.io/server/common/log/tag"
@@ -62,6 +64,8 @@ type (
 		metricsHandler      metrics.Handler // namespace/taskqueue tagged metric scope
 		// TODO(stephanos): move cache out of partition manager
 		cache cache.Cache // non-nil for root-partition
+
+		goroGroup goro.Group
 
 		cancelNewMatcherSub func()
 		cancelFairnessSub   func()
@@ -141,10 +145,7 @@ func (pm *taskQueuePartitionManagerImpl) Start() {
 	pm.engine.updateTaskQueuePartitionGauge(pm.Namespace(), pm.partition, 1)
 	pm.userDataManager.Start()
 	pm.defaultQueue.Start()
-}
-
-func (pm *taskQueuePartitionManagerImpl) GetRateLimitManager() *rateLimitManager {
-	return pm.rateLimitManager
+	pm.goroGroup.Go(pm.updateEphemeralData)
 }
 
 // Stop does not unload the partition from matching engine. It is intended to be called by matching engine when
@@ -173,6 +174,12 @@ func (pm *taskQueuePartitionManagerImpl) Stop(unloadCause unloadCause) {
 	pm.rateLimitManager.Stop()
 
 	pm.engine.updateTaskQueuePartitionGauge(pm.Namespace(), pm.partition, -1)
+
+	pm.goroGroup.Cancel()
+}
+
+func (pm *taskQueuePartitionManagerImpl) GetRateLimitManager() *rateLimitManager {
+	return pm.rateLimitManager
 }
 
 func (pm *taskQueuePartitionManagerImpl) Namespace() *namespace.Namespace {
@@ -727,7 +734,7 @@ func (pm *taskQueuePartitionManagerImpl) Describe(
 
 	pm.versionedQueuesLock.RUnlock()
 
-	versionsInfo := make(map[string]*taskqueuespb.TaskQueueVersionInfoInternal, 0)
+	versionsInfo := make(map[string]*taskqueuespb.TaskQueueVersionInfoInternal, len(versions))
 	for v := range versions {
 		vInfo := &taskqueuespb.TaskQueueVersionInfoInternal{
 			PhysicalTaskQueueInfo: &taskqueuespb.PhysicalTaskQueueInfo{},
@@ -748,7 +755,7 @@ func (pm *taskQueuePartitionManagerImpl) Describe(
 			vInfo.PhysicalTaskQueueInfo.Pollers = physicalQueue.GetAllPollerInfo()
 		}
 		if reportStats {
-			vInfo.PhysicalTaskQueueInfo.TaskQueueStatsByPriorityKey = physicalQueue.GetStatsByPriority()
+			vInfo.PhysicalTaskQueueInfo.TaskQueueStatsByPriorityKey = physicalQueue.GetStatsByPriority(true)
 			vInfo.PhysicalTaskQueueInfo.TaskQueueStats = aggregateStats(vInfo.PhysicalTaskQueueInfo.TaskQueueStatsByPriorityKey)
 		}
 		if internalTaskQueueStatus {
@@ -771,6 +778,58 @@ func (pm *taskQueuePartitionManagerImpl) Describe(
 	return &matchingservice.DescribeTaskQueuePartitionResponse{
 		VersionsInfoInternal: versionsInfo,
 	}, nil
+}
+
+func (pm *taskQueuePartitionManagerImpl) updateEphemeralData(ctx context.Context) error {
+	const checkInterval = 10 * time.Second  // TODO: dynamic config
+	const significantAge = 10 * time.Second // TODO: dynamic config
+
+	// for now, this only applies to normal workflow task queues
+	if pm.partition.Kind() != enumspb.TASK_QUEUE_KIND_NORMAL ||
+		pm.partition.TaskType() != enumspb.TASK_QUEUE_TYPE_WORKFLOW {
+		return
+	}
+
+	var prevMaxPriorityBacklog map[PhysicalTaskQueueVersion]priorityKey
+
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+
+		case <-time.After(checkInterval):
+			maxPriorityBacklog := make(map[PhysicalTaskQueueVersion]priorityKey)
+
+			setMax := func(vk PhysicalTaskQueueVersion, vq physicalTaskQueueManager) {
+				var maxKey priorityKey
+				for key, stats := range vq.GetStatsByPriority(false) {
+					if stats.ApproximateBacklogAge.AsDuration() > significantAge {
+						// note "min": lower numbers are higher priority
+						maxKey = min(maxKey, priorityKey(key))
+					}
+				}
+				if maxKey > 0 {
+					maxPriorityBacklog[vk] = maxKey
+				}
+			}
+
+			setMax(PhysicalTaskQueueVersion{}, pm.defaultQueue)
+
+			pm.versionedQueuesLock.RLock()
+			for vk, vq := range pm.versionedQueues {
+				if vk.buildId == "" || vk.deploymentSeriesName == "" {
+					continue // v3 only
+				}
+				setMax(vk, vq)
+			}
+			pm.versionedQueuesLock.RUnlock()
+
+			if !maps.Equal(maxPriorityBacklog, prevMaxPriorityBacklog) {
+				prevMaxPriorityBacklog = maxPriorityBacklog
+				pm.userDataManager.MaxPriorityBacklogChanged(maxPriorityBacklog)
+			}
+		}
+	}
 }
 
 func (pm *taskQueuePartitionManagerImpl) Partition() tqid.Partition {

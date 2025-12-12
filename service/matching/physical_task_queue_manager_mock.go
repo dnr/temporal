@@ -158,17 +158,17 @@ func (mr *MockphysicalTaskQueueManagerMockRecorder) GetInternalTaskQueueStatus()
 }
 
 // GetStatsByPriority mocks base method.
-func (m *MockphysicalTaskQueueManager) GetStatsByPriority() map[int32]*taskqueue.TaskQueueStats {
+func (m *MockphysicalTaskQueueManager) GetStatsByPriority(includeRates bool) map[int32]*taskqueue.TaskQueueStats {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "GetStatsByPriority")
+	ret := m.ctrl.Call(m, "GetStatsByPriority", includeRates)
 	ret0, _ := ret[0].(map[int32]*taskqueue.TaskQueueStats)
 	return ret0
 }
 
 // GetStatsByPriority indicates an expected call of GetStatsByPriority.
-func (mr *MockphysicalTaskQueueManagerMockRecorder) GetStatsByPriority() *gomock.Call {
+func (mr *MockphysicalTaskQueueManagerMockRecorder) GetStatsByPriority(includeRates any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetStatsByPriority", reflect.TypeOf((*MockphysicalTaskQueueManager)(nil).GetStatsByPriority))
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetStatsByPriority", reflect.TypeOf((*MockphysicalTaskQueueManager)(nil).GetStatsByPriority), includeRates)
 }
 
 // HasPollerAfter mocks base method.

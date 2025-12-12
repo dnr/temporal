@@ -51,6 +51,7 @@ type (
 		// Handles the maybe-long-poll GetUserData RPC.
 		HandleGetUserDataRequest(ctx context.Context, req *matchingservice.GetTaskQueueUserDataRequest) (*matchingservice.GetTaskQueueUserDataResponse, error)
 		CheckTaskQueueUserDataPropagation(context.Context, int64, int, int) error
+		MaxPriorityBacklogChanged(map[PhysicalTaskQueueVersion]priorityKey)
 	}
 
 	UserDataUpdateOptions struct {
@@ -681,6 +682,10 @@ func (m *userDataManagerImpl) CheckTaskQueueUserDataPropagation(
 	case err := <-complete:
 		return err
 	}
+}
+
+func (m *userDataManagerImpl) MaxPriorityBacklogChanged(map[PhysicalTaskQueueVersion]priorityKey) {
+	// TODO: implement this
 }
 
 func (m *userDataManagerImpl) setUserDataForNonOwningPartition(userData *persistencespb.VersionedTaskQueueUserData) {

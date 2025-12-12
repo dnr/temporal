@@ -605,7 +605,7 @@ func (c *physicalTaskQueueManagerImpl) LegacyDescribeTaskQueue(includeTaskQueueS
 	return response
 }
 
-func (c *physicalTaskQueueManagerImpl) GetStatsByPriority() map[int32]*taskqueuepb.TaskQueueStats {
+func (c *physicalTaskQueueManagerImpl) GetStatsByPriority(includeRates bool) map[int32]*taskqueuepb.TaskQueueStats {
 	stats := c.backlogMgr.BacklogStatsByPriority()
 
 	if m := c.drainBacklogMgr.Load(); m != nil {
@@ -615,15 +615,17 @@ func (c *physicalTaskQueueManagerImpl) GetStatsByPriority() map[int32]*taskqueue
 		}
 	}
 
-	c.taskTrackerLock.RLock()
-	defer c.taskTrackerLock.RUnlock()
+	if includeRates {
+		c.taskTrackerLock.RLock()
+		for pri, tt := range c.tasksAdded {
+			util.GetOrSetNew(stats, int32(pri)).TasksAddRate = tt.rate()
+		}
+		for pri, tt := range c.tasksDispatched {
+			util.GetOrSetNew(stats, int32(pri)).TasksDispatchRate = tt.rate()
+		}
+		c.taskTrackerLock.RUnlock()
+	}
 
-	for pri, tt := range c.tasksAdded {
-		util.GetOrSetNew(stats, int32(pri)).TasksAddRate = tt.rate()
-	}
-	for pri, tt := range c.tasksDispatched {
-		util.GetOrSetNew(stats, int32(pri)).TasksDispatchRate = tt.rate()
-	}
 	return stats
 }
 
@@ -786,7 +788,7 @@ func (c *physicalTaskQueueManagerImpl) counterFactory() counter.Counter {
 func (c *physicalTaskQueueManagerImpl) MakePollerScalingDecision(
 	pollStartTime time.Time) *taskqueuepb.PollerScalingDecision {
 	return c.makePollerScalingDecisionImpl(pollStartTime, func() *taskqueuepb.TaskQueueStats {
-		return aggregateStats(c.GetStatsByPriority())
+		return aggregateStats(c.GetStatsByPriority(true))
 	})
 }
 
