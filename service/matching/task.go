@@ -65,6 +65,9 @@ type (
 		pollerScalingDecision *taskqueuepb.PollerScalingDecision
 		recycleToken          func(*internalTask)
 		removeFromMatcher     atomic.Pointer[func()]
+		// taskDispatchRevisionNumber represents the revision number used by the task and is
+		// max(taskDirectiveRevisionNumber, routingConfigRevisionNumber) for the task.
+		taskDispatchRevisionNumber int64
 
 		// These fields are for use by matcherData:
 		waitableMatchResult
@@ -76,9 +79,7 @@ type (
 		// The scale of effectivePriority is 10× the normal scale to allow inserting forwards
 		// in between priority levels.
 		effectivePriority priorityKey
-		// taskDispatchRevisionNumber represents the revision number used by the task and is max(taskDirectiveRevisionNumber, routingConfigRevisionNumber) for the task.
-		taskDispatchRevisionNumber int64
-		isPollForwarder            bool
+		isPollForwarder   bool
 	}
 
 	// taskResponse is used to report the result of either a match with a local poller,
@@ -120,18 +121,18 @@ func newInternalTaskForSyncMatch(
 		redirectInfo = forwardInfo.GetRedirectInfo()
 	}
 	return &internalTask{
-		taskDispatchRevisionNumber: taskDispatchRevisionNumber,
 		event: &genericTaskInfo{
 			AllocatedTaskInfo: &persistencespb.AllocatedTaskInfo{
 				Data:   info,
 				TaskId: syncMatchTaskId,
 			},
 		},
-		forwardInfo:       forwardInfo,
-		source:            source,
-		redirectInfo:      redirectInfo,
-		responseC:         make(chan taskResponse, 1),
-		effectivePriority: effectivePriorityFactor * priorityKey(info.GetPriority().GetPriorityKey()),
+		forwardInfo:                forwardInfo,
+		source:                     source,
+		redirectInfo:               redirectInfo,
+		responseC:                  make(chan taskResponse, 1),
+		taskDispatchRevisionNumber: taskDispatchRevisionNumber,
+		effectivePriority:          effectivePriorityFactor * priorityKey(info.GetPriority().GetPriorityKey()),
 	}
 }
 

@@ -3001,8 +3001,8 @@ func (e *matchingEngineImpl) recordWorkflowTaskStarted(
 		// TODO: stop sending ScheduledDeployment. [cleanup-old-wv]
 		ScheduledDeployment:        worker_versioning.DirectiveDeployment(task.event.Data.VersionDirective),
 		VersionDirective:           task.event.Data.VersionDirective,
-		TaskDispatchRevisionNumber: task.taskDispatchRevisionNumber,
 		Stamp:                      task.event.Data.GetStamp(),
+		TaskDispatchRevisionNumber: task.taskDispatchRevisionNumber,
 	}
 
 	resp, err := e.historyClient.RecordWorkflowTaskStarted(ctx, recordStartedRequest)
