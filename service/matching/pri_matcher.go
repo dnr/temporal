@@ -115,6 +115,8 @@ func (tm *priTaskMatcher) Start() {
 	}
 
 	// Child partitions:
+	// TODO(pri): ForwarderMaxOutstandingTasks > 1 is not supported: it will cause alternating
+	// tasks to be sent to the validator, which will make the validator not validate anything.
 	for range tm.config.ForwarderMaxOutstandingTasks() {
 		go tm.forwardTasks(lim, retrier)
 	}
@@ -125,6 +127,7 @@ func (tm *priTaskMatcher) Start() {
 
 func (tm *priTaskMatcher) Stop() {}
 
+// TODO(pri): access to retrier is not synchronized
 func (tm *priTaskMatcher) forwardTasks(lim quotas.RateLimiter, retrier backoff.Retrier) {
 	ctxs := []context.Context{tm.tqCtx}
 	poller := waitingPoller{isTaskForwarder: true}
@@ -469,6 +472,10 @@ func (tm *priTaskMatcher) ReprocessAllTasks() {
 }
 
 func (tm *priTaskMatcher) UpdateMaxPriorityBacklogs(levels map[int32]priorityKey) {
+	// note that only sticky queues get here (for now).
+	// we want to create poll forwarders for these levels, to send polls to normal partitions
+	// if they have backlog at higher priority than our backlog. (and clear previous forwarders.)
+
 	// FIXME
 }
 

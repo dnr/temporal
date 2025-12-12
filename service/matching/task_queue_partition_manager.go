@@ -835,6 +835,11 @@ func (pm *taskQueuePartitionManagerImpl) updateEphemeralData(ctx context.Context
 }
 
 func (pm *taskQueuePartitionManagerImpl) ephemeralDataChanged(data *taskqueuespb.EphemeralData) {
+	// for now, only sticky partitions act on ephemeral data, normal partitions ignore it.
+	if pm.partition.Kind() != enumspb.TASK_QUEUE_KIND_STICKY {
+		return
+	}
+
 	// transpose map to more useful form
 	updates := make(map[PhysicalTaskQueueVersion]map[int32]priorityKey) // version -> partition id -> max level w/backlog
 
