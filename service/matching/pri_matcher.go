@@ -468,6 +468,10 @@ func (tm *priTaskMatcher) ReprocessAllTasks() {
 	}
 }
 
+func (tm *priTaskMatcher) UpdateMaxPriorityBacklogs(levels map[int32]priorityKey) {
+	// FIXME
+}
+
 func (tm *priTaskMatcher) poll(
 	ctx context.Context, pollMetadata *pollMetadata, queryOnly bool,
 ) (*internalTask, error) {

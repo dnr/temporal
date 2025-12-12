@@ -345,6 +345,18 @@ func (mr *MockphysicalTaskQueueManagerMockRecorder) UnloadFromPartitionManager(a
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UnloadFromPartitionManager", reflect.TypeOf((*MockphysicalTaskQueueManager)(nil).UnloadFromPartitionManager), arg0)
 }
 
+// UpdateMaxPriorityBacklogs mocks base method.
+func (m *MockphysicalTaskQueueManager) UpdateMaxPriorityBacklogs(arg0 map[int32]priorityKey) {
+	m.ctrl.T.Helper()
+	m.ctrl.Call(m, "UpdateMaxPriorityBacklogs", arg0)
+}
+
+// UpdateMaxPriorityBacklogs indicates an expected call of UpdateMaxPriorityBacklogs.
+func (mr *MockphysicalTaskQueueManagerMockRecorder) UpdateMaxPriorityBacklogs(arg0 any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UpdateMaxPriorityBacklogs", reflect.TypeOf((*MockphysicalTaskQueueManager)(nil).UpdateMaxPriorityBacklogs), arg0)
+}
+
 // UpdatePollerInfo mocks base method.
 func (m *MockphysicalTaskQueueManager) UpdatePollerInfo(arg0 pollerIdentity, arg1 *pollMetadata) {
 	m.ctrl.T.Helper()

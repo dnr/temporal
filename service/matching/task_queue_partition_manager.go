@@ -25,6 +25,7 @@ import (
 	"go.temporal.io/server/common/namespace"
 	serviceerrors "go.temporal.io/server/common/serviceerror"
 	"go.temporal.io/server/common/tqid"
+	"go.temporal.io/server/common/util"
 	"go.temporal.io/server/common/worker_versioning"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
@@ -784,10 +785,11 @@ func (pm *taskQueuePartitionManagerImpl) updateEphemeralData(ctx context.Context
 	const checkInterval = 10 * time.Second  // TODO: dynamic config
 	const significantAge = 10 * time.Second // TODO: dynamic config
 
-	// for now, this only applies to normal workflow task queues
+	// for now, this only applies to normal workflow task queues, only with new matcher
 	if pm.partition.Kind() != enumspb.TASK_QUEUE_KIND_NORMAL ||
-		pm.partition.TaskType() != enumspb.TASK_QUEUE_TYPE_WORKFLOW {
-		return
+		pm.partition.TaskType() != enumspb.TASK_QUEUE_TYPE_WORKFLOW ||
+		!pm.config.NewMatcher {
+		return nil
 	}
 
 	var prevMaxPriorityBacklog map[PhysicalTaskQueueVersion]priorityKey
@@ -828,6 +830,36 @@ func (pm *taskQueuePartitionManagerImpl) updateEphemeralData(ctx context.Context
 				prevMaxPriorityBacklog = maxPriorityBacklog
 				pm.userDataManager.MaxPriorityBacklogChanged(maxPriorityBacklog)
 			}
+		}
+	}
+}
+
+func (pm *taskQueuePartitionManagerImpl) ephemeralDataChanged(data *taskqueuespb.EphemeralData) {
+	// transpose map to more useful form
+	updates := make(map[PhysicalTaskQueueVersion]map[int32]priorityKey) // version -> partition id -> max level w/backlog
+
+	for _, part := range data.GetPartition() {
+		for _, verData := range part.GetVersion() {
+			key := PhysicalTaskQueueVersion{
+				buildId:              verData.Version.GetBuildId(),
+				deploymentSeriesName: verData.Version.GetDeploymentName(),
+			}
+			util.GetOrSetMap(updates, key)[part.Partition] = priorityKey(verData.HighestBacklogPriority)
+		}
+	}
+
+	pm.versionedQueuesLock.RLock()
+	defer pm.versionedQueuesLock.RUnlock()
+
+	for key, levels := range updates {
+		var pqm physicalTaskQueueManager
+		if key == (PhysicalTaskQueueVersion{}) {
+			pqm = pm.defaultQueue
+		} else {
+			pqm = pm.versionedQueues[key]
+		}
+		if pqm != nil {
+			pqm.UpdateMaxPriorityBacklogs(levels)
 		}
 	}
 }

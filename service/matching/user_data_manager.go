@@ -13,6 +13,7 @@ import (
 	"go.temporal.io/api/serviceerror"
 	"go.temporal.io/server/api/matchingservice/v1"
 	persistencespb "go.temporal.io/server/api/persistence/v1"
+	taskqueuespb "go.temporal.io/server/api/taskqueue/v1"
 	"go.temporal.io/server/common"
 	"go.temporal.io/server/common/backoff"
 	"go.temporal.io/server/common/clock/hybrid_logical_clock"
@@ -75,13 +76,14 @@ type (
 	// to/from the persistence layer passes through userDataManager of the owning partition.
 	// All other partitions long-poll the latest user data from the owning partition.
 	userDataManagerImpl struct {
-		lock              sync.Mutex
-		onFatalErr        func(unloadCause)
-		onUserDataChanged func() // if set, call this in new goroutine when user data changes
-		partition         tqid.Partition
-		userData          *persistencespb.VersionedTaskQueueUserData
-		userDataChanged   chan struct{}
-		userDataState     userDataState
+		lock                   sync.Mutex
+		onFatalErr             func(unloadCause)
+		onUserDataChanged      func()                            // if set, call this in new goroutine when user data changes
+		onEphemeralDataChanged func(*taskqueuespb.EphemeralData) // if set, call this in new goroutine when ephemeral data changes
+		partition              tqid.Partition
+		userData               *persistencespb.VersionedTaskQueueUserData
+		userDataChanged        chan struct{}
+		userDataState          userDataState
 		// only set if this partition owns user data of its task queue
 		store             persistence.TaskManager
 		config            *taskQueueConfig
@@ -113,21 +115,23 @@ func newUserDataManager(
 	matchingClient matchingservice.MatchingServiceClient,
 	onFatalErr func(unloadCause),
 	onUserDataChanged func(),
+	onEphemeralDataChanged func(*taskqueuespb.EphemeralData),
 	partition tqid.Partition,
 	config *taskQueueConfig,
 	logger log.Logger,
 	registry namespace.Registry,
 ) *userDataManagerImpl {
 	m := &userDataManagerImpl{
-		onFatalErr:        onFatalErr,
-		onUserDataChanged: onUserDataChanged,
-		partition:         partition,
-		userDataChanged:   make(chan struct{}),
-		config:            config,
-		namespaceRegistry: registry,
-		logger:            logger,
-		matchingClient:    matchingClient,
-		userDataReady:     future.NewFuture[struct{}](),
+		onFatalErr:             onFatalErr,
+		onUserDataChanged:      onUserDataChanged,
+		onEphemeralDataChanged: onEphemeralDataChanged,
+		partition:              partition,
+		userDataChanged:        make(chan struct{}),
+		config:                 config,
+		namespaceRegistry:      registry,
+		logger:                 logger,
+		matchingClient:         matchingClient,
+		userDataReady:          future.NewFuture[struct{}](),
 	}
 
 	if partition.IsRoot() && partition.TaskType() == enumspb.TASK_QUEUE_TYPE_WORKFLOW {

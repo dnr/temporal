@@ -792,10 +792,6 @@ func (c *physicalTaskQueueManagerImpl) MakePollerScalingDecision(
 	})
 }
 
-func (c *physicalTaskQueueManagerImpl) GetFairnessWeightOverrides() fairnessWeightOverrides {
-	return c.partitionMgr.GetRateLimitManager().GetFairnessWeightOverrides()
-}
-
 func (c *physicalTaskQueueManagerImpl) makePollerScalingDecisionImpl(
 	pollStartTime time.Time,
 	statsFn func() *taskqueuepb.TaskQueueStats,
@@ -840,6 +836,16 @@ func (c *physicalTaskQueueManagerImpl) makePollerScalingDecisionImpl(
 	}
 	return &taskqueuepb.PollerScalingDecision{
 		PollRequestDeltaSuggestion: delta,
+	}
+}
+
+func (c *physicalTaskQueueManagerImpl) GetFairnessWeightOverrides() fairnessWeightOverrides {
+	return c.partitionMgr.GetRateLimitManager().GetFairnessWeightOverrides()
+}
+
+func (c *physicalTaskQueueManagerImpl) UpdateMaxPriorityBacklogs(levels map[int32]priorityKey) {
+	if c.priMatcher != nil {
+		c.priMatcher.UpdateMaxPriorityBacklogs(levels)
 	}
 }
 
