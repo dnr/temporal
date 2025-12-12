@@ -503,6 +503,6 @@ func (c *taskQueueConfig) clipPriority(priority priorityKey) priorityKey {
 
 func (c *taskQueueConfig) setDefaultPriority(task *internalTask) {
 	if task.effectivePriority == 0 {
-		task.effectivePriority = c.DefaultPriorityKey
+		task.effectivePriority = effectivePriorityFactor * c.DefaultPriorityKey
 	}
 }
