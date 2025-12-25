@@ -68,13 +68,20 @@ type (
 	// Extra care should be taken to avoid mutating the current user data to avoid keeping uncommitted data in memory.
 	UserDataUpdateFunc func(*persistencespb.TaskQueueUserData) (*persistencespb.TaskQueueUserData, bool, error)
 
-	// userDataManager is responsible for fetching and keeping user data up-to-date in-memory
-	// for a given TQ partition.
+	// userDataManager is responsible for fetching and keeping user data and ephemeral data
+	// up-to-date in-memory for a given TQ partition.
 	//
-	// If a partition is the root of a normal (non-sticky) task queue with workflow type,
-	// we say the partition "owns" user data for its task queue. All reads and writes
-	// to/from the persistence layer passes through userDataManager of the owning partition.
-	// All other partitions long-poll the latest user data from the owning partition.
+	// If a partition is the root of a normal (non-sticky) task queue with workflow type, we say the
+	// partition "owns" user data for its task queue. All reads and writes to/from the persistence
+	// layer passes through userDataManager of the owning partition. All other partitions long-poll
+	// the latest user data from their parent in the forwarding tree structure, and the root
+	// partitions of other queue types poll from the root workflow partition.
+	//
+	// Ephemeral data is a little different: First, it's separate for different task queue types.
+	// Second, we're currently more lax about aggregating it, since the purposes it's used for don't
+	// require full perfect information. Instead of passing writes to the root, we currently just
+	// let each partition maintain its own data and merge with data coming from the root. Eventually
+	// we'll switch to passing writes to the root or aggregating by the tree structure.
 	userDataManagerImpl struct {
 		lock                   sync.Mutex
 		onFatalErr             func(unloadCause)
