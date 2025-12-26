@@ -782,9 +782,6 @@ func (pm *taskQueuePartitionManagerImpl) Describe(
 }
 
 func (pm *taskQueuePartitionManagerImpl) updateEphemeralData(ctx context.Context) error {
-	const checkInterval = 10 * time.Second  // TODO: dynamic config
-	const significantAge = 10 * time.Second // TODO: dynamic config
-
 	// for now, this only applies to normal workflow task queues, only with new matcher
 	if pm.partition.Kind() != enumspb.TASK_QUEUE_KIND_NORMAL ||
 		pm.partition.TaskType() != enumspb.TASK_QUEUE_TYPE_WORKFLOW ||
@@ -799,13 +796,14 @@ func (pm *taskQueuePartitionManagerImpl) updateEphemeralData(ctx context.Context
 		case <-ctx.Done():
 			return ctx.Err()
 
-		case <-time.After(checkInterval):
+		case <-time.After(pm.config.EphemeralDataUpdateInterval()):
+			negligibleAge := pm.config.BacklogNegligibleAge()
 			maxPriorityBacklog := make(map[PhysicalTaskQueueVersion]priorityKey)
 
 			setMax := func(vk PhysicalTaskQueueVersion, vq physicalTaskQueueManager) {
 				var maxKey priorityKey
 				for key, stats := range vq.GetStatsByPriority(false) {
-					if stats.ApproximateBacklogAge.AsDuration() > significantAge {
+					if stats.ApproximateBacklogAge.AsDuration() > negligibleAge {
 						// note "min": lower numbers are higher priority
 						maxKey = min(maxKey, priorityKey(key))
 					}
