@@ -49,7 +49,7 @@ func (s *PrioritySuite) SetupSuite() {
 	s.FunctionalTestBase.SetupSuiteWithCluster(testcore.WithDynamicConfigOverrides(dynamicConfigOverrides))
 }
 
-func (s *PrioritySuite) TestPriority_Activity_Basic() {
+func (s *PrioritySuite) TestActivity_Basic() {
 	const N = 100
 	const Levels = 5
 
@@ -225,6 +225,126 @@ func (s *PrioritySuite) TestSubqueue_Migration() {
 	}
 }
 
+func (s *PrioritySuite) TestStickyInteraction_SinglePartition() {
+	const N = 10
+
+	tv := testvars.New(s.T())
+
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	s.OverrideDynamicConfig(dynamicconfig.MatchingNumTaskqueueReadPartitions, 1)
+	s.OverrideDynamicConfig(dynamicconfig.MatchingNumTaskqueueWritePartitions, 1)
+
+	// create some wfts at default priority
+	for wfidx := range N {
+		_, err := s.FrontendClient().StartWorkflowExecution(ctx, &workflowservice.StartWorkflowExecutionRequest{
+			Namespace:    s.Namespace().String(),
+			WorkflowId:   fmt.Sprintf("wf%d", wfidx),
+			WorkflowType: tv.WorkflowType(),
+			TaskQueue:    tv.TaskQueue(),
+		})
+		s.NoError(err)
+	}
+
+	describeSticky := func() (*adminservice.DescribeTaskQueuePartitionResponse, error) {
+		return s.AdminClient().DescribeTaskQueuePartition(ctx, &adminservice.DescribeTaskQueuePartitionRequest{
+			Namespace: s.Namespace().String(),
+			TaskQueuePartition: &taskqueuespb.TaskQueuePartition{
+				TaskQueue:     tv.TaskQueue().Name,
+				TaskQueueType: enumspb.TASK_QUEUE_TYPE_WORKFLOW,
+				PartitionId:   &taskqueuespb.TaskQueuePartition_StickyName{StickyName: tv.StickyTaskQueue().Name},
+			},
+			BuildIds: &taskqueuepb.TaskQueueVersionSelection{Unversioned: true},
+		})
+	}
+
+	// poll sticky queue once, otherwise it won't be used
+	stickyPoller := s.TaskPoller().PollWorkflowTask(&workflowservice.PollWorkflowTaskQueueRequest{
+		TaskQueue: &taskqueuepb.TaskQueue{
+			Name:       tv.StickyTaskQueue().Name,
+			Kind:       enumspb.TASK_QUEUE_KIND_STICKY,
+			NormalName: tv.TaskQueue().Name,
+		},
+	})
+	stickyCtx, stickyCancel := context.WithCancel(ctx)
+	go stickyPoller.HandleTask(tv, taskpoller.DrainWorkflowTask, taskpoller.WithContext(stickyCtx)) // nolint:errcheck
+	// wait for poll to reach matching service and load the queue
+	s.EventuallyWithT(func(c *assert.CollectT) {
+		res, err := describeSticky()
+		require.NoError(c, err)
+		require.NotEmpty(c, res.VersionsInfoInternal[""].GetPhysicalTaskQueueInfo().GetPollers())
+	}, 5*time.Second, 10*time.Millisecond)
+	// cancel immediately
+	stickyCancel()
+
+	// process initial tasks
+	for range N {
+		_, err := s.TaskPoller().PollAndHandleWorkflowTask(
+			tv,
+			func(task *workflowservice.PollWorkflowTaskQueueResponse) (*workflowservice.RespondWorkflowTaskCompletedRequest, error) {
+				return &workflowservice.RespondWorkflowTaskCompletedRequest{
+					Commands: []*commandpb.Command{&commandpb.Command{
+						CommandType: enumspb.COMMAND_TYPE_START_TIMER,
+						Attributes: &commandpb.Command_StartTimerCommandAttributes{
+							StartTimerCommandAttributes: &commandpb.StartTimerCommandAttributes{
+								TimerId:            uuid.NewString(),
+								StartToFireTimeout: durationpb.New(time.Millisecond),
+							},
+						},
+					}},
+					StickyAttributes: &taskqueuepb.StickyExecutionAttributes{
+						WorkerTaskQueue:        tv.StickyTaskQueue(),
+						ScheduleToStartTimeout: durationpb.New(10 * time.Second),
+					},
+				}, nil
+			},
+			taskpoller.WithContext(ctx),
+		)
+		s.NoError(err)
+	}
+
+	// after 1 millisecond, we should have N tasks queued on the sticky queue at normal priority
+	s.EventuallyWithT(func(c *assert.CollectT) {
+		res, err := describeSticky()
+		require.NoError(c, err)
+		require.EqualValues(c, N, res.VersionsInfoInternal[""].PhysicalTaskQueueInfo.TaskQueueStats.ApproximateBacklogCount)
+	}, 5*time.Second, 10*time.Millisecond)
+
+	// create N more workflows at high priority and N at lower
+	for wfidx := range N {
+		_, err := s.FrontendClient().StartWorkflowExecution(ctx, &workflowservice.StartWorkflowExecutionRequest{
+			Namespace:    s.Namespace().String(),
+			WorkflowId:   fmt.Sprintf("highpri%d", wfidx),
+			WorkflowType: tv.WorkflowType(),
+			TaskQueue:    tv.TaskQueue(),
+			Priority:     &commonpb.Priority{PriorityKey: 1},
+		})
+		s.NoError(err)
+		_, err = s.FrontendClient().StartWorkflowExecution(ctx, &workflowservice.StartWorkflowExecutionRequest{
+			Namespace:    s.Namespace().String(),
+			WorkflowId:   fmt.Sprintf("lowpri%d", wfidx),
+			WorkflowType: tv.WorkflowType(),
+			TaskQueue:    tv.TaskQueue(),
+			Priority:     &commonpb.Priority{PriorityKey: 5},
+		})
+		s.NoError(err)
+	}
+
+	// now poll the sticky queue. we should get the high priority tasks from the normal queue
+	// then the normal-priority from sticky, then the low priority from normal
+	for range 3 * N {
+		_, _ = stickyPoller.HandleTask(
+			tv,
+			func(task *workflowservice.PollWorkflowTaskQueueResponse) (*workflowservice.RespondWorkflowTaskCompletedRequest, error) {
+				s.T().Log("task for wf", task.WorkflowExecution.WorkflowId)
+				return nil, nil
+			},
+			taskpoller.WithContext(ctx),
+		)
+	}
+}
+
 func wrongorderness(vs []int) float64 {
 	l := len(vs)
 	wrong := 0
@@ -263,7 +383,7 @@ func (s *FairnessSuite) SetupSuite() {
 	s.FunctionalTestBase.SetupSuiteWithCluster(testcore.WithDynamicConfigOverrides(dynamicConfigOverrides))
 }
 
-func (s *FairnessSuite) TestFairness_Activity_Basic() {
+func (s *FairnessSuite) Test_Activity_Basic() {
 	const Workflows = 15
 	const Tasks = 15
 	const Keys = 10
@@ -551,22 +671,22 @@ func (s *FairnessSuite) countTasksByDrainingActive(ctx context.Context, tv *test
 	return
 }
 
-func (s *FairnessSuite) TestFairness_Migration_FromClassic() {
+func (s *FairnessSuite) TestMigration_FromClassic() {
 	// classic->fair, fair->pri. fair metadata will be created on transition.
 	s.testMigration(false, false)
 }
 
-func (s *FairnessSuite) TestFairness_Migration_FromPri() {
+func (s *FairnessSuite) TestMigration_FromPri() {
 	// pri->fair, fair->pri. fair metadata will be created before transition.
 	s.testMigration(true, false)
 }
 
-func (s *FairnessSuite) TestFairness_Migration_FromFair() {
+func (s *FairnessSuite) TestMigration_FromFair() {
 	// fair->pri, pri->fair. fair metadata will be created first.
 	s.testMigration(true, true)
 }
 
-func (s *FairnessSuite) TestFairness_UpdateWorkflowExecutionOptions_InvalidatesPendingTask() {
+func (s *FairnessSuite) TestUpdateWorkflowExecutionOptions_InvalidatesPendingTask() {
 	tv := testvars.New(s.T())
 
 	capture := s.GetTestCluster().Host().CaptureMetricsHandler().StartCapture()
