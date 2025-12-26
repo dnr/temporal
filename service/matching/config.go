@@ -14,11 +14,6 @@ import (
 	"go.temporal.io/server/service/matching/counter"
 )
 
-const (
-	// Maximum value for priority levels.
-	maxPriorityLevels = 100
-)
-
 type (
 	// Config represents configuration for matching service
 	Config struct {

@@ -16,6 +16,7 @@ import (
 
 const (
 	invalidHeapIndex        = -13 // use unusual value to stand out in panics
+	maxPriorityLevels       = 100 // maximum value for priority levels.
 	effectivePriorityFactor = 10
 	pollForwarderPriority   = 1000000 // lower than any other priority. must be > maxPriorityLevels*effectivePriorityFactor.
 )
