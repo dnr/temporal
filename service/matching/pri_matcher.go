@@ -2,6 +2,7 @@ package matching
 
 import (
 	"context"
+	"errors"
 	"strconv"
 	"sync"
 	"time"
@@ -141,7 +142,7 @@ func (tm *priTaskMatcher) Start() {
 		degree := tm.config.ForwarderMaxChildrenPerNode()
 		if parent, err := normal.ParentPartition(degree); err == nil {
 			for range tm.config.ForwarderMaxOutstandingPolls() {
-				go tm.forwardPolls(tm.tqCtx, pollForwarderPriority, normalPollForwarder, parent)
+				go tm.forwardPolls(tm.tqCtx, 0, pollForwarderPriority, normalPollForwarder, parent)
 			}
 		}
 	}
@@ -277,10 +278,15 @@ func (tm *priTaskMatcher) validateTasksOnRoot(retrier backoff.Retrier) {
 	}
 }
 
-func (tm *priTaskMatcher) forwardPolls(ctx context.Context, p priorityKey, ft pollForwarderType, target *tqid.NormalPartition) {
-	forwarderTask := newPollForwarderTask(p, ft)
-	ctxs := []context.Context{ctx} // ctx should be child of tm.tqCtx
-	for {
+func (tm *priTaskMatcher) forwardPolls(
+	ctx context.Context,
+	targetPriority, effectivePriority priorityKey,
+	ft pollForwarderType,
+	target *tqid.NormalPartition,
+) {
+	forwarderTask := newPollForwarderTask(effectivePriority, ft)
+	ctxs := []context.Context{ctx} // ctx should be equal to or child of tm.tqCtx
+	for ctx.Err() == nil {
 		res := tm.data.EnqueueTaskAndWait(ctxs, forwarderTask)
 		if res.ctxErr != nil {
 			return // task queue closing
@@ -290,11 +296,29 @@ func (tm *priTaskMatcher) forwardPolls(ctx context.Context, p priorityKey, ft po
 		}
 
 		poller := res.poller
+		meta := poller.pollMetadata
+		if ft == priorityBacklogPollForwarder {
+			// This is a forwarder for high-priority backlog on another partition. Override the min
+			// priority so we get only that backlog and not any other tasks.
+			pmCopy := *meta
+			pmCopy.conditions = &matchingservice.PollConditions{
+				MinPriority: int32(targetPriority),
+				NoWait:      true,
+			}
+			meta = &pmCopy
+		}
 		// We need to use the real source poller context since it has the poller id and
 		// identity, plus the right deadline.
-		task, err := ForwardPollWithTarget(poller.forwardCtx, poller.pollMetadata, tm.client, tm.partition, target)
+		task, err := ForwardPollWithTarget(poller.forwardCtx, meta, tm.client, tm.partition, target)
 		if err == nil {
 			tm.data.FinishMatchAfterPollForward(poller, task)
+		} else if errors.Is(err, errNoTasks) {
+			// There are no tasks of the priority we're looking for on the target. This goroutine
+			// will probably get canceled as soon as ephemeral data updates. In the meantime, wait.
+			// Re-enqueue but don't disable other forwarders for this poll.
+			tm.data.ReenqueuePollerIfNotMatched(poller)
+			// 4× to allow for a few rounds plus propagation.
+			_ = util.InterruptibleSleep(ctx, 4*tm.config.EphemeralDataUpdateInterval())
 		} else {
 			// Re-enqueue to let it match again, if it hasn't gotten a context timeout already.
 			poller.forwardCtx = nil // disable forwarding next time
@@ -521,7 +545,7 @@ func (tm *priTaskMatcher) UpdateMaxPriorityBacklogs(levels map[int32]priorityKey
 		// +1 to make it match only after local backlog tasks at that priority
 		effectivePriority := effectivePriorityFactor*priority + 1
 		target := tm.partition.TaskQueue().NormalPartition(int(partition))
-		go tm.forwardPolls(ctx, effectivePriority, priorityBacklogPollForwarder, target)
+		go tm.forwardPolls(ctx, priority, effectivePriority, priorityBacklogPollForwarder, target)
 	}
 
 	// clear unwanted forwarders

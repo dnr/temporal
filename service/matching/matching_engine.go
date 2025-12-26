@@ -90,6 +90,7 @@ type (
 		taskQueueMetadata         *taskqueuepb.TaskQueueMetadata
 		workerVersionCapabilities *commonpb.WorkerVersionCapabilities
 		deploymentOptions         *deploymentpb.WorkerDeploymentOptions
+		conditions                *matchingservice.PollConditions
 		forwardedFrom             string
 		localPollStartTime        time.Time
 	}
@@ -627,7 +628,8 @@ pollLoop:
 		pollMetadata := &pollMetadata{
 			workerVersionCapabilities: request.WorkerVersionCapabilities,
 			deploymentOptions:         request.DeploymentOptions,
-			forwardedFrom:             req.GetForwardedSource(),
+			forwardedFrom:             req.ForwardedSource,
+			conditions:                req.Conditions,
 		}
 		task, versionSetUsed, err := e.pollTask(pollerCtx, partition, pollMetadata)
 		if err != nil {
@@ -892,7 +894,8 @@ pollLoop:
 			taskQueueMetadata:         request.TaskQueueMetadata,
 			workerVersionCapabilities: request.WorkerVersionCapabilities,
 			deploymentOptions:         request.DeploymentOptions,
-			forwardedFrom:             req.GetForwardedSource(),
+			forwardedFrom:             req.ForwardedSource,
+			conditions:                req.Conditions,
 		}
 		task, versionSetUsed, err := e.pollTask(pollerCtx, partition, pollMetadata)
 		if err != nil {
@@ -2435,7 +2438,8 @@ pollLoop:
 		pollMetadata := &pollMetadata{
 			workerVersionCapabilities: request.WorkerVersionCapabilities,
 			deploymentOptions:         request.DeploymentOptions,
-			forwardedFrom:             req.GetForwardedSource(),
+			forwardedFrom:             req.ForwardedSource,
+			conditions:                req.Conditions,
 		}
 		task, _, err := e.pollTask(pollerCtx, partition, pollMetadata)
 		if err != nil {

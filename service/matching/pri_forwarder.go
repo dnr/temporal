@@ -220,6 +220,7 @@ func ForwardPollWithTarget(
 				DeploymentOptions:         pollMetadata.deploymentOptions,
 			},
 			ForwardedSource: source.RpcName(),
+			Conditions:      pollMetadata.conditions,
 		})
 		if err != nil {
 			return nil, err
@@ -242,6 +243,7 @@ func ForwardPollWithTarget(
 				DeploymentOptions:         pollMetadata.deploymentOptions,
 			},
 			ForwardedSource: source.RpcName(),
+			Conditions:      pollMetadata.conditions,
 		})
 		if err != nil {
 			return nil, err
@@ -264,6 +266,7 @@ func ForwardPollWithTarget(
 				// Namespace is ignored here.
 			},
 			ForwardedSource: source.RpcName(),
+			Conditions:      pollMetadata.conditions,
 		})
 		if err != nil {
 			return nil, err
