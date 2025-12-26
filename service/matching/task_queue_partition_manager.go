@@ -851,19 +851,17 @@ func (pm *taskQueuePartitionManagerImpl) ephemeralDataChanged(data *taskqueuespb
 		}
 	}
 
+	update := func(key PhysicalTaskQueueVersion, pqm physicalTaskQueueManager) {
+		pqm.UpdateMaxPriorityBacklogs(updates[key])
+	}
+
+	update(PhysicalTaskQueueVersion{}, pm.defaultQueue)
+
 	pm.versionedQueuesLock.RLock()
 	defer pm.versionedQueuesLock.RUnlock()
 
-	for key, levels := range updates {
-		var pqm physicalTaskQueueManager
-		if key == (PhysicalTaskQueueVersion{}) {
-			pqm = pm.defaultQueue
-		} else {
-			pqm = pm.versionedQueues[key]
-		}
-		if pqm != nil {
-			pqm.UpdateMaxPriorityBacklogs(levels)
-		}
+	for key, pqm := range pm.versionedQueues {
+		update(key, pqm)
 	}
 }
 
