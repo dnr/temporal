@@ -233,19 +233,12 @@ func (s *PrioritySuite) TestStickyInteraction_SinglePartition() {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
+	// one partition for now:
 	s.OverrideDynamicConfig(dynamicconfig.MatchingNumTaskqueueReadPartitions, 1)
 	s.OverrideDynamicConfig(dynamicconfig.MatchingNumTaskqueueWritePartitions, 1)
-
-	// create some wfts at default priority
-	for wfidx := range N {
-		_, err := s.FrontendClient().StartWorkflowExecution(ctx, &workflowservice.StartWorkflowExecutionRequest{
-			Namespace:    s.Namespace().String(),
-			WorkflowId:   fmt.Sprintf("wf%d", wfidx),
-			WorkflowType: tv.WorkflowType(),
-			TaskQueue:    tv.TaskQueue(),
-		})
-		s.NoError(err)
-	}
+	// set these to make the mechanism react faster for the test:
+	s.OverrideDynamicConfig(dynamicconfig.MatchingBacklogNegligibleAge, 10*time.Millisecond)
+	s.OverrideDynamicConfig(dynamicconfig.MatchingEphemeralDataUpdateInterval, 10*time.Millisecond)
 
 	describeSticky := func() (*adminservice.DescribeTaskQueuePartitionResponse, error) {
 		return s.AdminClient().DescribeTaskQueuePartition(ctx, &adminservice.DescribeTaskQueuePartitionRequest{
@@ -260,6 +253,7 @@ func (s *PrioritySuite) TestStickyInteraction_SinglePartition() {
 	}
 
 	// poll sticky queue once, otherwise it won't be used
+	s.T().Log("polling sticky to load")
 	stickyPoller := s.TaskPoller().PollWorkflowTask(&workflowservice.PollWorkflowTaskQueueRequest{
 		TaskQueue: &taskqueuepb.TaskQueue{
 			Name:       tv.StickyTaskQueue().Name,
@@ -275,10 +269,26 @@ func (s *PrioritySuite) TestStickyInteraction_SinglePartition() {
 		require.NoError(c, err)
 		require.NotEmpty(c, res.VersionsInfoInternal[""].GetPhysicalTaskQueueInfo().GetPollers())
 	}, 5*time.Second, 10*time.Millisecond)
-	// cancel immediately
+	// cancel as soon as it's registered
+	s.T().Log("canceling sticky poll")
 	stickyCancel()
+	// wait for cancel to propagate
+	time.Sleep(100 * time.Millisecond) // nolint:forbidigo // there's no way to wait for this
 
-	// process initial tasks
+	// create some wfts at default priority
+	s.T().Log("creating wfts on normal")
+	for wfidx := range N {
+		_, err := s.FrontendClient().StartWorkflowExecution(ctx, &workflowservice.StartWorkflowExecutionRequest{
+			Namespace:    s.Namespace().String(),
+			WorkflowId:   fmt.Sprintf("wf%d", wfidx),
+			WorkflowType: tv.WorkflowType(),
+			TaskQueue:    tv.TaskQueue(),
+		})
+		s.NoError(err)
+	}
+
+	// process initial tasks on normal queue
+	s.T().Log("processing wfts")
 	for range N {
 		_, err := s.TaskPoller().PollAndHandleWorkflowTask(
 			tv,
@@ -305,6 +315,7 @@ func (s *PrioritySuite) TestStickyInteraction_SinglePartition() {
 	}
 
 	// after 1 millisecond, we should have N tasks queued on the sticky queue at normal priority
+	s.T().Log("checking sticky backlog")
 	s.EventuallyWithT(func(c *assert.CollectT) {
 		res, err := describeSticky()
 		require.NoError(c, err)
@@ -312,6 +323,7 @@ func (s *PrioritySuite) TestStickyInteraction_SinglePartition() {
 	}, 5*time.Second, 10*time.Millisecond)
 
 	// create N more workflows at high priority and N at lower
+	s.T().Log("creating high/low wfts on normal")
 	for wfidx := range N {
 		_, err := s.FrontendClient().StartWorkflowExecution(ctx, &workflowservice.StartWorkflowExecutionRequest{
 			Namespace:    s.Namespace().String(),
@@ -332,7 +344,10 @@ func (s *PrioritySuite) TestStickyInteraction_SinglePartition() {
 	}
 
 	// now poll the sticky queue. we should get the high priority tasks from the normal queue
-	// then the normal-priority from sticky, then the low priority from normal
+	// then the normal-priority from sticky, then the low priority from normal.
+	// the priority backlog forwarding mechanism is async, so we might get sticky tasks before
+	// it kicks in.
+	s.T().Log("polling sticky")
 	for range 3 * N {
 		_, _ = stickyPoller.HandleTask(
 			tv,
