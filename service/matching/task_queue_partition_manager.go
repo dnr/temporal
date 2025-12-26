@@ -801,14 +801,14 @@ func (pm *taskQueuePartitionManagerImpl) updateEphemeralData(ctx context.Context
 			maxPriorityBacklog := make(map[PhysicalTaskQueueVersion]priorityKey)
 
 			setMax := func(vk PhysicalTaskQueueVersion, vq physicalTaskQueueManager) {
-				var maxKey priorityKey
+				var maxKey priorityKey = pollForwarderPriority
 				for key, stats := range vq.GetStatsByPriority(false) {
 					if stats.ApproximateBacklogAge.AsDuration() > negligibleAge {
 						// note "min": lower numbers are higher priority
 						maxKey = min(maxKey, priorityKey(key))
 					}
 				}
-				if maxKey > 0 {
+				if maxKey < pollForwarderPriority {
 					maxPriorityBacklog[vk] = maxKey
 				}
 			}
