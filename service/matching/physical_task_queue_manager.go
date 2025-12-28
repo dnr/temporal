@@ -845,9 +845,9 @@ func (c *physicalTaskQueueManagerImpl) GetFairnessWeightOverrides() fairnessWeig
 	return c.partitionMgr.GetRateLimitManager().GetFairnessWeightOverrides()
 }
 
-func (c *physicalTaskQueueManagerImpl) UpdatePriorityBacklogs(backlogs priorityBacklogSet) {
+func (c *physicalTaskQueueManagerImpl) UpdateRemotePriorityBacklogs(backlogs remotePriorityBacklogSet) {
 	if c.priMatcher != nil {
-		c.priMatcher.UpdatePriorityBacklogs(backlogs)
+		c.priMatcher.UpdateRemotePriorityBacklogs(backlogs)
 	}
 }
 

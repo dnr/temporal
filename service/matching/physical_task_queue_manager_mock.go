@@ -357,16 +357,16 @@ func (mr *MockphysicalTaskQueueManagerMockRecorder) UpdatePollerInfo(arg0, arg1 
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UpdatePollerInfo", reflect.TypeOf((*MockphysicalTaskQueueManager)(nil).UpdatePollerInfo), arg0, arg1)
 }
 
-// UpdatePriorityBacklogs mocks base method.
-func (m *MockphysicalTaskQueueManager) UpdatePriorityBacklogs(arg0 priorityBacklogSet) {
+// UpdateRemotePriorityBacklogs mocks base method.
+func (m *MockphysicalTaskQueueManager) UpdateRemotePriorityBacklogs(arg0 remotePriorityBacklogSet) {
 	m.ctrl.T.Helper()
-	m.ctrl.Call(m, "UpdatePriorityBacklogs", arg0)
+	m.ctrl.Call(m, "UpdateRemotePriorityBacklogs", arg0)
 }
 
-// UpdatePriorityBacklogs indicates an expected call of UpdatePriorityBacklogs.
-func (mr *MockphysicalTaskQueueManagerMockRecorder) UpdatePriorityBacklogs(arg0 any) *gomock.Call {
+// UpdateRemotePriorityBacklogs indicates an expected call of UpdateRemotePriorityBacklogs.
+func (mr *MockphysicalTaskQueueManagerMockRecorder) UpdateRemotePriorityBacklogs(arg0 any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UpdatePriorityBacklogs", reflect.TypeOf((*MockphysicalTaskQueueManager)(nil).UpdatePriorityBacklogs), arg0)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UpdateRemotePriorityBacklogs", reflect.TypeOf((*MockphysicalTaskQueueManager)(nil).UpdateRemotePriorityBacklogs), arg0)
 }
 
 // UserDataChanged mocks base method.

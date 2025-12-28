@@ -44,7 +44,7 @@ type priTaskMatcher struct {
 	numPartitions    func() int // number of task queue partitions
 	markAlive        func()     // function to mark the physical task queue alive
 
-	priorityBacklogForwarders *goro.KeyedSet[priorityBacklogKey]
+	priorityBacklogForwarders *goro.KeyedSet[remotePriorityBacklog]
 }
 
 type waitingPoller struct {
@@ -64,15 +64,15 @@ type matchResult struct {
 	ctxErrIdx int   // index of context that closed first
 }
 
-// priorityBacklogKey represents the fact that a specific normal partition has a significant
+// remotePriorityBacklog represents the fact that a specific normal partition has a significant
 // backlog at a specific priority level. This is used to forward polls to partitions that have
 // higher priority backlogs than the partition they arrived at.
-type priorityBacklogKey struct {
+type remotePriorityBacklog struct {
 	partition int32
 	priority  priorityKey
 }
 
-type priorityBacklogSet = map[priorityBacklogKey]struct{}
+type remotePriorityBacklogSet = map[remotePriorityBacklog]struct{}
 
 type pollForwarderType int32
 
@@ -115,7 +115,7 @@ func newPriTaskMatcher(
 		rateLimitManager:          rateLimitManager,
 		numPartitions:             config.NumReadPartitions,
 		markAlive:                 markAlive,
-		priorityBacklogForwarders: goro.NewKeyedSet[priorityBacklogKey](tqCtx),
+		priorityBacklogForwarders: goro.NewKeyedSet[remotePriorityBacklog](tqCtx),
 	}
 
 	return tm
@@ -523,11 +523,11 @@ func (tm *priTaskMatcher) ReprocessAllTasks() {
 	}
 }
 
-func (tm *priTaskMatcher) UpdatePriorityBacklogs(backlogs priorityBacklogSet) {
+func (tm *priTaskMatcher) UpdateRemotePriorityBacklogs(backlogs remotePriorityBacklogSet) {
 	// note that only sticky queues get here (for now).
 	// we want to set up poll forwarders for these levels to send polls to normal partitions
 	// if they have backlog at higher priority than our backlog.
-	tm.priorityBacklogForwarders.Sync(backlogs, func(ctx context.Context, key priorityBacklogKey) {
+	tm.priorityBacklogForwarders.Sync(backlogs, func(ctx context.Context, key remotePriorityBacklog) {
 		// +1 to make it match only after local backlog tasks at that priority
 		effectivePriority := effectivePriorityFactor*key.priority + 1
 		target := tm.partition.TaskQueue().NormalPartition(int(key.partition))

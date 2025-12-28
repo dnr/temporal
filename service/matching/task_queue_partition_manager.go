@@ -833,7 +833,7 @@ func (pm *taskQueuePartitionManagerImpl) updateEphemeralDataIteration(prevBacklo
 		return prevBacklogPriority
 	}
 
-	pm.userDataManager.BacklogPriorityChanged(backlogPriority)
+	pm.userDataManager.LocalBacklogPriorityChanged(backlogPriority)
 	return backlogPriority
 }
 
@@ -844,7 +844,7 @@ func (pm *taskQueuePartitionManagerImpl) ephemeralDataChanged(data *taskqueuespb
 	}
 
 	// transpose map to more useful form
-	updates := make(map[PhysicalTaskQueueVersion]priorityBacklogSet) // version -> {partition id, max level w/backlog}
+	updates := make(map[PhysicalTaskQueueVersion]remotePriorityBacklogSet) // version -> {partition id, max level w/backlog}
 
 	for _, part := range data.GetPartition() {
 		for _, verData := range part.GetVersion() {
@@ -856,7 +856,7 @@ func (pm *taskQueuePartitionManagerImpl) ephemeralDataChanged(data *taskqueuespb
 			levels := uint64(verData.BacklogPriorityLevels)
 			for pri := bits.TrailingZeros64(levels); pri != 64; pri = bits.TrailingZeros64(levels) {
 				levels &^= 1 << pri
-				backlogKey := priorityBacklogKey{
+				backlogKey := remotePriorityBacklog{
 					partition: part.Partition,
 					priority:  priorityKey(pri),
 				}
@@ -866,7 +866,7 @@ func (pm *taskQueuePartitionManagerImpl) ephemeralDataChanged(data *taskqueuespb
 	}
 
 	update := func(key PhysicalTaskQueueVersion, pqm physicalTaskQueueManager) {
-		pqm.UpdatePriorityBacklogs(updates[key])
+		pqm.UpdateRemotePriorityBacklogs(updates[key])
 	}
 
 	update(PhysicalTaskQueueVersion{}, pm.defaultQueue)

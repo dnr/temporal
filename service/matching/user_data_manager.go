@@ -53,7 +53,7 @@ type (
 		// Handles the maybe-long-poll GetUserData RPC.
 		HandleGetUserDataRequest(ctx context.Context, req *matchingservice.GetTaskQueueUserDataRequest) (*matchingservice.GetTaskQueueUserDataResponse, error)
 		CheckTaskQueueUserDataPropagation(context.Context, int64, int, int) error
-		BacklogPriorityChanged(map[PhysicalTaskQueueVersion]int64)
+		LocalBacklogPriorityChanged(map[PhysicalTaskQueueVersion]int64)
 	}
 
 	UserDataUpdateOptions struct {
@@ -716,7 +716,7 @@ func (m *userDataManagerImpl) CheckTaskQueueUserDataPropagation(
 	}
 }
 
-func (m *userDataManagerImpl) BacklogPriorityChanged(priorityBacklogs map[PhysicalTaskQueueVersion]int64) {
+func (m *userDataManagerImpl) LocalBacklogPriorityChanged(backlogPriority map[PhysicalTaskQueueVersion]int64) {
 	// TODO: later, we'll send this data to the root to propagate instead of just keeping it
 	// locally and merging.
 
@@ -725,8 +725,8 @@ func (m *userDataManagerImpl) BacklogPriorityChanged(priorityBacklogs map[Physic
 		return
 	}
 
-	byVersion := make([]*taskqueuespb.EphemeralData_ByVersion, 0, len(priorityBacklogs))
-	for ver, levels := range priorityBacklogs {
+	byVersion := make([]*taskqueuespb.EphemeralData_ByVersion, 0, len(backlogPriority))
+	for ver, levels := range backlogPriority {
 		byVersion = append(byVersion, &taskqueuespb.EphemeralData_ByVersion{
 			Version:               ver.WorkerDeploymentVersionS(),
 			BacklogPriorityLevels: levels,

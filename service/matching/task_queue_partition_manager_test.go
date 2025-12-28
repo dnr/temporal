@@ -642,7 +642,7 @@ func (m *mockUserDataManager) CheckTaskQueueUserDataPropagation(ctx context.Cont
 	panic("unused")
 }
 
-func (m *mockUserDataManager) MaxPriorityBacklogChanged(map[PhysicalTaskQueueVersion]priorityKey) {
+func (m *mockUserDataManager) LocalBacklogPriorityChanged(map[PhysicalTaskQueueVersion]priorityKey) {
 	panic("unused")
 }
 
