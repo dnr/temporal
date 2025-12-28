@@ -72,6 +72,8 @@ type priorityBacklogKey struct {
 	priority  priorityKey
 }
 
+type priorityBacklogSet = map[priorityBacklogKey]struct{}
+
 type pollForwarderType int32
 
 var (
@@ -521,11 +523,11 @@ func (tm *priTaskMatcher) ReprocessAllTasks() {
 	}
 }
 
-func (tm *priTaskMatcher) UpdateMaxPriorityBacklogs(levels map[priorityBacklogKey]struct{}) {
+func (tm *priTaskMatcher) UpdatePriorityBacklogs(backlogs priorityBacklogSet) {
 	// note that only sticky queues get here (for now).
 	// we want to set up poll forwarders for these levels to send polls to normal partitions
 	// if they have backlog at higher priority than our backlog.
-	tm.priorityBacklogForwarders.Sync(levels, func(ctx context.Context, key priorityBacklogKey) {
+	tm.priorityBacklogForwarders.Sync(backlogs, func(ctx context.Context, key priorityBacklogKey) {
 		// +1 to make it match only after local backlog tasks at that priority
 		effectivePriority := effectivePriorityFactor*key.priority + 1
 		target := tm.partition.TaskQueue().NormalPartition(int(key.partition))

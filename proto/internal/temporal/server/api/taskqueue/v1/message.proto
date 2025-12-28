@@ -127,10 +127,9 @@ message EphemeralData {
         // All following fields are data associated with this versioned queue.
         temporal.server.api.deployment.v1.WorkerDeploymentVersion version = 1;
 
-        // This is the highest priority level that has "significant" backlog (defined by the server
-        // configuration). If no level has significant backlog, then it's unset/zero (or this
-        // message is not present in ByPartition at all).
-        int32 highest_backlog_priority = 2;
+        // This is a bit field of priority levels that have "significant" backlog (defined by
+        // the server configuration). Priority key k corresponds to 1<<k.
+        int64 backlog_priority_levels = 2;
     }
     message ByPartition {
         int32 partition = 1;

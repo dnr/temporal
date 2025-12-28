@@ -345,18 +345,6 @@ func (mr *MockphysicalTaskQueueManagerMockRecorder) UnloadFromPartitionManager(a
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UnloadFromPartitionManager", reflect.TypeOf((*MockphysicalTaskQueueManager)(nil).UnloadFromPartitionManager), arg0)
 }
 
-// UpdateMaxPriorityBacklogs mocks base method.
-func (m *MockphysicalTaskQueueManager) UpdateMaxPriorityBacklogs(arg0 map[int32]priorityKey) {
-	m.ctrl.T.Helper()
-	m.ctrl.Call(m, "UpdateMaxPriorityBacklogs", arg0)
-}
-
-// UpdateMaxPriorityBacklogs indicates an expected call of UpdateMaxPriorityBacklogs.
-func (mr *MockphysicalTaskQueueManagerMockRecorder) UpdateMaxPriorityBacklogs(arg0 any) *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UpdateMaxPriorityBacklogs", reflect.TypeOf((*MockphysicalTaskQueueManager)(nil).UpdateMaxPriorityBacklogs), arg0)
-}
-
 // UpdatePollerInfo mocks base method.
 func (m *MockphysicalTaskQueueManager) UpdatePollerInfo(arg0 pollerIdentity, arg1 *pollMetadata) {
 	m.ctrl.T.Helper()
@@ -367,6 +355,18 @@ func (m *MockphysicalTaskQueueManager) UpdatePollerInfo(arg0 pollerIdentity, arg
 func (mr *MockphysicalTaskQueueManagerMockRecorder) UpdatePollerInfo(arg0, arg1 any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UpdatePollerInfo", reflect.TypeOf((*MockphysicalTaskQueueManager)(nil).UpdatePollerInfo), arg0, arg1)
+}
+
+// UpdatePriorityBacklogs mocks base method.
+func (m *MockphysicalTaskQueueManager) UpdatePriorityBacklogs(arg0 priorityBacklogSet) {
+	m.ctrl.T.Helper()
+	m.ctrl.Call(m, "UpdatePriorityBacklogs", arg0)
+}
+
+// UpdatePriorityBacklogs indicates an expected call of UpdatePriorityBacklogs.
+func (mr *MockphysicalTaskQueueManagerMockRecorder) UpdatePriorityBacklogs(arg0 any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UpdatePriorityBacklogs", reflect.TypeOf((*MockphysicalTaskQueueManager)(nil).UpdatePriorityBacklogs), arg0)
 }
 
 // UserDataChanged mocks base method.

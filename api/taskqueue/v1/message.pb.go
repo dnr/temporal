@@ -789,12 +789,11 @@ type EphemeralData_ByVersion struct {
 	// Key for this data. Data for the unversioned queue has no version field present.
 	// All following fields are data associated with this versioned queue.
 	Version *v12.WorkerDeploymentVersion `protobuf:"bytes,1,opt,name=version,proto3" json:"version,omitempty"`
-	// This is the highest priority level that has "significant" backlog (defined by the server
-	// configuration). If no level has significant backlog, then it's unset/zero (or this
-	// message is not present in ByPartition at all).
-	HighestBacklogPriority int32 `protobuf:"varint,2,opt,name=highest_backlog_priority,json=highestBacklogPriority,proto3" json:"highest_backlog_priority,omitempty"`
-	unknownFields          protoimpl.UnknownFields
-	sizeCache              protoimpl.SizeCache
+	// This is a bit field of priority levels that have "significant" backlog (defined by
+	// the server configuration). Priority key k corresponds to 1<<k.
+	BacklogPriorityLevels int64 `protobuf:"varint,2,opt,name=backlog_priority_levels,json=backlogPriorityLevels,proto3" json:"backlog_priority_levels,omitempty"`
+	unknownFields         protoimpl.UnknownFields
+	sizeCache             protoimpl.SizeCache
 }
 
 func (x *EphemeralData_ByVersion) Reset() {
@@ -834,9 +833,9 @@ func (x *EphemeralData_ByVersion) GetVersion() *v12.WorkerDeploymentVersion {
 	return nil
 }
 
-func (x *EphemeralData_ByVersion) GetHighestBacklogPriority() int32 {
+func (x *EphemeralData_ByVersion) GetBacklogPriorityLevels() int64 {
 	if x != nil {
-		return x.HighestBacklogPriority
+		return x.BacklogPriorityLevels
 	}
 	return 0
 }
@@ -951,12 +950,12 @@ const file_temporal_server_api_taskqueue_v1_message_proto_rawDesc = "" +
 	"taskSource\x12Z\n" +
 	"\rredirect_info\x18\x03 \x01(\v25.temporal.server.api.taskqueue.v1.BuildIdRedirectInfoR\fredirectInfo\x12*\n" +
 	"\x11dispatch_build_id\x18\x04 \x01(\tR\x0fdispatchBuildId\x120\n" +
-	"\x14dispatch_version_set\x18\x05 \x01(\tR\x12dispatchVersionSet\"\x8b\x03\n" +
+	"\x14dispatch_version_set\x18\x05 \x01(\tR\x12dispatchVersionSet\"\x89\x03\n" +
 	"\rEphemeralData\x12Y\n" +
-	"\tpartition\x18\x01 \x03(\v2;.temporal.server.api.taskqueue.v1.EphemeralData.ByPartitionR\tpartition\x1a\x9b\x01\n" +
+	"\tpartition\x18\x01 \x03(\v2;.temporal.server.api.taskqueue.v1.EphemeralData.ByPartitionR\tpartition\x1a\x99\x01\n" +
 	"\tByVersion\x12T\n" +
-	"\aversion\x18\x01 \x01(\v2:.temporal.server.api.deployment.v1.WorkerDeploymentVersionR\aversion\x128\n" +
-	"\x18highest_backlog_priority\x18\x02 \x01(\x05R\x16highestBacklogPriority\x1a\x80\x01\n" +
+	"\aversion\x18\x01 \x01(\v2:.temporal.server.api.deployment.v1.WorkerDeploymentVersionR\aversion\x126\n" +
+	"\x17backlog_priority_levels\x18\x02 \x01(\x03R\x15backlogPriorityLevels\x1a\x80\x01\n" +
 	"\vByPartition\x12\x1c\n" +
 	"\tpartition\x18\x01 \x01(\x05R\tpartition\x12S\n" +
 	"\aversion\x18\x02 \x03(\v29.temporal.server.api.taskqueue.v1.EphemeralData.ByVersionR\aversion\"w\n" +

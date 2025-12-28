@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"maps"
+	"math/bits"
 	"sync"
 	"time"
 
@@ -788,7 +789,7 @@ func (pm *taskQueuePartitionManagerImpl) updateEphemeralData(ctx context.Context
 		return nil
 	}
 
-	var prevMaxPriorityBacklog map[PhysicalTaskQueueVersion]priorityKey
+	var prevBacklogPriority map[PhysicalTaskQueueVersion]int64
 
 	for {
 		select {
@@ -796,45 +797,44 @@ func (pm *taskQueuePartitionManagerImpl) updateEphemeralData(ctx context.Context
 			return ctx.Err()
 
 		case <-time.After(pm.config.EphemeralDataUpdateInterval()):
-			prevMaxPriorityBacklog = pm.updateEphemeralDataIteration(prevMaxPriorityBacklog)
+			prevBacklogPriority = pm.updateEphemeralDataIteration(prevBacklogPriority)
 		}
 	}
 }
 
-func (pm *taskQueuePartitionManagerImpl) updateEphemeralDataIteration(prevMaxPriorityBacklog map[PhysicalTaskQueueVersion]priorityKey) map[PhysicalTaskQueueVersion]priorityKey {
+func (pm *taskQueuePartitionManagerImpl) updateEphemeralDataIteration(prevBacklogPriority map[PhysicalTaskQueueVersion]int64) map[PhysicalTaskQueueVersion]int64 {
 	negligibleAge := pm.config.BacklogNegligibleAge()
-	maxPriorityBacklog := make(map[PhysicalTaskQueueVersion]priorityKey)
+	backlogPriority := make(map[PhysicalTaskQueueVersion]int64)
 
-	setMax := func(vk PhysicalTaskQueueVersion, vq physicalTaskQueueManager) {
-		var maxKey priorityKey = pollForwarderPriority
+	setLevels := func(vk PhysicalTaskQueueVersion, vq physicalTaskQueueManager) {
+		var levels int64
 		for key, stats := range vq.GetStatsByPriority(false) {
-			if stats.ApproximateBacklogAge.AsDuration() > negligibleAge {
-				// note "min": lower numbers are higher priority
-				maxKey = min(maxKey, priorityKey(key))
+			if key < 64 && stats.ApproximateBacklogAge.AsDuration() > negligibleAge {
+				levels = levels | 1<<key
 			}
 		}
-		if maxKey < pollForwarderPriority {
-			maxPriorityBacklog[vk] = maxKey
+		if levels != 0 {
+			backlogPriority[vk] = levels
 		}
 	}
 
-	setMax(PhysicalTaskQueueVersion{}, pm.defaultQueue)
+	setLevels(PhysicalTaskQueueVersion{}, pm.defaultQueue)
 
 	pm.versionedQueuesLock.RLock()
 	for vk, vq := range pm.versionedQueues {
 		if vk.buildId == "" || vk.deploymentSeriesName == "" {
 			continue // v3 only
 		}
-		setMax(vk, vq)
+		setLevels(vk, vq)
 	}
 	pm.versionedQueuesLock.RUnlock()
 
-	if maps.Equal(maxPriorityBacklog, prevMaxPriorityBacklog) {
-		return prevMaxPriorityBacklog
+	if maps.Equal(backlogPriority, prevBacklogPriority) {
+		return prevBacklogPriority
 	}
 
-	pm.userDataManager.MaxPriorityBacklogChanged(maxPriorityBacklog)
-	return maxPriorityBacklog
+	pm.userDataManager.BacklogPriorityChanged(backlogPriority)
+	return backlogPriority
 }
 
 func (pm *taskQueuePartitionManagerImpl) ephemeralDataChanged(data *taskqueuespb.EphemeralData) {
@@ -844,7 +844,7 @@ func (pm *taskQueuePartitionManagerImpl) ephemeralDataChanged(data *taskqueuespb
 	}
 
 	// transpose map to more useful form
-	updates := make(map[PhysicalTaskQueueVersion]map[priorityBacklogKey]struct{}) // version -> {partition id, max level w/backlog}
+	updates := make(map[PhysicalTaskQueueVersion]priorityBacklogSet) // version -> {partition id, max level w/backlog}
 
 	for _, part := range data.GetPartition() {
 		for _, verData := range part.GetVersion() {
@@ -852,16 +852,21 @@ func (pm *taskQueuePartitionManagerImpl) ephemeralDataChanged(data *taskqueuespb
 				buildId:              verData.Version.GetBuildId(),
 				deploymentSeriesName: verData.Version.GetDeploymentName(),
 			}
-			backlogKey := priorityBacklogKey{
-				partition: part.Partition,
-				priority:  priorityKey(verData.HighestBacklogPriority),
+			byVersion := util.GetOrSetMap(updates, versionKey)
+			levels := uint64(verData.BacklogPriorityLevels)
+			for pri := bits.TrailingZeros64(levels); pri != 64; pri = bits.TrailingZeros64(levels) {
+				levels &^= 1 << pri
+				backlogKey := priorityBacklogKey{
+					partition: part.Partition,
+					priority:  priorityKey(pri),
+				}
+				byVersion[backlogKey] = struct{}{}
 			}
-			util.GetOrSetMap(updates, versionKey)[backlogKey] = struct{}{}
 		}
 	}
 
 	update := func(key PhysicalTaskQueueVersion, pqm physicalTaskQueueManager) {
-		pqm.UpdateMaxPriorityBacklogs(updates[key])
+		pqm.UpdatePriorityBacklogs(updates[key])
 	}
 
 	update(PhysicalTaskQueueVersion{}, pm.defaultQueue)

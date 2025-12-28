@@ -53,7 +53,7 @@ type (
 		// Handles the maybe-long-poll GetUserData RPC.
 		HandleGetUserDataRequest(ctx context.Context, req *matchingservice.GetTaskQueueUserDataRequest) (*matchingservice.GetTaskQueueUserDataResponse, error)
 		CheckTaskQueueUserDataPropagation(context.Context, int64, int, int) error
-		MaxPriorityBacklogChanged(map[PhysicalTaskQueueVersion]priorityKey)
+		BacklogPriorityChanged(map[PhysicalTaskQueueVersion]int64)
 	}
 
 	UserDataUpdateOptions struct {
@@ -716,7 +716,7 @@ func (m *userDataManagerImpl) CheckTaskQueueUserDataPropagation(
 	}
 }
 
-func (m *userDataManagerImpl) MaxPriorityBacklogChanged(myBacklogs map[PhysicalTaskQueueVersion]priorityKey) {
+func (m *userDataManagerImpl) BacklogPriorityChanged(priorityBacklogs map[PhysicalTaskQueueVersion]int64) {
 	// TODO: later, we'll send this data to the root to propagate instead of just keeping it
 	// locally and merging.
 
@@ -725,11 +725,11 @@ func (m *userDataManagerImpl) MaxPriorityBacklogChanged(myBacklogs map[PhysicalT
 		return
 	}
 
-	byVersion := make([]*taskqueuespb.EphemeralData_ByVersion, 0, len(myBacklogs))
-	for ver, pri := range myBacklogs {
+	byVersion := make([]*taskqueuespb.EphemeralData_ByVersion, 0, len(priorityBacklogs))
+	for ver, levels := range priorityBacklogs {
 		byVersion = append(byVersion, &taskqueuespb.EphemeralData_ByVersion{
-			Version:                ver.WorkerDeploymentVersionS(),
-			HighestBacklogPriority: int32(pri),
+			Version:               ver.WorkerDeploymentVersionS(),
+			BacklogPriorityLevels: levels,
 		})
 	}
 
