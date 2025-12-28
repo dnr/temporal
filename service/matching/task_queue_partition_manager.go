@@ -796,39 +796,45 @@ func (pm *taskQueuePartitionManagerImpl) updateEphemeralData(ctx context.Context
 			return ctx.Err()
 
 		case <-time.After(pm.config.EphemeralDataUpdateInterval()):
-			negligibleAge := pm.config.BacklogNegligibleAge()
-			maxPriorityBacklog := make(map[PhysicalTaskQueueVersion]priorityKey)
-
-			setMax := func(vk PhysicalTaskQueueVersion, vq physicalTaskQueueManager) {
-				var maxKey priorityKey = pollForwarderPriority
-				for key, stats := range vq.GetStatsByPriority(false) {
-					if stats.ApproximateBacklogAge.AsDuration() > negligibleAge {
-						// note "min": lower numbers are higher priority
-						maxKey = min(maxKey, priorityKey(key))
-					}
-				}
-				if maxKey < pollForwarderPriority {
-					maxPriorityBacklog[vk] = maxKey
-				}
-			}
-
-			setMax(PhysicalTaskQueueVersion{}, pm.defaultQueue)
-
-			pm.versionedQueuesLock.RLock()
-			for vk, vq := range pm.versionedQueues {
-				if vk.buildId == "" || vk.deploymentSeriesName == "" {
-					continue // v3 only
-				}
-				setMax(vk, vq)
-			}
-			pm.versionedQueuesLock.RUnlock()
-
-			if !maps.Equal(maxPriorityBacklog, prevMaxPriorityBacklog) {
-				prevMaxPriorityBacklog = maxPriorityBacklog
-				pm.userDataManager.MaxPriorityBacklogChanged(maxPriorityBacklog)
-			}
+			prevMaxPriorityBacklog = pm.updateEphemeralDataIteration(prevMaxPriorityBacklog)
 		}
 	}
+}
+
+func (pm *taskQueuePartitionManagerImpl) updateEphemeralDataIteration(prevMaxPriorityBacklog map[PhysicalTaskQueueVersion]priorityKey) map[PhysicalTaskQueueVersion]priorityKey {
+	negligibleAge := pm.config.BacklogNegligibleAge()
+	maxPriorityBacklog := make(map[PhysicalTaskQueueVersion]priorityKey)
+
+	setMax := func(vk PhysicalTaskQueueVersion, vq physicalTaskQueueManager) {
+		var maxKey priorityKey = pollForwarderPriority
+		for key, stats := range vq.GetStatsByPriority(false) {
+			if stats.ApproximateBacklogAge.AsDuration() > negligibleAge {
+				// note "min": lower numbers are higher priority
+				maxKey = min(maxKey, priorityKey(key))
+			}
+		}
+		if maxKey < pollForwarderPriority {
+			maxPriorityBacklog[vk] = maxKey
+		}
+	}
+
+	setMax(PhysicalTaskQueueVersion{}, pm.defaultQueue)
+
+	pm.versionedQueuesLock.RLock()
+	for vk, vq := range pm.versionedQueues {
+		if vk.buildId == "" || vk.deploymentSeriesName == "" {
+			continue // v3 only
+		}
+		setMax(vk, vq)
+	}
+	pm.versionedQueuesLock.RUnlock()
+
+	if maps.Equal(maxPriorityBacklog, prevMaxPriorityBacklog) {
+		return prevMaxPriorityBacklog
+	}
+
+	pm.userDataManager.MaxPriorityBacklogChanged(maxPriorityBacklog)
+	return maxPriorityBacklog
 }
 
 func (pm *taskQueuePartitionManagerImpl) ephemeralDataChanged(data *taskqueuespb.EphemeralData) {
