@@ -36,7 +36,6 @@ const (
 )
 
 type (
-
 	// Represents a single partition of a (user-level) Task Queue in memory state. Under the hood, each Task Queue
 	// partition is made of one or more DB-level queues. There is always a default DB queue. For
 	// versioned TQs, there is an additional DB queue for each Build ID.
@@ -839,15 +838,19 @@ func (pm *taskQueuePartitionManagerImpl) ephemeralDataChanged(data *taskqueuespb
 	}
 
 	// transpose map to more useful form
-	updates := make(map[PhysicalTaskQueueVersion]map[int32]priorityKey) // version -> partition id -> max level w/backlog
+	updates := make(map[PhysicalTaskQueueVersion]map[priorityBacklogKey]struct{}) // version -> {partition id, max level w/backlog}
 
 	for _, part := range data.GetPartition() {
 		for _, verData := range part.GetVersion() {
-			key := PhysicalTaskQueueVersion{
+			versionKey := PhysicalTaskQueueVersion{
 				buildId:              verData.Version.GetBuildId(),
 				deploymentSeriesName: verData.Version.GetDeploymentName(),
 			}
-			util.GetOrSetMap(updates, key)[part.Partition] = priorityKey(verData.HighestBacklogPriority)
+			backlogKey := priorityBacklogKey{
+				partition: part.Partition,
+				priority:  priorityKey(verData.HighestBacklogPriority),
+			}
+			util.GetOrSetMap(updates, versionKey)[backlogKey] = struct{}{}
 		}
 	}
 

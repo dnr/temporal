@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"strconv"
-	"sync"
 	"time"
 
 	"go.temporal.io/api/serviceerror"
@@ -13,6 +12,7 @@ import (
 	"go.temporal.io/server/common"
 	"go.temporal.io/server/common/backoff"
 	"go.temporal.io/server/common/clock"
+	"go.temporal.io/server/common/goro"
 	"go.temporal.io/server/common/log"
 	"go.temporal.io/server/common/metrics"
 	"go.temporal.io/server/common/primitives/timestamp"
@@ -44,8 +44,7 @@ type priTaskMatcher struct {
 	numPartitions    func() int // number of task queue partitions
 	markAlive        func()     // function to mark the physical task queue alive
 
-	priorityBacklogForwardersLock sync.Mutex
-	priorityBacklogForwarders     map[priorityBacklogForwarderKey]context.CancelFunc
+	priorityBacklogForwarders *goro.KeyedSet[priorityBacklogKey]
 }
 
 type waitingPoller struct {
@@ -65,7 +64,10 @@ type matchResult struct {
 	ctxErrIdx int   // index of context that closed first
 }
 
-type priorityBacklogForwarderKey struct {
+// priorityBacklogKey represents the fact that a specific normal partition has a significant
+// backlog at a specific priority level. This is used to forward polls to partitions that have
+// higher priority backlogs than the partition they arrived at.
+type priorityBacklogKey struct {
 	partition int32
 	priority  priorityKey
 }
@@ -111,7 +113,7 @@ func newPriTaskMatcher(
 		rateLimitManager:          rateLimitManager,
 		numPartitions:             config.NumReadPartitions,
 		markAlive:                 markAlive,
-		priorityBacklogForwarders: make(map[priorityBacklogForwarderKey]context.CancelFunc),
+		priorityBacklogForwarders: goro.NewKeyedSet[priorityBacklogKey](tqCtx),
 	}
 
 	return tm
@@ -149,12 +151,7 @@ func (tm *priTaskMatcher) Start() {
 }
 
 func (tm *priTaskMatcher) Stop() {
-	tm.priorityBacklogForwardersLock.Lock()
-	defer tm.priorityBacklogForwardersLock.Unlock()
-	for _, cancel := range tm.priorityBacklogForwarders {
-		cancel()
-	}
-	clear(tm.priorityBacklogForwarders)
+	tm.priorityBacklogForwarders.Sync(nil, nil)
 }
 
 // TODO(pri): access to retrier is not synchronized
@@ -524,37 +521,16 @@ func (tm *priTaskMatcher) ReprocessAllTasks() {
 	}
 }
 
-func (tm *priTaskMatcher) UpdateMaxPriorityBacklogs(levels map[int32]priorityKey) {
+func (tm *priTaskMatcher) UpdateMaxPriorityBacklogs(levels map[priorityBacklogKey]struct{}) {
 	// note that only sticky queues get here (for now).
 	// we want to set up poll forwarders for these levels to send polls to normal partitions
 	// if they have backlog at higher priority than our backlog.
-
-	tm.priorityBacklogForwardersLock.Lock()
-	defer tm.priorityBacklogForwardersLock.Unlock()
-
-	want := make(map[priorityBacklogForwarderKey]struct{})
-	// create new forwarders
-	for partition, priority := range levels {
-		key := priorityBacklogForwarderKey{partition: partition, priority: priority}
-		want[key] = struct{}{}
-		if _, ok := tm.priorityBacklogForwarders[key]; ok {
-			continue
-		}
-		ctx, cancel := context.WithCancel(tm.tqCtx)
-		tm.priorityBacklogForwarders[key] = cancel
+	tm.priorityBacklogForwarders.Sync(levels, func(ctx context.Context, key priorityBacklogKey) {
 		// +1 to make it match only after local backlog tasks at that priority
-		effectivePriority := effectivePriorityFactor*priority + 1
-		target := tm.partition.TaskQueue().NormalPartition(int(partition))
-		go tm.forwardPolls(ctx, priority, effectivePriority, priorityBacklogPollForwarder, target)
-	}
-
-	// clear unwanted forwarders
-	for key, cancel := range tm.priorityBacklogForwarders {
-		if _, ok := want[key]; !ok {
-			cancel()
-			delete(tm.priorityBacklogForwarders, key)
-		}
-	}
+		effectivePriority := effectivePriorityFactor*key.priority + 1
+		target := tm.partition.TaskQueue().NormalPartition(int(key.partition))
+		tm.forwardPolls(ctx, key.priority, effectivePriority, priorityBacklogPollForwarder, target)
+	})
 }
 
 func (tm *priTaskMatcher) poll(

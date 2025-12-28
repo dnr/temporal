@@ -57,6 +57,6 @@ type (
 		MakePollerScalingDecision(pollStartTime time.Time) *taskqueuepb.PollerScalingDecision
 		// GetFairnessWeightOverrides returns current fairness weight overrides for this queue.
 		GetFairnessWeightOverrides() fairnessWeightOverrides
-		UpdateMaxPriorityBacklogs(map[int32]priorityKey)
+		UpdateMaxPriorityBacklogs(map[priorityBacklogKey]struct{})
 	}
 )
