@@ -18,6 +18,7 @@ import (
 	"go.temporal.io/server/api/matchingservice/v1"
 	"go.temporal.io/server/api/matchingservicemock/v1"
 	persistencespb "go.temporal.io/server/api/persistence/v1"
+	taskqueuespb "go.temporal.io/server/api/taskqueue/v1"
 	"go.temporal.io/server/common"
 	"go.temporal.io/server/common/backoff"
 	"go.temporal.io/server/common/dynamicconfig"
@@ -993,5 +994,147 @@ func defaultTqmTestOpts(controller *gomock.Controller) *tqmTestOpts {
 		config:             defaultTestConfig(),
 		dbq:                defaultTqId(),
 		matchingClientMock: matchingservicemock.NewMockMatchingServiceClient(controller),
+	}
+}
+
+func TestUserData_LocalBacklogPriorityChanged(t *testing.T) {
+	t.Parallel()
+
+	controller := gomock.NewController(t)
+	taskQueue := newTestTaskQueue(defaultNamespaceId, defaultRootTqID, enumspb.TASK_QUEUE_TYPE_WORKFLOW)
+	// Use partition 1 (not root) since LocalBacklogPriorityChanged only works on non-root partitions
+	dbq := UnversionedQueueKey(taskQueue.NormalPartition(1))
+	tqCfg := defaultTqmTestOpts(controller)
+	tqCfg.dbq = dbq
+
+	// Track when onEphemeralDataChanged is called
+	ephemeralDataChangedCh := make(chan *taskqueuespb.EphemeralData, 1)
+
+	m := createUserDataManager(t, controller, tqCfg)
+	m.onEphemeralDataChanged = func(data *taskqueuespb.EphemeralData) {
+		ephemeralDataChangedCh <- data
+	}
+
+	// Call LocalBacklogPriorityChanged with backlog at priority levels 1 and 3
+	// Level 1 = bit 1 = 2, Level 3 = bit 3 = 8, so combined = 10
+	backlogPriority := map[PhysicalTaskQueueVersion]int64{
+		{}: 10, // empty version = default queue, levels 1 and 3 have backlog
+	}
+	m.LocalBacklogPriorityChanged(backlogPriority)
+
+	// Verify the ephemeral data callback is called
+	select {
+	case data := <-ephemeralDataChangedCh:
+		require.NotNil(t, data)
+		require.Len(t, data.Partition, 1)
+		require.Equal(t, int32(1), data.Partition[0].Partition) // partition 1
+		require.Len(t, data.Partition[0].Version, 1)
+		require.Equal(t, int64(10), data.Partition[0].Version[0].BacklogPriorityLevels)
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("onEphemeralDataChanged was not called")
+	}
+
+	// Verify getMergedEphemeralData returns the data
+	merged, _ := m.getMergedEphemeralData()
+	require.NotNil(t, merged)
+	require.NotNil(t, merged.Data)
+	require.Len(t, merged.Data.Partition, 1)
+}
+
+func TestUserData_EphemeralDataMerging(t *testing.T) {
+	t.Parallel()
+
+	controller := gomock.NewController(t)
+	taskQueue := newTestTaskQueue(defaultNamespaceId, defaultRootTqID, enumspb.TASK_QUEUE_TYPE_WORKFLOW)
+	// Use partition 1 (not root)
+	dbq := UnversionedQueueKey(taskQueue.NormalPartition(1))
+	tqCfg := defaultTqmTestOpts(controller)
+	tqCfg.dbq = dbq
+
+	m := createUserDataManager(t, controller, tqCfg)
+
+	// Simulate incoming ephemeral data from parent (partition 0)
+	incomingData := &taskqueuespb.VersionedEphemeralData{
+		Data: &taskqueuespb.EphemeralData{
+			Partition: []*taskqueuespb.EphemeralData_ByPartition{
+				{
+					Partition: 0,
+					Version: []*taskqueuespb.EphemeralData_ByVersion{
+						{
+							BacklogPriorityLevels: 4, // level 2
+						},
+					},
+				},
+			},
+		},
+		Version: 1,
+	}
+	m.gotIncomingEphemeralData(incomingData)
+
+	// Add local ephemeral data via LocalBacklogPriorityChanged
+	backlogPriority := map[PhysicalTaskQueueVersion]int64{
+		{}: 2, // level 1
+	}
+	m.LocalBacklogPriorityChanged(backlogPriority)
+
+	// Verify merged data contains both incoming and local
+	merged, _ := m.getMergedEphemeralData()
+	require.NotNil(t, merged)
+	require.NotNil(t, merged.Data)
+	require.Len(t, merged.Data.Partition, 2) // partition 0 (incoming) + partition 1 (local)
+
+	// Check that we have both partitions
+	partitions := make(map[int32]int64)
+	for _, p := range merged.Data.Partition {
+		if len(p.Version) > 0 {
+			partitions[p.Partition] = p.Version[0].BacklogPriorityLevels
+		}
+	}
+	require.Equal(t, int64(4), partitions[0]) // incoming from partition 0
+	require.Equal(t, int64(2), partitions[1]) // local from partition 1
+}
+
+func TestUserData_EphemeralDataChangedChannel(t *testing.T) {
+	t.Parallel()
+
+	controller := gomock.NewController(t)
+	taskQueue := newTestTaskQueue(defaultNamespaceId, defaultRootTqID, enumspb.TASK_QUEUE_TYPE_WORKFLOW)
+	dbq := UnversionedQueueKey(taskQueue.NormalPartition(1))
+	tqCfg := defaultTqmTestOpts(controller)
+	tqCfg.dbq = dbq
+
+	m := createUserDataManager(t, controller, tqCfg)
+
+	// Get initial channel
+	_, initialCh := m.getMergedEphemeralData()
+	require.NotNil(t, initialCh)
+
+	// Channel should not be closed initially
+	select {
+	case <-initialCh:
+		t.Fatal("channel should not be closed initially")
+	default:
+	}
+
+	// Trigger a change
+	m.LocalBacklogPriorityChanged(map[PhysicalTaskQueueVersion]int64{{}: 1})
+
+	// Initial channel should now be closed
+	select {
+	case <-initialCh:
+		// expected - channel is closed
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("channel should be closed after ephemeral data change")
+	}
+
+	// Get new channel
+	_, newCh := m.getMergedEphemeralData()
+	require.NotNil(t, newCh)
+
+	// New channel should not be closed
+	select {
+	case <-newCh:
+		t.Fatal("new channel should not be closed")
+	default:
 	}
 }

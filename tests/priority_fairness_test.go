@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"math/rand"
+	"strings"
 	"testing"
 	"time"
 
@@ -348,16 +349,41 @@ func (s *PrioritySuite) TestStickyInteraction_SinglePartition() {
 	// the priority backlog forwarding mechanism is async, so we might get sticky tasks before
 	// it kicks in.
 	s.T().Log("polling sticky")
+	var receivedOrder []string
 	for range 3 * N {
 		_, _ = stickyPoller.HandleTask(
 			tv,
 			func(task *workflowservice.PollWorkflowTaskQueueResponse) (*workflowservice.RespondWorkflowTaskCompletedRequest, error) {
-				s.T().Log("task for wf", task.WorkflowExecution.WorkflowId)
+				wfid := task.WorkflowExecution.WorkflowId
+				s.T().Log("task for wf", wfid)
+				receivedOrder = append(receivedOrder, wfid)
 				return nil, nil
 			},
 			taskpoller.WithContext(ctx),
 		)
 	}
+
+	// Validate the order: high priority (highpri*) should come first,
+	// then default priority sticky (wf*), then low priority (lowpri*).
+	// Assign numeric priority: highpri=1, wf=2, lowpri=3
+	var priorityOrder []int
+	for _, wfid := range receivedOrder {
+		if strings.HasPrefix(wfid, "highpri") {
+			priorityOrder = append(priorityOrder, 1)
+		} else if strings.HasPrefix(wfid, "lowpri") {
+			priorityOrder = append(priorityOrder, 3)
+		} else {
+			priorityOrder = append(priorityOrder, 2) // default priority (wf*)
+		}
+	}
+	s.T().Log("received order:", receivedOrder)
+	s.T().Log("priority order:", priorityOrder)
+
+	// The forwarding mechanism is async, so there may be some out-of-order tasks.
+	// Allow up to 10% wrong order (tolerance for async behavior).
+	disorder := wrongorderness(priorityOrder)
+	s.T().Log("disorder:", disorder)
+	s.Less(disorder, 0.1, "tasks should mostly arrive in priority order (high, default, low)")
 }
 
 func wrongorderness(vs []int) float64 {
