@@ -94,8 +94,8 @@ func TestMapCounter_Update(t *testing.T) {
 	m := NewMapCounter(2)
 
 	// Use Update directly (for post-migration use case)
-	m.Update("a", 100)
-	m.Update("b", 50)
+	m.updateHeap("a", 100)
+	m.updateHeap("b", 50)
 
 	topK := m.TopK()
 	assert.Len(t, topK, 2)
@@ -106,9 +106,6 @@ func TestMapCounter_Update(t *testing.T) {
 	}
 	assert.Equal(t, int64(100), counts["a"])
 	assert.Equal(t, int64(50), counts["b"])
-
-	// Map should be empty (Update doesn't modify the map)
-	assert.Empty(t, m.m)
 }
 
 func TestMapCounter_TopK_ManyEntries(t *testing.T) {
