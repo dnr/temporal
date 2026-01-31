@@ -10,3 +10,9 @@ type Counter interface {
 	// by the Counter's configuration). Not guaranteed to return the exact top.
 	TopK() []TopKEntry
 }
+
+// TopKEntry is a count for a value with high count.
+type TopKEntry struct {
+	Key   string
+	Count int64
+}

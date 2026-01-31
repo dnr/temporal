@@ -64,7 +64,9 @@ func TestCMSketch_Grow(t *testing.T) {
 }
 
 func TestCMSketch_Grow_PreservedOnResize(t *testing.T) {
+	var topKCalls int
 	topK := func() []TopKEntry {
+		topKCalls++
 		return []TopKEntry{
 			TopKEntry{Key: "topkey1", Count: 9999},
 			TopKEntry{Key: "topkey2", Count: 99999},
@@ -87,8 +89,10 @@ func TestCMSketch_Grow_PreservedOnResize(t *testing.T) {
 		cms.GetPass(fmt.Sprintf("key%d", i), 0, 1)
 	}
 	assert.Equal(t, 10, cms.params.W)
+	assert.Zero(t, topKCalls)
 	cms.GetPass("onemore", 0, 1)
 	assert.Greater(t, cms.params.W, 10)
+	assert.Equal(t, 1, topKCalls)
 
 	assert.GreaterOrEqual(t, cms.GetPass("topkey1", 0, 1), int64(9999))
 	assert.GreaterOrEqual(t, cms.GetPass("topkey2", 0, 1), int64(99999))

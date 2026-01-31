@@ -21,12 +21,6 @@ type heapEntry struct {
 	index int // position in heap slice
 }
 
-// TopKEntry is the public type returned by TopK().
-type TopKEntry struct {
-	Key   string
-	Count int64
-}
-
 var _ Counter = (*mapCounter)(nil)
 
 // NewMapCounter creates a mapCounter that also tracks the top K entries.
