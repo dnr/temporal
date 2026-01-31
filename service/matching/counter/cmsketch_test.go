@@ -11,7 +11,7 @@ import (
 
 func TestCMSketch_Basic(t *testing.T) {
 	src := rand.NewPCG(rand.Uint64(), rand.Uint64())
-	cms := NewCMSketchCounter(CMSketchParams{W: 10, D: 3}, src)
+	cms := NewCMSketchCounter(CMSketchParams{W: 10, D: 3}, src, nil)
 
 	// one key
 	assert.Equal(t, int64(1), cms.GetPass("one", 0, 1))
@@ -27,7 +27,7 @@ func TestCMSketch_Basic(t *testing.T) {
 
 func TestCMSketch_CrossMaxInt32(t *testing.T) {
 	src := rand.NewPCG(rand.Uint64(), rand.Uint64())
-	cms := NewCMSketchCounter(CMSketchParams{W: 10, D: 3}, src)
+	cms := NewCMSketchCounter(CMSketchParams{W: 10, D: 3}, src, nil)
 
 	for _, base := range []int64{
 		math.MaxInt32 - 123,
@@ -53,7 +53,7 @@ func TestCMSketch_Grow(t *testing.T) {
 			Ratio:         2,
 			MaxW:          10_000,
 		},
-	}, src)
+	}, src, nil)
 
 	for i := range 1000 {
 		cms.GetPass(fmt.Sprintf("key%d", i), 0, 1)
