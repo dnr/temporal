@@ -50,7 +50,7 @@ func (h *hybridCounter) GetPass(key string, base int64, inc int64) int64 {
 	if h.cmSketch != nil {
 		p := h.cmSketch.GetPass(key, base, inc)
 		// after migration, continue updating top-K tracker
-		h.mapCounter.updateHeap(key, p)
+		_ = h.mapCounter.updateHeap(key, p)
 		return p
 	}
 
