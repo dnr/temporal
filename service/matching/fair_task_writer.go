@@ -150,6 +150,10 @@ func (w *fairTaskWriter) taskWriterLoop() {
 		return
 	}
 
+	// TODO: this will be out of phase with the timer in fairBacklogManagerImpl.periodicSync.
+	// can we align them better?
+	persistFairnessKeys := time.NewTicker(w.config.UpdateAckInterval()).C
+
 	var reqs []*writeTaskRequest
 	for {
 		atomic.StoreInt64(&w.currentTaskIDBlock.start, w.taskIDBlock.start)
@@ -175,6 +179,15 @@ func (w *fairTaskWriter) taskWriterLoop() {
 
 		for _, req := range reqs {
 			req.responseCh <- err
+		}
+
+		// maybe persist fairness key counts if it's time
+		select {
+		case <-persistFairnessKeys:
+			for subqueue, counter := range w.counters {
+				w.db.persistTopKFairnessKeys(subqueue, counter.TopK())
+			}
+		default:
 		}
 	}
 }
