@@ -64,7 +64,7 @@ func (h *hybridCounter) GetPass(key string, base int64, inc int64) int64 {
 func (h *hybridCounter) migrateToCMS() {
 	h.cmSketch = NewCMSketchCounter(h.params.CMS, h.src, h.mapCounter.TopK)
 	// move existing counts into CMS
-	for _, entry := range h.mapCounter.TopK() {
+	for _, entry := range h.mapCounter.heap {
 		_ = h.cmSketch.GetPass(entry.Key, entry.Count, 0)
 	}
 }
