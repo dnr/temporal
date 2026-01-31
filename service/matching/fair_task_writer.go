@@ -24,7 +24,7 @@ type (
 		config         *taskQueueConfig
 		db             *taskQueueDB
 		logger         log.Logger
-		counterFactory func() counter.Counter
+		counterFactory func(subqueueIndex) counter.Counter
 		appendCh       chan *writeTaskRequest
 
 		// state:
@@ -36,7 +36,7 @@ type (
 
 func newFairTaskWriter(
 	backlogMgr *fairBacklogManagerImpl,
-	counterFactory func() counter.Counter,
+	counterFactory func(subqueueIndex) counter.Counter,
 ) *fairTaskWriter {
 	return &fairTaskWriter{
 		backlogMgr:     backlogMgr,
@@ -124,7 +124,7 @@ func (w *fairTaskWriter) pickPasses(tasks []*writeTaskRequest, bases []fairLevel
 		base := bases[task.subqueue].pass
 		cntr := w.counters[task.subqueue]
 		if cntr == nil {
-			cntr = w.counterFactory()
+			cntr = w.counterFactory(task.subqueue)
 			w.counters[task.subqueue] = cntr
 		}
 		pass := cntr.GetPass(key, base, inc)

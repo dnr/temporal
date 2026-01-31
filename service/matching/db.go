@@ -401,6 +401,21 @@ func (db *taskQueueDB) persistTopKFairnessKeys(subqueue subqueueIndex, entries [
 	db.lastChange = time.Now()
 }
 
+func (db *taskQueueDB) getTopKFairnessKeys(subqueue subqueueIndex) []counter.TopKEntry {
+	db.Lock()
+	defer db.Unlock()
+
+	if subqueue >= subqueueIndex(len(db.subqueues)) {
+		return nil
+	}
+	counts := db.subqueues[subqueue].TopKFairnessCounts
+	entries := make([]counter.TopKEntry, len(counts))
+	for i, count := range counts {
+		entries[i] = counter.TopKEntry{Key: count.Key, Count: count.Count}
+	}
+	return entries
+}
+
 // getApproximateBacklogCountsBySubqueue return the approximate backlog count for each subqueue.
 // The index corresponds to the subqueue id.
 func (db *taskQueueDB) getApproximateBacklogCountsBySubqueue() []int64 {
