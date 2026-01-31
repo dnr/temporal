@@ -62,3 +62,34 @@ func TestCMSketch_Grow(t *testing.T) {
 	cms.GetPass("onemore", 0, 1)
 	assert.Greater(t, cms.params.W, 10)
 }
+
+func TestCMSketch_Grow_PreservedOnResize(t *testing.T) {
+	topK := func() []TopKEntry {
+		return []TopKEntry{
+			TopKEntry{Key: "topkey1", Count: 9999},
+			TopKEntry{Key: "topkey2", Count: 99999},
+		}
+	}
+
+	src := rand.NewPCG(rand.Uint64(), rand.Uint64())
+	cms := NewCMSketchCounter(CMSketchParams{
+		W: 10,
+		D: 3,
+		Grow: CMSGrowParams{
+			SkipRateDecay: 1_000,
+			Threshold:     0.1,
+			Ratio:         2,
+			MaxW:          10_000,
+		},
+	}, src, topK)
+
+	for i := range 1000 {
+		cms.GetPass(fmt.Sprintf("key%d", i), 0, 1)
+	}
+	assert.Equal(t, 10, cms.params.W)
+	cms.GetPass("onemore", 0, 1)
+	assert.Greater(t, cms.params.W, 10)
+
+	assert.GreaterOrEqual(t, cms.GetPass("topkey1", 0, 1), int64(9999))
+	assert.GreaterOrEqual(t, cms.GetPass("topkey2", 0, 1), int64(99999))
+}

@@ -8,7 +8,7 @@ import (
 )
 
 func TestMapCounter_Basic(t *testing.T) {
-	m := NewMapCounter()
+	m := NewMapCounter(100)
 
 	assert.Equal(t, int64(1), m.GetPass("a", 0, 1))
 	assert.Equal(t, int64(3), m.GetPass("a", 0, 2))
@@ -17,7 +17,7 @@ func TestMapCounter_Basic(t *testing.T) {
 }
 
 func TestMapCounter_TopK(t *testing.T) {
-	m := NewMapCounterWithLimit(3)
+	m := NewMapCounter(3)
 
 	// Add 5 entries with different counts
 	m.GetPass("low1", 0, 1)
@@ -42,7 +42,7 @@ func TestMapCounter_TopK(t *testing.T) {
 }
 
 func TestMapCounter_TopK_Update(t *testing.T) {
-	m := NewMapCounterWithLimit(2)
+	m := NewMapCounter(2)
 
 	// Start with two entries
 	m.GetPass("a", 0, 1)
@@ -64,7 +64,7 @@ func TestMapCounter_TopK_Update(t *testing.T) {
 }
 
 func TestMapCounter_TopK_Eviction(t *testing.T) {
-	m := NewMapCounterWithLimit(2)
+	m := NewMapCounter(2)
 
 	m.GetPass("a", 0, 10)
 	m.GetPass("b", 0, 20)
@@ -91,7 +91,7 @@ func TestMapCounter_TopK_Eviction(t *testing.T) {
 }
 
 func TestMapCounter_Update(t *testing.T) {
-	m := NewMapCounterWithLimit(2)
+	m := NewMapCounter(2)
 
 	// Use Update directly (for post-migration use case)
 	m.Update("a", 100)
@@ -111,18 +111,8 @@ func TestMapCounter_Update(t *testing.T) {
 	assert.Empty(t, m.m)
 }
 
-func TestMapCounter_NoLimit(t *testing.T) {
-	m := NewMapCounter()
-
-	m.GetPass("a", 0, 1)
-	m.GetPass("b", 0, 2)
-
-	// TopK should return nil when no limit
-	assert.Nil(t, m.TopK())
-}
-
 func TestMapCounter_TopK_ManyEntries(t *testing.T) {
-	m := NewMapCounterWithLimit(10)
+	m := NewMapCounter(10)
 
 	// Add 100 entries with counts 1-100
 	for i := 1; i <= 100; i++ {

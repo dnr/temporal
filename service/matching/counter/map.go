@@ -29,12 +29,8 @@ type TopKEntry struct {
 
 var _ Counter = (*mapCounter)(nil)
 
-func NewMapCounter() *mapCounter {
-	return &mapCounter{m: make(map[string]int64)}
-}
-
-// NewMapCounterWithLimit creates a mapCounter that tracks the top-K entries.
-func NewMapCounterWithLimit(limit int) *mapCounter {
+// NewMapCounter creates a mapCounter that also tracks the top K entries.
+func NewMapCounter(limit int) *mapCounter {
 	return &mapCounter{
 		m:      make(map[string]int64),
 		limit:  limit,
@@ -52,16 +48,16 @@ func (m *mapCounter) GetPass(key string, base, inc int64) int64 {
 	return c
 }
 
+func (m *mapCounter) EstimateDistinctKeys() int {
+	return len(m.m)
+}
+
 // Update updates the top-K tracking without modifying the underlying map.
 // This is useful when the actual counts are stored elsewhere (e.g., cmSketch).
 func (m *mapCounter) Update(key string, count int64) {
 	if m.limit > 0 {
 		m.updateHeap(key, count)
 	}
-}
-
-func (m *mapCounter) EstimateDistinctKeys() int {
-	return len(m.m)
 }
 
 // TopK returns the top-K entries by count.

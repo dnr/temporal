@@ -11,12 +11,12 @@ type (
 	}
 
 	// hybridCounter is a Counter that uses a mapCounter until it has params.MapLimit entries,
-	// then switches to a cmSketch. hybridCounter is not safe for concurrent use.
-	// After switching to cmSketch, it continues to track the top-K entries (where K = MapLimit)
-	// in the mapCounter, so they can be preserved when cmSketch resizes.
+	// then switches to a cmSketch. After switching, it continues to track the top MapLimit
+	// entries in the mapCounter, so they can be preserved when cmSketch resizes and persisted.
+	// hybridCounter is not safe for concurrent use.
 	hybridCounter struct {
 		Counter
-		mapCounter *mapCounter // kept for top-K tracking even after migration
+		mapCounter mapCounter
 		params     CounterParams
 		src        rand.Source
 	}
@@ -39,17 +39,19 @@ var DefaultCounterParams = CounterParams{
 }
 
 func NewHybridCounter(params CounterParams, src rand.Source) *hybridCounter {
-	mc := NewMapCounterWithLimit(params.MapLimit)
-	return &hybridCounter{
-		Counter:    mc,
-		mapCounter: mc,
+	hc := &hybridCounter{
+		mapCounter: *NewMapCounter(params.MapLimit),
 		params:     params,
 		src:        src,
 	}
+	// start with mapCounter as the counter
+	hc.Counter = &hc.mapCounter
+	return hc
 }
 
 func (h *hybridCounter) GetPass(key string, base int64, inc int64) int64 {
 	p := h.Counter.GetPass(key, base, inc)
+	// FIXME: use interface?
 	if _, ok := h.Counter.(*mapCounter); ok && len(h.mapCounter.m) > h.params.MapLimit {
 		h.migrateToCMS()
 	} else if _, ok := h.Counter.(*cmSketch); ok {
