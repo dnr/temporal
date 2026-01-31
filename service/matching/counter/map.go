@@ -6,9 +6,9 @@ import "container/heap"
 // It also maintains a min-heap to efficiently track the top-K entries.
 // mapCounter is not safe for concurrent use.
 type mapCounter struct {
-	limit  int
-	heap   topKHeap
-	inHeap map[string]*heapEntry
+	m     map[string]*heapEntry
+	heap  topKHeap
+	limit int
 }
 
 // heapEntry represents an entry in the top-K min-heap.
@@ -23,9 +23,8 @@ var _ Counter = (*mapCounter)(nil)
 // NewMapCounter creates a mapCounter that also tracks the top K entries.
 func NewMapCounter(limit int) *mapCounter {
 	return &mapCounter{
-		limit:  limit,
-		heap:   make(topKHeap, 0, limit),
-		inHeap: make(map[string]*heapEntry),
+		m:     make(map[string]*heapEntry),
+		limit: limit,
 	}
 }
 
@@ -36,16 +35,15 @@ func (m *mapCounter) GetPass(key string, base, inc int64) int64 {
 
 func (m *mapCounter) getPassWithOverflow(key string, base, inc int64) (int64, bool) {
 	var prev int64
-	if entry, ok := m.inHeap[key]; ok {
+	if entry, ok := m.m[key]; ok {
 		prev = entry.count
 	}
 	c := max(base, prev+inc)
-	overflow := m.updateHeap(key, c)
-	return c, overflow
+	return c, m.updateHeap(key, c)
 }
 
 func (m *mapCounter) EstimateDistinctKeys() int {
-	return len(m.inHeap)
+	return len(m.heap)
 }
 
 // TopK returns the top-K entries by count.
@@ -58,7 +56,7 @@ func (m *mapCounter) TopK() []TopKEntry {
 }
 
 func (m *mapCounter) updateHeap(key string, count int64) bool {
-	if entry, ok := m.inHeap[key]; ok {
+	if entry, ok := m.m[key]; ok {
 		// already in heap - update count and fix
 		entry.count = count
 		heap.Fix(&m.heap, entry.index)
@@ -69,7 +67,7 @@ func (m *mapCounter) updateHeap(key string, count int64) bool {
 		// Heap not full - add entry
 		entry := &heapEntry{key: key, count: count}
 		heap.Push(&m.heap, entry)
-		m.inHeap[key] = entry
+		m.m[key] = entry
 		return false
 	}
 
@@ -77,17 +75,17 @@ func (m *mapCounter) updateHeap(key string, count int64) bool {
 	if count > m.heap[0].count {
 		// Evict the minimum
 		evicted := heap.Pop(&m.heap).(*heapEntry)
-		delete(m.inHeap, evicted.key)
+		delete(m.m, evicted.key)
 
 		// Add new entry
 		entry := &heapEntry{key: key, count: count}
 		heap.Push(&m.heap, entry)
-		m.inHeap[key] = entry
+		m.m[key] = entry
 	}
 	return true
 }
 
-// topKHeap implements heap.Interface as a min-heap (smallest count at root).
+// topKHeap implements heap.Interface as a min-heap (smallest count at root)
 type topKHeap []*heapEntry
 
 func (h topKHeap) Len() int           { return len(h) }
