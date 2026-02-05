@@ -97,3 +97,106 @@ func TestCMSketch_Grow_PreservedOnResize(t *testing.T) {
 	assert.GreaterOrEqual(t, cms.GetPass("topkey1", 0, 1), int64(9999))
 	assert.GreaterOrEqual(t, cms.GetPass("topkey2", 0, 1), int64(99999))
 }
+
+func TestCMSketch_SlideBase(t *testing.T) {
+	src := rand.NewPCG(12345, 67890)
+	cms := NewCMSketchCounter(CMSketchParams{W: 10, D: 3}, src, nil)
+
+	// Start with a value that will require sliding when we add more
+	startBase := int64(math.MaxUint32) - 100
+	p1 := cms.GetPass("hot", startBase, 0)
+	assert.Equal(t, startBase, p1)
+	assert.Equal(t, int64(0), cms.base, "base should still be 0, value fits in uint32")
+
+	// Now push past MaxUint32, which should trigger a slide
+	p2 := cms.GetPass("hot", 0, 200)
+	assert.Equal(t, startBase+200, p2)
+	assert.Greater(t, cms.base, int64(0), "base should have slid up")
+
+	// The value should still be correct after sliding
+	p3 := cms.GetPass("hot", 0, 0)
+	assert.Equal(t, startBase+200, p3)
+}
+
+func TestCMSketch_SlideBase_DragUp(t *testing.T) {
+	src := rand.NewPCG(12345, 67890)
+	cms := NewCMSketchCounter(CMSketchParams{W: 10, D: 3}, src, nil)
+
+	// Set up a cold key at a low value
+	coldPass := cms.GetPass("cold", 0, 100)
+	assert.Equal(t, int64(100), coldPass)
+
+	// Set up a hot key near the uint32 boundary
+	hotStart := int64(math.MaxUint32) - 50
+	cms.GetPass("hot", hotStart, 0)
+
+	// Push hot key past the boundary, triggering a slide
+	cms.GetPass("hot", 0, 200)
+
+	// Cold key should have been "dragged up" - its value is now at or above the new base
+	coldPassAfter := cms.GetPass("cold", 0, 0)
+	assert.Greater(t, coldPassAfter, coldPass, "cold key should have been dragged up")
+	assert.GreaterOrEqual(t, coldPassAfter, cms.base, "cold key should be at or above base")
+}
+
+func TestCMSketch_SlideBase_Headroom(t *testing.T) {
+	src := rand.NewPCG(12345, 67890)
+	cms := NewCMSketchCounter(CMSketchParams{W: 10, D: 3}, src, nil)
+
+	// Push a key just past MaxUint32 to trigger a slide
+	startBase := int64(math.MaxUint32) + 1
+	cms.GetPass("key", startBase, 0)
+
+	// After sliding, there should be ~50% headroom (MaxUint32/2)
+	// The cell value should be around MaxUint32/2
+	expectedCellValue := uint32(math.MaxUint32 / 2)
+	// Check that base was set to leave headroom
+	expectedBase := startBase - int64(expectedCellValue)
+	assert.Equal(t, expectedBase, cms.base, "base should be set to leave 50%% headroom")
+
+	// Verify we can do many more increments without another slide
+	baseBeforeIncs := cms.base
+	for i := 0; i < 1000; i++ {
+		cms.GetPass("key", 0, 1000)
+	}
+	assert.Equal(t, baseBeforeIncs, cms.base, "base should not have changed after moderate increments")
+}
+
+func TestCMSketch_SlideBase_TargetBelowBase(t *testing.T) {
+	src := rand.NewPCG(12345, 67890)
+	cms := NewCMSketchCounter(CMSketchParams{W: 10, D: 3}, src, nil)
+
+	// Push past MaxUint32 to establish a high base
+	highValue := int64(math.MaxUint32) + 1000
+	cms.GetPass("key", highValue, 0)
+	assert.Greater(t, cms.base, int64(0))
+
+	// Now try to set a value below the base - should be a no-op, returning current value
+	result := cms.GetPass("key", 100, 0) // base arg of 100 is way below cms.base
+	assert.Equal(t, highValue, result, "should return current value, not the low base")
+
+	// A new key with a low base should get dragged up to the current base
+	newKeyResult := cms.GetPass("newkey", 100, 0)
+	assert.GreaterOrEqual(t, newKeyResult, cms.base, "new key should be at or above base")
+}
+
+func TestCMSketch_SlideBase_MultipleSlides(t *testing.T) {
+	src := rand.NewPCG(12345, 67890)
+	cms := NewCMSketchCounter(CMSketchParams{W: 10, D: 3}, src, nil)
+
+	// Do multiple slides by repeatedly jumping past the uint32 boundary
+	var lastPass int64
+	for i := 0; i < 5; i++ {
+		// Jump by more than MaxUint32/2 to force a new slide each time
+		jump := int64(math.MaxUint32/2) + int64(math.MaxUint32/4)
+		lastPass = cms.GetPass("key", lastPass+jump, 0)
+	}
+
+	// Values should still be tracked correctly
+	expectedMin := int64(5) * (int64(math.MaxUint32/2) + int64(math.MaxUint32/4))
+	assert.GreaterOrEqual(t, lastPass, expectedMin)
+
+	// And we can still increment
+	newPass := cms.GetPass("key", 0, 100)
+	assert.Equal(t, lastPass+100, newPass)
+}
