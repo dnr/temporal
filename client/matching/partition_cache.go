@@ -36,42 +36,32 @@ func (c *partitionCache) Start() {
 	}()
 }
 
-func (c *partitionCache) makeKey(
+func (*partitionCache) makeKey(
 	nsid, tqname string, tqtype enumspb.TaskQueueType,
-) (string, int, error) {
+) string {
 	// note we don't need delimiters to make unambiguous keys: nsid is always the same length,
 	// the last byte is tqtype, and everything in between is the name.
 	nsidBytes, err := uuid.Parse(nsid)
 	if err != nil {
-		return "", 0, err
+		// this shouldn't fail, but use the string form as a backup, append a 0xff to differentiate
+		return nsid + tqname + string([]byte{byte(tqtype), 0xff})
 	}
-	key := string(nsidBytes[:]) + tqname + string([]byte{byte(tqtype)})
+	return string(nsidBytes[:]) + tqname + string([]byte{byte(tqtype)})
+}
+
+func (*partitionCache) shardFromKey(key string) int {
 	// mix a few bits to pick a shard
 	l := len(key)
 	shard := int(key[14] ^ key[l-2] ^ key[l-1])
-	shard = shard & (1<<partitionCacheShards - 1)
-	return key, shard, nil
+	return shard & (1<<partitionCacheShards - 1)
 }
 
-func (c *partitionCache) lookup(
-	nsid, tqname string, tqtype enumspb.TaskQueueType,
-) (partitionCounts, bool) {
-	key, shard, err := c.makeKey(nsid, tqname, tqtype)
-	if err != nil {
-		return partitionCounts{}, false
-	}
-	return c.shards[shard].lookup(key)
+func (c *partitionCache) lookup(key string) (partitionCounts, bool) {
+	return c.shards[c.shardFromKey(key)].lookup(key)
 }
 
-func (c *partitionCache) put(
-	nsid, tqname string, tqtype enumspb.TaskQueueType,
-	pc partitionCounts,
-) {
-	key, shard, err := c.makeKey(nsid, tqname, tqtype)
-	if err != nil {
-		return
-	}
-	c.shards[shard&(1<<partitionCacheShards-1)].put(key, pc)
+func (c *partitionCache) put(key string, pc partitionCounts) {
+	c.shards[c.shardFromKey(key)].put(key, pc)
 }
 
 func (s *partitionCacheShard) lookup(key string) (partitionCounts, bool) {
