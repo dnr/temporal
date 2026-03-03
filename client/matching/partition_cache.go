@@ -56,7 +56,7 @@ func (*partitionCache) shardFromKey(key string) int {
 	return shard & (1<<partitionCacheShards - 1)
 }
 
-func (c *partitionCache) lookup(key string) (partitionCounts, bool) {
+func (c *partitionCache) lookup(key string) partitionCounts {
 	return c.shards[c.shardFromKey(key)].lookup(key)
 }
 
@@ -64,23 +64,27 @@ func (c *partitionCache) put(key string, pc partitionCounts) {
 	c.shards[c.shardFromKey(key)].put(key, pc)
 }
 
-func (s *partitionCacheShard) lookup(key string) (partitionCounts, bool) {
+func (s *partitionCacheShard) lookup(key string) partitionCounts {
 	s.lock.RLock()
 	if pc, ok := s.active[key]; ok {
 		s.lock.RUnlock()
-		return pc, true
+		return pc
 	} else if pc, ok := s.prev[key]; ok {
 		s.lock.RUnlock()
 		s.put(key, pc) // promote to active
-		return pc, true
+		return pc
 	}
 	s.lock.RUnlock()
-	return partitionCounts{}, false
+	return partitionCounts{}
 }
 
 func (s *partitionCacheShard) put(key string, pc partitionCounts) {
 	s.lock.Lock()
-	s.active[key] = pc
+	if pc.valid() {
+		s.active[key] = pc
+	} else {
+		delete(s.active, key)
+	}
 	delete(s.prev, key)
 	s.lock.Unlock()
 }

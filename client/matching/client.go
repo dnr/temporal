@@ -69,6 +69,46 @@ func NewClient(
 	return c
 }
 
+func handlePartitionCounts[Req, Res any](
+	ctx context.Context,
+	c *clientImpl,
+	pkey string,
+	request Req,
+	opts []grpc.CallOption,
+	op func(
+		ctx context.Context,
+		pc partitionCounts,
+		request Req,
+		opts []grpc.CallOption,
+	) (Res, error),
+) (Res, error) {
+	// capture trailer
+	var trailer metadata.MD
+	opts = append(slices.Clone(opts), grpc.Trailer(&trailer))
+
+	// get current idea of partition counts
+	pc := c.partitionCache.lookup(pkey)
+
+	// try once
+	res, err := op(pc.appendToOutgoingContext(ctx), pc, request, opts)
+
+	// update cache on trailer on both success and error. if the trailer has no data,
+	// this removes the key from the cache.
+	pc = parsePartitionCountsFromTrailer(trailer)
+	c.partitionCache.put(pkey, pc)
+
+	if _, ok := errors.AsType[*serviceerrors.StalePartitionCounts](err); ok {
+		// if we got a StalePartitionCounts, retry once
+		trailer = nil
+		res, err = op(pc.appendToOutgoingContext(ctx), pc, request, opts)
+		// update again
+		pc = parsePartitionCountsFromTrailer(trailer)
+		c.partitionCache.put(pkey, pc)
+	}
+
+	return res, err
+}
+
 func (c *clientImpl) AddActivityTask(
 	ctx context.Context,
 	request *matchingservice.AddActivityTaskRequest,
@@ -79,24 +119,15 @@ func (c *clientImpl) AddActivityTask(
 		request.GetTaskQueue().GetName(),
 		enumspb.TASK_QUEUE_TYPE_ACTIVITY,
 	)
-	res, err := c.addActivityTask(ctx, pkey, request, opts...)
-	if c.handleStalePartitionCounts(pkey, err) {
-		// one immediate retry on stale partition counts
-		res, err = c.addActivityTask(ctx, pkey, request, opts)
-	}
-	return res, err
+	return handlePartitionCounts(ctx, c, pkey, request, opts, c.addActivityTask)
 }
 
 func (c *clientImpl) addActivityTask(
 	ctx context.Context,
-	pkey string,
+	pc partitionCounts,
 	request *matchingservice.AddActivityTaskRequest,
 	opts []grpc.CallOption,
 ) (*matchingservice.AddActivityTaskResponse, error) {
-
-	pc, ctx, opts, handleTrailer := c.getPartitionCountsAndContext(ctx, opts, pkey)
-	defer handleTrailer()
-
 	request = common.CloneProto(request)
 	client, err := c.pickClientForWrite(
 		request.GetTaskQueue(),
@@ -123,19 +154,15 @@ func (c *clientImpl) AddWorkflowTask(
 		request.GetTaskQueue().GetName(),
 		enumspb.TASK_QUEUE_TYPE_WORKFLOW,
 	)
-	return c.addWorkflowTask(ctx, pkey, request, opts...)
+	return handlePartitionCounts(ctx, c, pkey, request, opts, c.addWorkflowTask)
 }
 
 func (c *clientImpl) addWorkflowTask(
 	ctx context.Context,
-	pkey string,
+	pc partitionCounts,
 	request *matchingservice.AddWorkflowTaskRequest,
-	opts ...grpc.CallOption,
+	opts []grpc.CallOption,
 ) (*matchingservice.AddWorkflowTaskResponse, error) {
-
-	pc, ctx, opts, handleTrailer := c.getPartitionCountsAndContext(ctx, opts, pkey)
-	defer handleTrailer()
-
 	request = common.CloneProto(request)
 	client, err := c.pickClientForWrite(
 		request.GetTaskQueue(),
@@ -162,19 +189,15 @@ func (c *clientImpl) PollActivityTaskQueue(
 		request.GetPollRequest().GetTaskQueue().GetName(),
 		enumspb.TASK_QUEUE_TYPE_ACTIVITY,
 	)
-	return c.pollActivityTaskQueue(ctx, pkey, request, opts...)
+	return handlePartitionCounts(ctx, c, pkey, request, opts, c.pollActivityTaskQueue)
 }
 
 func (c *clientImpl) pollActivityTaskQueue(
 	ctx context.Context,
-	pkey string,
+	pc partitionCounts,
 	request *matchingservice.PollActivityTaskQueueRequest,
-	opts ...grpc.CallOption,
+	opts []grpc.CallOption,
 ) (*matchingservice.PollActivityTaskQueueResponse, error) {
-
-	pc, ctx, opts, handleTrailer := c.getPartitionCountsAndContext(ctx, opts, pkey)
-	defer handleTrailer()
-
 	request = common.CloneProto(request)
 	client, release, err := c.pickClientForRead(
 		request.GetPollRequest().GetTaskQueue(),
@@ -204,19 +227,15 @@ func (c *clientImpl) PollWorkflowTaskQueue(
 		request.GetPollRequest().GetTaskQueue().GetName(),
 		enumspb.TASK_QUEUE_TYPE_WORKFLOW,
 	)
-	return c.pollWorkflowTaskQueue(ctx, pkey, request, opts...)
+	return handlePartitionCounts(ctx, c, pkey, request, opts, c.pollWorkflowTaskQueue)
 }
 
 func (c *clientImpl) pollWorkflowTaskQueue(
 	ctx context.Context,
-	pkey string,
+	pc partitionCounts,
 	request *matchingservice.PollWorkflowTaskQueueRequest,
-	opts ...grpc.CallOption,
+	opts []grpc.CallOption,
 ) (*matchingservice.PollWorkflowTaskQueueResponse, error) {
-
-	pc, ctx, opts, handleTrailer := c.getPartitionCountsAndContext(ctx, opts, pkey)
-	defer handleTrailer()
-
 	request = common.CloneProto(request)
 	client, release, err := c.pickClientForRead(
 		request.GetPollRequest().GetTaskQueue(),
@@ -246,19 +265,15 @@ func (c *clientImpl) QueryWorkflow(
 		request.GetTaskQueue().GetName(),
 		enumspb.TASK_QUEUE_TYPE_WORKFLOW,
 	)
-	return c.queryWorkflow(ctx, pkey, request, opts...)
+	return handlePartitionCounts(ctx, c, pkey, request, opts, c.queryWorkflow)
 }
 
 func (c *clientImpl) queryWorkflow(
 	ctx context.Context,
-	pkey string,
+	pc partitionCounts,
 	request *matchingservice.QueryWorkflowRequest,
-	opts ...grpc.CallOption,
+	opts []grpc.CallOption,
 ) (*matchingservice.QueryWorkflowResponse, error) {
-
-	pc, ctx, opts, handleTrailer := c.getPartitionCountsAndContext(ctx, opts, pkey)
-	defer handleTrailer()
-
 	// use shallow copy since QueryRequest may contain a large payload
 	request = &matchingservice.QueryWorkflowRequest{
 		NamespaceId:      request.NamespaceId,
@@ -369,37 +384,4 @@ func (c *clientImpl) getClientForTaskQueuePartition(
 		return nil, err
 	}
 	return client.(matchingservice.MatchingServiceClient), nil
-}
-
-func (c *clientImpl) getPartitionCountsAndContext(
-	ctx context.Context,
-	opts []grpc.CallOption,
-	pkey string,
-) (partitionCounts, context.Context, []grpc.CallOption, func()) {
-	var trailer metadata.MD
-	opts = append(slices.Clone(opts), grpc.Trailer(&trailer))
-	handleTrailer := func() {
-		newPC, err := parsePartitionCountsFromTrailer(trailer)
-		if err == nil && newPC.valid() {
-			c.partitionCache.put(pkey, newPC)
-		}
-	}
-
-	pc, ok := c.partitionCache.lookup(pkey)
-	if ok {
-		ctx = pc.appendToOutgoingContext(ctx)
-	}
-
-	return pc, pc.appendToOutgoingContext(ctx), opts, handleTrailer
-}
-
-func (c *clientImpl) handleStalePartitionCounts(pkey string, err error) bool {
-	spc, ok := errors.AsType[*serviceerrors.StalePartitionCounts](err)
-	if ok {
-		c.partitionCache.put(pkey, partitionCounts{
-			read:  int16(spc.Read),
-			write: int16(spc.Write),
-		})
-	}
-	return ok
 }
