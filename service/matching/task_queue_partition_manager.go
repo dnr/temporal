@@ -20,6 +20,7 @@ import (
 	"go.temporal.io/server/api/matchingservice/v1"
 	persistencespb "go.temporal.io/server/api/persistence/v1"
 	taskqueuespb "go.temporal.io/server/api/taskqueue/v1"
+	"go.temporal.io/server/client/matching"
 	"go.temporal.io/server/common/backoff"
 	"go.temporal.io/server/common/cache"
 	"go.temporal.io/server/common/dynamicconfig"
@@ -40,11 +41,18 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
-var errDefaultQueueNotInit = serviceerror.NewInternal("defaultQueue is not initializaed")
+var (
+	errDefaultQueueNotInit  = serviceerror.NewInternal("defaultQueue is not initializaed")
+	errPartitionInvalid     = serviceerror.NewUnavailable("partition is invalid")
+	errPartitionDraining    = serviceerror.NewUnavailable("partition is draining")
+	errStalePartitionCounts = serviceerrors.NewStalePartitionCounts()
+)
 
 const (
 	defaultTaskDispatchRPS    = 100000.0
 	defaultTaskDispatchRPSTTL = time.Minute
+
+	partitionCountAllowedError = 1.5
 )
 
 type (
@@ -154,6 +162,7 @@ func (pm *taskQueuePartitionManagerImpl) initialize() (retErr error) {
 	if err != nil {
 		return err
 	}
+	pm.initCancel()
 	data, _, err := pm.getPerTypeUserData()
 	if err != nil {
 		return err
@@ -251,6 +260,60 @@ func (pm *taskQueuePartitionManagerImpl) Stop(unloadCause unloadCause) {
 	pm.engine.updateTaskQueuePartitionGauge(pm.Namespace(), pm.partition, -1)
 
 	pm.goroGroup.Cancel()
+}
+
+func (pm *taskQueuePartitionManagerImpl) checkPartitionCounts(ctx context.Context, forWrite bool) error {
+	normal, ok := pm.partition.(*tqid.NormalPartition)
+	if !ok {
+		return nil // only normal partitions do dynamic scaling
+	}
+	id := normal.PartitionId()
+
+	// TODO: maybe we can assume this is initialized?
+	err := pm.userDataManager.WaitUntilInitialized(ctx)
+	if err != nil {
+		return err
+	}
+
+	scaleInfo := pm.userDataManager.PartitionScale()
+	if scaleInfo.GetRead() <= 0 || scaleInfo.GetWrite() <= 0 || scaleInfo.Write > scaleInfo.Read {
+		return nil // missing or invalid scale info
+	}
+
+	// handle cases where we can't accept the rpc at all: any call for invalid,
+	// write calls for draining
+	switch {
+	case id < 0:
+		return serviceerror.NewInternal("negative partition id")
+	case id >= int(scaleInfo.Read):
+		return errPartitionInvalid
+	case id >= int(scaleInfo.Write) && forWrite:
+		return errPartitionDraining
+	}
+
+	// check what the client thought the counts were
+	pc := matching.ParsePartitionCountsFromIncomingContext(ctx)
+	if pc.Valid() {
+		readRatio := float32(pc.Read) / float32(scaleInfo.Read)
+		writeRatio := float32(pc.Write) / float32(scaleInfo.Write)
+		worst := max(readRatio, 1/readRatio, writeRatio, 1/writeRatio)
+		if worst > partitionCountAllowedError {
+			// reject to improve load balancing
+			return errStalePartitionCounts
+		}
+	}
+	// if client did not send any counts, don't reject (as long as partition is valid).
+	// FIXME: is that right?
+
+	// attach current counts in trailer
+	// FIXME: attach counts right before return instead!
+	newPC := matching.PartitionCounts{
+		Read:  scaleInfo.Read,
+		Write: scaleInfo.Write,
+	}
+	newPC.SetTrailer(ctx)
+
+	return nil
 }
 
 func (pm *taskQueuePartitionManagerImpl) GetRateLimitManager() *rateLimitManager {

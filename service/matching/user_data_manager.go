@@ -55,6 +55,8 @@ type (
 		HandleGetUserDataRequest(ctx context.Context, req *matchingservice.GetTaskQueueUserDataRequest) (*matchingservice.GetTaskQueueUserDataResponse, error)
 		CheckTaskQueueUserDataPropagation(context.Context, int64, int, int) error
 		LocalBacklogPriorityChanged(map[PhysicalTaskQueueVersion]int64)
+		SetPartitionScale(read, write int32)
+		PartitionScale() *taskqueuespb.PartitionScaleInfo
 	}
 
 	UserDataUpdateOptions struct {

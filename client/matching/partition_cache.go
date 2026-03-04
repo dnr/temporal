@@ -16,8 +16,8 @@ type partitionCache struct {
 
 type partitionCacheShard struct {
 	lock   sync.RWMutex
-	active map[string]partitionCounts
-	prev   map[string]partitionCounts
+	active map[string]PartitionCounts
+	prev   map[string]PartitionCounts
 	_      [64 - 24 - 8 - 8]byte // eliminate false sharing
 }
 
@@ -56,15 +56,15 @@ func (*partitionCache) shardFromKey(key string) int {
 	return shard & (1<<partitionCacheShards - 1)
 }
 
-func (c *partitionCache) lookup(key string) partitionCounts {
+func (c *partitionCache) lookup(key string) PartitionCounts {
 	return c.shards[c.shardFromKey(key)].lookup(key)
 }
 
-func (c *partitionCache) put(key string, pc partitionCounts) {
+func (c *partitionCache) put(key string, pc PartitionCounts) {
 	c.shards[c.shardFromKey(key)].put(key, pc)
 }
 
-func (s *partitionCacheShard) lookup(key string) partitionCounts {
+func (s *partitionCacheShard) lookup(key string) PartitionCounts {
 	s.lock.RLock()
 	if pc, ok := s.active[key]; ok {
 		s.lock.RUnlock()
@@ -75,12 +75,12 @@ func (s *partitionCacheShard) lookup(key string) partitionCounts {
 		return pc
 	}
 	s.lock.RUnlock()
-	return partitionCounts{}
+	return PartitionCounts{}
 }
 
-func (s *partitionCacheShard) put(key string, pc partitionCounts) {
+func (s *partitionCacheShard) put(key string, pc PartitionCounts) {
 	s.lock.Lock()
-	if pc.valid() {
+	if pc.Valid() {
 		s.active[key] = pc
 	} else {
 		delete(s.active, key)
@@ -93,5 +93,5 @@ func (s *partitionCacheShard) rotate() {
 	s.lock.Lock()
 	defer s.lock.Unlock()
 	s.prev = s.active
-	s.active = make(map[string]partitionCounts)
+	s.active = make(map[string]PartitionCounts)
 }

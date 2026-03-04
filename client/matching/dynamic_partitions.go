@@ -7,61 +7,66 @@ import (
 	"strconv"
 	"strings"
 
+	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
 )
 
 const partitionCountsHeaderName = "dpcount"
 const partitionCountsTrailerName = "dpcount"
 
-type partitionCounts struct {
-	read, write int16
+type PartitionCounts struct {
+	Read, Write int32
 }
 
-func (pc partitionCounts) valid() bool {
-	return pc.read > 0 && pc.write > 0
+func (pc PartitionCounts) Valid() bool {
+	return pc.Read > 0 && pc.Write > 0
 }
 
-func (pc partitionCounts) encode() string {
-	return fmt.Sprintf("%d,%d", pc.read, pc.write)
+func (pc PartitionCounts) encode() string {
+	return fmt.Sprintf("%d,%d", pc.Read, pc.Write)
 }
 
-func (pc partitionCounts) appendToOutgoingContext(ctx context.Context) context.Context {
+func (pc PartitionCounts) appendToOutgoingContext(ctx context.Context) context.Context {
 	return metadata.AppendToOutgoingContext(ctx, partitionCountsHeaderName, pc.encode())
 }
 
-func parsePartitionCounts(hdr string) (partitionCounts, error) {
+func (pc PartitionCounts) SetTrailer(ctx context.Context) {
+	grpc.SetTrailer(ctx, metadata.Pairs(partitionCountsTrailerName, pc.encode()))
+}
+
+func parsePartitionCounts(hdr string) (PartitionCounts, error) {
 	parts := strings.SplitN(hdr, ",", 2)
 	if len(parts) < 2 {
-		return partitionCounts{}, errors.New("not enough parts")
+		return PartitionCounts{}, errors.New("not enough parts")
 	}
 	read, err := strconv.Atoi(parts[0])
 	if err != nil {
-		return partitionCounts{}, err
+		return PartitionCounts{}, err
 	}
 	write, err := strconv.Atoi(parts[1])
 	if err != nil {
-		return partitionCounts{}, err
+		return PartitionCounts{}, err
 	}
-	return partitionCounts{
-		read:  int16(read),
-		write: int16(write),
+	return PartitionCounts{
+		Read:  int32(read),
+		Write: int32(write),
 	}, nil
 }
 
-func parsePartitionCountsFromIncomingContext(ctx context.Context) partitionCounts {
+func ParsePartitionCountsFromIncomingContext(ctx context.Context) PartitionCounts {
 	vals := metadata.ValueFromIncomingContext(ctx, partitionCountsHeaderName)
 	if len(vals) == 0 {
-		return partitionCounts{}
+		return PartitionCounts{}
 	}
 	pc, _ := parsePartitionCounts(vals[0])
 	// TODO: log errors?
 	return pc
 }
 
-func parsePartitionCountsFromTrailer(trailer metadata.MD) partitionCounts {
+func parsePartitionCountsFromTrailer(trailer metadata.MD) PartitionCounts {
 	vals := trailer.Get(partitionCountsTrailerName)
 	if len(vals) == 0 {
-		return partitionCounts{}
+		return PartitionCounts{}
 	}
 	pc, _ := parsePartitionCounts(vals[0])
 	// TODO: log errors?

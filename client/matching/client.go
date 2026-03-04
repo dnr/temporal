@@ -77,7 +77,7 @@ func handlePartitionCounts[Req, Res any](
 	opts []grpc.CallOption,
 	op func(
 		ctx context.Context,
-		pc partitionCounts,
+		pc PartitionCounts,
 		request Req,
 		opts []grpc.CallOption,
 	) (Res, error),
@@ -90,6 +90,8 @@ func handlePartitionCounts[Req, Res any](
 	pc := c.partitionCache.lookup(pkey)
 
 	// try once
+	// FIXME: note this sends 0,0 instead of dynamic config values if missing from cache. maybe
+	// we need to send dc values?
 	res, err := op(pc.appendToOutgoingContext(ctx), pc, request, opts)
 
 	// update cache on trailer on both success and error. if the trailer has no data,
@@ -124,7 +126,7 @@ func (c *clientImpl) AddActivityTask(
 
 func (c *clientImpl) addActivityTask(
 	ctx context.Context,
-	pc partitionCounts,
+	pc PartitionCounts,
 	request *matchingservice.AddActivityTaskRequest,
 	opts []grpc.CallOption,
 ) (*matchingservice.AddActivityTaskResponse, error) {
@@ -159,7 +161,7 @@ func (c *clientImpl) AddWorkflowTask(
 
 func (c *clientImpl) addWorkflowTask(
 	ctx context.Context,
-	pc partitionCounts,
+	pc PartitionCounts,
 	request *matchingservice.AddWorkflowTaskRequest,
 	opts []grpc.CallOption,
 ) (*matchingservice.AddWorkflowTaskResponse, error) {
@@ -194,7 +196,7 @@ func (c *clientImpl) PollActivityTaskQueue(
 
 func (c *clientImpl) pollActivityTaskQueue(
 	ctx context.Context,
-	pc partitionCounts,
+	pc PartitionCounts,
 	request *matchingservice.PollActivityTaskQueueRequest,
 	opts []grpc.CallOption,
 ) (*matchingservice.PollActivityTaskQueueResponse, error) {
@@ -232,7 +234,7 @@ func (c *clientImpl) PollWorkflowTaskQueue(
 
 func (c *clientImpl) pollWorkflowTaskQueue(
 	ctx context.Context,
-	pc partitionCounts,
+	pc PartitionCounts,
 	request *matchingservice.PollWorkflowTaskQueueRequest,
 	opts []grpc.CallOption,
 ) (*matchingservice.PollWorkflowTaskQueueResponse, error) {
@@ -270,7 +272,7 @@ func (c *clientImpl) QueryWorkflow(
 
 func (c *clientImpl) queryWorkflow(
 	ctx context.Context,
-	pc partitionCounts,
+	pc PartitionCounts,
 	request *matchingservice.QueryWorkflowRequest,
 	opts []grpc.CallOption,
 ) (*matchingservice.QueryWorkflowResponse, error) {
@@ -328,7 +330,7 @@ func (c *clientImpl) pickClientForWrite(
 	nsid string,
 	taskType enumspb.TaskQueueType,
 	forwardedFrom string,
-	pc partitionCounts,
+	pc PartitionCounts,
 ) (matchingservice.MatchingServiceClient, error) {
 	p, tq := c.processInputPartition(proto, nsid, taskType, forwardedFrom)
 	if tq != nil {
@@ -344,7 +346,7 @@ func (c *clientImpl) pickClientForRead(
 	nsid string,
 	taskType enumspb.TaskQueueType,
 	forwardedFrom string,
-	pc partitionCounts,
+	pc PartitionCounts,
 ) (client matchingservice.MatchingServiceClient, release func(), err error) {
 	p, tq := c.processInputPartition(proto, nsid, taskType, forwardedFrom)
 	if tq != nil {

@@ -23,7 +23,7 @@ type (
 		// performed
 		PickWritePartition(
 			taskQueue *tqid.TaskQueue,
-			pc partitionCounts,
+			pc PartitionCounts,
 		) *tqid.NormalPartition
 
 		// PickReadPartition returns the task queue partition to send a poller to.
@@ -31,7 +31,7 @@ type (
 		// forwardedFrom is non-empty, no load balancing should be done.
 		PickReadPartition(
 			taskQueue *tqid.TaskQueue,
-			pc partitionCounts,
+			pc PartitionCounts,
 		) *pollToken
 	}
 
@@ -77,7 +77,7 @@ func NewLoadBalancer(
 
 func (lb *defaultLoadBalancer) PickWritePartition(
 	taskQueue *tqid.TaskQueue,
-	pc partitionCounts,
+	pc PartitionCounts,
 ) *tqid.NormalPartition {
 	if n, ok := testhooks.Get(lb.testHooks, testhooks.MatchingLBForceWritePartition, namespace.ID(taskQueue.NamespaceId())); ok {
 		return taskQueue.NormalPartition(n)
@@ -89,8 +89,8 @@ func (lb *defaultLoadBalancer) PickWritePartition(
 	}
 
 	var partitionCount int
-	if pc.write > 0 {
-		partitionCount = int(pc.write)
+	if pc.Write > 0 {
+		partitionCount = int(pc.Write)
 	} else {
 		partitionCount = max(1, lb.nWritePartitions(nsName.String(), taskQueue.Name(), taskQueue.TaskType()))
 	}
@@ -102,7 +102,7 @@ func (lb *defaultLoadBalancer) PickWritePartition(
 // Caller is responsible to call pollToken.Release() after complete the poll.
 func (lb *defaultLoadBalancer) PickReadPartition(
 	taskQueue *tqid.TaskQueue,
-	pc partitionCounts,
+	pc PartitionCounts,
 ) *pollToken {
 	tqlb := lb.getTaskQueueLoadBalancer(taskQueue)
 
@@ -110,8 +110,8 @@ func (lb *defaultLoadBalancer) PickReadPartition(
 	// map namespace ID to name.
 	var partitionCount = dynamicconfig.GlobalDefaultNumTaskQueuePartitions
 
-	if pc.read > 0 {
-		partitionCount = int(pc.read)
+	if pc.Read > 0 {
+		partitionCount = int(pc.Read)
 	} else {
 		namespaceName, err := lb.namespaceIDToName(namespace.ID(taskQueue.NamespaceId()))
 		if err == nil {
