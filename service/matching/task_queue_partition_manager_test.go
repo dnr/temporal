@@ -92,7 +92,7 @@ func (s *PartitionManagerTestSuite) SetupTest() {
 	tqConfig := newTaskQueueConfig(partition.TaskQueue(), engine.config, ns.Name())
 	s.userDataMgr = &mockUserDataManager{}
 
-	pm, err := newTaskQueuePartitionManager(engine, ns, partition, tqConfig, logger, logger, metrics.NoopMetricsHandler, s.userDataMgr, nil)
+	pm, err := newTaskQueuePartitionManager(engine, ns, partition, tqConfig, logger, logger, metrics.NoopMetricsHandler, s.userDataMgr)
 	s.NoError(err)
 	s.partitionMgr = pm
 	engine.Start()
@@ -1349,7 +1349,7 @@ func (s *PartitionManagerTestSuite) setupPartitionManagerWithCapture(
 	partition := f.TaskQueue(enumspb.TASK_QUEUE_TYPE_WORKFLOW).RootPartition()
 	tqConfig := newTaskQueueConfig(partition.TaskQueue(), s.partitionMgr.engine.config, s.partitionMgr.ns.Name())
 
-	pm, err := newTaskQueuePartitionManager(s.partitionMgr.engine, s.partitionMgr.ns, partition, tqConfig, s.partitionMgr.logger, s.partitionMgr.throttledLogger, metricsHandler, s.userDataMgr, nil)
+	pm, err := newTaskQueuePartitionManager(s.partitionMgr.engine, s.partitionMgr.ns, partition, tqConfig, s.partitionMgr.logger, s.partitionMgr.throttledLogger, metricsHandler, s.userDataMgr)
 	s.Require().NoError(err)
 	pm.Start()
 
@@ -1536,7 +1536,7 @@ func (m *mockUserDataManager) SetPartitionScale(scaleInfo *taskqueuespb.Partitio
 }
 
 func (m *mockUserDataManager) PartitionScale() *taskqueuespb.PartitionScaleInfo {
-	panic("unused")
+	return nil
 }
 
 func (m *mockUserDataManager) updateVersioningData(data *persistencespb.VersioningData) {

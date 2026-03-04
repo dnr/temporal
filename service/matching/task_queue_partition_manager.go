@@ -125,15 +125,23 @@ func newTaskQueuePartitionManager(
 	throttledLogger log.Logger,
 	metricsHandler metrics.Handler,
 	userDataManager userDataManager,
-	partitionScaler PartitionScaler,
 ) (*taskQueuePartitionManagerImpl, error) {
 	rateLimitManager := newRateLimitManager(
 		userDataManager,
 		tqConfig,
 		partition.TaskQueue().TaskType())
+
+	// create partition scaler + manager if root
 	var scaleManager *scaleManager
-	if partition.IsRoot() && partitionScaler != nil {
-		scaleManager = newScaleManager(userDataManager, partitionScaler)
+	if partition.IsRoot() && e.partitionScalerFactory != nil {
+		partitionScaler := e.partitionScalerFactory.New(
+			ns.Name(),
+			partition.TaskQueue().Name(),
+			partition.TaskQueue().TaskType(),
+		)
+		if partitionScaler != nil {
+			scaleManager = newScaleManager(userDataManager, partitionScaler)
+		}
 	}
 	pm := &taskQueuePartitionManagerImpl{
 		engine:                e,

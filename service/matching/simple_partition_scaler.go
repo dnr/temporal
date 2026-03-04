@@ -22,7 +22,9 @@ func newSimplePartitionScalerFactory(cfg scalerFactoryCfg) *simplePartitionScale
 	return &simplePartitionScalerFactory{cfg: cfg}
 }
 
-func (s *simplePartitionScalerFactory) New(nsName namespace.Name, tqName string, tqType enumspb.TaskQueueType) PartitionScaler {
+func (s *simplePartitionScalerFactory) New(
+	nsName namespace.Name, tqName string, tqType enumspb.TaskQueueType,
+) PartitionScaler {
 	cfg := func() dynamicconfig.SimplePartitionScalerSettings { return s.cfg(nsName.String(), tqName, tqType) }
 	return newSimplePartitionScaler(cfg)
 }
