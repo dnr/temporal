@@ -1,13 +1,18 @@
 package matching
 
 import (
+	"context"
 	"math/bits"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	persistencespb "go.temporal.io/server/api/persistence/v1"
 	taskqueuespb "go.temporal.io/server/api/taskqueue/v1"
 	"go.temporal.io/server/common"
+	"go.temporal.io/server/common/backoff"
+	"go.temporal.io/server/common/goro"
+	"go.temporal.io/server/common/util"
 )
 
 // scaleManager keeps some state and manages the interaction with partitionScaler.
@@ -16,12 +21,12 @@ type scaleManager struct {
 	userDataManager userDataManager
 	partitionScaler PartitionScaler
 	setTarget       func(int)
+	scaleDown       *goro.Handle
 
 	lock         sync.Mutex
 	scaleState   *persistencespb.PartitionScaleState
 	defaultQueue physicalTaskQueueManager // used to write state to db
 
-	_     [64 - 8 - 8 - 16]byte
 	batch atomic.Int64
 }
 
@@ -32,8 +37,10 @@ func newScaleManager(
 	sm := &scaleManager{
 		userDataManager: userDataManager,
 		partitionScaler: partitionScaler,
+		scaleDown:       goro.NewHandle(context.Background()),
 	}
 	sm.setTarget = sm.SetTarget // allocate closure once
+	sm.scaleDown.Go(sm.scaleDownPeriodically)
 	return sm
 }
 
@@ -41,6 +48,7 @@ func (sm *scaleManager) Stop() {
 	if sm == nil {
 		return
 	}
+	sm.scaleDown.Cancel()
 	sm.partitionScaler.Stop()
 }
 
@@ -133,6 +141,23 @@ func (sm *scaleManager) syncToEphemeralDataLocked() {
 		Read:  read,
 		Write: write,
 	})
+}
+
+func (sm *scaleManager) scaleDownPeriodically(ctx context.Context) error {
+	const interval = time.Minute
+	util.InterruptibleSleep(ctx, backoff.FullJitter(interval))
+	t := time.NewTicker(time.Minute).C
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-t:
+			sm.lock.Lock()
+			target := sm.scaleState.GetTarget()
+			sm.lock.Unlock()
+			sm.partitionScaler.OnTasks(0, int(target), sm.setTarget)
+		}
+	}
 }
 
 func readPartitionsFromBacklogState(state []uint64) int32 {

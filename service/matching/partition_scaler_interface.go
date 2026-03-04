@@ -18,6 +18,8 @@ type PartitionScaler interface {
 	// It will also be given the current partition count target. If it wants to change the
 	// target, it should call setTarget with the new target. Changes may be rejected if called
 	// too often or the changes are too large.
+	// OnTasks will also be called periodically with num == 0 to allow scale down when there
+	// are no tasks.
 	// Setting target to zero will disable dynamic partition scaling.
 	OnTasks(num, currentTarget int, setTarget func(newTarget int))
 	// Stop will be called when unloading the partition.

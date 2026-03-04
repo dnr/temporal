@@ -29,7 +29,8 @@ func (s *simplePartitionScalerFactory) New(nsName namespace.Name, tqName string,
 
 // simplePartitionScaler uses task add rates to scale partitions.
 type simplePartitionScaler struct {
-	cfg      scalerCfg
+	cfg scalerCfg
+
 	lock     sync.Mutex
 	trackers map[time.Duration]*taskTracker
 }
