@@ -1,0 +1,50 @@
+package matching
+
+import (
+	"testing"
+
+	"github.com/stretchr/testify/assert"
+	persistencespb "go.temporal.io/server/api/persistence/v1"
+)
+
+func TestBacklogStateBits(t *testing.T) {
+	state := &persistencespb.PartitionScaleState{}
+
+	// setting and reading individual bits
+	setBacklogStateBit(state, 0)
+	assert.Equal(t, []uint64{1}, state.BacklogState)
+	assert.Equal(t, int32(1), readPartitionsFromBacklogState(state))
+
+	setBacklogStateBit(state, 5)
+	assert.Equal(t, []uint64{0b100001}, state.BacklogState)
+	assert.Equal(t, int32(6), readPartitionsFromBacklogState(state))
+
+	// bit in second word
+	setBacklogStateBit(state, 64)
+	assert.Equal(t, []uint64{0b100001, 1}, state.BacklogState)
+	assert.Equal(t, int32(65), readPartitionsFromBacklogState(state))
+
+	// bit at word boundary
+	setBacklogStateBit(state, 63)
+	assert.Equal(t, []uint64{0b100001 | (1 << 63), 1}, state.BacklogState)
+	assert.Equal(t, int32(65), readPartitionsFromBacklogState(state))
+
+	// clear high bit, read should drop back
+	clearBacklogStateBit(state, 64)
+	assert.Equal(t, []uint64{0b100001 | (1 << 63)}, state.BacklogState) // trailing zero word trimmed
+	assert.Equal(t, int32(64), readPartitionsFromBacklogState(state))
+
+	// clear all bits one by one
+	clearBacklogStateBit(state, 63)
+	clearBacklogStateBit(state, 5)
+	clearBacklogStateBit(state, 0)
+	assert.Empty(t, state.BacklogState)
+	assert.Equal(t, int32(0), readPartitionsFromBacklogState(state))
+
+	// clearing a bit that's already clear or out of range is a no-op
+	clearBacklogStateBit(state, 999)
+	assert.Empty(t, state.BacklogState)
+
+	// read on nil returns 0
+	assert.Equal(t, int32(0), readPartitionsFromBacklogState(nil))
+}
