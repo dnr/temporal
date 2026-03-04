@@ -464,6 +464,14 @@ func (db *taskQueueDB) SetOtherHasTasks(ctx context.Context, value bool) error {
 	return db.updateTaskQueueLocked(ctx, false)
 }
 
+func (db *taskQueueDB) UpdateScaleState(ctx context.Context, scaleState *persistencespb.PartitionScaleState) error {
+	db.Lock()
+	defer db.Unlock()
+	db.scaleState = scaleState
+	db.lastChange = time.Now()
+	return db.updateTaskQueueLocked(ctx, false)
+}
+
 // CreateTasks creates a batch of given tasks for this task queue
 func (db *taskQueueDB) CreateTasks(
 	ctx context.Context,

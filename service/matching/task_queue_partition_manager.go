@@ -98,6 +98,8 @@ type (
 		// rateLimitManager is used to manage the rate limit for task queues.
 		rateLimitManager *rateLimitManager
 
+		scaleManager *scaleManager
+
 		// loadTime tracks when this partition manager was started, used to prevent
 		// false positives in the no-recent-poller metric for newly loaded queues
 		loadTime time.Time
@@ -123,11 +125,16 @@ func newTaskQueuePartitionManager(
 	throttledLogger log.Logger,
 	metricsHandler metrics.Handler,
 	userDataManager userDataManager,
+	partitionScaler PartitionScaler,
 ) (*taskQueuePartitionManagerImpl, error) {
 	rateLimitManager := newRateLimitManager(
 		userDataManager,
 		tqConfig,
 		partition.TaskQueue().TaskType())
+	var scaleManager *scaleManager
+	if partition.IsRoot() && partitionScaler != nil {
+		scaleManager = newScaleManager(userDataManager, partitionScaler)
+	}
 	pm := &taskQueuePartitionManagerImpl{
 		engine:                e,
 		partition:             partition,
@@ -140,6 +147,7 @@ func newTaskQueuePartitionManager(
 		versionedQueues:       make(map[PhysicalTaskQueueVersion]physicalTaskQueueManager),
 		userDataManager:       userDataManager,
 		rateLimitManager:      rateLimitManager,
+		scaleManager:          scaleManager,
 		defaultQueueFuture:    future.NewFuture[physicalTaskQueueManager](),
 		autoEnableRateLimiter: quotas.NewRateLimiter(1.0/60, 1),
 	}
@@ -245,6 +253,7 @@ func (pm *taskQueuePartitionManagerImpl) Stop(unloadCause unloadCause) {
 	if pm.cancelNewMatcherSub != nil {
 		pm.cancelNewMatcherSub()
 	}
+	pm.scaleManager.Stop()
 
 	pm.versionedQueuesLock.Lock()
 	for version, vq := range pm.versionedQueues {
@@ -267,7 +276,7 @@ func (pm *taskQueuePartitionManagerImpl) Stop(unloadCause unloadCause) {
 func (pm *taskQueuePartitionManagerImpl) LoadedMetadata(scaleState *persistencespb.PartitionScaleState) {
 	// Note that this must be called before defaultQueue is marked initialized!
 	// Otherwise child partitions will see empty scale info in their first ephemeral data update.
-	pm.userDataManager.SetPartitionScale(scaleState)
+	pm.scaleManager.LoadedMetadata(scaleState, pm.defaultQueue())
 }
 
 func (pm *taskQueuePartitionManagerImpl) checkPartitionCounts(ctx context.Context, forWrite bool) error {
@@ -279,6 +288,12 @@ func (pm *taskQueuePartitionManagerImpl) checkPartitionCounts(ctx context.Contex
 
 	// userDataManager must be initialized here already
 	scaleInfo := pm.userDataManager.PartitionScale()
+
+	if forWrite {
+		// note new task to scaler. note that write == target, so we can use write count for target.
+		pm.scaleManager.OnTask(int(scaleInfo.GetWrite()))
+	}
+
 	if scaleInfo.GetRead() <= 0 || scaleInfo.GetWrite() <= 0 || scaleInfo.Write > scaleInfo.Read {
 		return nil // missing or invalid scale info
 	}

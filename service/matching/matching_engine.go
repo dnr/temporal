@@ -146,6 +146,7 @@ type (
 		partitions                    map[tqid.PartitionKey]taskQueuePartitionManager
 		gaugeMetrics                  gaugeMetrics // per-namespace task queue counters
 		config                        *Config
+		partitionScalerFactory        PartitionScalerFactory
 		versionChecker                headers.VersionChecker
 		testHooks                     testhooks.TestHooks
 		// queryResults maps query TaskID (which is a UUID generated in QueryWorkflow() call) to a channel
@@ -254,6 +255,7 @@ func NewEngine(
 	saMapperProvider searchattribute.MapperProvider,
 	rateLimiter TaskDispatchRateLimiter,
 	historySerializer serialization.Serializer,
+	partitionScalerFactory PartitionScalerFactory,
 ) Engine {
 	scopedMetricsHandler := metricsHandler.WithTags(metrics.OperationTag(metrics.MatchingEngineScope))
 	e := &matchingEngineImpl{
@@ -296,6 +298,7 @@ func NewEngine(
 		namespaceReplicationQueue: namespaceReplicationQueue,
 		userDataUpdateBatchers:    collection.NewSyncMap[namespace.ID, *stream_batcher.Batcher[*userDataUpdate, error]](),
 		rateLimiter:               rateLimiter,
+		partitionScalerFactory:    partitionScalerFactory,
 	}
 	e.reachabilityCache = newReachabilityCache(
 		metrics.NoopMetricsHandler,
@@ -488,6 +491,10 @@ func (e *matchingEngineImpl) getTaskQueuePartitionManager(
 		logger,
 		e.namespaceRegistry,
 	)
+	var partitionScaler PartitionScaler
+	if partition.IsRoot() && e.partitionScalerFactory != nil {
+		partitionScaler = e.partitionScalerFactory.New()
+	}
 	newPM, err = newTaskQueuePartitionManager(
 		e,
 		namespaceEntry,
@@ -497,6 +504,7 @@ func (e *matchingEngineImpl) getTaskQueuePartitionManager(
 		throttledLogger,
 		metricsHandler,
 		userDataManager,
+		partitionScaler,
 	)
 	if err != nil {
 		return nil, false, err

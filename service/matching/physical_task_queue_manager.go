@@ -355,6 +355,12 @@ func (c *physicalTaskQueueManagerImpl) LoadedMetadata(scaleState *persistencespb
 	c.partitionMgr.LoadedMetadata(scaleState)
 }
 
+func (c *physicalTaskQueueManagerImpl) UpdateScaleState(scaleState *persistencespb.PartitionScaleState) error {
+	ctx, cancel := context.WithTimeout(c.tqCtx, ioTimeout)
+	defer cancel()
+	return c.backlogMgr.getDB().UpdateScaleState(ctx, scaleState)
+}
+
 // Call this to set up dual-read from the other table.
 // Must be called by the active backlog manager before it sets itself initialized.
 // Must only be called when using new matcher.
