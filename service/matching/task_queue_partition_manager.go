@@ -53,7 +53,8 @@ const (
 	defaultTaskDispatchRPSTTL = time.Minute
 
 	// TODO: dynamic config?
-	partitionCountAllowedError = 1.5
+	partitionCountAllowedDelta = 1
+	partitionCountAllowedRatio = 1.5
 )
 
 type (
@@ -290,13 +291,17 @@ func (pm *taskQueuePartitionManagerImpl) checkPartitionCounts(ctx context.Contex
 	// check what the client thought the counts were
 	pc := matching.ParsePartitionCountsFromIncomingContext(ctx)
 	if pc.Valid() {
+		var delta int32
 		var ratio float32
 		if forWrite {
+			delta = pc.Write - scaleInfo.Write
 			ratio = float32(pc.Write) / float32(scaleInfo.Write)
 		} else {
+			delta = pc.Read - scaleInfo.Read
 			ratio = float32(pc.Read) / float32(scaleInfo.Read)
 		}
-		if ratio > partitionCountAllowedError || ratio < 1/partitionCountAllowedError {
+		if (delta > partitionCountAllowedDelta || delta < -partitionCountAllowedDelta) &&
+			(ratio > partitionCountAllowedRatio || ratio < 1/partitionCountAllowedRatio) {
 			// reject to improve load balancing
 			return errPartitionCountsWrong
 		}
