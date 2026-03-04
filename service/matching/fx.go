@@ -47,6 +47,7 @@ var Module = fx.Options(
 	fx.Provide(ServiceResolverProvider),
 	fx.Provide(ServerProvider),
 	fx.Provide(NewService),
+	fx.Provide(simplePartitionScalerFactoryProvider),
 	fx.Invoke(ServiceLifetimeHooks),
 )
 
@@ -207,4 +208,8 @@ func WorkersRegistryProvider(
 		MetricsHandler:      metricsHandler,
 		EnablePluginMetrics: serviceConfig.EnableWorkerPluginMetrics,
 	})
+}
+
+func simplePartitionScalerFactoryProvider(config *Config) PartitionScalerFactory {
+	return newSimplePartitionScalerFactory()
 }
