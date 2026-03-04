@@ -15,13 +15,21 @@ import (
 	"go.temporal.io/server/common/util"
 )
 
+const (
+	// scaleNotificationBatchSize is the size of a batch to send to the partitions scaler.
+	scaleNotificationBatchSize = 100
+	// scaleNotificationInterval is the interval to send signals to the scaler even if not a
+	// full batch of tasks has been received yet.
+	scaleNotificationInterval = 46 * time.Second
+)
+
 // scaleManager keeps some state and manages the interaction with partitionScaler.
 // scaleManager runs on the root partition only.
 type scaleManager struct {
-	userDataManager userDataManager
-	partitionScaler PartitionScaler
-	setTarget       func(int)
-	scaleDown       *goro.Handle
+	userDataManager      userDataManager
+	partitionScaler      PartitionScaler
+	setTarget            func(int)
+	periodicNotification *goro.Handle
 
 	lock         sync.Mutex
 	scaleState   *persistencespb.PartitionScaleState
@@ -35,12 +43,12 @@ func newScaleManager(
 	partitionScaler PartitionScaler,
 ) *scaleManager {
 	sm := &scaleManager{
-		userDataManager: userDataManager,
-		partitionScaler: partitionScaler,
-		scaleDown:       goro.NewHandle(context.Background()),
+		userDataManager:      userDataManager,
+		partitionScaler:      partitionScaler,
+		periodicNotification: goro.NewHandle(context.Background()),
 	}
 	sm.setTarget = sm.SetTarget // allocate closure once
-	sm.scaleDown.Go(sm.scaleDownPeriodically)
+	sm.periodicNotification.Go(sm.sendPeriodicNotification)
 	return sm
 }
 
@@ -48,7 +56,7 @@ func (sm *scaleManager) Stop() {
 	if sm == nil {
 		return
 	}
-	sm.scaleDown.Cancel()
+	sm.periodicNotification.Cancel()
 	sm.partitionScaler.Stop()
 }
 
@@ -78,12 +86,9 @@ func (sm *scaleManager) OnTask(currentTarget int) {
 		return
 	}
 
-	// FIXME: make adjustable
-	const batchSize = 100
-
-	if sm.batch.Add(1) >= batchSize {
-		sm.batch.Add(-batchSize)
-		sm.partitionScaler.OnTasks(batchSize, currentTarget, sm.setTarget)
+	if sm.batch.Add(1) >= scaleNotificationBatchSize {
+		sm.batch.Add(-scaleNotificationBatchSize)
+		sm.partitionScaler.OnTasks(scaleNotificationBatchSize, currentTarget, sm.setTarget)
 	}
 }
 
@@ -143,19 +148,19 @@ func (sm *scaleManager) syncToEphemeralDataLocked() {
 	})
 }
 
-func (sm *scaleManager) scaleDownPeriodically(ctx context.Context) error {
-	const interval = time.Minute
-	util.InterruptibleSleep(ctx, backoff.FullJitter(interval))
-	t := time.NewTicker(time.Minute).C
+func (sm *scaleManager) sendPeriodicNotification(ctx context.Context) error {
+	util.InterruptibleSleep(ctx, backoff.FullJitter(scaleNotificationInterval))
+	t := time.NewTicker(scaleNotificationInterval).C
 	for {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-t:
 			sm.lock.Lock()
-			target := sm.scaleState.GetTarget()
+			target := int(sm.scaleState.GetTarget())
 			sm.lock.Unlock()
-			sm.partitionScaler.OnTasks(0, int(target), sm.setTarget)
+			tasks := int(sm.batch.Swap(0))
+			sm.partitionScaler.OnTasks(tasks, target, sm.setTarget)
 		}
 	}
 }
