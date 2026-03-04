@@ -92,7 +92,7 @@ func (s *PartitionManagerTestSuite) SetupTest() {
 	tqConfig := newTaskQueueConfig(partition.TaskQueue(), engine.config, ns.Name())
 	s.userDataMgr = &mockUserDataManager{}
 
-	pm, err := newTaskQueuePartitionManager(engine, ns, partition, tqConfig, logger, logger, metrics.NoopMetricsHandler, s.userDataMgr)
+	pm, err := newTaskQueuePartitionManager(engine, ns, partition, tqConfig, logger, logger, metrics.NoopMetricsHandler, s.userDataMgr, nil)
 	s.NoError(err)
 	s.partitionMgr = pm
 	engine.Start()
@@ -1349,7 +1349,7 @@ func (s *PartitionManagerTestSuite) setupPartitionManagerWithCapture(
 	partition := f.TaskQueue(enumspb.TASK_QUEUE_TYPE_WORKFLOW).RootPartition()
 	tqConfig := newTaskQueueConfig(partition.TaskQueue(), s.partitionMgr.engine.config, s.partitionMgr.ns.Name())
 
-	pm, err := newTaskQueuePartitionManager(s.partitionMgr.engine, s.partitionMgr.ns, partition, tqConfig, s.partitionMgr.logger, s.partitionMgr.throttledLogger, metricsHandler, s.userDataMgr)
+	pm, err := newTaskQueuePartitionManager(s.partitionMgr.engine, s.partitionMgr.ns, partition, tqConfig, s.partitionMgr.logger, s.partitionMgr.throttledLogger, metricsHandler, s.userDataMgr, nil)
 	s.Require().NoError(err)
 	pm.Start()
 
@@ -1528,6 +1528,14 @@ func (m *mockUserDataManager) CheckTaskQueueUserDataPropagation(ctx context.Cont
 }
 
 func (m *mockUserDataManager) LocalBacklogPriorityChanged(map[PhysicalTaskQueueVersion]int64) {
+	panic("unused")
+}
+
+func (m *mockUserDataManager) SetPartitionScale(scaleInfo *taskqueuespb.PartitionScaleInfo) {
+	panic("unused")
+}
+
+func (m *mockUserDataManager) PartitionScale() *taskqueuespb.PartitionScaleInfo {
 	panic("unused")
 }
 

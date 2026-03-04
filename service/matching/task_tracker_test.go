@@ -12,7 +12,7 @@ import (
 func trackTasksHelper(tr *taskTracker, numberOfTasks int) {
 	for range numberOfTasks {
 		// adding a bunch of tasks
-		tr.incrementTaskCount()
+		tr.inc(1)
 	}
 }
 
