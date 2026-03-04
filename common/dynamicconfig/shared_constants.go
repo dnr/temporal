@@ -117,3 +117,23 @@ var DefaultHistoryCacheBackgroundEvictSettings = CacheBackgroundEvictSettings{
 	LoopInterval:    1 * time.Minute,
 	MaxEntryPerCall: 1024,
 }
+
+type SimplePartitionScalerSettings struct {
+	// If Enabled is false, scaler will remove dynamic scale state and fall back to dynamic
+	// config. If Enabled is true but Ups and Downs are empty, dynamic scale state will be
+	// preserved and used as-is without changes.
+	Enabled bool
+	// Ups and Downs control scaling based on add rate: if the add rate exceeds an Up threshold
+	// over an interval, partitions will be scaled up to use the threshold as a target.
+	// If it falls below a Down threshold over an interval, partitions will be scaled down to
+	// meet the threshold.
+	Ups   []SimplePartitionScalerThreshold
+	Downs []SimplePartitionScalerThreshold
+	// Maximum allowed rate of changes.
+	ChangeRate float32
+}
+
+type SimplePartitionScalerThreshold struct {
+	Interval  time.Duration
+	Threshold int // tasks/second
+}

@@ -1437,6 +1437,11 @@ an optional feature and also requires a metrics collection system that can handl
 		false,
 		`MatchingAutoEnableV2 automatically enables fairness when a fairness or priority key is seen`,
 	)
+	MatchingPartitionScaler = NewTaskQueueTypedSetting(
+		"matching.partitionScaler",
+		SimplePartitionScalerSettings{},
+		`Settings for simple partition scaler.`,
+	)
 
 	// Worker registry settings
 	MatchingWorkerRegistryNumBuckets = NewGlobalIntSetting(
