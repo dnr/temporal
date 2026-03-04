@@ -264,6 +264,12 @@ func (pm *taskQueuePartitionManagerImpl) Stop(unloadCause unloadCause) {
 	pm.goroGroup.Cancel()
 }
 
+func (pm *taskQueuePartitionManagerImpl) LoadedMetadata(scaleState *persistencespb.PartitionScaleState) {
+	// Note that this must be called before defaultQueue is marked initialized!
+	// Otherwise child partitions will see empty scale info in their first ephemeral data update.
+	pm.userDataManager.SetPartitionScale(scaleState)
+}
+
 func (pm *taskQueuePartitionManagerImpl) checkPartitionCounts(ctx context.Context, forWrite bool) error {
 	normal, ok := pm.partition.(*tqid.NormalPartition)
 	if !ok {

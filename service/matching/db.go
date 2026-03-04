@@ -46,6 +46,7 @@ type (
 		rangeID       int64
 		subqueues     []*dbSubqueue
 		otherHasTasks bool
+		scaleState    *persistencespb.PartitionScaleState
 
 		// used to avoid unnecessary metadata writes:
 		lastChange time.Time // updated when metadata is changed in memory
@@ -63,6 +64,7 @@ type (
 		ackLevel      int64 // TODO(pri): old matcher cleanup, delete later
 		subqueues     []persistencespb.SubqueueInfo
 		otherHasTasks bool
+		scaleState    *persistencespb.PartitionScaleState
 	}
 
 	subqueueIndex int
@@ -166,6 +168,7 @@ func (db *taskQueueDB) RenewLease(
 		ackLevel:      db.subqueues[subqueueZero].AckLevel, // TODO(pri): cleanup, only used by old backlog manager
 		subqueues:     db.cloneSubqueues(),
 		otherHasTasks: !db.isDraining && db.otherHasTasks,
+		scaleState:    db.scaleState,
 	}, nil
 }
 
@@ -759,6 +762,7 @@ func (db *taskQueueDB) cachedQueueInfo() *persistencespb.TaskQueueInfo {
 		ApproximateBacklogCount: db.subqueues[subqueueZero].ApproximateBacklogCount, // backwards compatibility
 		Subqueues:               infos,
 		OtherHasTasks:           db.otherHasTasks,
+		PartitionScaleState:     db.scaleState,
 	}
 }
 

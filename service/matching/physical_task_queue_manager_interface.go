@@ -17,6 +17,9 @@ type (
 		Start()
 		Stop(unloadCause)
 		WaitUntilInitialized(context.Context) error
+		// LoadedMetadata is called by backlog manager after it's loaded metadata from the
+		// default queue. (New matcher only.)
+		LoadedMetadata(*persistencespb.PartitionScaleState)
 		SetupDraining()
 		// FinishedDraining is called by a draining backlog manager when it has fully drained.
 		FinishedDraining()

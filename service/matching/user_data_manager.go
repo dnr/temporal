@@ -55,7 +55,7 @@ type (
 		HandleGetUserDataRequest(ctx context.Context, req *matchingservice.GetTaskQueueUserDataRequest) (*matchingservice.GetTaskQueueUserDataResponse, error)
 		CheckTaskQueueUserDataPropagation(context.Context, int64, int, int) error
 		LocalBacklogPriorityChanged(map[PhysicalTaskQueueVersion]int64)
-		SetPartitionScale(read, write int32)
+		SetPartitionScale(*persistencespb.PartitionScaleState)
 		PartitionScale() *taskqueuespb.PartitionScaleInfo
 	}
 
@@ -755,10 +755,14 @@ func (m *userDataManagerImpl) LocalBacklogPriorityChanged(backlogPriority map[Ph
 }
 
 // SetPartitionScale can only be called on a root partition.
-func (m *userDataManagerImpl) SetPartitionScale(read, write int32) {
+func (m *userDataManagerImpl) SetPartitionScale(scaleState *persistencespb.PartitionScaleState) {
 	if !m.partition.IsRoot() {
 		return
 	}
+
+	write := scaleState.GetTarget()
+	read := max(write, readPartitionsFromBacklogState(scaleState.GetBacklogState()))
+
 	m.updateEphemeralData(func(newData *taskqueuespb.EphemeralData) {
 		newData.Scale = &taskqueuespb.PartitionScaleInfo{
 			Read:  read,
