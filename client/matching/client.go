@@ -102,16 +102,20 @@ func handlePartitionCounts[Req, Res any](
 
 	// update cache on trailer on both success and error. if the trailer has no data,
 	// this removes the key from the cache.
-	pc = parsePartitionCountsFromTrailer(trailer)
-	c.partitionCache.put(pkey, pc)
+	pc2 := parsePartitionCountsFromTrailer(trailer)
+	if pc2 != pc {
+		c.partitionCache.put(pkey, pc2)
+	}
 
 	if _, ok := errors.AsType[*serviceerrors.StalePartitionCounts](err); ok {
 		// if we got a StalePartitionCounts, retry once
 		trailer = nil
-		res, err = op(pc.appendToOutgoingContext(ctx), pc, request, opts)
+		res, err = op(pc.appendToOutgoingContext(ctx), pc2, request, opts)
 		// update again
-		pc = parsePartitionCountsFromTrailer(trailer)
-		c.partitionCache.put(pkey, pc)
+		pc3 := parsePartitionCountsFromTrailer(trailer)
+		if pc3 != pc2 {
+			c.partitionCache.put(pkey, pc3)
+		}
 	}
 
 	return res, err
