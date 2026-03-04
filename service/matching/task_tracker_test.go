@@ -22,7 +22,7 @@ func TestAddTasksRate(t *testing.T) {
 	currentTime := time.Now()
 	timeSource.Update(currentTime)
 
-	tr := newTaskTracker(timeSource)
+	tr := newTaskTracker(timeSource, 5*time.Second, 30*time.Second)
 
 	// mini windows will have the following format : (start time, end time)
 	// (0 - 4), (5 - 9), (10 - 14), (15 - 19), (20 - 24), (25 - 29), (30 - 34), ...

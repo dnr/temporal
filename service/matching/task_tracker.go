@@ -7,22 +7,15 @@ import (
 	"go.temporal.io/server/common/clock"
 )
 
-const (
-	// The duration of each mini-bucket in the circularTaskBuffer
-	intervalSize = 5
-	// The total duration which is used to calculate the rate of tasks added/dispatched
-	totalIntervalSize = 30
-)
-
 // a circular array of a fixed size for tracking tasks
 type circularTaskBuffer struct {
-	buffer     []int
+	buffer     []int32
 	currentPos int
 }
 
 func newCircularTaskBuffer(size int) circularTaskBuffer {
 	return circularTaskBuffer{
-		buffer: make([]int, size),
+		buffer: make([]int32, size),
 	}
 }
 
@@ -39,7 +32,7 @@ func (cb *circularTaskBuffer) advance() {
 func (cb *circularTaskBuffer) totalTasks() int {
 	totalTasks := 0
 	for _, count := range cb.buffer {
-		totalTasks += count
+		totalTasks += int(count)
 	}
 	return totalTasks
 }
@@ -49,34 +42,39 @@ type taskTracker struct {
 	clock             clock.TimeSource
 	startTime         time.Time     // time when taskTracker was initialized
 	bucketStartTime   time.Time     // the starting time of a bucket in the buffer
-	bucketSize        time.Duration // the duration of each bucket in the buffer
-	numberOfBuckets   int           // the total number of buckets in the buffer
+	intervalSize      time.Duration // the duration of each bucket in the buffer
+	buckets           int           // the total number of buckets in the buffer
 	totalIntervalSize time.Duration // the number of seconds over which rate of tasks are added/dispatched
 	tasksInInterval   circularTaskBuffer
 }
 
-func newTaskTracker(timeSource clock.TimeSource) *taskTracker {
+func newTaskTracker(
+	timeSource clock.TimeSource,
+	intervalSize time.Duration,
+	totalIntervalSize time.Duration,
+) *taskTracker {
+	buckets := int(totalIntervalSize/intervalSize) + 1
 	return &taskTracker{
 		clock:             timeSource,
 		startTime:         timeSource.Now(),
 		bucketStartTime:   timeSource.Now(),
-		bucketSize:        time.Duration(intervalSize) * time.Second,
-		numberOfBuckets:   (totalIntervalSize / intervalSize) + 1,
-		totalIntervalSize: time.Duration(totalIntervalSize) * time.Second,
-		tasksInInterval:   newCircularTaskBuffer((totalIntervalSize / intervalSize) + 1),
+		intervalSize:      intervalSize,
+		buckets:           buckets,
+		totalIntervalSize: totalIntervalSize,
+		tasksInInterval:   newCircularTaskBuffer(buckets),
 	}
 }
 
-// advanceAndResetTracker advances the trackers position and clears out any expired intervals
+// advanceAndResetLocked advances the trackers position and clears out any expired intervals
 // This method must be called with taskTracker's lock held.
-func (s *taskTracker) advanceAndResetTracker(elapsed time.Duration) {
+func (s *taskTracker) advanceAndResetLocked(elapsed time.Duration) {
 	// Calculate the number of intervals elapsed since the start interval time
-	intervalsElapsed := int(elapsed / s.bucketSize)
+	intervalsElapsed := int(elapsed / s.intervalSize)
 
-	for i := 0; i < min(intervalsElapsed, s.numberOfBuckets); i++ {
+	for i := 0; i < min(intervalsElapsed, s.buckets); i++ {
 		s.tasksInInterval.advance() // advancing our circular buffer's position until we land on the right interval
 	}
-	s.bucketStartTime = s.bucketStartTime.Add(time.Duration(intervalsElapsed) * s.bucketSize)
+	s.bucketStartTime = s.bucketStartTime.Add(time.Duration(intervalsElapsed) * s.intervalSize)
 }
 
 // incrementTaskCount adds/removes tasks from the current time that falls in the appropriate interval
@@ -87,7 +85,7 @@ func (s *taskTracker) incrementTaskCount() {
 
 	// Calculate elapsed time from the latest start interval time
 	elapsed := currentTime.Sub(s.bucketStartTime)
-	s.advanceAndResetTracker(elapsed)
+	s.advanceAndResetLocked(elapsed)
 	s.tasksInInterval.incrementTaskCount()
 }
 
@@ -99,7 +97,7 @@ func (s *taskTracker) rate() float32 {
 
 	// Calculate elapsed time from the latest start interval time
 	elapsed := currentTime.Sub(s.bucketStartTime)
-	s.advanceAndResetTracker(elapsed)
+	s.advanceAndResetLocked(elapsed)
 	totalTasks := s.tasksInInterval.totalTasks()
 
 	elapsedTime := min(currentTime.Sub(s.bucketStartTime)+s.totalIntervalSize,

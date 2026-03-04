@@ -951,8 +951,8 @@ func (c *physicalTaskQueueManagerImpl) getOrCreateTaskTracker(
 	}
 
 	// Initalize all task trackers together; or the timeframes won't line up.
-	c.tasksAdded[priorityKey] = newTaskTracker(c.partitionMgr.engine.timeSource)
-	c.tasksDispatched[priorityKey] = newTaskTracker(c.partitionMgr.engine.timeSource)
+	c.tasksAdded[priorityKey] = c.partitionMgr.engine.newTaskTracker()
+	c.tasksDispatched[priorityKey] = c.partitionMgr.engine.newTaskTracker()
 
 	return intervals[priorityKey]
 }
