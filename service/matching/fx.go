@@ -210,6 +210,8 @@ func WorkersRegistryProvider(
 	})
 }
 
-func simplePartitionScalerFactoryProvider(config *Config) PartitionScalerFactory {
-	return newSimplePartitionScalerFactory()
+func simplePartitionScalerFactoryProvider(dc *dynamicconfig.Collection) PartitionScalerFactory {
+	return newSimplePartitionScalerFactory(
+		dynamicconfig.MatchingPartitionScaler.Get(dc),
+	)
 }

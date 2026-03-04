@@ -493,7 +493,11 @@ func (e *matchingEngineImpl) getTaskQueuePartitionManager(
 	)
 	var partitionScaler PartitionScaler
 	if partition.IsRoot() && e.partitionScalerFactory != nil {
-		partitionScaler = e.partitionScalerFactory.New()
+		partitionScaler = e.partitionScalerFactory.New(
+			namespaceEntry.Name(),
+			partition.TaskQueue().Name(),
+			partition.TaskQueue().TaskType(),
+		)
 	}
 	newPM, err = newTaskQueuePartitionManager(
 		e,

@@ -1,10 +1,15 @@
 package matching
 
+import (
+	enumspb "go.temporal.io/api/enums/v1"
+	"go.temporal.io/server/common/namespace"
+)
+
 // PartitionScalerFactory is a pluggable interface to control partition scaling.
 type PartitionScalerFactory interface {
 	// New will be called for a new root partition. It should return a new PartitionScaler
 	// (or nil to disable).
-	New() PartitionScaler
+	New(nsName namespace.Name, tqName string, tqType enumspb.TaskQueueType) PartitionScaler
 }
 
 // PartitionScaler is an instance of a scaler for one task queue.
