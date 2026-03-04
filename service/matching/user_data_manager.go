@@ -1,6 +1,7 @@
 package matching
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"slices"
@@ -721,6 +722,7 @@ func (m *userDataManagerImpl) CheckTaskQueueUserDataPropagation(
 	}
 }
 
+// LocalBacklogPriorityChanged can be called on any normal partition.
 func (m *userDataManagerImpl) LocalBacklogPriorityChanged(backlogPriority map[PhysicalTaskQueueVersion]int64) {
 	// TODO: later, we'll send this data to the root to propagate instead of just keeping it
 	// locally and merging.
@@ -738,23 +740,36 @@ func (m *userDataManagerImpl) LocalBacklogPriorityChanged(backlogPriority map[Ph
 		})
 	}
 
-	newEph := &taskqueuespb.VersionedEphemeralData{
-		Data: &taskqueuespb.EphemeralData{
-			Partition: []*taskqueuespb.EphemeralData_ByPartition{
-				&taskqueuespb.EphemeralData_ByPartition{
-					Partition: int32(normal.PartitionId()),
-					Version:   byVersion,
-				},
-			},
+	newPartition := []*taskqueuespb.EphemeralData_ByPartition{
+		&taskqueuespb.EphemeralData_ByPartition{
+			Partition: int32(normal.PartitionId()),
+			Version:   byVersion,
 		},
-		Version: time.Now().UnixNano(),
 	}
 
+	m.updateEphemeralData(func(newData *taskqueuespb.EphemeralData) {
+		newData.Partition = newPartition
+	})
+}
+
+// SetPartitionScale can only be called on a root partition.
+func (m *userDataManagerImpl) SetPartitionScale(read, write int32) {
+	if !m.partition.IsRoot() {
+		return
+	}
+	m.updateEphemeralData(func(newData *taskqueuespb.EphemeralData) {
+		newData.Scale = &taskqueuespb.PartitionScaleInfo{
+			Read:  read,
+			Write: write,
+		}
+	})
+}
+
+// PartitionScale gets the current partition scale state.
+func (m *userDataManagerImpl) PartitionScale() *taskqueuespb.PartitionScaleInfo {
 	m.lock.Lock()
 	defer m.lock.Unlock()
-
-	m.myEphemeralData = newEph
-	m.mergeEphemeralDataLocked()
+	return m.mergedEphemeralData.GetData().GetScale()
 }
 
 func (m *userDataManagerImpl) gotIncomingEphemeralData(eph *taskqueuespb.VersionedEphemeralData) {
@@ -762,6 +777,24 @@ func (m *userDataManagerImpl) gotIncomingEphemeralData(eph *taskqueuespb.Version
 	defer m.lock.Unlock()
 
 	m.incomingEphemeralData = eph
+	m.mergeEphemeralDataLocked()
+}
+
+// updateEphemeralData updates the ephemeral data owned by this partition. The update function
+// will be given a non-nil clone of the current data, which it should mutate.
+func (m *userDataManagerImpl) updateEphemeralData(update func(*taskqueuespb.EphemeralData)) {
+	m.lock.Lock()
+	defer m.lock.Unlock()
+
+	newData := common.CloneProto(m.myEphemeralData.GetData())
+	if newData == nil {
+		newData = &taskqueuespb.EphemeralData{}
+	}
+	update(newData)
+	m.myEphemeralData = &taskqueuespb.VersionedEphemeralData{
+		Data:    newData,
+		Version: time.Now().UnixNano(),
+	}
 	m.mergeEphemeralDataLocked()
 }
 
@@ -786,6 +819,11 @@ func (m *userDataManagerImpl) mergeEphemeralDataLocked() {
 			Partition: slices.Concat(
 				m.incomingEphemeralData.GetData().GetPartition(),
 				m.myEphemeralData.GetData().GetPartition(),
+			),
+			// scale info always comes from the root, so only one of these should be non-nil
+			Scale: cmp.Or(
+				m.incomingEphemeralData.GetData().GetScale(),
+				m.myEphemeralData.GetData().GetScale(),
 			),
 		},
 		Version: time.Now().UnixNano(),
