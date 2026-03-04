@@ -55,7 +55,11 @@ func (s *simplePartitionScaler) getTrackerLocked(interval time.Duration) *taskTr
 	return t
 }
 
-func (s *simplePartitionScaler) OnTasks(num, currentTarget int, setTarget func(newTarget int)) {
+func (s *simplePartitionScaler) OnTasks(num, currentTarget, currentEffective int, setTarget func(newTarget int)) {
+	if currentEffective == 0 {
+		return // can't compute total rate without a current effective write count
+	}
+
 	cfg := s.cfg()
 
 	if !cfg.Enabled {
@@ -64,9 +68,10 @@ func (s *simplePartitionScaler) OnTasks(num, currentTarget int, setTarget func(n
 		}
 		return
 	}
-
 	s.lock.Lock()
 
+	// TODO: optimization: use one tracker and query it for different intervals.
+	// TODO: clean up trackers that are unused after config change.
 	for _, t := range s.trackers {
 		t.inc(num)
 	}

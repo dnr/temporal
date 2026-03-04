@@ -289,9 +289,17 @@ func (pm *taskQueuePartitionManagerImpl) checkPartitionCounts(ctx context.Contex
 	// userDataManager must be initialized here already
 	scaleInfo := pm.userDataManager.PartitionScale()
 
-	if forWrite {
-		// note new task to scaler. note that write == target, so we can use write count for target.
-		pm.scaleManager.OnTask(int(scaleInfo.GetWrite()))
+	// on root partition, send signal to scaler
+	if forWrite && pm.scaleManager != nil {
+		// note that write == target, so we can use write for target
+		target := int(scaleInfo.GetWrite())
+		// we can assume the effective number of write partitions is equal to the target
+		effective := target
+		// if no target is set yet, get effective count from dynamic config (matches client behavior)
+		if effective == 0 {
+			effective = max(1, pm.config.NumWritePartitions())
+		}
+		pm.scaleManager.OnTask(target, effective)
 	}
 
 	if scaleInfo.GetRead() <= 0 || scaleInfo.GetWrite() <= 0 || scaleInfo.Write > scaleInfo.Read {

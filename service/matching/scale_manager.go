@@ -72,23 +72,22 @@ func (sm *scaleManager) LoadedMetadata(
 	sm.lock.Lock()
 	defer sm.lock.Unlock()
 
-	sm.scaleState = scaleState
 	sm.defaultQueue = defaultQueue
-	sm.syncToEphemeralDataLocked()
+	sm.setStateLocked(scaleState)
 }
 
 // OnTask is called on every task added. The caller is required to pass in the current target
 // even though we have it already, so that we don't have to do another mutex lock. The caller
 // in this case (partitionManager checkPartitionCounts) has already gotten the partition counts
 // from ephemeral data.
-func (sm *scaleManager) OnTask(currentTarget int) {
+func (sm *scaleManager) OnTask(currentTarget, currentEffective int) {
 	if sm == nil {
 		return
 	}
 
 	if sm.batch.Add(1) >= scaleNotificationBatchSize {
 		sm.batch.Add(-scaleNotificationBatchSize)
-		sm.partitionScaler.OnTasks(scaleNotificationBatchSize, currentTarget, sm.setTarget)
+		sm.partitionScaler.OnTasks(scaleNotificationBatchSize, currentTarget, currentEffective, sm.setTarget)
 	}
 }
 
@@ -133,12 +132,15 @@ func (sm *scaleManager) SetTarget(targeti int) {
 			return
 		}
 
-		sm.scaleState = newState
-		sm.syncToEphemeralDataLocked()
+		sm.setStateLocked(newState)
 	}()
 }
 
-func (sm *scaleManager) syncToEphemeralDataLocked() {
+// setStateLocked updates the current scale state and syncs it to ephemeral data.
+// This should only be called _after_ the state is persisted to the db.
+func (sm *scaleManager) setStateLocked(newState *persistencespb.PartitionScaleState) {
+	sm.scaleState = newState
+
 	write := sm.scaleState.GetTarget()
 	read := max(write, readPartitionsFromBacklogState(sm.scaleState.GetBacklogState()))
 
@@ -159,8 +161,13 @@ func (sm *scaleManager) sendPeriodicNotification(ctx context.Context) error {
 			sm.lock.Lock()
 			target := int(sm.scaleState.GetTarget())
 			sm.lock.Unlock()
-			tasks := int(sm.batch.Swap(0))
-			sm.partitionScaler.OnTasks(tasks, target, sm.setTarget)
+			// This periodic mechanism is mostly useful for scaling down. For scaling up we'll
+			// get enough events from tasks added. If target == 0, that means scaling isn't
+			// enabled or hasn't set a target yet, in that case there's no need to notify.
+			if target > 0 {
+				tasks := int(sm.batch.Swap(0))
+				sm.partitionScaler.OnTasks(tasks, target, target, sm.setTarget)
+			}
 		}
 	}
 }
