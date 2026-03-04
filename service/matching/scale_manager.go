@@ -9,52 +9,6 @@ import (
 	"go.temporal.io/server/common"
 )
 
-// PartitionScalerFactory is a pluggable interface to control partition scaling.
-type PartitionScalerFactory interface {
-	// New will be called for a new root partition. It should return a new PartitionScaler
-	// (or nil to disable).
-	New() PartitionScaler
-}
-
-// PartitionScaler is an instance of a scaler for one task queue.
-type PartitionScaler interface {
-	// OnTask will be called once per task added, either sync match or async.
-	// It will also be given the current partition count target. If it wants to change the
-	// target, it should call setTarget with the new target. Changes may be rejected if called
-	// too often or the changes are too large.
-	// Setting target to zero will disable dynamic partition scaling.
-	OnTask(currentTarget int, setTarget func(newTarget int))
-	// Stop will be called when unloading the partition.
-	Stop()
-}
-
-// simplePartitionScalerFactory creates simplePartitionScalers.
-type simplePartitionScalerFactory struct {
-}
-
-func newSimplePartitionScalerFactory() *simplePartitionScalerFactory {
-	return &simplePartitionScalerFactory{}
-}
-
-func (s *simplePartitionScalerFactory) New() PartitionScaler {
-	return newSimplePartitionScaler()
-}
-
-// simplePartitionScaler uses task add rates to scale partitions.
-type simplePartitionScaler struct {
-}
-
-func newSimplePartitionScaler() *simplePartitionScaler {
-	return &simplePartitionScaler{}
-}
-
-func (s *simplePartitionScaler) OnTask(currentTarget int, setTarget func(newTarget int)) {
-	panic("not implemented") // TODO: Implement
-}
-
-func (s *simplePartitionScaler) Stop() {
-}
-
 // scaleManager keeps some state and manages the interaction with partitionScaler.
 // scaleManager runs on the root partition only.
 type scaleManager struct {
@@ -124,7 +78,7 @@ func (sm *scaleManager) SetTarget(targeti int) {
 		return // don't block on contention
 	}
 
-	// TODO: add some limits on frequency of changes here
+	// FIXME: add some limits on frequency of changes here
 	if sm.defaultQueue == nil || false /* too fast ... */ {
 		sm.lock.Unlock()
 		return
