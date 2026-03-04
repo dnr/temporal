@@ -123,8 +123,7 @@ func (sm *scaleManager) SetTarget(targeti int) {
 
 		// mark all new partitions as having backlog
 		for i := prevTarget; i < target; i++ {
-			newState.BacklogState = setBacklogStateBits(
-				newState.BacklogState, i)
+			setBacklogStateBit(newState, i)
 		}
 
 		// we must succesfully write to the db before making new state active
@@ -141,8 +140,9 @@ func (sm *scaleManager) SetTarget(targeti int) {
 func (sm *scaleManager) setStateLocked(newState *persistencespb.PartitionScaleState) {
 	sm.scaleState = newState
 
+	// note if newState == nil, read and write will both be 0
 	write := sm.scaleState.GetTarget()
-	read := max(write, readPartitionsFromBacklogState(sm.scaleState.GetBacklogState()))
+	read := max(write, readPartitionsFromBacklogState(sm.scaleState))
 
 	sm.userDataManager.SetPartitionScale(&taskqueuespb.PartitionScaleInfo{
 		Read:  read,
@@ -172,18 +172,27 @@ func (sm *scaleManager) sendPeriodicNotification(ctx context.Context) error {
 	}
 }
 
-func readPartitionsFromBacklogState(state []uint64) int32 {
-	i := len(state) - 1
+func readPartitionsFromBacklogState(state *persistencespb.PartitionScaleState) int32 {
+	i := len(state.GetBacklogState()) - 1
 	if i < 0 {
 		return 0
 	}
-	return int32(bits.Len64(state[i]) - 1 + i*64)
+	return int32(bits.Len64(state.BacklogState[i]) + i*64)
 }
 
-func setBacklogStateBits(state []uint64, i int32) []uint64 {
-	for len(state) < int(i)/64+1 {
-		state = append(state, 0)
+func setBacklogStateBit(state *persistencespb.PartitionScaleState, i int32) {
+	for len(state.BacklogState) < int(i)/64+1 {
+		state.BacklogState = append(state.BacklogState, 0)
 	}
-	state[i/64] |= 1 << (i % 64)
-	return state
+	state.BacklogState[i/64] |= 1 << (i % 64)
+}
+
+func clearBacklogStateBit(state *persistencespb.PartitionScaleState, i int32) {
+	if len(state.BacklogState) < int(i)/64+1 {
+		return
+	}
+	state.BacklogState[i/64] &^= 1 << (i % 64)
+	for len(state.BacklogState) > 0 && state.BacklogState[len(state.BacklogState)-1] == 0 {
+		state.BacklogState = state.BacklogState[:len(state.BacklogState)-1]
+	}
 }
