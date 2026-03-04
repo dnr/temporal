@@ -3,6 +3,7 @@ package matching
 import (
 	"math/bits"
 	"sync"
+	"sync/atomic"
 
 	persistencespb "go.temporal.io/server/api/persistence/v1"
 	taskqueuespb "go.temporal.io/server/api/taskqueue/v1"
@@ -19,6 +20,9 @@ type scaleManager struct {
 	lock         sync.Mutex
 	scaleState   *persistencespb.PartitionScaleState
 	defaultQueue physicalTaskQueueManager // used to write state to db
+
+	_     [64 - 8 - 8 - 16]byte
+	batch atomic.Int64
 }
 
 func newScaleManager(
@@ -66,7 +70,13 @@ func (sm *scaleManager) OnTask(currentTarget int) {
 		return
 	}
 
-	sm.partitionScaler.OnTask(currentTarget, sm.setTarget)
+	// FIXME: make adjustable
+	const batchSize = 100
+
+	if sm.batch.Add(1) >= batchSize {
+		sm.batch.Add(-batchSize)
+		sm.partitionScaler.OnTasks(batchSize, currentTarget, sm.setTarget)
+	}
 }
 
 func (sm *scaleManager) SetTarget(targeti int) {

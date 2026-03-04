@@ -512,7 +512,7 @@ func (c *physicalTaskQueueManagerImpl) PollTask(
 		task.backlogCountHint = c.backlogCountHint
 
 		if pollMetadata.forwardedFrom == "" { // track the task on the child, not where a poll was forwarded to
-			c.getOrCreateTaskTracker(c.tasksDispatched, priorityKey(task.getPriority().GetPriorityKey())).incrementTaskCount()
+			c.getOrCreateTaskTracker(c.tasksDispatched, priorityKey(task.getPriority().GetPriorityKey())).inc(1)
 		}
 		return task, nil
 	}
@@ -591,7 +591,7 @@ func (c *physicalTaskQueueManagerImpl) DispatchQueryTask(
 	task := newInternalQueryTask(taskId, request)
 	c.config.setDefaultPriority(task)
 	if !task.isForwarded() {
-		c.getOrCreateTaskTracker(c.tasksAdded, priorityKey(request.GetPriority().GetPriorityKey())).incrementTaskCount()
+		c.getOrCreateTaskTracker(c.tasksAdded, priorityKey(request.GetPriority().GetPriorityKey())).inc(1)
 	}
 	return c.matcher.OfferQuery(ctx, task)
 }
@@ -617,7 +617,7 @@ func (c *physicalTaskQueueManagerImpl) DispatchNexusTask(
 	task := newInternalNexusTask(taskId, deadline, opDeadline, request)
 	c.config.setDefaultPriority(task)
 	if !task.isForwarded() {
-		c.getOrCreateTaskTracker(c.tasksAdded, priorityKey(0)).incrementTaskCount() // Nexus has no priorities
+		c.getOrCreateTaskTracker(c.tasksAdded, priorityKey(0)).inc(1) // Nexus has no priorities
 	}
 	return c.matcher.OfferNexusTask(ctx, task)
 }
@@ -712,7 +712,7 @@ func (c *physicalTaskQueueManagerImpl) TrySyncMatch(ctx context.Context, task *i
 	if !task.isForwarded() {
 		// request sent by history service
 		c.liveness.markAlive()
-		c.getOrCreateTaskTracker(c.tasksAdded, priorityKey(task.getPriority().GetPriorityKey())).incrementTaskCount()
+		c.getOrCreateTaskTracker(c.tasksAdded, priorityKey(task.getPriority().GetPriorityKey())).inc(1)
 		if disable, _ := testhooks.Get(c.partitionMgr.engine.testHooks, testhooks.MatchingDisableSyncMatch, c.partitionMgr.ns.ID()); disable {
 			return false, nil
 		}

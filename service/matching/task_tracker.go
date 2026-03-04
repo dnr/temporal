@@ -19,8 +19,8 @@ func newCircularTaskBuffer(size int) circularTaskBuffer {
 	}
 }
 
-func (cb *circularTaskBuffer) incrementTaskCount() {
-	cb.buffer[cb.currentPos]++
+func (cb *circularTaskBuffer) inc(n int) {
+	cb.buffer[cb.currentPos] += int32(n)
 }
 
 func (cb *circularTaskBuffer) advance() {
@@ -77,8 +77,8 @@ func (s *taskTracker) advanceAndResetLocked(elapsed time.Duration) {
 	s.bucketStartTime = s.bucketStartTime.Add(time.Duration(intervalsElapsed) * s.intervalSize)
 }
 
-// incrementTaskCount adds/removes tasks from the current time that falls in the appropriate interval
-func (s *taskTracker) incrementTaskCount() {
+// inc adds/removes tasks from the current time that falls in the appropriate interval
+func (s *taskTracker) inc(n int) {
 	s.lock.Lock()
 	defer s.lock.Unlock()
 	currentTime := s.clock.Now()
@@ -86,7 +86,7 @@ func (s *taskTracker) incrementTaskCount() {
 	// Calculate elapsed time from the latest start interval time
 	elapsed := currentTime.Sub(s.bucketStartTime)
 	s.advanceAndResetLocked(elapsed)
-	s.tasksInInterval.incrementTaskCount()
+	s.tasksInInterval.inc(n)
 }
 
 // rate returns the rate of tasks added/dispatched in a given interval
