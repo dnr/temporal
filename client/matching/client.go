@@ -73,6 +73,7 @@ func handlePartitionCounts[Req, Res any](
 	ctx context.Context,
 	c *clientImpl,
 	pkey string,
+	kind enumspb.TaskQueueKind,
 	request Req,
 	opts []grpc.CallOption,
 	op func(
@@ -82,6 +83,11 @@ func handlePartitionCounts[Req, Res any](
 		opts []grpc.CallOption,
 	) (Res, error),
 ) (Res, error) {
+	if kind != enumspb.TASK_QUEUE_KIND_NORMAL {
+		// only normal partitions participate in scaling
+		return op(ctx, PartitionCounts{}, request, opts)
+	}
+
 	// capture trailer
 	var trailer metadata.MD
 	opts = append(slices.Clone(opts), grpc.Trailer(&trailer))
@@ -121,7 +127,8 @@ func (c *clientImpl) AddActivityTask(
 		request.GetTaskQueue().GetName(),
 		enumspb.TASK_QUEUE_TYPE_ACTIVITY,
 	)
-	return handlePartitionCounts(ctx, c, pkey, request, opts, c.addActivityTask)
+	kind := request.GetTaskQueue().GetKind()
+	return handlePartitionCounts(ctx, c, pkey, kind, request, opts, c.addActivityTask)
 }
 
 func (c *clientImpl) addActivityTask(
@@ -156,7 +163,8 @@ func (c *clientImpl) AddWorkflowTask(
 		request.GetTaskQueue().GetName(),
 		enumspb.TASK_QUEUE_TYPE_WORKFLOW,
 	)
-	return handlePartitionCounts(ctx, c, pkey, request, opts, c.addWorkflowTask)
+	kind := request.GetTaskQueue().GetKind()
+	return handlePartitionCounts(ctx, c, pkey, kind, request, opts, c.addWorkflowTask)
 }
 
 func (c *clientImpl) addWorkflowTask(
@@ -191,7 +199,8 @@ func (c *clientImpl) PollActivityTaskQueue(
 		request.GetPollRequest().GetTaskQueue().GetName(),
 		enumspb.TASK_QUEUE_TYPE_ACTIVITY,
 	)
-	return handlePartitionCounts(ctx, c, pkey, request, opts, c.pollActivityTaskQueue)
+	kind := request.GetPollRequest().GetTaskQueue().GetKind()
+	return handlePartitionCounts(ctx, c, pkey, kind, request, opts, c.pollActivityTaskQueue)
 }
 
 func (c *clientImpl) pollActivityTaskQueue(
@@ -229,7 +238,8 @@ func (c *clientImpl) PollWorkflowTaskQueue(
 		request.GetPollRequest().GetTaskQueue().GetName(),
 		enumspb.TASK_QUEUE_TYPE_WORKFLOW,
 	)
-	return handlePartitionCounts(ctx, c, pkey, request, opts, c.pollWorkflowTaskQueue)
+	kind := request.GetPollRequest().GetTaskQueue().GetKind()
+	return handlePartitionCounts(ctx, c, pkey, kind, request, opts, c.pollWorkflowTaskQueue)
 }
 
 func (c *clientImpl) pollWorkflowTaskQueue(
@@ -267,7 +277,8 @@ func (c *clientImpl) QueryWorkflow(
 		request.GetTaskQueue().GetName(),
 		enumspb.TASK_QUEUE_TYPE_WORKFLOW,
 	)
-	return handlePartitionCounts(ctx, c, pkey, request, opts, c.queryWorkflow)
+	kind := request.GetTaskQueue().GetKind()
+	return handlePartitionCounts(ctx, c, pkey, kind, request, opts, c.queryWorkflow)
 }
 
 func (c *clientImpl) queryWorkflow(
