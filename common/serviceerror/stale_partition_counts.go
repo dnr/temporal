@@ -15,8 +15,8 @@ type (
 )
 
 // NewStalePartitionCounts returns new StalePartitionCounts error.
-func NewStalePartitionCounts() error {
-	return &StalePartitionCounts{Message: "stale partition counts"}
+func NewStalePartitionCounts(message string) error {
+	return &StalePartitionCounts{Message: message}
 }
 
 // Error returns string message.

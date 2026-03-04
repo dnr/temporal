@@ -43,15 +43,16 @@ import (
 
 var (
 	errDefaultQueueNotInit  = serviceerror.NewInternal("defaultQueue is not initializaed")
-	errPartitionInvalid     = serviceerror.NewUnavailable("partition is invalid")
-	errPartitionDraining    = serviceerror.NewUnavailable("partition is draining")
-	errStalePartitionCounts = serviceerrors.NewStalePartitionCounts()
+	errPartitionInvalid     = serviceerrors.NewStalePartitionCounts("partition is invalid")
+	errPartitionDraining    = serviceerrors.NewStalePartitionCounts("partition is draining")
+	errPartitionCountsWrong = serviceerrors.NewStalePartitionCounts("counts are too far off")
 )
 
 const (
 	defaultTaskDispatchRPS    = 100000.0
 	defaultTaskDispatchRPSTTL = time.Minute
 
+	// TODO: dynamic config?
 	partitionCountAllowedError = 1.5
 )
 
@@ -269,12 +270,7 @@ func (pm *taskQueuePartitionManagerImpl) checkPartitionCounts(ctx context.Contex
 	}
 	id := normal.PartitionId()
 
-	// TODO: maybe we can assume this is initialized?
-	err := pm.userDataManager.WaitUntilInitialized(ctx)
-	if err != nil {
-		return err
-	}
-
+	// userDataManager must be initialized here already
 	scaleInfo := pm.userDataManager.PartitionScale()
 	if scaleInfo.GetRead() <= 0 || scaleInfo.GetWrite() <= 0 || scaleInfo.Write > scaleInfo.Read {
 		return nil // missing or invalid scale info
@@ -294,26 +290,31 @@ func (pm *taskQueuePartitionManagerImpl) checkPartitionCounts(ctx context.Contex
 	// check what the client thought the counts were
 	pc := matching.ParsePartitionCountsFromIncomingContext(ctx)
 	if pc.Valid() {
-		readRatio := float32(pc.Read) / float32(scaleInfo.Read)
-		writeRatio := float32(pc.Write) / float32(scaleInfo.Write)
-		worst := max(readRatio, 1/readRatio, writeRatio, 1/writeRatio)
-		if worst > partitionCountAllowedError {
+		var ratio float32
+		if forWrite {
+			ratio = float32(pc.Write) / float32(scaleInfo.Write)
+		} else {
+			ratio = float32(pc.Read) / float32(scaleInfo.Read)
+		}
+		if ratio > partitionCountAllowedError || ratio < 1/partitionCountAllowedError {
 			// reject to improve load balancing
-			return errStalePartitionCounts
+			return errPartitionCountsWrong
 		}
 	}
-	// if client did not send any counts, don't reject (as long as partition is valid).
+	// if client did not send any/valid counts, don't reject (as long as partition is valid).
 	// FIXME: is that right?
 
-	// attach current counts in trailer
-	// FIXME: attach counts right before return instead!
-	newPC := matching.PartitionCounts{
-		Read:  scaleInfo.Read,
-		Write: scaleInfo.Write,
-	}
-	newPC.SetTrailer(ctx)
-
 	return nil
+}
+
+func (pm *taskQueuePartitionManagerImpl) sendPartitionCountTrailer(ctx context.Context) {
+	// note this sends the trailer even if there is no scale info (i.e. dynamic partition
+	// scaling is not enabled). that will instruct clients to fall back to dynamic config.
+	scaleInfo := pm.userDataManager.PartitionScale()
+	matching.PartitionCounts{
+		Read:  scaleInfo.GetRead(),
+		Write: scaleInfo.GetWrite(),
+	}.SetTrailer(ctx)
 }
 
 func (pm *taskQueuePartitionManagerImpl) GetRateLimitManager() *rateLimitManager {
@@ -374,6 +375,7 @@ func (pm *taskQueuePartitionManagerImpl) AddTask(
 	ctx context.Context,
 	params addTaskParams,
 ) (buildId string, syncMatched bool, err error) {
+	defer pm.sendPartitionCountTrailer(ctx)
 	if err := pm.checkPartitionCounts(ctx, true); err != nil {
 		return "", false, err
 	}
@@ -477,6 +479,7 @@ func (pm *taskQueuePartitionManagerImpl) PollTask(
 	ctx context.Context,
 	pollMetadata *pollMetadata,
 ) (*internalTask, bool, error) {
+	defer pm.sendPartitionCountTrailer(ctx)
 	if err := pm.checkPartitionCounts(ctx, false); err != nil {
 		return nil, false, err
 	}
@@ -757,6 +760,7 @@ func (pm *taskQueuePartitionManagerImpl) DispatchQueryTask(
 	request *matchingservice.QueryWorkflowRequest,
 ) (*matchingservice.QueryWorkflowResponse, error) {
 	// query counts as "write" for partition load balancing
+	defer pm.sendPartitionCountTrailer(ctx)
 	if err := pm.checkPartitionCounts(ctx, true); err != nil {
 		return nil, err
 	}
@@ -801,6 +805,7 @@ func (pm *taskQueuePartitionManagerImpl) DispatchNexusTask(
 	request *matchingservice.DispatchNexusTaskRequest,
 ) (*matchingservice.DispatchNexusTaskResponse, error) {
 	// nexus counts as "write" for partition load balancing
+	defer pm.sendPartitionCountTrailer(ctx)
 	if err := pm.checkPartitionCounts(ctx, true); err != nil {
 		return nil, err
 	}
