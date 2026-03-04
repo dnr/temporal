@@ -374,6 +374,10 @@ func (pm *taskQueuePartitionManagerImpl) AddTask(
 	ctx context.Context,
 	params addTaskParams,
 ) (buildId string, syncMatched bool, err error) {
+	if err := pm.checkPartitionCounts(ctx, true); err != nil {
+		return "", false, err
+	}
+
 	var spoolQueue, syncMatchQueue physicalTaskQueueManager
 	directive := params.taskInfo.GetVersionDirective()
 
@@ -473,6 +477,10 @@ func (pm *taskQueuePartitionManagerImpl) PollTask(
 	ctx context.Context,
 	pollMetadata *pollMetadata,
 ) (*internalTask, bool, error) {
+	if err := pm.checkPartitionCounts(ctx, false); err != nil {
+		return nil, false, err
+	}
+
 	var err error
 	dbq := pm.defaultQueue()
 	if dbq == nil {
@@ -748,6 +756,11 @@ func (pm *taskQueuePartitionManagerImpl) DispatchQueryTask(
 	taskID string,
 	request *matchingservice.QueryWorkflowRequest,
 ) (*matchingservice.QueryWorkflowResponse, error) {
+	// query counts as "write" for partition load balancing
+	if err := pm.checkPartitionCounts(ctx, true); err != nil {
+		return nil, err
+	}
+
 reredirectTask:
 	_, syncMatchQueue, _, _, _, err := pm.getPhysicalQueuesForAdd(ctx,
 		request.VersionDirective,
@@ -787,6 +800,11 @@ func (pm *taskQueuePartitionManagerImpl) DispatchNexusTask(
 	taskId string,
 	request *matchingservice.DispatchNexusTaskRequest,
 ) (*matchingservice.DispatchNexusTaskResponse, error) {
+	// nexus counts as "write" for partition load balancing
+	if err := pm.checkPartitionCounts(ctx, true); err != nil {
+		return nil, err
+	}
+
 reredirectTask:
 	_, syncMatchQueue, _, _, _, err := pm.getPhysicalQueuesForAdd(ctx,
 		worker_versioning.MakeUseAssignmentRulesDirective(),
