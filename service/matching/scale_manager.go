@@ -25,8 +25,9 @@ type scaleManager struct {
 	logger          log.Logger
 	userDataManager userDataManager
 	partitionScaler PartitionScaler
-	// for simplicity, settings are set at construction time
+	// for simplicity, settings are fixed at construction time
 	settings             dynamicconfig.PartitionScaleManagerSettings
+	getWritePartitions   dynamicconfig.IntPropertyFn
 	setTarget            func(int)
 	periodicNotification *goro.Handle
 	limiter              quotas.RateLimiter
@@ -49,12 +50,14 @@ func newScaleManager(
 	userDataManager userDataManager,
 	partitionScaler PartitionScaler,
 	settings dynamicconfig.PartitionScaleManagerSettings,
+	getWritePartitions dynamicconfig.IntPropertyFn,
 ) *scaleManager {
 	sm := &scaleManager{
 		logger:               logger,
 		userDataManager:      userDataManager,
 		partitionScaler:      partitionScaler,
 		settings:             settings,
+		getWritePartitions:   getWritePartitions,
 		periodicNotification: goro.NewHandle(context.Background()),
 		limiter:              quotas.NewRateLimiter(float64(settings.MaxRate), 1),
 	}
@@ -134,9 +137,17 @@ func (sm *scaleManager) SetTarget(targeti int) {
 		newState.Target = target
 		newState.MaxTarget = max(newState.MaxTarget, target)
 
-		// mark all new partitions as having backlog
-		for i := prevTarget; i < target; i++ {
-			setBacklogStateBit(newState, i)
+		if prevTarget == 0 {
+			// turning on managed partition scaling: consider all partitions from dynamic
+			// config as having backlog.
+			for i := range max(target, int32(sm.getWritePartitions())) {
+				setBacklogStateBit(newState, i)
+			}
+		} else {
+			// mark all new partitions as having backlog
+			for i := prevTarget; i < target; i++ {
+				setBacklogStateBit(newState, i)
+			}
 		}
 
 		// we must succesfully write to the db before making new state active
@@ -147,6 +158,7 @@ func (sm *scaleManager) SetTarget(targeti int) {
 
 		sm.logger.Info("partition scale event",
 			tag.Int32("target", target),
+			tag.Int32("prev-targe", prevTarget),
 			tag.Int32("max-target", newState.MaxTarget))
 
 		sm.setStateLocked(newState)

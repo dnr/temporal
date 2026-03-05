@@ -1446,7 +1446,7 @@ an optional feature and also requires a metrics collection system that can handl
 			AllowedDelta: 1,
 			AllowedRatio: 1.5,
 		},
-		`Settings for partition scale manager.`,
+		`Settings for partition scale manager. Some fields require a task queue reload to take effect.`,
 	)
 	MatchingSimplePartitionScaler = NewTaskQueueTypedSetting(
 		"matching.simplePartitionScaler",

@@ -141,6 +141,7 @@ func newTaskQueuePartitionManager(
 				userDataManager,
 				partitionScaler,
 				tqConfig.PartitionScaleManagerSettings(),
+				tqConfig.NumWritePartitions,
 			)
 		}
 	}

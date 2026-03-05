@@ -119,12 +119,13 @@ var DefaultHistoryCacheBackgroundEvictSettings = CacheBackgroundEvictSettings{
 }
 
 type PartitionScaleManagerSettings struct {
-	// MaxRate limits scale change frequency.
+	// MaxRate limits scale change frequency. (Needs task queue reload.)
 	MaxRate float32
-	// BatchSize is the size of a batch to send to the partition scaler.
+	// BatchSize is the size of a batch to send to the partition scaler. (Needs task queue
+	// reload.)
 	BatchSize int32
-	// IdleInterval is the interval to send signals to the scaler even if not a
-	// full batch of tasks has been received yet.
+	// IdleInterval is the interval to send signals to the scaler even if not a full batch of
+	// tasks has been received yet. (Needs task queue reload.)
 	IdleInterval time.Duration
 
 	// AllowedDelta and AllowedRatio controls how far off client counts can be before we reject

@@ -104,6 +104,7 @@ func TestPartitionScaling_Down(t *testing.T) {
 	s.T().Log("stop sending tasks")
 	stopTasks()
 
+	s.T().Log("capture poll metrics")
 	capture := s.GetTestCluster().Host().CaptureMetricsHandler().StartCapture()
 	defer s.GetTestCluster().Host().CaptureMetricsHandler().StopCapture(capture)
 
@@ -126,7 +127,7 @@ func TestPartitionScaling_Down(t *testing.T) {
 	// That's tested in another test (TODO).
 }
 
-func TestPartitionScaling_Up_FromDc(t *testing.T) {
+func TestPartitionScaling_Up_FromDC(t *testing.T) {
 	// default dynamic config to 3
 	s := testcore.NewEnv(t, scalerEnvOptions(3)...)
 
@@ -157,7 +158,7 @@ func TestPartitionScaling_Up_FromDc(t *testing.T) {
 	s.Eventually(scalerBacklogEmpty(s, s.Tv(), 5, 0, 1, 2, 3, 4, 5), 15*time.Second, time.Second)
 }
 
-func TestPartitionScaling_Down_FromDc(t *testing.T) {
+func TestPartitionScaling_Down_FromDC(t *testing.T) {
 	// default dynamic config to 6
 	s := testcore.NewEnv(t, scalerEnvOptions(6)...)
 
@@ -180,6 +181,10 @@ func TestPartitionScaling_Down_FromDc(t *testing.T) {
 	s.T().Log("stop sending tasks")
 	stopTasks()
 
+	s.T().Log("capture poll metrics")
+	capture := s.GetTestCluster().Host().CaptureMetricsHandler().StartCapture()
+	defer s.GetTestCluster().Host().CaptureMetricsHandler().StopCapture(capture)
+
 	s.T().Log("start background polls")
 	stopPolls := scalerBackgroundPolls(s, s.Tv(), s.TaskPoller(), 3)
 	defer stopPolls()
@@ -187,8 +192,12 @@ func TestPartitionScaling_Down_FromDc(t *testing.T) {
 	s.T().Log("wait until all are drained")
 	s.Eventually(scalerBacklogEmpty(s, s.Tv(), 5, 0, 1, 2, 3, 4, 5), 15*time.Second, time.Second)
 
-	// FIXME: ah crap, this doesn't really test what we want because the tasks get forwarded
-	// from the higher partitions and get drained even if we don't poll them
+	// We want to check that polls went to all 6 partitions directly, even though we decreased
+	// the target to 4. Note that tasks will be forwarded, so we'll still drain everything even
+	// if we don't poll all 6. So we have to look at metrics.
+	pollsByPartition := scalerCountPollsFromSnapshot(s, s.Tv(), capture.Snapshot())
+	s.T().Log("poll counts", pollsByPartition)
+	s.Equal(6, len(pollsByPartition))
 }
 
 // test migration from old dc to scaler with > 4:
