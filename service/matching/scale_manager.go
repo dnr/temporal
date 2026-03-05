@@ -76,18 +76,21 @@ func (sm *scaleManager) LoadedMetadata(
 	sm.setStateLocked(scaleState)
 }
 
-// OnTask is called on every task added. The caller is required to pass in the current target
-// even though we have it already, so that we don't have to do another mutex lock. The caller
-// in this case (partitionManager checkPartitionCounts) has already gotten the partition counts
-// from ephemeral data.
-func (sm *scaleManager) OnTask(currentTarget, currentEffective int) {
+// OnTasks is called on a batch of tasks added. The caller is required to pass in the current
+// target even though we have it already, so that in the common case, we only have to one
+// atomic increment. The caller in this case (partitionManager checkPartitionCounts) has
+// already gotten the partition counts from ephemeral data, which should match our target.
+func (sm *scaleManager) OnTasks(numTasks, currentTarget int) {
 	if sm == nil {
 		return
 	}
 
-	if sm.batch.Add(1) >= scaleNotificationBatchSize {
-		sm.batch.Add(-scaleNotificationBatchSize)
-		sm.partitionScaler.OnTasks(scaleNotificationBatchSize, currentTarget, currentEffective, sm.setTarget)
+	// scale target batch size by numTasks (since numTasks is scaled by partitions)
+	batchSize := numTasks * scaleNotificationBatchSize
+
+	if tasks := sm.batch.Add(int64(numTasks)); tasks >= int64(batchSize) {
+		tasks = sm.batch.Swap(0)
+		sm.partitionScaler.OnTasks(int(tasks), currentTarget, sm.setTarget)
 	}
 }
 
@@ -161,13 +164,8 @@ func (sm *scaleManager) sendPeriodicNotification(ctx context.Context) error {
 			sm.lock.Lock()
 			target := int(sm.scaleState.GetTarget())
 			sm.lock.Unlock()
-			// This periodic mechanism is mostly useful for scaling down. For scaling up we'll
-			// get enough events from tasks added. If target == 0, that means scaling isn't
-			// enabled or hasn't set a target yet, in that case there's no need to notify.
-			if target > 0 {
-				tasks := int(sm.batch.Swap(0))
-				sm.partitionScaler.OnTasks(tasks, target, target, sm.setTarget)
-			}
+			tasks := int(sm.batch.Swap(0))
+			sm.partitionScaler.OnTasks(tasks, target, sm.setTarget)
 		}
 	}
 }

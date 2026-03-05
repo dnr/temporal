@@ -14,14 +14,17 @@ type PartitionScalerFactory interface {
 
 // PartitionScaler is an instance of a scaler for one task queue.
 type PartitionScaler interface {
-	// OnTasks will be called once per batch of tasks added to the root partition, either sync
-	// match or async. It will be given the current partition count target, and the current
-	// effective write partition count. If it wants to change the target, it should call
-	// setTarget with the new target. Changes may be rejected if called too often.
-	// It will also be called periodically with less than a full batch, or with numTasks == 0,
-	// to allow timely scale down when there are no/few tasks.
-	// Setting target to zero will disable dynamic partition scaling.
-	OnTasks(numTasks, currentTarget, currentEffective int, setTarget func(newTarget int))
+	// OnTasks will be called once per batch of tasks added, either sync match or async. The
+	// numTasks count may be estimated based on assumptions of load balancing across
+	// partitions.
+	//
+	// It will be given the current partition count target. If it wants to change the target,
+	// it should call setTarget with the new target. Setting target to zero will disable
+	// dynamic partition scaling. Changes may be rejected if called too often.
+	//
+	// It will also be called periodically with less than a full batch, or even zero, to allow
+	// timely scale down when there are no/few tasks.
+	OnTasks(numTasks, currentTarget int, setTarget func(newTarget int))
 	// Stop will be called when unloading the partition.
 	Stop()
 }

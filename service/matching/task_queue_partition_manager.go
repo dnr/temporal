@@ -287,7 +287,7 @@ func (pm *taskQueuePartitionManagerImpl) LoadedMetadata(scaleState *persistences
 	pm.scaleManager.LoadedMetadata(scaleState, pm.defaultQueue())
 }
 
-func (pm *taskQueuePartitionManagerImpl) checkPartitionCounts(ctx context.Context, forWrite bool) error {
+func (pm *taskQueuePartitionManagerImpl) checkPartitionCounts(ctx context.Context, forWrite, forwarded bool) error {
 	normal, ok := pm.partition.(*tqid.NormalPartition)
 	if !ok {
 		return nil // only normal partitions do dynamic scaling
@@ -298,7 +298,7 @@ func (pm *taskQueuePartitionManagerImpl) checkPartitionCounts(ctx context.Contex
 	scaleInfo := pm.userDataManager.PartitionScale()
 
 	// on root partition, send signal to scaler
-	if forWrite && pm.scaleManager != nil {
+	if forWrite && !forwarded && pm.scaleManager != nil {
 		// note that write == target, so we can use write for target
 		target := int(scaleInfo.GetWrite())
 		// we can assume the effective number of write partitions is equal to the target
@@ -307,7 +307,11 @@ func (pm *taskQueuePartitionManagerImpl) checkPartitionCounts(ctx context.Contex
 		if effective == 0 {
 			effective = max(1, pm.config.NumWritePartitions())
 		}
-		pm.scaleManager.OnTask(target, effective)
+		// we assume that tasks are balanced uniformly across partitions, so if the root has
+		// seen 1 task then all have seen ~1 task, so the whole queue has seen 'effective'
+		// tasks in total.
+		// TODO: we could aggregate real stats instead of assuming
+		pm.scaleManager.OnTasks(effective, target)
 	}
 
 	if scaleInfo.GetRead() <= 0 || scaleInfo.GetWrite() <= 0 || scaleInfo.Write > scaleInfo.Read {
@@ -418,7 +422,7 @@ func (pm *taskQueuePartitionManagerImpl) AddTask(
 	params addTaskParams,
 ) (buildId string, syncMatched bool, err error) {
 	defer pm.sendPartitionCountTrailer(ctx)
-	if err := pm.checkPartitionCounts(ctx, true); err != nil {
+	if err := pm.checkPartitionCounts(ctx, true, params.forwardInfo != nil); err != nil {
 		return "", false, err
 	}
 
@@ -522,7 +526,7 @@ func (pm *taskQueuePartitionManagerImpl) PollTask(
 	pollMetadata *pollMetadata,
 ) (*internalTask, bool, error) {
 	defer pm.sendPartitionCountTrailer(ctx)
-	if err := pm.checkPartitionCounts(ctx, false); err != nil {
+	if err := pm.checkPartitionCounts(ctx, false, pollMetadata.forwardedFrom != ""); err != nil {
 		return nil, false, err
 	}
 
@@ -803,7 +807,7 @@ func (pm *taskQueuePartitionManagerImpl) DispatchQueryTask(
 ) (*matchingservice.QueryWorkflowResponse, error) {
 	// query counts as "write" for partition load balancing
 	defer pm.sendPartitionCountTrailer(ctx)
-	if err := pm.checkPartitionCounts(ctx, true); err != nil {
+	if err := pm.checkPartitionCounts(ctx, true, request.ForwardInfo != nil); err != nil {
 		return nil, err
 	}
 
@@ -848,7 +852,7 @@ func (pm *taskQueuePartitionManagerImpl) DispatchNexusTask(
 ) (*matchingservice.DispatchNexusTaskResponse, error) {
 	// nexus counts as "write" for partition load balancing
 	defer pm.sendPartitionCountTrailer(ctx)
-	if err := pm.checkPartitionCounts(ctx, true); err != nil {
+	if err := pm.checkPartitionCounts(ctx, true, request.ForwardInfo != nil); err != nil {
 		return nil, err
 	}
 

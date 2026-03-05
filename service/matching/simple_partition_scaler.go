@@ -57,11 +57,7 @@ func (s *simplePartitionScaler) getTrackerLocked(interval time.Duration) *taskTr
 	return t
 }
 
-func (s *simplePartitionScaler) OnTasks(num, currentTarget, currentEffective int, setTarget func(newTarget int)) {
-	if currentEffective == 0 {
-		return // can't compute total rate without a current effective write count
-	}
-
+func (s *simplePartitionScaler) OnTasks(num, currentTarget int, setTarget func(newTarget int)) {
 	cfg := s.cfg()
 
 	if !cfg.Enabled {
@@ -84,8 +80,6 @@ func (s *simplePartitionScaler) OnTasks(num, currentTarget, currentEffective int
 
 	for _, up := range cfg.Ups {
 		rate := s.getTrackerLocked(up.Interval).rate()
-		// adjust rate by assuming all partitions are seeing equal load
-		rate *= float32(currentTarget)
 		// increase target so that each partition is ~= threshold
 		newTarget = max(
 			newTarget,
@@ -95,8 +89,6 @@ func (s *simplePartitionScaler) OnTasks(num, currentTarget, currentEffective int
 
 	for _, down := range cfg.Downs {
 		rate := s.getTrackerLocked(down.Interval).rate()
-		// adjust rate by assuming all partitions are seeing equal load
-		rate *= float32(currentTarget)
 		// decrease target so that each partition is ~= threshold
 		newTarget = min(
 			newTarget,
