@@ -38,11 +38,17 @@ type scaleManager struct {
 	periodicNotification *goro.Handle
 	limiter              quotas.RateLimiter
 
-	lock         sync.Mutex
-	scaleState   *persistencespb.PartitionScaleState
-	defaultQueue physicalTaskQueueManager // used to write state to db
+	lock       sync.Mutex
+	scaleState *persistencespb.PartitionScaleState
+	scaleDB    scaleDB
 
 	batch atomic.Int64
+}
+
+// scaleDB is used to write scale state to persistence. It's a sub-interface of
+// physicalTaskQueueManager (for the default queue).
+type scaleDB interface {
+	UpdateScaleState(*persistencespb.PartitionScaleState) error
 }
 
 func newScaleManager(
@@ -73,7 +79,7 @@ func (sm *scaleManager) Stop() {
 // LoadedMetadata is called when the root partitions's default queue has loaded its metadata.
 func (sm *scaleManager) LoadedMetadata(
 	scaleState *persistencespb.PartitionScaleState,
-	defaultQueue physicalTaskQueueManager,
+	defaultQueue scaleDB,
 ) {
 	if sm == nil {
 		return
@@ -82,7 +88,7 @@ func (sm *scaleManager) LoadedMetadata(
 	sm.lock.Lock()
 	defer sm.lock.Unlock()
 
-	sm.defaultQueue = defaultQueue
+	sm.scaleDB = defaultQueue
 	sm.setStateLocked(scaleState)
 }
 
@@ -113,7 +119,7 @@ func (sm *scaleManager) SetTarget(targeti int) {
 		return // don't block on contention
 	}
 
-	if sm.defaultQueue == nil || !sm.limiter.Allow() {
+	if sm.scaleDB == nil || !sm.limiter.Allow() {
 		sm.lock.Unlock()
 		return
 	}
@@ -139,7 +145,7 @@ func (sm *scaleManager) SetTarget(targeti int) {
 		}
 
 		// we must succesfully write to the db before making new state active
-		if err := sm.defaultQueue.UpdateScaleState(newState); err != nil {
+		if err := sm.scaleDB.UpdateScaleState(newState); err != nil {
 			sm.logger.Error("partition scale failed to update state", tag.Error(err))
 			return
 		}
