@@ -6,6 +6,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	enumspb "go.temporal.io/api/enums/v1"
 	taskqueuepb "go.temporal.io/api/taskqueue/v1"
 	"go.temporal.io/api/workflowservice/v1"
@@ -17,53 +19,142 @@ import (
 	"go.temporal.io/server/tests/testcore"
 )
 
+var scalerEnvOptions = []testcore.TestOption{
+	testcore.WithDynamicConfig(dynamicconfig.MatchingUseNewMatcher, true),
+	// default dynamic config to 1 to ensure we turn on managed scaling immediately
+	testcore.WithDynamicConfig(dynamicconfig.MatchingNumTaskqueueReadPartitions, 1),
+	testcore.WithDynamicConfig(dynamicconfig.MatchingNumTaskqueueWritePartitions, 1),
+	testcore.WithDynamicConfig(dynamicconfig.MatchingPartitionScaleManager, dynamicconfig.PartitionScaleManagerSettings{
+		MaxRate:      100,         // don't limit speed of changes
+		BatchSize:    1,           // always go directly to scaler
+		IdleInterval: time.Second, // ping scaler on idle
+	}),
+}
+
 func TestPartitionScaling_Up(t *testing.T) {
-	s := testcore.NewEnv(t,
-		testcore.WithDynamicConfig(dynamicconfig.MatchingUseNewMatcher, true),
-		// default dynamic config to 1 to ensure we turn on managed scaling immediately
-		testcore.WithDynamicConfig(dynamicconfig.MatchingNumTaskqueueReadPartitions, 1),
-		testcore.WithDynamicConfig(dynamicconfig.MatchingNumTaskqueueWritePartitions, 1),
-		testcore.WithDynamicConfig(dynamicconfig.MatchingPartitionScaleManager, dynamicconfig.PartitionScaleManagerSettings{
-			BatchSize:    1,           // always go directly to scaler
-			IdleInterval: time.Second, // ping scaler on idle
-			MaxRate:      100,         // don't limit speed of changes
-		}),
-	)
+	s := testcore.NewEnv(t, scalerEnvOptions...)
 
-	// test plan:
-	// set to 2 partitions using scaler (fixed)
-	// start tasks (5/s)
-	// wait until 0,1 have 5 tasks
-	// set to 4 partitions using scaler (fixed)
-	// wait until 2,3 have 5 tasks
-	// stop tasks
-	// start pollers
-	// wait until none have tasks
-
+	s.T().Log("set to 2 partitions using scaler")
 	s.OverrideDynamicConfig(dynamicconfig.MatchingSimplePartitionScaler, dynamicconfig.SimplePartitionScalerSettings{
 		Enabled: true,
 		Fixed:   2,
 	})
 
-	stopTasks := scalerBackgroundTasks(s, s.Tv(), 5)
+	s.T().Log("start sending 10 tasks/s")
+	stopTasks := scalerBackgroundTasks(s, s.Tv(), 10)
 	defer stopTasks()
 
+	s.T().Log("wait until partitions 0,1 have 5 tasks backlog")
 	s.Eventually(scalerBacklogAtLeast(s, s.Tv(), 5, 0, 1), 15*time.Second, time.Second)
 
+	s.T().Log("check that 2,3 have no tasks (leave 4,5 unloaded)")
+	s.True(scalerBacklogEmpty(s, s.Tv(), 5, 2, 3)())
+
+	s.T().Log("set to 6 partitions using scaler")
 	s.OverrideDynamicConfig(dynamicconfig.MatchingSimplePartitionScaler, dynamicconfig.SimplePartitionScalerSettings{
 		Enabled: true,
 		Fixed:   6,
 	})
 
+	s.T().Log("wait until partitions 2,3,4,5 have 5 tasks backlog")
 	s.Eventually(scalerBacklogAtLeast(s, s.Tv(), 5, 2, 3, 4, 5), 15*time.Second, time.Second)
 
+	s.T().Log("stop sending tasks")
 	stopTasks()
 
-	stopPolls := scalerBackgroundPolls(s, s.Tv(), s.TaskPoller())
+	s.T().Log("start background polls")
+	stopPolls := scalerBackgroundPolls(s, s.Tv(), s.TaskPoller(), 3)
 	defer stopPolls()
 
+	s.T().Log("wait until all are drained")
 	s.Eventually(scalerBacklogEmpty(s, s.Tv(), 5, 0, 1, 2, 3, 4, 5), 15*time.Second, time.Second)
 }
+
+func TestPartitionScaling_Down(t *testing.T) {
+	s := testcore.NewEnv(t, scalerEnvOptions...)
+
+	// test plan:
+	// set to 6 partitions using scaler (fixed)
+	// start tasks (10/s)
+	// wait until all have 5 tasks (~3s)
+	// set to 4 partitions using scaler (fixed)
+	// wait until 1s has gone by with 4,5 getting no newly added tasks
+	// stop tasks
+	// start pollers
+	// wait until
+
+	s.T().Log("set to 6 partitions using scaler")
+	s.OverrideDynamicConfig(dynamicconfig.MatchingSimplePartitionScaler, dynamicconfig.SimplePartitionScalerSettings{
+		Enabled: true,
+		Fixed:   6,
+	})
+
+	s.T().Log("start sending 10 tasks/s")
+	stopTasks := scalerBackgroundTasks(s, s.Tv(), 10)
+	defer stopTasks()
+
+	s.T().Log("wait until partitions 0-5 have 5 tasks backlog")
+	s.Eventually(scalerBacklogAtLeast(s, s.Tv(), 5, 0, 1, 2, 3, 4, 5), 15*time.Second, time.Second)
+
+	s.T().Log("set to 4 partitions using scaler")
+	s.OverrideDynamicConfig(dynamicconfig.MatchingSimplePartitionScaler, dynamicconfig.SimplePartitionScalerSettings{
+		Enabled: true,
+		Fixed:   4,
+	})
+
+	s.T().Log("wait until 4,5 see no new tasks over a 1s window")
+	s.EventuallyWithT(func(c *assert.CollectT) {
+		fourBacklog, err := scalerGetBacklog(s, s.Tv(), 4)
+		require.NoError(c, err)
+		fiveBacklog, err := scalerGetBacklog(s, s.Tv(), 5)
+		require.NoError(c, err)
+
+		time.Sleep(time.Second) //nolint:forbidigo // trying to test a negative
+
+		fourBacklog2, err := scalerGetBacklog(s, s.Tv(), 4)
+		require.NoError(c, err)
+		fiveBacklog2, err := scalerGetBacklog(s, s.Tv(), 5)
+		require.NoError(c, err)
+
+		require.Equal(c, fourBacklog, fourBacklog2)
+		require.Equal(c, fiveBacklog, fiveBacklog2)
+	}, 15*time.Second, time.Millisecond)
+
+	s.T().Log("stop sending tasks")
+	stopTasks()
+
+	s.T().Log("start background polls")
+	stopPolls := scalerBackgroundPolls(s, s.Tv(), s.TaskPoller(), 3)
+	defer stopPolls()
+
+	s.T().Log("wait until all are drained")
+	s.Eventually(scalerBacklogEmpty(s, s.Tv(), 5, 0, 1, 2, 3, 4, 5), 15*time.Second, time.Second)
+
+	// Note that this test does not test the read count eventually drops!
+	// That's in another test (TODO).
+}
+
+// test migration from old dc to scaler with > 4:
+// set 4 partitions using old dynamic config
+// start creating tasks in the background, 5/s
+// no pollers yet
+// wait until all 4 partitions have 5 tasks in backlog
+// set scaler to 6
+// wait until parts 4,5 have 5 tasks in backlog
+// stop tasks
+// start pollers
+// wait until all have no backlog
+
+// test migration from old dc to scaler with < 4:
+// set 4 partitions using old dynamic config
+// start creating tasks in the background, 5/s
+// no pollers yet
+// wait until all 4 partitions have 5 tasks in backlog
+// set scaler to 2
+// wait until partitions 0,1 have 10 tasks in backlog
+// stop tasks
+// start pollers
+// wait until all have no backlog
 
 func scalerBackgroundTasks(s testcore.Env, tv *testvars.TestVars, rate float32) func() {
 	ctx, cancel := context.WithCancel(context.Background())
@@ -90,18 +181,20 @@ func scalerBackgroundTasks(s testcore.Env, tv *testvars.TestVars, rate float32) 
 	return cancel
 }
 
-func scalerBackgroundPolls(s testcore.Env, tv *testvars.TestVars, tp *taskpoller.TaskPoller) func() {
+func scalerBackgroundPolls(s testcore.Env, tv *testvars.TestVars, tp *taskpoller.TaskPoller, workers int) func() {
 	ctx, cancel := context.WithCancel(context.Background())
 
-	go func() {
-		for ctx.Err() == nil {
-			_, _ = tp.PollAndHandleWorkflowTask(
-				tv,
-				taskpoller.CompleteWorkflowHandler,
-				taskpoller.WithContext(ctx),
-			)
-		}
-	}()
+	for range workers {
+		go func() {
+			for ctx.Err() == nil {
+				_, _ = tp.PollAndHandleWorkflowTask(
+					tv,
+					taskpoller.CompleteWorkflowHandler,
+					taskpoller.WithContext(ctx),
+				)
+			}
+		}()
+	}
 
 	return cancel
 }
@@ -152,40 +245,3 @@ func scalerBacklogEmpty(s testcore.Env, tv *testvars.TestVars, parts ...int) fun
 		return true
 	}
 }
-
-// func TestPartitionScaling_Down(t *testing.T) {
-// 	s := testcore.NewEnv(t)
-
-// 	// test plan:
-// 	// set to 6 partitions using scaler (fixed)
-// 	// start tasks (10/s)
-// 	// wait until all have 5 tasks (~3s)
-// 	// set to 4 partitions using scaler (fixed)
-// 	// wait until 1s has gone by with 4,5 getting no newly added tasks
-// 	// stop tasks
-// 	// start pollers
-// 	// wait until
-
-// }
-
-// test migration from old dc to scaler with > 4:
-// set 4 partitions using old dynamic config
-// start creating tasks in the background, 5/s
-// no pollers yet
-// wait until all 4 partitions have 5 tasks in backlog
-// set scaler to 6
-// wait until parts 4,5 have 5 tasks in backlog
-// stop tasks
-// start pollers
-// wait until all have no backlog
-
-// test migration from old dc to scaler with < 4:
-// set 4 partitions using old dynamic config
-// start creating tasks in the background, 5/s
-// no pollers yet
-// wait until all 4 partitions have 5 tasks in backlog
-// set scaler to 2
-// wait until partitions 0,1 have 10 tasks in backlog
-// stop tasks
-// start pollers
-// wait until all have no backlog
