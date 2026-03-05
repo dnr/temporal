@@ -110,7 +110,7 @@ func handlePartitionCounts[Req, Res any](
 	if _, ok := errors.AsType[*serviceerrors.StalePartitionCounts](err); ok {
 		// if we got a StalePartitionCounts, retry once
 		trailer = nil
-		res, err = op(pc.appendToOutgoingContext(ctx), pc2, request, opts)
+		res, err = op(pc2.appendToOutgoingContext(ctx), pc2, request, opts)
 		// update again
 		pc3 := parsePartitionCountsFromTrailer(trailer)
 		if pc3 != pc2 {
