@@ -212,6 +212,6 @@ func WorkersRegistryProvider(
 
 func simplePartitionScalerFactoryProvider(dc *dynamicconfig.Collection) PartitionScalerFactory {
 	return newSimplePartitionScalerFactory(
-		dynamicconfig.MatchingPartitionScaler.Get(dc),
+		dynamicconfig.MatchingSimplePartitionScaler.Get(dc),
 	)
 }

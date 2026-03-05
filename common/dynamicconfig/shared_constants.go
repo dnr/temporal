@@ -118,6 +118,23 @@ var DefaultHistoryCacheBackgroundEvictSettings = CacheBackgroundEvictSettings{
 	MaxEntryPerCall: 1024,
 }
 
+type PartitionScaleManagerSettings struct {
+	// MaxRate limits scale change frequency.
+	MaxRate float32
+	// BatchSize is the size of a batch to send to the partition scaler.
+	BatchSize int32
+	// IdleInterval is the interval to send signals to the scaler even if not a
+	// full batch of tasks has been received yet.
+	IdleInterval time.Duration
+
+	// AllowedDelta and AllowedRatio controls how far off client counts can be before we reject
+	// an RPC. If the client count is within either the delta or ratio, then it's allowed.
+	// To always allow: set Delta to 10000 and Ratio to 1.0.
+	// To never allow except on exact match: set Delta to 0 and Ratio to 1.0.
+	AllowedDelta int32
+	AllowedRatio float32
+}
+
 type SimplePartitionScalerSettings struct {
 	// If Enabled is false, scaler will remove dynamic scale state and fall back to dynamic
 	// config. If Enabled is true but Ups and Downs are empty, dynamic scale state will be

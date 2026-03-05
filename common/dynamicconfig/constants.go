@@ -1437,8 +1437,19 @@ an optional feature and also requires a metrics collection system that can handl
 		false,
 		`MatchingAutoEnableV2 automatically enables fairness when a fairness or priority key is seen`,
 	)
-	MatchingPartitionScaler = NewTaskQueueTypedSetting(
-		"matching.partitionScaler",
+	MatchingPartitionScaleManager = NewTaskQueueTypedSetting(
+		"matching.partitionScaleManager",
+		PartitionScaleManagerSettings{
+			MaxRate:      0.33,
+			BatchSize:    100,
+			IdleInterval: 46 * time.Second,
+			AllowedDelta: 1,
+			AllowedRatio: 1.5,
+		},
+		`Settings for partition scale manager.`,
+	)
+	MatchingSimplePartitionScaler = NewTaskQueueTypedSetting(
+		"matching.simplePartitionScaler",
 		SimplePartitionScalerSettings{},
 		`Settings for simple partition scaler.`,
 	)

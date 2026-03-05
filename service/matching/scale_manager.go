@@ -11,6 +11,7 @@ import (
 	taskqueuespb "go.temporal.io/server/api/taskqueue/v1"
 	"go.temporal.io/server/common"
 	"go.temporal.io/server/common/backoff"
+	"go.temporal.io/server/common/dynamicconfig"
 	"go.temporal.io/server/common/goro"
 	"go.temporal.io/server/common/log"
 	"go.temporal.io/server/common/log/tag"
@@ -18,22 +19,14 @@ import (
 	"go.temporal.io/server/common/util"
 )
 
-const (
-	// scaleNotificationBatchSize is the size of a batch to send to the partitions scaler.
-	scaleNotificationBatchSize = 100
-	// scaleNotificationInterval is the interval to send signals to the scaler even if not a
-	// full batch of tasks has been received yet.
-	scaleNotificationInterval = 46 * time.Second
-	// limit scale change frequency
-	scaleChangeMaxRate = 0.33 // changes per second
-)
-
 // scaleManager keeps some state and manages the interaction with partitionScaler.
 // scaleManager runs on the root partition only.
 type scaleManager struct {
-	logger               log.Logger
-	userDataManager      userDataManager
-	partitionScaler      PartitionScaler
+	logger          log.Logger
+	userDataManager userDataManager
+	partitionScaler PartitionScaler
+	// for simplicity, settings are set at construction time
+	settings             dynamicconfig.PartitionScaleManagerSettings
 	setTarget            func(int)
 	periodicNotification *goro.Handle
 	limiter              quotas.RateLimiter
@@ -55,13 +48,15 @@ func newScaleManager(
 	logger log.Logger,
 	userDataManager userDataManager,
 	partitionScaler PartitionScaler,
+	settings dynamicconfig.PartitionScaleManagerSettings,
 ) *scaleManager {
 	sm := &scaleManager{
 		logger:               logger,
 		userDataManager:      userDataManager,
 		partitionScaler:      partitionScaler,
+		settings:             settings,
 		periodicNotification: goro.NewHandle(context.Background()),
-		limiter:              quotas.NewRateLimiter(scaleChangeMaxRate, 1),
+		limiter:              quotas.NewRateLimiter(float64(settings.MaxRate), 1),
 	}
 	sm.setTarget = sm.SetTarget // allocate closure once
 	sm.periodicNotification.Go(sm.sendPeriodicNotification)
@@ -102,9 +97,9 @@ func (sm *scaleManager) OnTasks(numTasks, currentTarget int) {
 	}
 
 	// scale target batch size by numTasks (since numTasks is scaled by partitions)
-	batchSize := numTasks * scaleNotificationBatchSize
+	batchSize := int64(numTasks) * int64(sm.settings.BatchSize)
 
-	if tasks := sm.batch.Add(int64(numTasks)); tasks >= int64(batchSize) {
+	if tasks := sm.batch.Add(int64(numTasks)); tasks >= batchSize {
 		tasks = sm.batch.Swap(0)
 		sm.partitionScaler.OnTasks(int(tasks), currentTarget, sm.setTarget)
 	}
@@ -174,8 +169,8 @@ func (sm *scaleManager) setStateLocked(newState *persistencespb.PartitionScaleSt
 }
 
 func (sm *scaleManager) sendPeriodicNotification(ctx context.Context) error {
-	util.InterruptibleSleep(ctx, backoff.FullJitter(scaleNotificationInterval))
-	t := time.NewTicker(scaleNotificationInterval).C
+	util.InterruptibleSleep(ctx, backoff.FullJitter(sm.settings.IdleInterval))
+	t := time.NewTicker(sm.settings.IdleInterval).C
 	for {
 		select {
 		case <-ctx.Done():

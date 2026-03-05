@@ -51,10 +51,6 @@ var (
 const (
 	defaultTaskDispatchRPS    = 100000.0
 	defaultTaskDispatchRPSTTL = time.Minute
-
-	// TODO: dynamic config?
-	partitionCountAllowedDelta = 1
-	partitionCountAllowedRatio = 1.5
 )
 
 type (
@@ -140,7 +136,12 @@ func newTaskQueuePartitionManager(
 			partition.TaskQueue().TaskType(),
 		)
 		if partitionScaler != nil {
-			scaleManager = newScaleManager(logger, userDataManager, partitionScaler)
+			scaleManager = newScaleManager(
+				logger,
+				userDataManager,
+				partitionScaler,
+				tqConfig.PartitionScaleManagerSettings(),
+			)
 		}
 	}
 	pm := &taskQueuePartitionManagerImpl{
@@ -341,8 +342,10 @@ func (pm *taskQueuePartitionManagerImpl) checkPartitionCounts(ctx context.Contex
 			delta = pc.Read - scaleInfo.Read
 			ratio = float32(pc.Read) / float32(scaleInfo.Read)
 		}
-		if (delta > partitionCountAllowedDelta || delta < -partitionCountAllowedDelta) &&
-			(ratio > partitionCountAllowedRatio || ratio < 1/partitionCountAllowedRatio) {
+		settings := pm.config.PartitionScaleManagerSettings()
+		allowedRatio := max(1.001, settings.AllowedRatio)
+		if (delta > settings.AllowedDelta || delta < -settings.AllowedDelta) &&
+			(ratio > allowedRatio || ratio < 1/allowedRatio) {
 			// reject to improve load balancing
 			return errPartitionCountsWrong
 		}
