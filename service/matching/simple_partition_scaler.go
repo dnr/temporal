@@ -31,28 +31,25 @@ func (s *simplePartitionScalerFactory) New(
 
 // simplePartitionScaler uses task add rates to scale partitions.
 type simplePartitionScaler struct {
-	cfg scalerCfg
-	ts  clock.TimeSource
-
-	lock     sync.Mutex
-	trackers map[time.Duration]*taskTracker
+	cfg      scalerCfg
+	ts       clock.TimeSource
+	trackers sync.Map // time.Duration -> *taskTracker
 }
 
 func newSimplePartitionScaler(cfg scalerCfg, ts clock.TimeSource) *simplePartitionScaler {
 	return &simplePartitionScaler{
-		cfg:      cfg,
-		ts:       ts,
-		trackers: make(map[time.Duration]*taskTracker),
+		cfg: cfg,
+		ts:  ts,
 	}
 }
 
-func (s *simplePartitionScaler) getTrackerLocked(interval time.Duration) *taskTracker {
-	if t := s.trackers[interval]; t != nil {
-		return t
+func (s *simplePartitionScaler) getTracker(interval time.Duration) *taskTracker {
+	if t, _ := s.trackers.Load(interval); t != nil {
+		return t.(*taskTracker) //nolint:revive
 	}
-	t := newTaskTracker(s.ts, interval/20, interval)
-	s.trackers[interval] = t
-	return t
+	newT := newTaskTracker(s.ts, interval/10, interval)
+	t, _ := s.trackers.LoadOrStore(interval, newT)
+	return t.(*taskTracker)
 }
 
 func (s *simplePartitionScaler) OnTasks(num, currentTarget int, setTarget func(newTarget int)) {
@@ -65,27 +62,17 @@ func (s *simplePartitionScaler) OnTasks(num, currentTarget int, setTarget func(n
 		return
 	}
 
-	s.lock.Lock()
-
 	// TODO: optimization: use one tracker and query it for different intervals.
 	// TODO: clean up trackers that are unused after config change.
-	for _, t := range s.trackers {
-		t.inc(num)
-	}
+	s.trackers.Range(func(_, t any) bool {
+		t.(*taskTracker).inc(num)
+		return true
+	})
 
 	newTarget := currentTarget
 
-	for _, up := range cfg.Ups {
-		rate := s.getTrackerLocked(up.Interval).rate()
-		// increase target so that each partition is ~= threshold
-		newTarget = max(
-			newTarget,
-			int(rate/float32(up.Threshold)+0.5),
-		)
-	}
-
 	for _, down := range cfg.Downs {
-		rate := s.getTrackerLocked(down.Interval).rate()
+		rate := s.getTracker(down.Interval).rate()
 		// decrease target so that each partition is ~= threshold
 		newTarget = min(
 			newTarget,
@@ -93,8 +80,14 @@ func (s *simplePartitionScaler) OnTasks(num, currentTarget int, setTarget func(n
 		)
 	}
 
-	// unlock before setTarget
-	s.lock.Unlock()
+	for _, up := range cfg.Ups {
+		rate := s.getTracker(up.Interval).rate()
+		// increase target so that each partition is ~= threshold
+		newTarget = max(
+			newTarget,
+			int(rate/float32(up.Threshold)+0.5),
+		)
+	}
 
 	if newTarget != currentTarget {
 		setTarget(newTarget)
