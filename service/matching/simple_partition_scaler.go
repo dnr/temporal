@@ -60,6 +60,11 @@ func (s *simplePartitionScaler) OnTasks(num, currentTarget int, setTarget func(n
 			setTarget(0)
 		}
 		return
+	} else if cfg.Fixed > 0 {
+		if currentTarget != cfg.Fixed {
+			setTarget(cfg.Fixed)
+		}
+		return
 	}
 
 	// TODO: optimization: use one tracker and query it for different intervals.
@@ -74,10 +79,10 @@ func (s *simplePartitionScaler) OnTasks(num, currentTarget int, setTarget func(n
 	for _, down := range cfg.Downs {
 		rate := s.getTracker(down.Interval).rate()
 		// decrease target so that each partition is ~= threshold
-		newTarget = min(
+		newTarget = max(1, min(
 			newTarget,
 			int(rate/float32(down.Threshold)+0.5),
-		)
+		))
 	}
 
 	for _, up := range cfg.Ups {
@@ -86,6 +91,7 @@ func (s *simplePartitionScaler) OnTasks(num, currentTarget int, setTarget func(n
 		newTarget = max(
 			newTarget,
 			int(rate/float32(up.Threshold)+0.5),
+			1,
 		)
 	}
 

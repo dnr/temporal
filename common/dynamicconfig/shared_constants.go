@@ -123,14 +123,16 @@ type SimplePartitionScalerSettings struct {
 	// config. If Enabled is true but Ups and Downs are empty, dynamic scale state will be
 	// preserved and used as-is without changes.
 	Enabled bool
+
+	// If non-zero, Fixed will be used as the scaling decision (Ups/Downs will be ignored).
+	Fixed int
+
 	// Ups and Downs control scaling based on add rate: if the add rate exceeds an Up threshold
 	// over an interval, partitions will be scaled up to use the threshold as a target.
 	// If it falls below a Down threshold over an interval, partitions will be scaled down to
 	// meet the threshold.
 	Ups   []SimplePartitionScalerThreshold
 	Downs []SimplePartitionScalerThreshold
-	// Maximum allowed rate of changes.
-	ChangeRate float32
 }
 
 type SimplePartitionScalerThreshold struct {
