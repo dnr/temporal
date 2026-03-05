@@ -8,6 +8,7 @@ import (
 	enumspb "go.temporal.io/api/enums/v1"
 )
 
+// should be power of 2
 const partitionCacheShards = 8
 
 type partitionCache struct {
@@ -22,16 +23,18 @@ type partitionCacheShard struct {
 }
 
 func newPartitionCache() *partitionCache {
-	c := &partitionCache{}
-	return c
+	return &partitionCache{}
 }
 
 func (c *partitionCache) Start() {
+	for i := range c.shards {
+		c.shards[i].rotate()
+	}
 	go func() {
-		idx := 0
+		i := 0
 		for range time.NewTicker(time.Hour / partitionCacheShards).C {
-			c.shards[idx].rotate()
-			idx = (idx + 1) & (1<<partitionCacheShards - 1)
+			c.shards[i].rotate()
+			i = (i + 1) % partitionCacheShards
 		}
 	}()
 }
@@ -53,7 +56,7 @@ func (*partitionCache) shardFromKey(key string) int {
 	// mix a few bits to pick a shard
 	l := len(key)
 	shard := int(key[14] ^ key[l-2] ^ key[l-1])
-	return shard & (1<<partitionCacheShards - 1)
+	return shard % partitionCacheShards
 }
 
 func (c *partitionCache) lookup(key string) PartitionCounts {
