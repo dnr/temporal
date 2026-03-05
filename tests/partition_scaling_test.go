@@ -2,6 +2,7 @@ package tests
 
 import (
 	"context"
+	"maps"
 	"strconv"
 	"testing"
 	"time"
@@ -124,7 +125,7 @@ func TestPartitionScaling_Down(t *testing.T) {
 
 	// Note that this test does not test the read count eventually drops!
 	// (i.e. polls will continue to go to 4,5 after they are drained)
-	// That's tested in another test (TODO).
+	// That's tested in TestPartitionScaling_Down_AndStopPolling.
 }
 
 func TestPartitionScaling_Up_FromDC(t *testing.T) {
@@ -200,27 +201,56 @@ func TestPartitionScaling_Down_FromDC(t *testing.T) {
 	s.Equal(6, len(pollsByPartition))
 }
 
-// test migration from old dc to scaler with > 4:
-// set 4 partitions using old dynamic config
-// start creating tasks in the background, 5/s
-// no pollers yet
-// wait until all 4 partitions have 5 tasks in backlog
-// set scaler to 6
-// wait until parts 4,5 have 5 tasks in backlog
-// stop tasks
-// start pollers
-// wait until all have no backlog
+func TestPartitionScaling_Down_AndStopPolling(t *testing.T) {
+	// default dynamic config to 1 to ensure we turn on managed scaling immediately
+	s := testcore.NewEnv(t, scalerEnvOptions(1)...)
 
-// test migration from old dc to scaler with < 4:
-// set 4 partitions using old dynamic config
-// start creating tasks in the background, 5/s
-// no pollers yet
-// wait until all 4 partitions have 5 tasks in backlog
-// set scaler to 2
-// wait until partitions 0,1 have 10 tasks in backlog
-// stop tasks
-// start pollers
-// wait until all have no backlog
+	s.T().Log("set to 6 partitions using scaler")
+	s.OverrideDynamicConfig(dynamicconfig.MatchingSimplePartitionScaler, dynamicconfig.SimplePartitionScalerSettings{
+		Enabled: true,
+		Fixed:   6,
+	})
+
+	s.T().Log("start sending 10 tasks/s")
+	stopTasks := scalerBackgroundTasks(s, s.Tv(), 10)
+	defer stopTasks()
+
+	capture := s.GetTestCluster().Host().CaptureMetricsHandler().StartCapture()
+	defer s.GetTestCluster().Host().CaptureMetricsHandler().StopCapture(capture)
+
+	s.T().Log("start background polls")
+	stopPolls := scalerBackgroundPolls(s, s.Tv(), s.TaskPoller(), 3)
+	defer stopPolls()
+
+	var polls map[int]int
+	s.T().Log("wait for 10 successful polls on each partition")
+	s.EventuallyWithT(func(c *assert.CollectT) {
+		polls = scalerCountPollsFromSnapshot(s, s.Tv(), capture.Snapshot())
+		s.T().Log("polls(6)", polls)
+		require.Equal(c, 6, len(polls))
+		for _, v := range polls {
+			require.GreaterOrEqual(c, v, 10)
+		}
+	}, 15*time.Second, time.Second)
+
+	s.T().Log("set to 3 partitions using scaler")
+	s.OverrideDynamicConfig(dynamicconfig.MatchingSimplePartitionScaler, dynamicconfig.SimplePartitionScalerSettings{
+		Enabled: true,
+		Fixed:   3,
+	})
+
+	// initially, polls should continue going to all 6, but new tasks should go to only 3
+	// eventually, the three will report that they are drained, and then new polls should only go to 3.
+	s.EventuallyWithT(func(c *assert.CollectT) {
+		polls2 := scalerCountPollsFromSnapshot(s, s.Tv(), capture.Snapshot())
+		diff := scalerSubtractPollCounts(polls2, polls)
+		polls = polls2
+		s.T().Log("polls(3)", diff)
+		require.Equal(c, 3, len(diff))
+	}, 15*time.Second, time.Second)
+}
+
+// TODO: test disabling scaler
 
 func scalerBackgroundTasks(s testcore.Env, tv *testvars.TestVars, rate float32) func() {
 	ctx, cancel := context.WithCancel(context.Background())
@@ -349,4 +379,16 @@ func scalerCountPollsFromSnapshot(s testcore.Env, tv *testvars.TestVars, snap me
 		out[part]++
 	}
 	return out
+}
+
+// Returns "a - b" per-key, removing zeros.
+func scalerSubtractPollCounts(a, b map[int]int) map[int]int {
+	a = maps.Clone(a)
+	for k, v := range b {
+		a[k] = a[k] - v
+		if a[k] == 0 {
+			delete(a, k)
+		}
+	}
+	return a
 }
