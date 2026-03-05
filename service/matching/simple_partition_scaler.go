@@ -26,20 +26,22 @@ func (s *simplePartitionScalerFactory) New(
 	nsName namespace.Name, tqName string, tqType enumspb.TaskQueueType,
 ) PartitionScaler {
 	cfg := func() dynamicconfig.SimplePartitionScalerSettings { return s.cfg(nsName.String(), tqName, tqType) }
-	return newSimplePartitionScaler(cfg)
+	return newSimplePartitionScaler(cfg, clock.NewRealTimeSource())
 }
 
 // simplePartitionScaler uses task add rates to scale partitions.
 type simplePartitionScaler struct {
 	cfg scalerCfg
+	ts  clock.TimeSource
 
 	lock     sync.Mutex
 	trackers map[time.Duration]*taskTracker
 }
 
-func newSimplePartitionScaler(cfg scalerCfg) *simplePartitionScaler {
+func newSimplePartitionScaler(cfg scalerCfg, ts clock.TimeSource) *simplePartitionScaler {
 	return &simplePartitionScaler{
 		cfg:      cfg,
+		ts:       ts,
 		trackers: make(map[time.Duration]*taskTracker),
 	}
 }
@@ -48,11 +50,7 @@ func (s *simplePartitionScaler) getTrackerLocked(interval time.Duration) *taskTr
 	if t := s.trackers[interval]; t != nil {
 		return t
 	}
-	t := newTaskTracker(
-		clock.NewRealTimeSource(),
-		interval/20,
-		interval,
-	)
+	t := newTaskTracker(s.ts, interval/20, interval)
 	s.trackers[interval] = t
 	return t
 }
@@ -66,6 +64,7 @@ func (s *simplePartitionScaler) OnTasks(num, currentTarget int, setTarget func(n
 		}
 		return
 	}
+
 	s.lock.Lock()
 
 	// TODO: optimization: use one tracker and query it for different intervals.
