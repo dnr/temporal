@@ -2,6 +2,7 @@ package tests
 
 import (
 	"context"
+	"strconv"
 	"testing"
 	"time"
 
@@ -14,6 +15,8 @@ import (
 	"go.temporal.io/server/api/adminservice/v1"
 	taskqueuespb "go.temporal.io/server/api/taskqueue/v1"
 	"go.temporal.io/server/common/dynamicconfig"
+	"go.temporal.io/server/common/metrics"
+	"go.temporal.io/server/common/metrics/metricstest"
 	"go.temporal.io/server/common/testing/taskpoller"
 	"go.temporal.io/server/common/testing/testvars"
 	"go.temporal.io/server/tests/testcore"
@@ -101,6 +104,9 @@ func TestPartitionScaling_Down(t *testing.T) {
 	s.T().Log("stop sending tasks")
 	stopTasks()
 
+	capture := s.GetTestCluster().Host().CaptureMetricsHandler().StartCapture()
+	defer s.GetTestCluster().Host().CaptureMetricsHandler().StopCapture(capture)
+
 	s.T().Log("start background polls")
 	stopPolls := scalerBackgroundPolls(s, s.Tv(), s.TaskPoller(), 3)
 	defer stopPolls()
@@ -108,8 +114,12 @@ func TestPartitionScaling_Down(t *testing.T) {
 	s.T().Log("wait until all are drained")
 	s.Eventually(scalerBacklogEmpty(s, s.Tv(), 5, 0, 1, 2, 3, 4, 5), 15*time.Second, time.Second)
 
-	// FIXME: ah crap, this doesn't really test what we want because the tasks get forwarded
-	// from the higher partitions and get drained even if we don't poll them
+	// We want to check that polls went to all 6 partitions directly, even though we decreased
+	// the target to 4. Note that tasks will be forwarded, so we'll still drain everything even
+	// if we don't poll all 6. So we have to look at metrics.
+	pollsByPartition := scalerCountPollsFromSnapshot(s, s.Tv(), capture.Snapshot())
+	s.T().Log("poll counts", pollsByPartition)
+	s.Equal(6, len(pollsByPartition))
 
 	// Note that this test does not test the read count eventually drops!
 	// (i.e. polls will continue to go to 4,5 after they are drained)
@@ -175,7 +185,7 @@ func TestPartitionScaling_Down_FromDc(t *testing.T) {
 	defer stopPolls()
 
 	s.T().Log("wait until all are drained")
-	s.Eventually(scalerBacklogmpty(s, s.Tv(), 5, 0, 1, 2, 3, 4, 5), 15*time.Second, time.Second)
+	s.Eventually(scalerBacklogEmpty(s, s.Tv(), 5, 0, 1, 2, 3, 4, 5), 15*time.Second, time.Second)
 
 	// FIXME: ah crap, this doesn't really test what we want because the tasks get forwarded
 	// from the higher partitions and get drained even if we don't poll them
@@ -310,4 +320,24 @@ func scalerBacklogUnchanged(s testcore.Env, tv *testvars.TestVars, sleep time.Du
 			require.Equal(c, before[i], after)
 		}
 	}
+}
+
+func scalerCountPollsFromSnapshot(s testcore.Env, tv *testvars.TestVars, snap metricstest.CaptureSnapshot) map[int]int {
+	out := make(map[int]int)
+	// Note that poll latency records the partition that the poll originally came to, not the
+	// one it matched on if it was forwarded.
+	for _, pt := range snap[metrics.PollLatencyPerTaskQueue.Name()] {
+		tags := pt.Tags
+		if tags["namespace"] != s.Namespace().String() ||
+			tags["taskqueue"] != tv.TaskQueue().Name ||
+			tags["task_type"] != "Workflow" {
+			continue
+		}
+		part, err := strconv.Atoi(tags["partition"])
+		if err != nil {
+			continue
+		}
+		out[part]++
+	}
+	return out
 }
