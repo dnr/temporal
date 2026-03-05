@@ -12,6 +12,7 @@ import (
 	"go.temporal.io/server/common"
 	"go.temporal.io/server/common/backoff"
 	"go.temporal.io/server/common/goro"
+	"go.temporal.io/server/common/quotas"
 	"go.temporal.io/server/common/util"
 )
 
@@ -21,6 +22,8 @@ const (
 	// scaleNotificationInterval is the interval to send signals to the scaler even if not a
 	// full batch of tasks has been received yet.
 	scaleNotificationInterval = 46 * time.Second
+	// limit scale change frequency
+	scaleChangeMaxRate = 0.33 // changes per second
 )
 
 // scaleManager keeps some state and manages the interaction with partitionScaler.
@@ -30,6 +33,7 @@ type scaleManager struct {
 	partitionScaler      PartitionScaler
 	setTarget            func(int)
 	periodicNotification *goro.Handle
+	limiter              quotas.RateLimiter
 
 	lock         sync.Mutex
 	scaleState   *persistencespb.PartitionScaleState
@@ -46,6 +50,7 @@ func newScaleManager(
 		userDataManager:      userDataManager,
 		partitionScaler:      partitionScaler,
 		periodicNotification: goro.NewHandle(context.Background()),
+		limiter:              quotas.NewRateLimiter(scaleChangeMaxRate, 1),
 	}
 	sm.setTarget = sm.SetTarget // allocate closure once
 	sm.periodicNotification.Go(sm.sendPeriodicNotification)
@@ -103,8 +108,7 @@ func (sm *scaleManager) SetTarget(targeti int) {
 		return // don't block on contention
 	}
 
-	// FIXME: add some limits on frequency of changes here
-	if sm.defaultQueue == nil || false /* too fast ... */ {
+	if sm.defaultQueue == nil || !sm.limiter.Allow() {
 		sm.lock.Unlock()
 		return
 	}

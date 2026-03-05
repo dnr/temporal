@@ -74,8 +74,6 @@ func (s *simplePartitionScaler) OnTasks(num, currentTarget int, setTarget func(n
 		t.inc(num)
 	}
 
-	// FIXME: do some rate limiting here
-
 	newTarget := currentTarget
 
 	for _, up := range cfg.Ups {
