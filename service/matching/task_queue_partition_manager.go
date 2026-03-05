@@ -140,7 +140,7 @@ func newTaskQueuePartitionManager(
 			partition.TaskQueue().TaskType(),
 		)
 		if partitionScaler != nil {
-			scaleManager = newScaleManager(userDataManager, partitionScaler)
+			scaleManager = newScaleManager(logger, userDataManager, partitionScaler)
 		}
 	}
 	pm := &taskQueuePartitionManagerImpl{

@@ -12,6 +12,8 @@ import (
 	"go.temporal.io/server/common"
 	"go.temporal.io/server/common/backoff"
 	"go.temporal.io/server/common/goro"
+	"go.temporal.io/server/common/log"
+	"go.temporal.io/server/common/log/tag"
 	"go.temporal.io/server/common/quotas"
 	"go.temporal.io/server/common/util"
 )
@@ -29,6 +31,7 @@ const (
 // scaleManager keeps some state and manages the interaction with partitionScaler.
 // scaleManager runs on the root partition only.
 type scaleManager struct {
+	logger               log.Logger
 	userDataManager      userDataManager
 	partitionScaler      PartitionScaler
 	setTarget            func(int)
@@ -43,10 +46,12 @@ type scaleManager struct {
 }
 
 func newScaleManager(
+	logger log.Logger,
 	userDataManager userDataManager,
 	partitionScaler PartitionScaler,
 ) *scaleManager {
 	sm := &scaleManager{
+		logger:               logger,
 		userDataManager:      userDataManager,
 		partitionScaler:      partitionScaler,
 		periodicNotification: goro.NewHandle(context.Background()),
@@ -134,9 +139,14 @@ func (sm *scaleManager) SetTarget(targeti int) {
 		}
 
 		// we must succesfully write to the db before making new state active
-		if sm.defaultQueue.UpdateScaleState(newState) != nil {
+		if err := sm.defaultQueue.UpdateScaleState(newState); err != nil {
+			sm.logger.Error("partition scale failed to update state", tag.Error(err))
 			return
 		}
+
+		sm.logger.Info("partition scale event",
+			tag.Int32("target", target),
+			tag.Int32("max-target", newState.MaxTarget))
 
 		sm.setStateLocked(newState)
 	}()
