@@ -109,21 +109,20 @@ message SubqueueKey {
 }
 
 message PartitionScaleState {
-    bool enabled = 1;
-
-    // Target number of partitions.
-    int32 target = 2;
-
-    // Bit field of partitions that may have backlog. Partition i is represented
-    // by bit: backlog_state[i/64] & (1 << i%64). Bit 0 (corresponding to the
-    // root partition) is unused since the root partition is always valid, we
-    // don't need to track its backlog state.
-    // (-- api-linter: core::0141::forbidden-types=disabled
-    //     aip.dev/not-precedent: This is a bit field --)
-    repeated uint64 backlog_state = 3;
+    // Target number of partitions. Zero means managed scaling is not enabled.
+    int32 target = 1;
 
     // Highest value that target has ever been set to.
-    int32 max_target = 4;
+    int32 max_target = 2;
+
+    // Version number for target. This should change every time target changes.
+    sfixed64 target_version = 3;
+
+    // Bit field of partitions that may have backlog. Partition i is represented by:
+    // backlog_state[i/64] & (1 << i%64).
+    // (-- api-linter: core::0141::forbidden-types=disabled
+    //     aip.dev/not-precedent: This is a bit field --)
+    repeated uint64 backlog_state = 4;
 }
 
 

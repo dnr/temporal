@@ -20,6 +20,7 @@ import (
 	"go.temporal.io/server/common/quotas"
 	"go.temporal.io/server/common/tqid"
 	"go.temporal.io/server/common/util"
+	"google.golang.org/protobuf/proto"
 )
 
 // scaleManager keeps some state and manages the interaction with partitionScaler.
@@ -133,8 +134,8 @@ func (sm *scaleManager) SetTarget(targeti int) {
 		return
 	}
 
-	// do rest async so that we don't block the task add.
-	// note that we unlock sm.lock in another goroutine.
+	// Do the rest async so that we don't block the task add.
+	// Note that we unlock sm.lock in another goroutine.
 	go func() {
 		defer sm.lock.Unlock()
 
@@ -147,18 +148,19 @@ func (sm *scaleManager) SetTarget(targeti int) {
 		prevTarget := newState.Target
 		newState.Target = target
 		newState.MaxTarget = max(newState.MaxTarget, target)
+		// Use timestamp instead of just incrementing here for extra safety: if we just
+		// incremented, and scaleDB.UpdateScaleState fails, then we could have two "states"
+		// with the same version but different targets, which could confuse things.
+		newState.TargetVersion = time.Now().UnixNano()
 
+		mayHaveBacklog := target
 		if prevTarget == 0 {
-			// turning on managed partition scaling: consider all partitions from dynamic
-			// config as having backlog.
-			for i := range max(target, int32(sm.getWritePartitions())) {
-				setBacklogStateBit(newState, i)
-			}
-		} else {
-			// mark all new partitions as having backlog
-			for i := prevTarget; i < target; i++ {
-				setBacklogStateBit(newState, i)
-			}
+			// Turning on managed partition scaling: consider all partitions from dynamic
+			// config as having backlog also.
+			mayHaveBacklog = max(mayHaveBacklog, int32(sm.getWritePartitions()))
+		}
+		for i := range mayHaveBacklog {
+			setBacklogStateBit(newState, i)
 		}
 
 		// we must succesfully write to the db before making new state active
@@ -179,28 +181,16 @@ func (sm *scaleManager) SetTarget(targeti int) {
 // setStateLocked updates the current scale state and syncs it to ephemeral data.
 // This should only be called _after_ the state is persisted to the db.
 func (sm *scaleManager) setStateLocked(newState *persistencespb.PartitionScaleState) {
-	prevRead, prevWrite := sm.scaleInfo(sm.scaleState)
+	prevInfo := scaleStateToInfo(sm.scaleState)
 
 	sm.scaleState = newState
 
-	read, write := sm.scaleInfo(sm.scaleState)
+	newInfo := scaleStateToInfo(sm.scaleState)
 
 	// only push ephemeral data if read/write changed, not on any state change
-	if write == prevWrite && read == prevRead {
-		return
+	if !proto.Equal(prevInfo, newInfo) {
+		sm.userDataManager.SetPartitionScale(newInfo)
 	}
-
-	sm.userDataManager.SetPartitionScale(&taskqueuespb.PartitionScaleInfo{
-		Read:  read,
-		Write: write,
-	})
-}
-
-func (*scaleManager) scaleInfo(scaleState *persistencespb.PartitionScaleState) (read, write int32) {
-	// note if scaleState == nil, read and write will both be 0
-	write = scaleState.GetTarget()
-	read = max(write, readPartitionsFromBacklogState(scaleState))
-	return
 }
 
 func (sm *scaleManager) sendPeriodicNotification(ctx context.Context) error {
@@ -227,14 +217,14 @@ func (sm *scaleManager) sendPeriodicNotification(ctx context.Context) error {
 }
 
 func (sm *scaleManager) checkDrained(ctx context.Context, scaleState *persistencespb.PartitionScaleState) {
-	read, write := sm.scaleInfo(scaleState)
-	if write == 0 || read <= write {
-		return // nothing to do
+	info := scaleStateToInfo(scaleState)
+	if info.Write == 0 {
+		return // managed scaling disabled
 	}
 
 	// we have partitions that should be draining, see if they are yet
 	var toClear []int32
-	for id := write; id < read; id++ {
+	for id := info.Write; id < info.Read; id++ {
 		if !getBacklogStateBit(scaleState, id) {
 			continue
 		}
@@ -255,7 +245,7 @@ func (sm *scaleManager) checkDrained(ctx context.Context, scaleState *persistenc
 			ReportInternalTaskQueueStatus: true,
 		})
 		cancel()
-		if err == nil && sm.isFullyDrained(res, read, write) {
+		if err == nil && partitionIsFullyDrained(res, info) {
 			toClear = append(toClear, id)
 		}
 	}
@@ -268,8 +258,7 @@ func (sm *scaleManager) checkDrained(ctx context.Context, scaleState *persistenc
 	defer sm.lock.Unlock()
 
 	if sm.scaleState != scaleState {
-		// we were operating from an old state
-		return
+		return // we were operating from an old state
 	}
 
 	newState := common.CloneProto(scaleState)
@@ -288,16 +277,21 @@ func (sm *scaleManager) checkDrained(ctx context.Context, scaleState *persistenc
 
 	sm.logger.Info("drain",
 		tag.Any("drained-partitions", toClear),
-		tag.Int32("prev-read", read),
+		tag.Int32("target", info.Write),
+		tag.Int32("prev-read", info.Read),
 		tag.Int32("read", readPartitionsFromBacklogState(newState)))
 
 	sm.setStateLocked(newState)
 }
 
-func (sm_ *scaleManager) isFullyDrained(res *matchingservice.DescribeTaskQueuePartitionResponse, read, write int32) bool {
-	if si := res.GetScaleInfo(); si.GetRead() != read || si.GetWrite() != write {
-		// require that the partition agrees with the current scale state, i.e. it knows that
-		// it's draining, i.e. it knows it can't accept any new tasks.
+func partitionIsFullyDrained(
+	res *matchingservice.DescribeTaskQueuePartitionResponse,
+	info *taskqueuespb.PartitionScaleInfo,
+) bool {
+	if !proto.Equal(res.GetScaleInfo(), info) {
+		// Require that the partition agrees with the current scale state, i.e. it knows that
+		// it's draining, i.e. it knows it can't accept any new tasks. We include the version
+		// as well as just the read+write counts to avoid an ABA problem.
 		return false
 	}
 
@@ -309,6 +303,15 @@ func (sm_ *scaleManager) isFullyDrained(res *matchingservice.DescribeTaskQueuePa
 		}
 	}
 	return true
+}
+
+func scaleStateToInfo(scaleState *persistencespb.PartitionScaleState) *taskqueuespb.PartitionScaleInfo {
+	// note if scaleState == nil, read and write will both be 0
+	return &taskqueuespb.PartitionScaleInfo{
+		Read:    max(scaleState.GetTarget(), readPartitionsFromBacklogState(scaleState)),
+		Write:   scaleState.GetTarget(),
+		Version: scaleState.GetTargetVersion(),
+	}
 }
 
 func readPartitionsFromBacklogState(state *persistencespb.PartitionScaleState) int32 {

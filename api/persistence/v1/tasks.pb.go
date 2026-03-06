@@ -554,20 +554,19 @@ func (x *SubqueueKey) GetPriority() int32 {
 }
 
 type PartitionScaleState struct {
-	state   protoimpl.MessageState `protogen:"open.v1"`
-	Enabled bool                   `protobuf:"varint,1,opt,name=enabled,proto3" json:"enabled,omitempty"`
-	// Target number of partitions.
-	Target int32 `protobuf:"varint,2,opt,name=target,proto3" json:"target,omitempty"`
-	// Bit field of partitions that may have backlog. Partition i is represented
-	// by bit: backlog_state[i/64] & (1 << i%64). Bit 0 (corresponding to the
-	// root partition) is unused since the root partition is always valid, we
-	// don't need to track its backlog state.
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Target number of partitions. Zero means managed scaling is not enabled.
+	Target int32 `protobuf:"varint,1,opt,name=target,proto3" json:"target,omitempty"`
+	// Highest value that target has ever been set to.
+	MaxTarget int32 `protobuf:"varint,2,opt,name=max_target,json=maxTarget,proto3" json:"max_target,omitempty"`
+	// Version number for target. This should change every time target changes.
+	TargetVersion int64 `protobuf:"fixed64,3,opt,name=target_version,json=targetVersion,proto3" json:"target_version,omitempty"`
+	// Bit field of partitions that may have backlog. Partition i is represented by:
+	// backlog_state[i/64] & (1 << i%64).
 	// (-- api-linter: core::0141::forbidden-types=disabled
 	//
 	//	aip.dev/not-precedent: This is a bit field --)
-	BacklogState []uint64 `protobuf:"varint,3,rep,packed,name=backlog_state,json=backlogState,proto3" json:"backlog_state,omitempty"`
-	// Highest value that target has ever been set to.
-	MaxTarget     int32 `protobuf:"varint,4,opt,name=max_target,json=maxTarget,proto3" json:"max_target,omitempty"`
+	BacklogState  []uint64 `protobuf:"varint,4,rep,packed,name=backlog_state,json=backlogState,proto3" json:"backlog_state,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -602,16 +601,23 @@ func (*PartitionScaleState) Descriptor() ([]byte, []int) {
 	return file_temporal_server_api_persistence_v1_tasks_proto_rawDescGZIP(), []int{6}
 }
 
-func (x *PartitionScaleState) GetEnabled() bool {
-	if x != nil {
-		return x.Enabled
-	}
-	return false
-}
-
 func (x *PartitionScaleState) GetTarget() int32 {
 	if x != nil {
 		return x.Target
+	}
+	return 0
+}
+
+func (x *PartitionScaleState) GetMaxTarget() int32 {
+	if x != nil {
+		return x.MaxTarget
+	}
+	return 0
+}
+
+func (x *PartitionScaleState) GetTargetVersion() int64 {
+	if x != nil {
+		return x.TargetVersion
 	}
 	return 0
 }
@@ -621,13 +627,6 @@ func (x *PartitionScaleState) GetBacklogState() []uint64 {
 		return x.BacklogState
 	}
 	return nil
-}
-
-func (x *PartitionScaleState) GetMaxTarget() int32 {
-	if x != nil {
-		return x.MaxTarget
-	}
-	return 0
 }
 
 // key for history tasks (everything above is for matching tasks)
@@ -733,13 +732,13 @@ const file_temporal_server_api_persistence_v1_tasks_proto_rawDesc = "" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05count\x18\x02 \x01(\x03R\x05count\")\n" +
 	"\vSubqueueKey\x12\x1a\n" +
-	"\bpriority\x18\x01 \x01(\x05R\bpriority\"\x8b\x01\n" +
-	"\x13PartitionScaleState\x12\x18\n" +
-	"\aenabled\x18\x01 \x01(\bR\aenabled\x12\x16\n" +
-	"\x06target\x18\x02 \x01(\x05R\x06target\x12#\n" +
-	"\rbacklog_state\x18\x03 \x03(\x04R\fbacklogState\x12\x1d\n" +
+	"\bpriority\x18\x01 \x01(\x05R\bpriority\"\x98\x01\n" +
+	"\x13PartitionScaleState\x12\x16\n" +
+	"\x06target\x18\x01 \x01(\x05R\x06target\x12\x1d\n" +
 	"\n" +
-	"max_target\x18\x04 \x01(\x05R\tmaxTarget\"[\n" +
+	"max_target\x18\x02 \x01(\x05R\tmaxTarget\x12%\n" +
+	"\x0etarget_version\x18\x03 \x01(\x10R\rtargetVersion\x12#\n" +
+	"\rbacklog_state\x18\x04 \x03(\x04R\fbacklogState\"[\n" +
 	"\aTaskKey\x127\n" +
 	"\tfire_time\x18\x01 \x01(\v2\x1a.google.protobuf.TimestampR\bfireTime\x12\x17\n" +
 	"\atask_id\x18\x02 \x01(\x03R\x06taskIdB6Z4go.temporal.io/server/api/persistence/v1;persistenceb\x06proto3"

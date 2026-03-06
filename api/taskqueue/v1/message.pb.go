@@ -223,9 +223,11 @@ type InternalTaskQueueStatus struct {
 	ApproximateBacklogCount int64                  `protobuf:"varint,5,opt,name=approximate_backlog_count,json=approximateBacklogCount,proto3" json:"approximate_backlog_count,omitempty"`
 	MaxReadLevel            int64                  `protobuf:"varint,6,opt,name=max_read_level,json=maxReadLevel,proto3" json:"max_read_level,omitempty"`
 	FairMaxReadLevel        *FairLevel             `protobuf:"bytes,9,opt,name=fair_max_read_level,json=fairMaxReadLevel,proto3" json:"fair_max_read_level,omitempty"`
-	// Draining means that this status is from a draining queue.
+	// Draining means that this status is from a queue that is being drained to
+	// migrate from v1 to v2 tasks persistence (or backwards).
 	Draining bool `protobuf:"varint,10,opt,name=draining,proto3" json:"draining,omitempty"`
-	// Drained means that this queue has an empty backlog (at some point in time).
+	// Drained means that this queue has an empty backlog (at this point in time).
+	// Used for partition scaling.
 	Drained       bool `protobuf:"varint,11,opt,name=drained,proto3" json:"drained,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -806,6 +808,7 @@ type PartitionScaleInfo struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Read          int32                  `protobuf:"varint,1,opt,name=read,proto3" json:"read,omitempty"`
 	Write         int32                  `protobuf:"varint,2,opt,name=write,proto3" json:"write,omitempty"`
+	Version       int64                  `protobuf:"fixed64,3,opt,name=version,proto3" json:"version,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -850,6 +853,13 @@ func (x *PartitionScaleInfo) GetRead() int32 {
 func (x *PartitionScaleInfo) GetWrite() int32 {
 	if x != nil {
 		return x.Write
+	}
+	return 0
+}
+
+func (x *PartitionScaleInfo) GetVersion() int64 {
+	if x != nil {
+		return x.Version
 	}
 	return 0
 }
@@ -1033,10 +1043,11 @@ const file_temporal_server_api_taskqueue_v1_message_proto_rawDesc = "" +
 	"\aversion\x18\x02 \x03(\v29.temporal.server.api.taskqueue.v1.EphemeralData.ByVersionR\aversion\"w\n" +
 	"\x16VersionedEphemeralData\x12C\n" +
 	"\x04data\x18\x01 \x01(\v2/.temporal.server.api.taskqueue.v1.EphemeralDataR\x04data\x12\x18\n" +
-	"\aversion\x18\x02 \x01(\x03R\aversion\">\n" +
+	"\aversion\x18\x02 \x01(\x03R\aversion\"X\n" +
 	"\x12PartitionScaleInfo\x12\x12\n" +
 	"\x04read\x18\x01 \x01(\x05R\x04read\x12\x14\n" +
-	"\x05write\x18\x02 \x01(\x05R\x05writeB2Z0go.temporal.io/server/api/taskqueue/v1;taskqueueb\x06proto3"
+	"\x05write\x18\x02 \x01(\x05R\x05write\x12\x18\n" +
+	"\aversion\x18\x03 \x01(\x10R\aversionB2Z0go.temporal.io/server/api/taskqueue/v1;taskqueueb\x06proto3"
 
 var (
 	file_temporal_server_api_taskqueue_v1_message_proto_rawDescOnce sync.Once
