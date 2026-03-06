@@ -179,16 +179,13 @@ func (sm *scaleManager) SetTarget(targeti int) {
 // setStateLocked updates the current scale state and syncs it to ephemeral data.
 // This should only be called _after_ the state is persisted to the db.
 func (sm *scaleManager) setStateLocked(newState *persistencespb.PartitionScaleState) {
-	prevState := sm.scaleState
+	prevRead, prevWrite := sm.scaleInfo(sm.scaleState)
+
 	sm.scaleState = newState
 
-	// note if newState == nil, read and write will both be 0
-	write := sm.scaleState.GetTarget()
-	read := max(write, readPartitionsFromBacklogState(sm.scaleState))
+	read, write := sm.scaleInfo(sm.scaleState)
 
 	// only push ephemeral data if read/write changed, not on any state change
-	prevWrite := prevState.GetTarget()
-	prevRead := max(write, readPartitionsFromBacklogState(prevState))
 	if write == prevWrite && read == prevRead {
 		return
 	}
@@ -199,6 +196,13 @@ func (sm *scaleManager) setStateLocked(newState *persistencespb.PartitionScaleSt
 	})
 }
 
+func (*scaleManager) scaleInfo(scaleState *persistencespb.PartitionScaleState) (read, write int32) {
+	// note if scaleState == nil, read and write will both be 0
+	write = scaleState.GetTarget()
+	read = max(write, readPartitionsFromBacklogState(scaleState))
+	return
+}
+
 func (sm *scaleManager) sendPeriodicNotification(ctx context.Context) error {
 	util.InterruptibleSleep(ctx, backoff.FullJitter(sm.settings.IdleInterval))
 	t := time.NewTicker(sm.settings.IdleInterval).C
@@ -206,6 +210,7 @@ func (sm *scaleManager) sendPeriodicNotification(ctx context.Context) error {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
+
 		case <-t:
 			sm.lock.Lock()
 			scaleState := sm.scaleState
@@ -222,15 +227,14 @@ func (sm *scaleManager) sendPeriodicNotification(ctx context.Context) error {
 }
 
 func (sm *scaleManager) checkDrained(ctx context.Context, scaleState *persistencespb.PartitionScaleState) {
-	read := readPartitionsFromBacklogState(scaleState)
-	target := scaleState.GetTarget()
-	if target == 0 || read <= target {
+	read, write := sm.scaleInfo(scaleState)
+	if write == 0 || read <= write {
 		return // nothing to do
 	}
 
 	// we have partitions that should be draining, see if they are yet
 	var toClear []int32
-	for id := target; id < read; id++ {
+	for id := write; id < read; id++ {
 		if !getBacklogStateBit(scaleState, id) {
 			continue
 		}
