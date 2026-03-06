@@ -136,9 +136,13 @@ func newTaskQueuePartitionManager(
 			partition.TaskQueue().TaskType(),
 		)
 		if partitionScaler != nil {
+			baseCtx := headers.SetCallerInfo(context.Background(), headers.NewBackgroundLowCallerInfo(ns.Name().String()))
 			scaleManager = newScaleManager(
+				baseCtx,
+				partition,
 				logger,
 				userDataManager,
+				e.matchingRawClient,
 				partitionScaler,
 				tqConfig.PartitionScaleManagerSettings(),
 				tqConfig.NumWritePartitions,

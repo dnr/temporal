@@ -351,6 +351,7 @@ func (c *priBacklogManagerImpl) InternalStatus() []*taskqueuespb.InternalTaskQue
 			LoadedTasks:             int64(r.getLoadedTasks()),
 			MaxReadLevel:            c.db.GetMaxReadLevel(subqueueIndex(i)),
 			ApproximateBacklogCount: backlogCountsBySubqueue[i],
+			Drained:                 r.isDrained(),
 		}
 	}
 	return status

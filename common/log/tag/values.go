@@ -103,6 +103,7 @@ var (
 	ComponentShardContext              = component("shard-context")
 	ComponentShardEngine               = component("shard-engine")
 	ComponentMatchingEngine            = component("matching-engine")
+	ComponentPartitionScaler           = component("partition-scaler")
 	ComponentReplicator                = component("replicator")
 	ComponentReplicationTaskProcessor  = component("replication-task-processor")
 	ComponentHSMStateReplicator        = component("hsm-state-replicator")
