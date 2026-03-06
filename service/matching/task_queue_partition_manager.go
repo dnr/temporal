@@ -1231,6 +1231,7 @@ func (pm *taskQueuePartitionManagerImpl) describe(
 
 	return &matchingservice.DescribeTaskQueuePartitionResponse{
 		VersionsInfoInternal: versionsInfo,
+		ScaleInfo:            pm.userDataManager.PartitionScale(),
 	}, nil
 }
 

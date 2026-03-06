@@ -241,8 +241,12 @@ func (sm *scaleManager) checkDrained(ctx context.Context, scaleState *persistenc
 
 		callCtx, cancel := context.WithTimeout(ctx, ioTimeout)
 		res, err := sm.matchingClient.DescribeTaskQueuePartition(callCtx, &matchingservice.DescribeTaskQueuePartitionRequest{
-			NamespaceId:        sm.partition.NamespaceId(),
-			TaskQueuePartition: &taskqueuespb.TaskQueuePartition{},
+			NamespaceId: sm.partition.NamespaceId(),
+			TaskQueuePartition: &taskqueuespb.TaskQueuePartition{
+				TaskQueue:     sm.partition.TaskQueue().Name(),
+				TaskQueueType: sm.partition.TaskType(),
+				PartitionId:   &taskqueuespb.TaskQueuePartition_NormalPartitionId{NormalPartitionId: id},
+			},
 			Versions: &taskqueuepb.TaskQueueVersionSelection{
 				Unversioned: true,
 				// TODO: what about "inactive" versions?
@@ -251,7 +255,7 @@ func (sm *scaleManager) checkDrained(ctx context.Context, scaleState *persistenc
 			ReportInternalTaskQueueStatus: true,
 		})
 		cancel()
-		if err == nil && sm.isFullyDrained(res) {
+		if err == nil && sm.isFullyDrained(res, read, write) {
 			toClear = append(toClear, id)
 		}
 	}
@@ -290,7 +294,13 @@ func (sm *scaleManager) checkDrained(ctx context.Context, scaleState *persistenc
 	sm.setStateLocked(newState)
 }
 
-func (*scaleManager) isFullyDrained(res *matchingservice.DescribeTaskQueuePartitionResponse) bool {
+func (sm_ *scaleManager) isFullyDrained(res *matchingservice.DescribeTaskQueuePartitionResponse, read, write int32) bool {
+	if si := res.GetScaleInfo(); si.GetRead() != read || si.GetWrite() != write {
+		// require that the partition agrees with the current scale state, i.e. it knows that
+		// it's draining, i.e. it knows it can't accept any new tasks.
+		return false
+	}
+
 	for _, v := range res.GetVersionsInfoInternal() {
 		for _, q := range v.GetPhysicalTaskQueueInfo().GetInternalTaskQueueStatus() {
 			if !q.GetDrained() {
