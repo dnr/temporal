@@ -77,20 +77,26 @@ func (s *simplePartitionScaler) OnTasks(num, currentTarget int, setTarget func(n
 	newTarget := currentTarget
 
 	for _, down := range cfg.Downs {
-		rate := s.getTracker(down.Interval).rate()
-		// decrease target so that each partition is ~= threshold
+		if !validateSimplePartitionScalerThreshold(down) {
+			continue
+		}
+		rate := s.getTracker(down.Window).rate()
+		// decrease target so that each partition is ~= target rate
 		newTarget = max(1, min(
 			newTarget,
-			int(rate/float32(down.Threshold)+0.5),
+			int(rate/float32(down.TargetRate)+0.5),
 		))
 	}
 
 	for _, up := range cfg.Ups {
-		rate := s.getTracker(up.Interval).rate()
-		// increase target so that each partition is ~= threshold
+		if !validateSimplePartitionScalerThreshold(up) {
+			continue
+		}
+		rate := s.getTracker(up.Window).rate()
+		// increase target so that each partition is ~= target rate
 		newTarget = max(
 			newTarget,
-			int(rate/float32(up.Threshold)+0.5),
+			int(rate/float32(up.TargetRate)+0.5),
 			1,
 		)
 	}
@@ -101,4 +107,8 @@ func (s *simplePartitionScaler) OnTasks(num, currentTarget int, setTarget func(n
 }
 
 func (s *simplePartitionScaler) Stop() {
+}
+
+func validateSimplePartitionScalerThreshold(t dynamicconfig.SimplePartitionScalerThreshold) bool {
+	return t.Window >= 100*time.Millisecond && t.TargetRate >= 1
 }

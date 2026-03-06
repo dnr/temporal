@@ -153,15 +153,17 @@ type SimplePartitionScalerSettings struct {
 	// If non-zero, Fixed will be used as the scaling decision (Ups/Downs will be ignored).
 	Fixed int
 
-	// Ups and Downs control scaling based on add rate: if the add rate exceeds an Up threshold
-	// over an interval, partitions will be scaled up to use the threshold as a target.
-	// If it falls below a Down threshold over an interval, partitions will be scaled down to
-	// meet the threshold.
-	Ups   []SimplePartitionScalerThreshold
+	// Ups and Downs control scaling based on add rate: The TargetRate measured over the
+	// Interval is used to calculate a target number of partitions. Ups may move the actual
+	// partition target higher, Downs may move it lower. Ups take priority.
+	//
+	// Note the TargetRate for Downs should be _higher_ than for Ups to leave a deadband in the
+	// middle for hysteresis (avoid changing too often).
 	Downs []SimplePartitionScalerThreshold
+	Ups   []SimplePartitionScalerThreshold
 }
 
 type SimplePartitionScalerThreshold struct {
-	Interval  time.Duration
-	Threshold int // tasks/second
+	Window     time.Duration // window to measure add rate over
+	TargetRate int           // target tasks/second per partition
 }
