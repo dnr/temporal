@@ -80,7 +80,6 @@ func newScaleManager(
 		limiter:            quotas.NewRateLimiter(float64(settings.MaxRate), 1),
 	}
 	sm.setTarget = sm.SetTarget // allocate closure once
-	sm.background.Go(sm.backgroundWork)
 	return sm
 }
 
@@ -98,10 +97,7 @@ func (sm *scaleManager) Stop() {
 }
 
 // LoadedMetadata is called when the root partitions's default queue has loaded its metadata.
-func (sm *scaleManager) LoadedMetadata(
-	scaleState *persistencespb.PartitionScaleState,
-	defaultQueue scaleDB,
-) {
+func (sm *scaleManager) LoadedMetadata(scaleState *persistencespb.PartitionScaleState, scaleDB scaleDB) {
 	if sm == nil {
 		return
 	}
@@ -109,8 +105,10 @@ func (sm *scaleManager) LoadedMetadata(
 	sm.lock.Lock()
 	defer sm.lock.Unlock()
 
-	sm.scaleDB = defaultQueue
+	sm.scaleDB = scaleDB
 	sm.setStateLocked(scaleState)
+
+	sm.background.Go(sm.backgroundWork)
 }
 
 // OnTasks is called on a batch of tasks added. The caller is required to pass in the current
