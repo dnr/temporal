@@ -1310,7 +1310,7 @@ func (pm *taskQueuePartitionManagerImpl) emitLogicalBacklogMetrics(ctx context.C
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case <-time.After(interval):
+		case <-time.After(backoff.Jitter(interval, 0.05)):
 			pm.fetchAndEmitLogicalBacklogMetrics(ctx)
 		}
 	}
