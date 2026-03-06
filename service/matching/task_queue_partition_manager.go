@@ -141,11 +141,13 @@ func newTaskQueuePartitionManager(
 				baseCtx,
 				partition,
 				logger,
+				metricsHandler,
 				userDataManager,
 				e.matchingRawClient,
 				partitionScaler,
 				tqConfig.PartitionScaleManagerSettings(),
 				tqConfig.NumWritePartitions,
+				tqConfig.BreakdownMetricsByTaskQueue,
 			)
 		}
 	}

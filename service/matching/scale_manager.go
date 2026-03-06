@@ -17,6 +17,7 @@ import (
 	"go.temporal.io/server/common/goro"
 	"go.temporal.io/server/common/log"
 	"go.temporal.io/server/common/log/tag"
+	"go.temporal.io/server/common/metrics"
 	"go.temporal.io/server/common/quotas"
 	"go.temporal.io/server/common/tqid"
 	"go.temporal.io/server/common/util"
@@ -28,12 +29,14 @@ import (
 type scaleManager struct {
 	partition       tqid.Partition
 	logger          log.Logger
+	metricsHandler  metrics.Handler
 	userDataManager userDataManager
 	matchingClient  matchingservice.MatchingServiceClient
 	partitionScaler PartitionScaler
 	// for simplicity, settings are fixed at construction time
 	settings           dynamicconfig.PartitionScaleManagerSettings
 	getWritePartitions dynamicconfig.IntPropertyFn
+	emitGaugeMetrics   dynamicconfig.BoolPropertyFn
 	setTarget          func(int)
 	background         *goro.Handle
 	limiter            quotas.RateLimiter
@@ -55,20 +58,24 @@ func newScaleManager(
 	baseCtx context.Context,
 	partition tqid.Partition,
 	logger log.Logger,
+	metricsHandler metrics.Handler,
 	userDataManager userDataManager,
 	matchingClient matchingservice.MatchingServiceClient,
 	partitionScaler PartitionScaler,
 	settings dynamicconfig.PartitionScaleManagerSettings,
 	getWritePartitions dynamicconfig.IntPropertyFn,
+	emitGaugeMetrics dynamicconfig.BoolPropertyFn,
 ) *scaleManager {
 	sm := &scaleManager{
 		partition:          partition,
 		logger:             log.With(logger, tag.ComponentPartitionScaler),
+		metricsHandler:     metricsHandler,
 		userDataManager:    userDataManager,
 		matchingClient:     matchingClient,
 		partitionScaler:    partitionScaler,
 		settings:           settings,
 		getWritePartitions: getWritePartitions,
+		emitGaugeMetrics:   emitGaugeMetrics,
 		background:         goro.NewHandle(baseCtx),
 		limiter:            quotas.NewRateLimiter(float64(settings.MaxRate), 1),
 	}
@@ -83,6 +90,11 @@ func (sm *scaleManager) Stop() {
 	}
 	sm.background.Cancel()
 	sm.partitionScaler.Stop()
+	if sm.emitGaugeMetrics() {
+		// this is unfortunate but at least allows max() across pods to get the right value
+		metrics.PartitionScaleRead.With(sm.metricsHandler).Record(float64(-1))
+		metrics.PartitionScaleWrite.With(sm.metricsHandler).Record(float64(-1))
+	}
 }
 
 // LoadedMetadata is called when the root partitions's default queue has loaded its metadata.
@@ -173,6 +185,7 @@ func (sm *scaleManager) SetTarget(targeti int) {
 			tag.Int32("target", target),
 			tag.Int32("prev-target", prevTarget),
 			tag.Int32("max-target", newState.MaxTarget))
+		metrics.PartitionScaleEvents.With(sm.metricsHandler).Record(1)
 
 		sm.setStateLocked(newState)
 	}()
@@ -190,6 +203,11 @@ func (sm *scaleManager) setStateLocked(newState *persistencespb.PartitionScaleSt
 	// only push ephemeral data if read/write changed, not on any state change
 	if !proto.Equal(prevInfo, newInfo) {
 		sm.userDataManager.SetPartitionScale(newInfo)
+	}
+
+	if sm.emitGaugeMetrics() {
+		metrics.PartitionScaleRead.With(sm.metricsHandler).Record(float64(newInfo.Read))
+		metrics.PartitionScaleWrite.With(sm.metricsHandler).Record(float64(newInfo.Write))
 	}
 }
 
