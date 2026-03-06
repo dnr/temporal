@@ -217,13 +217,15 @@ func (sm *scaleManager) backgroundWork(ctx context.Context) error {
 }
 
 func (sm *scaleManager) checkDrained(ctx context.Context, scaleState *persistencespb.PartitionScaleState) {
-	info := scaleStateToInfo(scaleState)
-	if info.Write == 0 {
+	if scaleState.GetTarget() == 0 {
 		return // managed scaling disabled
+	} else if time.Since(time.Unix(0, scaleState.GetTargetVersion())) < sm.settings.DrainBufferTime {
+		return // too soon: wait for some buffer before draining
 	}
 
 	// we have partitions that should be draining, see if they are yet
 	var toClear []int32
+	info := scaleStateToInfo(scaleState)
 	for id := info.Write; id < info.Read; id++ {
 		if !getBacklogStateBit(scaleState, id) {
 			continue

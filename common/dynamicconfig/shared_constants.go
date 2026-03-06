@@ -129,6 +129,12 @@ type PartitionScaleManagerSettings struct {
 	// - check drained partition state
 	// (Needs task queue reload.)
 	BackgroundInterval time.Duration
+	// DrainBufferTime is how long to wait until after scaling down before we can consider
+	// draining queues. It's needed because there's a tiny window where tasks may be written
+	// after a scale down, since draining state is only checked at the start of an RPC. This
+	// should be set to the maximum time of an AddTask call. Note that query/nexus tasks will
+	// be processed without interruption even after scale down.
+	DrainBufferTime time.Duration
 
 	// AllowedDelta and AllowedRatio controls how far off client counts can be before we reject
 	// an RPC. If the client count is within either the delta or ratio, then it's allowed.

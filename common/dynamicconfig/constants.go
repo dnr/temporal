@@ -1443,6 +1443,7 @@ an optional feature and also requires a metrics collection system that can handl
 			MaxRate:            0.33,
 			BatchSize:          100,
 			BackgroundInterval: 37 * time.Second,
+			DrainBufferTime:    15 * time.Second,
 			AllowedDelta:       1,
 			AllowedRatio:       1.5,
 		},
