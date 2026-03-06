@@ -60,6 +60,8 @@ message InternalTaskQueueStatus {
     FairLevel fair_max_read_level = 9;
     // Draining means that this status is from a draining queue.
     bool draining = 10;
+    // Drained means that this queue has an empty backlog (at some point in time).
+    bool drained = 11;
 }
 
 message TaskQueueVersionInfoInternal {
