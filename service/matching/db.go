@@ -191,6 +191,7 @@ func (db *taskQueueDB) takeOverTaskQueueLocked(
 			response.TaskQueueInfo.AckLevel,
 			response.TaskQueueInfo.ApproximateBacklogCount,
 		)
+		db.scaleState = response.TaskQueueInfo.PartitionScaleState
 		err := db.updateTaskQueueLocked(ctx, true)
 		if err != nil {
 			db.rangeID = 0
