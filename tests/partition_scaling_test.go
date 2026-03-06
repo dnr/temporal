@@ -29,9 +29,9 @@ func scalerEnvOptions(dcPartitions int) []testcore.TestOption {
 		testcore.WithDynamicConfig(dynamicconfig.MatchingNumTaskqueueReadPartitions, dcPartitions),
 		testcore.WithDynamicConfig(dynamicconfig.MatchingNumTaskqueueWritePartitions, dcPartitions),
 		testcore.WithDynamicConfig(dynamicconfig.MatchingPartitionScaleManager, dynamicconfig.PartitionScaleManagerSettings{
-			MaxRate:      100,         // don't limit speed of changes
-			BatchSize:    1,           // always go directly to scaler
-			IdleInterval: time.Second, // ping scaler on idle
+			MaxRate:            100,         // don't limit speed of changes
+			BatchSize:          1,           // always go directly to scaler
+			BackgroundInterval: time.Second, // ping scaler on idle
 		}),
 	}
 }

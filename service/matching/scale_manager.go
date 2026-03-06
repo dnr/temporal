@@ -32,11 +32,11 @@ type scaleManager struct {
 	matchingClient  matchingservice.MatchingServiceClient
 	partitionScaler PartitionScaler
 	// for simplicity, settings are fixed at construction time
-	settings             dynamicconfig.PartitionScaleManagerSettings
-	getWritePartitions   dynamicconfig.IntPropertyFn
-	setTarget            func(int)
-	periodicNotification *goro.Handle
-	limiter              quotas.RateLimiter
+	settings           dynamicconfig.PartitionScaleManagerSettings
+	getWritePartitions dynamicconfig.IntPropertyFn
+	setTarget          func(int)
+	background         *goro.Handle
+	limiter            quotas.RateLimiter
 
 	lock       sync.Mutex
 	scaleState *persistencespb.PartitionScaleState
@@ -62,18 +62,18 @@ func newScaleManager(
 	getWritePartitions dynamicconfig.IntPropertyFn,
 ) *scaleManager {
 	sm := &scaleManager{
-		partition:            partition,
-		logger:               log.With(logger, tag.ComponentPartitionScaler),
-		userDataManager:      userDataManager,
-		matchingClient:       matchingClient,
-		partitionScaler:      partitionScaler,
-		settings:             settings,
-		getWritePartitions:   getWritePartitions,
-		periodicNotification: goro.NewHandle(baseCtx),
-		limiter:              quotas.NewRateLimiter(float64(settings.MaxRate), 1),
+		partition:          partition,
+		logger:             log.With(logger, tag.ComponentPartitionScaler),
+		userDataManager:    userDataManager,
+		matchingClient:     matchingClient,
+		partitionScaler:    partitionScaler,
+		settings:           settings,
+		getWritePartitions: getWritePartitions,
+		background:         goro.NewHandle(baseCtx),
+		limiter:            quotas.NewRateLimiter(float64(settings.MaxRate), 1),
 	}
 	sm.setTarget = sm.SetTarget // allocate closure once
-	sm.periodicNotification.Go(sm.sendPeriodicNotification)
+	sm.background.Go(sm.backgroundWork)
 	return sm
 }
 
@@ -81,7 +81,7 @@ func (sm *scaleManager) Stop() {
 	if sm == nil {
 		return
 	}
-	sm.periodicNotification.Cancel()
+	sm.background.Cancel()
 	sm.partitionScaler.Stop()
 }
 
@@ -193,9 +193,9 @@ func (sm *scaleManager) setStateLocked(newState *persistencespb.PartitionScaleSt
 	}
 }
 
-func (sm *scaleManager) sendPeriodicNotification(ctx context.Context) error {
-	util.InterruptibleSleep(ctx, backoff.FullJitter(sm.settings.IdleInterval))
-	t := time.NewTicker(sm.settings.IdleInterval).C
+func (sm *scaleManager) backgroundWork(ctx context.Context) error {
+	util.InterruptibleSleep(ctx, backoff.FullJitter(sm.settings.BackgroundInterval))
+	t := time.NewTicker(sm.settings.BackgroundInterval).C
 	for {
 		select {
 		case <-ctx.Done():

@@ -124,9 +124,11 @@ type PartitionScaleManagerSettings struct {
 	// BatchSize is the size of a batch to send to the partition scaler. (Needs task queue
 	// reload.)
 	BatchSize int32
-	// IdleInterval is the interval to send signals to the scaler even if not a full batch of
-	// tasks has been received yet. (Needs task queue reload.)
-	IdleInterval time.Duration
+	// BackgroundInterval is the interval for background work:
+	// - send signals to the scaler even if not a full batch of tasks has been received yet
+	// - check drained partition state
+	// (Needs task queue reload.)
+	BackgroundInterval time.Duration
 
 	// AllowedDelta and AllowedRatio controls how far off client counts can be before we reject
 	// an RPC. If the client count is within either the delta or ratio, then it's allowed.
