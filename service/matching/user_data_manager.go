@@ -600,9 +600,10 @@ func (m *userDataManagerImpl) HandleGetUserDataRequest(
 			return nil, err
 		}
 		newUserData := userData.GetVersion() > lastVersion
-		newEphData := ephData.GetVersion() > lastEphVersion
+		// lastEphVersion < 0 means the caller does not want ephemeral data
+		newEphData := lastEphVersion >= 0 && ephData.GetVersion() > lastEphVersion
 		if newUserData || newEphData {
-			m.logger.Info("returning user data",
+			m.logger.Debug("returning user data",
 				tag.Bool("long-poll", req.WaitNewData),
 				tag.Int64("request-known-version", lastVersion),
 				tag.UserDataVersion(userData.GetVersion()),
@@ -775,6 +776,14 @@ func (m *userDataManagerImpl) PartitionScale() *taskqueuespb.PartitionScaleInfo 
 }
 
 func (m *userDataManagerImpl) gotIncomingEphemeralData(eph *taskqueuespb.VersionedEphemeralData) {
+	if m.partition.IsRoot() {
+		// Root activity/nexus partition should not get ephemeral data from its fetch source
+		// (root workflow partition). This is done by setting LastKnownEphemeralDataVersion to
+		// -1 on root non-wf partitions and having HandleGetUserDataRequest not send ephemeral
+		// data in that case. But if we do get it (e.g. during deployment), ignore it.
+		return
+	}
+
 	m.lock.Lock()
 	defer m.lock.Unlock()
 
@@ -808,6 +817,12 @@ func (m *userDataManagerImpl) getMergedEphemeralData() (*taskqueuespb.VersionedE
 }
 
 func (m *userDataManagerImpl) getIncomingEphemeralDataVersion() int64 {
+	if m.partition.IsRoot() {
+		// The root activity/nexus partition should not fetch ephemeral data from the root
+		// workflow partition.
+		return -1
+	}
+
 	m.lock.Lock()
 	defer m.lock.Unlock()
 
