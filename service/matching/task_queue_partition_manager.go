@@ -332,6 +332,22 @@ func (pm *taskQueuePartitionManagerImpl) checkPartitionCounts(ctx context.Contex
 		pm.scaleManager.OnTasks(effective, target)
 	}
 
+	clientPC := matching.ParsePartitionCountsFromIncomingContext(ctx)
+	settings := pm.config.PartitionScaleManagerSettings()
+	return validatePartitionCounts(id, scaleInfo, clientPC, forWrite, settings.AllowedDelta, settings.AllowedRatio)
+}
+
+// validatePartitionCounts checks whether a partition should accept an RPC based on
+// the current scale info and the client's idea of partition counts. It returns nil if
+// the RPC should be accepted, or an error if it should be rejected.
+func validatePartitionCounts(
+	partitionID int,
+	scaleInfo *taskqueuespb.PartitionScaleInfo,
+	clientPC matching.PartitionCounts,
+	forWrite bool,
+	allowedDelta int32,
+	allowedRatio float32,
+) error {
 	if scaleInfo.GetRead() <= 0 || scaleInfo.GetWrite() <= 0 || scaleInfo.Write > scaleInfo.Read {
 		return nil // missing or invalid scale info
 	}
@@ -339,30 +355,28 @@ func (pm *taskQueuePartitionManagerImpl) checkPartitionCounts(ctx context.Contex
 	// handle cases where we can't accept the rpc at all: any call for invalid,
 	// write calls for draining
 	switch {
-	case id < 0:
+	case partitionID < 0:
 		return serviceerror.NewInternal("negative partition id")
-	case id >= int(scaleInfo.Read):
+	case partitionID >= int(scaleInfo.Read):
 		return errPartitionInvalid
-	case id >= int(scaleInfo.Write) && forWrite:
+	case partitionID >= int(scaleInfo.Write) && forWrite:
 		return errPartitionDraining
 	}
 
 	// check what the client thought the counts were
-	pc := matching.ParsePartitionCountsFromIncomingContext(ctx)
-	if pc.Valid() {
+	if clientPC.Valid() {
 		var delta int32
 		var ratio float32
 		if forWrite {
-			delta = pc.Write - scaleInfo.Write
-			ratio = float32(pc.Write) / float32(scaleInfo.Write)
+			delta = clientPC.Write - scaleInfo.Write
+			ratio = float32(clientPC.Write) / float32(scaleInfo.Write)
 		} else {
-			delta = pc.Read - scaleInfo.Read
-			ratio = float32(pc.Read) / float32(scaleInfo.Read)
+			delta = clientPC.Read - scaleInfo.Read
+			ratio = float32(clientPC.Read) / float32(scaleInfo.Read)
 		}
-		settings := pm.config.PartitionScaleManagerSettings()
-		allowedRatio := max(1.001, settings.AllowedRatio)
-		if (delta > settings.AllowedDelta || delta < -settings.AllowedDelta) &&
-			(ratio > allowedRatio || ratio < 1/allowedRatio) {
+		effectiveRatio := max(1.001, allowedRatio)
+		if (delta > allowedDelta || delta < -allowedDelta) &&
+			(ratio > effectiveRatio || ratio < 1/effectiveRatio) {
 			// reject to improve load balancing
 			return errPartitionCountsWrong
 		}
