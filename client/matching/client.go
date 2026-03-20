@@ -96,8 +96,9 @@ func handlePartitionCounts[Req, Res any](
 	pc := c.partitionCache.lookup(pkey)
 
 	// try once
-	// FIXME: note this sends 0,0 instead of dynamic config values if missing from cache. maybe
-	// we need to send dc values?
+	// Note: If missing from the cache, this sends "0,0" for counts, which the server will
+	// always accept as not-stale if using dynamic scaling (but may reject for being invalid).
+	// The first reply will have current counts if using scaling, or nothing if not.
 	res, err := op(pc.appendToOutgoingContext(ctx), pc, request, opts)
 
 	// update cache on trailer on both success and error. if the trailer has no data,
