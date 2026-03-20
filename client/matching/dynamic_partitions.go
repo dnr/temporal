@@ -53,22 +53,18 @@ func parsePartitionCounts(hdr string) (PartitionCounts, error) {
 	}, nil
 }
 
-func ParsePartitionCountsFromIncomingContext(ctx context.Context) PartitionCounts {
+func ParsePartitionCountsFromIncomingContext(ctx context.Context) (PartitionCounts, error) {
 	vals := metadata.ValueFromIncomingContext(ctx, partitionCountsHeaderName)
 	if len(vals) == 0 {
-		return PartitionCounts{}
+		return PartitionCounts{}, nil
 	}
-	pc, _ := parsePartitionCounts(vals[0])
-	// TODO: log errors?
-	return pc
+	return parsePartitionCounts(vals[0])
 }
 
-func parsePartitionCountsFromTrailer(trailer metadata.MD) PartitionCounts {
+func parsePartitionCountsFromTrailer(trailer metadata.MD) (PartitionCounts, error) {
 	vals := trailer.Get(partitionCountsTrailerName)
 	if len(vals) == 0 {
-		return PartitionCounts{}
+		return PartitionCounts{}, nil
 	}
-	pc, _ := parsePartitionCounts(vals[0])
-	// TODO: log errors?
-	return pc
+	return parsePartitionCounts(vals[0])
 }

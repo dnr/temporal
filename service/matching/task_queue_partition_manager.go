@@ -332,7 +332,11 @@ func (pm *taskQueuePartitionManagerImpl) checkPartitionCounts(ctx context.Contex
 		pm.scaleManager.OnTasks(effective, target)
 	}
 
-	clientPC := matching.ParsePartitionCountsFromIncomingContext(ctx)
+	clientPC, parseErr := matching.ParsePartitionCountsFromIncomingContext(ctx)
+	if parseErr != nil {
+		pm.throttledLogger.Info("partition count header parse error", tag.Error(parseErr))
+		// do not return here! we always need to call validatePartitionCounts
+	}
 	settings := pm.config.PartitionScaleManagerSettings()
 	return validatePartitionCounts(id, scaleInfo, clientPC, forWrite, settings.AllowedDelta, settings.AllowedRatio)
 }
