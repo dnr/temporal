@@ -45,7 +45,7 @@ var (
 	errDefaultQueueNotInit  = serviceerror.NewInternal("defaultQueue is not initializaed")
 	errPartitionInvalid     = serviceerrors.NewStalePartitionCounts("partition is invalid")
 	errPartitionDraining    = serviceerrors.NewStalePartitionCounts("partition is draining")
-	errPartitionCountsWrong = serviceerrors.NewStalePartitionCounts("counts are too far off")
+	errPartitionCountsStale = serviceerrors.NewStalePartitionCounts("counts are too far off")
 )
 
 const (
@@ -363,28 +363,30 @@ func validatePartitionCounts(
 		return errPartitionDraining
 	}
 
-	// check what the client thought the counts were
-	if clientPC.Valid() {
-		var delta int32
-		var ratio float32
-		if forWrite {
-			delta = clientPC.Write - scaleInfo.Write
-			ratio = float32(clientPC.Write) / float32(scaleInfo.Write)
-		} else {
-			delta = clientPC.Read - scaleInfo.Read
-			ratio = float32(clientPC.Read) / float32(scaleInfo.Read)
-		}
-		effectiveRatio := max(1.001, allowedRatio)
-		if (delta > allowedDelta || delta < -allowedDelta) &&
-			(ratio > effectiveRatio || ratio < 1/effectiveRatio) {
-			// reject to improve load balancing
-			return errPartitionCountsWrong
-		}
-	}
 	// if client did not send any/valid counts, don't reject (as long as partition is valid).
-	// FIXME: is that right?
+	// this handles cases where the server is upgraded before the client.
+	if !clientPC.Valid() {
+		return nil
+	}
 
-	return nil
+	// check what the client thought the counts were
+	var delta int32
+	var ratio float32
+	if forWrite {
+		delta = clientPC.Write - scaleInfo.Write
+		ratio = float32(clientPC.Write) / float32(scaleInfo.Write)
+	} else {
+		delta = clientPC.Read - scaleInfo.Read
+		ratio = float32(clientPC.Read) / float32(scaleInfo.Read)
+	}
+	effectiveRatio := max(1.001, allowedRatio)
+	if delta > -allowedDelta && delta < allowedDelta ||
+		ratio > 1/effectiveRatio && ratio < effectiveRatio {
+		return nil
+	}
+
+	// otherwise reject to improve load balancing
+	return errPartitionCountsStale
 }
 
 func (pm *taskQueuePartitionManagerImpl) sendPartitionCountTrailer(ctx context.Context) {
