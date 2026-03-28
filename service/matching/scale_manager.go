@@ -20,7 +20,6 @@ import (
 	"go.temporal.io/server/common/metrics"
 	"go.temporal.io/server/common/quotas"
 	"go.temporal.io/server/common/tqid"
-	"go.temporal.io/server/common/util"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -210,14 +209,12 @@ func (sm *scaleManager) setStateLocked(newState *persistencespb.PartitionScaleSt
 }
 
 func (sm *scaleManager) backgroundWork(ctx context.Context) error {
-	util.InterruptibleSleep(ctx, backoff.FullJitter(sm.settings.BackgroundInterval))
-	t := time.NewTicker(sm.settings.BackgroundInterval).C
 	for {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
 
-		case <-t:
+		case <-time.After(backoff.Jitter(sm.settings.BackgroundInterval, 0.05)):
 			sm.lock.Lock()
 			scaleState := sm.scaleState
 			sm.lock.Unlock()
