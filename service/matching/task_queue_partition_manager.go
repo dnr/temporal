@@ -3,12 +3,15 @@ package matching
 import (
 	"context"
 	"errors"
+	"fmt"
 	"maps"
 	"math"
 	"math/bits"
+	"strings"
 	"sync"
 	"time"
 
+	"github.com/nexus-rpc/sdk-go/nexus"
 	commonpb "go.temporal.io/api/common/v1"
 	deploymentpb "go.temporal.io/api/deployment/v1"
 	enumspb "go.temporal.io/api/enums/v1"
@@ -34,6 +37,7 @@ import (
 	"go.temporal.io/server/common/quotas"
 	serviceerrors "go.temporal.io/server/common/serviceerror"
 	"go.temporal.io/server/common/softassert"
+	"go.temporal.io/server/common/taskqueue"
 	"go.temporal.io/server/common/tqid"
 	"go.temporal.io/server/common/util"
 	"go.temporal.io/server/common/worker_versioning"
@@ -851,6 +855,9 @@ func (pm *taskQueuePartitionManagerImpl) DispatchQueryTask(
 		return nil, err
 	}
 
+	task := newInternalQueryTask(taskID, request)
+	pm.config.setDefaultPriority(task)
+
 reredirectTask:
 	_, syncMatchQueue, _, _, _, err := pm.getPhysicalQueuesForAdd(ctx,
 		request.VersionDirective,
@@ -877,7 +884,7 @@ reredirectTask:
 		dbq.MarkAlive()
 	}
 
-	res, err := syncMatchQueue.DispatchQueryTask(ctx, taskID, request)
+	res, err := syncMatchQueue.DispatchQueryTask(ctx, task)
 	if errors.Is(err, errReprocessTask) {
 		// We get this if userdata changed while the task was blocked in DispatchQueryTask
 		goto reredirectTask
@@ -895,6 +902,23 @@ func (pm *taskQueuePartitionManagerImpl) DispatchNexusTask(
 	if err := pm.checkPartitionCounts(ctx, true, request.ForwardInfo != nil); err != nil {
 		return nil, err
 	}
+
+	deadline, _ := ctx.Deadline() // If not set by user, our client will set a default.
+	var opDeadline time.Time
+	if header := nexus.Header(request.GetRequest().GetHeader()); header != nil {
+		if opTimeoutHeader := header.Get(nexus.HeaderOperationTimeout); opTimeoutHeader != "" {
+			opTimeout, err := time.ParseDuration(opTimeoutHeader)
+			if err != nil {
+				// Operation-Timeout header is not required so don't fail request on parsing errors.
+				pm.logger.Warn(fmt.Sprintf("unable to parse %v header: %v", nexus.HeaderOperationTimeout, opTimeoutHeader), tag.Error(err), tag.WorkflowNamespaceID(request.NamespaceId))
+			} else {
+				opDeadline = time.Now().Add(opTimeout)
+			}
+		}
+	}
+
+	task := newInternalNexusTask(taskId, deadline, opDeadline, request)
+	pm.config.setDefaultPriority(task)
 
 reredirectTask:
 	_, syncMatchQueue, _, _, _, err := pm.getPhysicalQueuesForAdd(ctx,
@@ -921,7 +945,7 @@ reredirectTask:
 		dbq.MarkAlive()
 	}
 
-	res, err := syncMatchQueue.DispatchNexusTask(ctx, taskId, request)
+	res, err := syncMatchQueue.DispatchNexusTask(ctx, task)
 	if errors.Is(err, errReprocessTask) {
 		// We get this if userdata changed while the task was blocked in DispatchNexusTask
 		goto reredirectTask
@@ -1380,8 +1404,11 @@ func (pm *taskQueuePartitionManagerImpl) fetchAndEmitLogicalBacklogMetrics(ctx c
 
 		pqInfo := vInfo.GetPhysicalTaskQueueInfo()
 
+		deploymentName, buildID := parseDeploymentFromVersionKey(versionKey)
 		versionHandler := pm.metricsHandler.WithTags(
 			metrics.WorkerVersionTag(versionKey, pm.config.BreakdownMetricsByBuildID()),
+			metrics.WorkerDeploymentNameTag(deploymentName, pm.config.BreakdownMetricsByBuildID()),
+			metrics.WorkerDeploymentBuildIDTag(buildID, pm.config.BreakdownMetricsByBuildID()),
 		)
 
 		// Per-priority backlog count
@@ -1417,13 +1444,28 @@ func (pm *taskQueuePartitionManagerImpl) emitZeroLogicalBacklogForQueue(version 
 	if !pm.config.BreakdownMetricsByTaskQueue() || !pm.config.BreakdownMetricsByPartition() {
 		return
 	}
+	deploymentName, buildID := parseDeploymentFromVersionKey(version.MetricsTagValue())
 	handler := pm.metricsHandler.WithTags(
 		metrics.WorkerVersionTag(version.MetricsTagValue(), pm.config.BreakdownMetricsByBuildID()),
+		metrics.WorkerDeploymentNameTag(deploymentName, pm.config.BreakdownMetricsByBuildID()),
+		metrics.WorkerDeploymentBuildIDTag(buildID, pm.config.BreakdownMetricsByBuildID()),
 	)
 	for pri := range pq.GetStatsByPriority(false) {
 		metrics.ApproximateBacklogCount.With(handler).Record(0, metrics.MatchingTaskPriorityTag(pri))
 	}
 	metrics.ApproximateBacklogAgeSeconds.With(handler).Record(0)
+}
+
+// parseDeploymentFromVersionKey extracts the deployment name and build ID from a version key
+// string used as the map key in DescribeTaskQueuePartitionResponse.VersionsInfoInternal.
+// The key format is "deploymentName:buildId" for V3 deployment-based versions, or empty for
+// unversioned queues. Returns empty strings when the delimiter is not found (unversioned or
+// V2 version-set keys).
+func parseDeploymentFromVersionKey(versionKey string) (deploymentName, buildID string) {
+	if name, id, found := strings.Cut(versionKey, worker_versioning.WorkerDeploymentVersionDelimiter); found {
+		return name, id
+	}
+	return "", ""
 }
 
 func (pm *taskQueuePartitionManagerImpl) ephemeralDataChanged(data *taskqueuespb.EphemeralData) {
@@ -1589,9 +1631,9 @@ func mergeStatsByPriority(into, from map[int32]*taskqueuepb.TaskQueueStats) {
 			continue
 		}
 		ensureStatsWithAge(into, pri)
-		// mergeStats requires non-nil ApproximateBacklogAge on both inputs.
+		// MergeStats requires non-nil ApproximateBacklogAge on both inputs.
 		s = cloneTaskQueueStats(s)
-		mergeStats(into[pri], s)
+		taskqueue.MergeStats(into[pri], s)
 	}
 }
 

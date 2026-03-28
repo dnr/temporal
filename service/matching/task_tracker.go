@@ -38,30 +38,31 @@ func (cb *circularTaskBuffer) totalTasks() int {
 }
 
 type taskTracker struct {
-	lock              sync.Mutex
-	clock             clock.TimeSource
-	startTime         time.Time     // time when taskTracker was initialized
-	bucketStartTime   time.Time     // the starting time of a bucket in the buffer
-	intervalSize      time.Duration // the duration of each bucket in the buffer
-	buckets           int           // the total number of buckets in the buffer
-	totalIntervalSize time.Duration // the number of seconds over which rate of tasks are added/dispatched
-	tasksInInterval   circularTaskBuffer
+	lock            sync.Mutex
+	clock           clock.TimeSource
+	startTime       time.Time     // time when taskTracker was initialized
+	bucketStartTime time.Time     // the starting time of a bucket in the buffer
+	bucketSize      time.Duration // duration of each bucket in the buffer
+	buckets         int           // number of buckets in the buffer
+	totalInterval   time.Duration // duration over which rate of tasks is measured
+	tasks           circularTaskBuffer
 }
 
 func newTaskTracker(
 	timeSource clock.TimeSource,
-	intervalSize time.Duration,
-	totalIntervalSize time.Duration,
+	bucketSize time.Duration,
+	totalInterval time.Duration,
 ) *taskTracker {
-	buckets := int(totalIntervalSize/intervalSize) + 1
+	bucketSize = max(bucketSize, time.Millisecond)
+	buckets := int(totalInterval/bucketSize) + 1
 	return &taskTracker{
-		clock:             timeSource,
-		startTime:         timeSource.Now(),
-		bucketStartTime:   timeSource.Now(),
-		intervalSize:      intervalSize,
-		buckets:           buckets,
-		totalIntervalSize: totalIntervalSize,
-		tasksInInterval:   newCircularTaskBuffer(buckets),
+		clock:           timeSource,
+		startTime:       timeSource.Now(),
+		bucketStartTime: timeSource.Now(),
+		bucketSize:      bucketSize,
+		buckets:         buckets,
+		totalInterval:   totalInterval,
+		tasks:           newCircularTaskBuffer(buckets),
 	}
 }
 
@@ -69,15 +70,15 @@ func newTaskTracker(
 // This method must be called with taskTracker's lock held.
 func (s *taskTracker) advanceAndResetLocked(elapsed time.Duration) {
 	// Calculate the number of intervals elapsed since the start interval time
-	intervalsElapsed := int(elapsed / s.intervalSize)
+	intervalsElapsed := int(elapsed / s.bucketSize)
 
-	for i := 0; i < min(intervalsElapsed, s.buckets); i++ {
-		s.tasksInInterval.advance() // advancing our circular buffer's position until we land on the right interval
+	for range min(intervalsElapsed, s.buckets) {
+		s.tasks.advance() // advancing our circular buffer's position until we land on the right interval
 	}
-	s.bucketStartTime = s.bucketStartTime.Add(time.Duration(intervalsElapsed) * s.intervalSize)
+	s.bucketStartTime = s.bucketStartTime.Add(time.Duration(intervalsElapsed) * s.bucketSize)
 }
 
-// inc adds/removes tasks from the current time that falls in the appropriate interval
+// inc increments the count of tasks by n at the current time
 func (s *taskTracker) inc(n int) {
 	s.lock.Lock()
 	defer s.lock.Unlock()
@@ -86,7 +87,7 @@ func (s *taskTracker) inc(n int) {
 	// Calculate elapsed time from the latest start interval time
 	elapsed := currentTime.Sub(s.bucketStartTime)
 	s.advanceAndResetLocked(elapsed)
-	s.tasksInInterval.inc(n)
+	s.tasks.inc(n)
 }
 
 // rate returns the rate of tasks added/dispatched in a given interval
@@ -98,9 +99,9 @@ func (s *taskTracker) rate() float32 {
 	// Calculate elapsed time from the latest start interval time
 	elapsed := currentTime.Sub(s.bucketStartTime)
 	s.advanceAndResetLocked(elapsed)
-	totalTasks := s.tasksInInterval.totalTasks()
+	totalTasks := s.tasks.totalTasks()
 
-	elapsedTime := min(currentTime.Sub(s.bucketStartTime)+s.totalIntervalSize,
+	elapsedTime := min(currentTime.Sub(s.bucketStartTime)+s.totalInterval,
 		currentTime.Sub(s.startTime))
 
 	if elapsedTime <= 0 {

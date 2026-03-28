@@ -315,7 +315,7 @@ func partitionIsFullyDrained(
 
 	for _, v := range res.GetVersionsInfoInternal() {
 		for _, q := range v.GetPhysicalTaskQueueInfo().GetInternalTaskQueueStatus() {
-			if !q.GetDrained() {
+			if !q.GetBacklogDrained() {
 				return false
 			}
 		}

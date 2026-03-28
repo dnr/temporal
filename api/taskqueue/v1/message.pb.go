@@ -19,6 +19,7 @@ import (
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	emptypb "google.golang.org/protobuf/types/known/emptypb"
+	timestamppb "google.golang.org/protobuf/types/known/timestamppb"
 )
 
 const (
@@ -226,11 +227,13 @@ type InternalTaskQueueStatus struct {
 	// Draining means that this status is from a queue that is being drained to
 	// migrate from v1 to v2 tasks persistence (or backwards).
 	Draining bool `protobuf:"varint,10,opt,name=draining,proto3" json:"draining,omitempty"`
-	// Drained means that this queue has an empty backlog (at this point in time).
-	// Used for partition scaling.
-	Drained       bool `protobuf:"varint,11,opt,name=drained,proto3" json:"drained,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	// BacklogDrained means this queue has an empty backlog at the time this status
+	// was generated. This is inherently racy — new tasks may arrive after this
+	// check. Consumers must use version-based validation (see scaleManager) to
+	// ensure correctness.
+	BacklogDrained bool `protobuf:"varint,11,opt,name=backlog_drained,json=backlogDrained,proto3" json:"backlog_drained,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *InternalTaskQueueStatus) Reset() {
@@ -333,9 +336,9 @@ func (x *InternalTaskQueueStatus) GetDraining() bool {
 	return false
 }
 
-func (x *InternalTaskQueueStatus) GetDrained() bool {
+func (x *InternalTaskQueueStatus) GetBacklogDrained() bool {
 	if x != nil {
-		return x.Drained
+		return x.BacklogDrained
 	}
 	return false
 }
@@ -614,6 +617,13 @@ type TaskForwardInfo struct {
 	// In case of multiple hops, this is the source partition of the last hop.
 	SourcePartition string         `protobuf:"bytes,1,opt,name=source_partition,json=sourcePartition,proto3" json:"source_partition,omitempty"`
 	TaskSource      v14.TaskSource `protobuf:"varint,2,opt,name=task_source,json=taskSource,proto3,enum=temporal.server.api.enums.v1.TaskSource" json:"task_source,omitempty"`
+	// The partition where the task was initially forwarded from.
+	// Unlike source_partition which gets overwritten at each hop, origin_partition
+	// persists across all forwarding hops.
+	OriginPartition string `protobuf:"bytes,6,opt,name=origin_partition,json=originPartition,proto3" json:"origin_partition,omitempty"`
+	// For tasks that are forwarded, we should keep the original creation time that comes from the
+	// source partition. Used for dispatch latency metrics.
+	CreateTime *timestamppb.Timestamp `protobuf:"bytes,7,opt,name=create_time,json=createTime,proto3" json:"create_time,omitempty"`
 	// Redirect info is not present for Query and Nexus tasks. Versioning decisions for activity/workflow
 	// tasks are made at the source partition and sent to the parent partition in this message so that parent partition
 	// does not have to make versioning decision again. For Query/Nexus tasks, this works differently as the child's
@@ -672,6 +682,20 @@ func (x *TaskForwardInfo) GetTaskSource() v14.TaskSource {
 		return x.TaskSource
 	}
 	return v14.TaskSource(0)
+}
+
+func (x *TaskForwardInfo) GetOriginPartition() string {
+	if x != nil {
+		return x.OriginPartition
+	}
+	return ""
+}
+
+func (x *TaskForwardInfo) GetCreateTime() *timestamppb.Timestamp {
+	if x != nil {
+		return x.CreateTime
+	}
+	return nil
 }
 
 func (x *TaskForwardInfo) GetRedirectInfo() *BuildIdRedirectInfo {
@@ -976,7 +1000,7 @@ var File_temporal_server_api_taskqueue_v1_message_proto protoreflect.FileDescrip
 
 const file_temporal_server_api_taskqueue_v1_message_proto_rawDesc = "" +
 	"\n" +
-	".temporal/server/api/taskqueue/v1/message.proto\x12 temporal.server.api.taskqueue.v1\x1a\x1bgoogle/protobuf/empty.proto\x1a(temporal/api/deployment/v1/message.proto\x1a&temporal/api/enums/v1/task_queue.proto\x1a$temporal/api/enums/v1/workflow.proto\x1a'temporal/api/taskqueue/v1/message.proto\x1a'temporal/server/api/enums/v1/task.proto\x1a/temporal/server/api/deployment/v1/message.proto\"\xbf\x03\n" +
+	".temporal/server/api/taskqueue/v1/message.proto\x12 temporal.server.api.taskqueue.v1\x1a\x1bgoogle/protobuf/empty.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a(temporal/api/deployment/v1/message.proto\x1a&temporal/api/enums/v1/task_queue.proto\x1a$temporal/api/enums/v1/workflow.proto\x1a'temporal/api/taskqueue/v1/message.proto\x1a'temporal/server/api/enums/v1/task.proto\x1a/temporal/server/api/deployment/v1/message.proto\"\xbf\x03\n" +
 	"\x14TaskVersionDirective\x12J\n" +
 	"\x14use_assignment_rules\x18\x01 \x01(\v2\x16.google.protobuf.EmptyH\x00R\x12useAssignmentRules\x12,\n" +
 	"\x11assigned_build_id\x18\x02 \x01(\tH\x00R\x0fassignedBuildId\x12E\n" +
@@ -990,7 +1014,7 @@ const file_temporal_server_api_taskqueue_v1_message_proto_rawDesc = "" +
 	"\bbuild_id\"A\n" +
 	"\tFairLevel\x12\x1b\n" +
 	"\ttask_pass\x18\x01 \x01(\x03R\btaskPass\x12\x17\n" +
-	"\atask_id\x18\x02 \x01(\x03R\x06taskId\"\xe0\x04\n" +
+	"\atask_id\x18\x02 \x01(\x03R\x06taskId\"\xef\x04\n" +
 	"\x17InternalTaskQueueStatus\x12\x1d\n" +
 	"\n" +
 	"read_level\x18\x01 \x01(\x03R\treadLevel\x12S\n" +
@@ -1003,8 +1027,8 @@ const file_temporal_server_api_taskqueue_v1_message_proto_rawDesc = "" +
 	"\x0emax_read_level\x18\x06 \x01(\x03R\fmaxReadLevel\x12Z\n" +
 	"\x13fair_max_read_level\x18\t \x01(\v2+.temporal.server.api.taskqueue.v1.FairLevelR\x10fairMaxReadLevel\x12\x1a\n" +
 	"\bdraining\x18\n" +
-	" \x01(\bR\bdraining\x12\x18\n" +
-	"\adrained\x18\v \x01(\bR\adrained\"\x90\x01\n" +
+	" \x01(\bR\bdraining\x12'\n" +
+	"\x0fbacklog_drained\x18\v \x01(\bR\x0ebacklogDrained\"\x90\x01\n" +
 	"\x1cTaskQueueVersionInfoInternal\x12p\n" +
 	"\x18physical_task_queue_info\x18\x02 \x01(\v27.temporal.server.api.taskqueue.v1.PhysicalTaskQueueInfoR\x15physicalTaskQueueInfo\"\xc2\x04\n" +
 	"\x15PhysicalTaskQueueInfo\x12?\n" +
@@ -1024,11 +1048,14 @@ const file_temporal_server_api_taskqueue_v1_message_proto_rawDesc = "" +
 	"stickyNameB\x0e\n" +
 	"\fpartition_id\"A\n" +
 	"\x13BuildIdRedirectInfo\x12*\n" +
-	"\x11assigned_build_id\x18\x01 \x01(\tR\x0fassignedBuildId\"\xc1\x02\n" +
+	"\x11assigned_build_id\x18\x01 \x01(\tR\x0fassignedBuildId\"\xa9\x03\n" +
 	"\x0fTaskForwardInfo\x12)\n" +
 	"\x10source_partition\x18\x01 \x01(\tR\x0fsourcePartition\x12I\n" +
 	"\vtask_source\x18\x02 \x01(\x0e2(.temporal.server.api.enums.v1.TaskSourceR\n" +
-	"taskSource\x12Z\n" +
+	"taskSource\x12)\n" +
+	"\x10origin_partition\x18\x06 \x01(\tR\x0foriginPartition\x12;\n" +
+	"\vcreate_time\x18\a \x01(\v2\x1a.google.protobuf.TimestampR\n" +
+	"createTime\x12Z\n" +
 	"\rredirect_info\x18\x03 \x01(\v25.temporal.server.api.taskqueue.v1.BuildIdRedirectInfoR\fredirectInfo\x12*\n" +
 	"\x11dispatch_build_id\x18\x04 \x01(\tR\x0fdispatchBuildId\x120\n" +
 	"\x14dispatch_version_set\x18\x05 \x01(\tR\x12dispatchVersionSet\"\xd5\x03\n" +
@@ -1086,6 +1113,7 @@ var file_temporal_server_api_taskqueue_v1_message_proto_goTypes = []any{
 	(*v13.TaskQueueStats)(nil),           // 20: temporal.api.taskqueue.v1.TaskQueueStats
 	(v1.TaskQueueType)(0),                // 21: temporal.api.enums.v1.TaskQueueType
 	(v14.TaskSource)(0),                  // 22: temporal.server.api.enums.v1.TaskSource
+	(*timestamppb.Timestamp)(nil),        // 23: google.protobuf.Timestamp
 }
 var file_temporal_server_api_taskqueue_v1_message_proto_depIdxs = []int32{
 	14, // 0: temporal.server.api.taskqueue.v1.TaskVersionDirective.use_assignment_rules:type_name -> google.protobuf.Empty
@@ -1103,18 +1131,19 @@ var file_temporal_server_api_taskqueue_v1_message_proto_depIdxs = []int32{
 	11, // 12: temporal.server.api.taskqueue.v1.PhysicalTaskQueueInfo.task_queue_stats_by_priority_key:type_name -> temporal.server.api.taskqueue.v1.PhysicalTaskQueueInfo.TaskQueueStatsByPriorityKeyEntry
 	21, // 13: temporal.server.api.taskqueue.v1.TaskQueuePartition.task_queue_type:type_name -> temporal.api.enums.v1.TaskQueueType
 	22, // 14: temporal.server.api.taskqueue.v1.TaskForwardInfo.task_source:type_name -> temporal.server.api.enums.v1.TaskSource
-	6,  // 15: temporal.server.api.taskqueue.v1.TaskForwardInfo.redirect_info:type_name -> temporal.server.api.taskqueue.v1.BuildIdRedirectInfo
-	13, // 16: temporal.server.api.taskqueue.v1.EphemeralData.partition:type_name -> temporal.server.api.taskqueue.v1.EphemeralData.ByPartition
-	10, // 17: temporal.server.api.taskqueue.v1.EphemeralData.scale:type_name -> temporal.server.api.taskqueue.v1.PartitionScaleInfo
-	8,  // 18: temporal.server.api.taskqueue.v1.VersionedEphemeralData.data:type_name -> temporal.server.api.taskqueue.v1.EphemeralData
-	20, // 19: temporal.server.api.taskqueue.v1.PhysicalTaskQueueInfo.TaskQueueStatsByPriorityKeyEntry.value:type_name -> temporal.api.taskqueue.v1.TaskQueueStats
-	17, // 20: temporal.server.api.taskqueue.v1.EphemeralData.ByVersion.version:type_name -> temporal.server.api.deployment.v1.WorkerDeploymentVersion
-	12, // 21: temporal.server.api.taskqueue.v1.EphemeralData.ByPartition.version:type_name -> temporal.server.api.taskqueue.v1.EphemeralData.ByVersion
-	22, // [22:22] is the sub-list for method output_type
-	22, // [22:22] is the sub-list for method input_type
-	22, // [22:22] is the sub-list for extension type_name
-	22, // [22:22] is the sub-list for extension extendee
-	0,  // [0:22] is the sub-list for field type_name
+	23, // 15: temporal.server.api.taskqueue.v1.TaskForwardInfo.create_time:type_name -> google.protobuf.Timestamp
+	6,  // 16: temporal.server.api.taskqueue.v1.TaskForwardInfo.redirect_info:type_name -> temporal.server.api.taskqueue.v1.BuildIdRedirectInfo
+	13, // 17: temporal.server.api.taskqueue.v1.EphemeralData.partition:type_name -> temporal.server.api.taskqueue.v1.EphemeralData.ByPartition
+	10, // 18: temporal.server.api.taskqueue.v1.EphemeralData.scale:type_name -> temporal.server.api.taskqueue.v1.PartitionScaleInfo
+	8,  // 19: temporal.server.api.taskqueue.v1.VersionedEphemeralData.data:type_name -> temporal.server.api.taskqueue.v1.EphemeralData
+	20, // 20: temporal.server.api.taskqueue.v1.PhysicalTaskQueueInfo.TaskQueueStatsByPriorityKeyEntry.value:type_name -> temporal.api.taskqueue.v1.TaskQueueStats
+	17, // 21: temporal.server.api.taskqueue.v1.EphemeralData.ByVersion.version:type_name -> temporal.server.api.deployment.v1.WorkerDeploymentVersion
+	12, // 22: temporal.server.api.taskqueue.v1.EphemeralData.ByPartition.version:type_name -> temporal.server.api.taskqueue.v1.EphemeralData.ByVersion
+	23, // [23:23] is the sub-list for method output_type
+	23, // [23:23] is the sub-list for method input_type
+	23, // [23:23] is the sub-list for extension type_name
+	23, // [23:23] is the sub-list for extension extendee
+	0,  // [0:23] is the sub-list for field type_name
 }
 
 func init() { file_temporal_server_api_taskqueue_v1_message_proto_init() }

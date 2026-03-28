@@ -40,6 +40,10 @@ const (
 
 const maxFastUserDataFetches = 5
 
+// noEphemeralDataVersion as a value for LastKnownEphemeralDataVersion means
+// the caller does not want to receive ephemeral data.
+const noEphemeralDataVersion = -1
+
 type (
 	userDataManager interface {
 		Start()
@@ -600,8 +604,8 @@ func (m *userDataManagerImpl) HandleGetUserDataRequest(
 			return nil, err
 		}
 		newUserData := userData.GetVersion() > lastVersion
-		// lastEphVersion < 0 means the caller does not want ephemeral data
-		newEphData := lastEphVersion >= 0 && ephData.GetVersion() > lastEphVersion
+		// noEphemeralDataVersion means the caller does not want ephemeral data
+		newEphData := lastEphVersion != noEphemeralDataVersion && ephData.GetVersion() > lastEphVersion
 		if newUserData || newEphData {
 			m.logger.Debug("returning user data",
 				tag.Bool("long-poll", req.WaitNewData),
@@ -820,7 +824,7 @@ func (m *userDataManagerImpl) getIncomingEphemeralDataVersion() int64 {
 	if m.partition.IsRoot() {
 		// The root activity/nexus partition should not fetch ephemeral data from the root
 		// workflow partition.
-		return -1
+		return noEphemeralDataVersion
 	}
 
 	m.lock.Lock()

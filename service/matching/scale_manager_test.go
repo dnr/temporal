@@ -122,7 +122,7 @@ func TestPartitionIsFullyDrained_ScaleInfoMismatch(t *testing.T) {
 		ScaleInfo: &taskqueuespb.PartitionScaleInfo{Read: 8, Write: 4, Version: 99}, // different version
 		VersionsInfoInternal: map[string]*taskqueuespb.TaskQueueVersionInfoInternal{
 			"": {PhysicalTaskQueueInfo: &taskqueuespb.PhysicalTaskQueueInfo{
-				InternalTaskQueueStatus: []*taskqueuespb.InternalTaskQueueStatus{{Drained: true}},
+				InternalTaskQueueStatus: []*taskqueuespb.InternalTaskQueueStatus{{BacklogDrained: true}},
 			}},
 		},
 	}
@@ -136,7 +136,7 @@ func TestPartitionIsFullyDrained_NotDrained(t *testing.T) {
 		ScaleInfo: proto.Clone(info).(*taskqueuespb.PartitionScaleInfo),
 		VersionsInfoInternal: map[string]*taskqueuespb.TaskQueueVersionInfoInternal{
 			"": {PhysicalTaskQueueInfo: &taskqueuespb.PhysicalTaskQueueInfo{
-				InternalTaskQueueStatus: []*taskqueuespb.InternalTaskQueueStatus{{Drained: false}},
+				InternalTaskQueueStatus: []*taskqueuespb.InternalTaskQueueStatus{{BacklogDrained: false}},
 			}},
 		},
 	}
@@ -150,10 +150,10 @@ func TestPartitionIsFullyDrained_AllDrained(t *testing.T) {
 		ScaleInfo: proto.Clone(info).(*taskqueuespb.PartitionScaleInfo),
 		VersionsInfoInternal: map[string]*taskqueuespb.TaskQueueVersionInfoInternal{
 			"v1": {PhysicalTaskQueueInfo: &taskqueuespb.PhysicalTaskQueueInfo{
-				InternalTaskQueueStatus: []*taskqueuespb.InternalTaskQueueStatus{{Drained: true}},
+				InternalTaskQueueStatus: []*taskqueuespb.InternalTaskQueueStatus{{BacklogDrained: true}},
 			}},
 			"v2": {PhysicalTaskQueueInfo: &taskqueuespb.PhysicalTaskQueueInfo{
-				InternalTaskQueueStatus: []*taskqueuespb.InternalTaskQueueStatus{{Drained: true}, {Drained: true}},
+				InternalTaskQueueStatus: []*taskqueuespb.InternalTaskQueueStatus{{BacklogDrained: true}, {BacklogDrained: true}},
 			}},
 		},
 	}
@@ -167,10 +167,10 @@ func TestPartitionIsFullyDrained_PartiallyDrained(t *testing.T) {
 		ScaleInfo: proto.Clone(info).(*taskqueuespb.PartitionScaleInfo),
 		VersionsInfoInternal: map[string]*taskqueuespb.TaskQueueVersionInfoInternal{
 			"v1": {PhysicalTaskQueueInfo: &taskqueuespb.PhysicalTaskQueueInfo{
-				InternalTaskQueueStatus: []*taskqueuespb.InternalTaskQueueStatus{{Drained: true}},
+				InternalTaskQueueStatus: []*taskqueuespb.InternalTaskQueueStatus{{BacklogDrained: true}},
 			}},
 			"v2": {PhysicalTaskQueueInfo: &taskqueuespb.PhysicalTaskQueueInfo{
-				InternalTaskQueueStatus: []*taskqueuespb.InternalTaskQueueStatus{{Drained: false}},
+				InternalTaskQueueStatus: []*taskqueuespb.InternalTaskQueueStatus{{BacklogDrained: false}},
 			}},
 		},
 	}
@@ -233,12 +233,12 @@ func newTestScaleManager(
 	f, _ := tqid.NewTaskQueueFamily("test-ns-id", "test-tq")
 	partition := f.TaskQueue(1).RootPartition()
 	sm := &scaleManager{
-		partition:   partition,
-		logger:      log.NewNoopLogger(),
-		metricsHandler: metrics.NoopMetricsHandler,
-		userDataManager: &scaleManagerUDMAdapter{udm},
-		partitionScaler: scaler,
-		settings:        settings,
+		partition:          partition,
+		logger:             log.NewNoopLogger(),
+		metricsHandler:     metrics.NoopMetricsHandler,
+		userDataManager:    &scaleManagerUDMAdapter{udm},
+		partitionScaler:    scaler,
+		settings:           settings,
 		getWritePartitions: func() int { return 4 },
 		emitGaugeMetrics:   func() bool { return false },
 		background:         goro.NewHandle(context.Background()),
@@ -263,8 +263,8 @@ func (a *scaleManagerUDMAdapter) PartitionScale() *taskqueuespb.PartitionScaleIn
 }
 
 // Stubs for unused methods - scaleManager only calls SetPartitionScale/PartitionScale
-func (a *scaleManagerUDMAdapter) Start()                          {}
-func (a *scaleManagerUDMAdapter) Stop()                           {}
+func (a *scaleManagerUDMAdapter) Start()                                     {}
+func (a *scaleManagerUDMAdapter) Stop()                                      {}
 func (a *scaleManagerUDMAdapter) WaitUntilInitialized(context.Context) error { return nil }
 func (a *scaleManagerUDMAdapter) GetUserData() (*persistencespb.VersionedTaskQueueUserData, chan struct{}, error) {
 	return nil, nil, nil
