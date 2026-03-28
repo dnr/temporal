@@ -357,10 +357,13 @@ func (c *physicalTaskQueueManagerImpl) LoadedMetadata(scaleState *persistencespb
 	c.partitionMgr.LoadedMetadata(scaleState)
 }
 
-func (c *physicalTaskQueueManagerImpl) UpdateScaleState(scaleState *persistencespb.PartitionScaleState) error {
+func (c *physicalTaskQueueManagerImpl) UpdateScaleState(scaleState *persistencespb.PartitionScaleState, sync bool) error {
+	if !sync {
+		return c.backlogMgr.getDB().UpdateScaleState(nil, scaleState, false)
+	}
 	ctx, cancel := context.WithTimeout(c.tqCtx, ioTimeout)
 	defer cancel()
-	return c.backlogMgr.getDB().UpdateScaleState(ctx, scaleState)
+	return c.backlogMgr.getDB().UpdateScaleState(ctx, scaleState, true)
 }
 
 // Call this to set up dual-read from the other table.

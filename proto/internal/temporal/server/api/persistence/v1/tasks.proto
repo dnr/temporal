@@ -108,20 +108,28 @@ message SubqueueKey {
 }
 
 message PartitionScaleState {
-    // Target number of partitions. Zero means managed scaling is not enabled.
-    int32 target = 1;
+  // Target number of partitions. Zero means managed scaling is not enabled.
+  int32 target = 1;
 
-    // Highest value that target has ever been set to.
-    int32 max_target = 2;
+  // Highest value that target has ever been set to.
+  int32 max_target = 2;
 
-    // Version number for target. This should change every time target changes.
-    sfixed64 target_version = 3;
+  // Version number for target. This should change every time target changes.
+  sfixed64 target_version = 3;
 
-    // Bit field of partitions that may have backlog. Partition i is represented by:
-    // backlog_state[i/64] & (1 << i%64).
-    // (-- api-linter: core::0141::forbidden-types=disabled
-    //     aip.dev/not-precedent: This is a bit field --)
-    repeated uint64 backlog_state = 4;
+  // Bit field of partitions that may have backlog. Partition i is represented by:
+  // backlog_state[i/64] & (1 << i%64).
+  // (-- api-linter: core::0141::forbidden-types=disabled
+  //     aip.dev/not-precedent: This is a bit field --)
+  repeated uint64 backlog_state = 4;
+
+  // Summary of backlog counts, 8 bits per partition (see common/number/e5m3.go).
+  // This is different from backlog_state: a partition will have a 1 bit in backlog_state
+  // unless it is draining and we know for sure that it's fully drained. It may have zero
+  // actual backlog most of that time, so it would have a zero here. Also, we commit changes to
+  // backlog_state to persistence before changing counts, but we don't have to keep
+  // backlog_counts as consistent.
+  bytes backlog_counts = 5;
 }
 
 

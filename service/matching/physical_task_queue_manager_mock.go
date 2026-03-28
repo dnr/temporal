@@ -420,17 +420,17 @@ func (mr *MockphysicalTaskQueueManagerMockRecorder) UpdateRemotePriorityBacklogs
 }
 
 // UpdateScaleState mocks base method.
-func (m *MockphysicalTaskQueueManager) UpdateScaleState(arg0 *persistence.PartitionScaleState) error {
+func (m *MockphysicalTaskQueueManager) UpdateScaleState(arg0 *persistence.PartitionScaleState, arg1 bool) error {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "UpdateScaleState", arg0)
+	ret := m.ctrl.Call(m, "UpdateScaleState", arg0, arg1)
 	ret0, _ := ret[0].(error)
 	return ret0
 }
 
 // UpdateScaleState indicates an expected call of UpdateScaleState.
-func (mr *MockphysicalTaskQueueManagerMockRecorder) UpdateScaleState(arg0 any) *gomock.Call {
+func (mr *MockphysicalTaskQueueManagerMockRecorder) UpdateScaleState(arg0, arg1 any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UpdateScaleState", reflect.TypeOf((*MockphysicalTaskQueueManager)(nil).UpdateScaleState), arg0)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UpdateScaleState", reflect.TypeOf((*MockphysicalTaskQueueManager)(nil).UpdateScaleState), arg0, arg1)
 }
 
 // UserDataChanged mocks base method.

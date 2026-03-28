@@ -566,7 +566,14 @@ type PartitionScaleState struct {
 	// (-- api-linter: core::0141::forbidden-types=disabled
 	//
 	//	aip.dev/not-precedent: This is a bit field --)
-	BacklogState  []uint64 `protobuf:"varint,4,rep,packed,name=backlog_state,json=backlogState,proto3" json:"backlog_state,omitempty"`
+	BacklogState []uint64 `protobuf:"varint,4,rep,packed,name=backlog_state,json=backlogState,proto3" json:"backlog_state,omitempty"`
+	// Summary of backlog counts, 8 bits per partition (see common/number/e5m3.go).
+	// This is different from backlog_state: a partition will have a 1 bit in backlog_state
+	// unless it is draining and we know for sure that it's fully drained. It may have zero
+	// actual backlog most of that time, so it would have a zero here. Also, we commit changes to
+	// backlog_state to persistence before changing counts, but we don't have to keep
+	// backlog_counts as consistent.
+	BacklogCounts []byte `protobuf:"bytes,5,opt,name=backlog_counts,json=backlogCounts,proto3" json:"backlog_counts,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -625,6 +632,13 @@ func (x *PartitionScaleState) GetTargetVersion() int64 {
 func (x *PartitionScaleState) GetBacklogState() []uint64 {
 	if x != nil {
 		return x.BacklogState
+	}
+	return nil
+}
+
+func (x *PartitionScaleState) GetBacklogCounts() []byte {
+	if x != nil {
+		return x.BacklogCounts
 	}
 	return nil
 }
@@ -732,13 +746,14 @@ const file_temporal_server_api_persistence_v1_tasks_proto_rawDesc = "" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05count\x18\x02 \x01(\x03R\x05count\")\n" +
 	"\vSubqueueKey\x12\x1a\n" +
-	"\bpriority\x18\x01 \x01(\x05R\bpriority\"\x98\x01\n" +
+	"\bpriority\x18\x01 \x01(\x05R\bpriority\"\xbf\x01\n" +
 	"\x13PartitionScaleState\x12\x16\n" +
 	"\x06target\x18\x01 \x01(\x05R\x06target\x12\x1d\n" +
 	"\n" +
 	"max_target\x18\x02 \x01(\x05R\tmaxTarget\x12%\n" +
 	"\x0etarget_version\x18\x03 \x01(\x10R\rtargetVersion\x12#\n" +
-	"\rbacklog_state\x18\x04 \x03(\x04R\fbacklogState\"[\n" +
+	"\rbacklog_state\x18\x04 \x03(\x04R\fbacklogState\x12%\n" +
+	"\x0ebacklog_counts\x18\x05 \x01(\fR\rbacklogCounts\"[\n" +
 	"\aTaskKey\x127\n" +
 	"\tfire_time\x18\x01 \x01(\v2\x1a.google.protobuf.TimestampR\bfireTime\x12\x17\n" +
 	"\atask_id\x18\x02 \x01(\x03R\x06taskIdB6Z4go.temporal.io/server/api/persistence/v1;persistenceb\x06proto3"

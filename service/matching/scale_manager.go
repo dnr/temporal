@@ -43,9 +43,7 @@ type scaleManager struct {
 
 	lock       sync.Mutex
 	scaleState *persistencespb.PartitionScaleState
-	// FIXME: maybe we should just persist this???
-	backlogCounts []byte
-	scaleDB       scaleDB
+	scaleDB    scaleDB
 
 	batch atomic.Int64
 }
@@ -53,7 +51,7 @@ type scaleManager struct {
 // scaleDB is used to write scale state to persistence. It's a sub-interface of
 // physicalTaskQueueManager (for the default queue).
 type scaleDB interface {
-	UpdateScaleState(*persistencespb.PartitionScaleState) error
+	UpdateScaleState(*persistencespb.PartitionScaleState, bool) error
 }
 
 func newScaleManager(
@@ -176,7 +174,7 @@ func (sm *scaleManager) SetTarget(targeti int) {
 		}
 
 		// we must succesfully write to the db before making new state active
-		if err := sm.scaleDB.UpdateScaleState(newState); err != nil {
+		if err := sm.scaleDB.UpdateScaleState(newState, true); err != nil {
 			sm.logger.Error("failed to update state", tag.Error(err), tag.Operation("scale"))
 			return
 		}
@@ -194,11 +192,11 @@ func (sm *scaleManager) SetTarget(targeti int) {
 // setStateLocked updates the current scale state and syncs it to ephemeral data.
 // This should only be called _after_ the state is persisted to the db.
 func (sm *scaleManager) setStateLocked(newState *persistencespb.PartitionScaleState) {
-	prevInfo := scaleStateToInfo(sm.scaleState, sm.backlogCounts)
+	prevInfo := scaleStateToInfo(sm.scaleState)
 
 	sm.scaleState = newState
 
-	newInfo := scaleStateToInfo(sm.scaleState, sm.backlogCounts)
+	newInfo := scaleStateToInfo(sm.scaleState)
 
 	// only push ephemeral data if read/write changed, not on any state change
 	if !proto.Equal(prevInfo, newInfo) {
@@ -220,7 +218,6 @@ func (sm *scaleManager) backgroundWork(ctx context.Context) error {
 		case <-time.After(backoff.Jitter(sm.settings.BackgroundInterval, 0.05)):
 			sm.lock.Lock()
 			scaleState := sm.scaleState
-			prevBacklog := sm.backlogCounts
 			sm.lock.Unlock()
 
 			// notify once
@@ -228,7 +225,7 @@ func (sm *scaleManager) backgroundWork(ctx context.Context) error {
 			sm.partitionScaler.OnTasks(tasks, int(scaleState.GetTarget()), sm.setTarget)
 
 			// update backlog stats
-			sm.updateBacklogStats(ctx, scaleStateToReadCount(scaleState), prevBacklog)
+			sm.updateBacklogStats(ctx, scaleState)
 
 			// check drained state
 			sm.checkDrained(ctx, scaleState)
@@ -253,7 +250,9 @@ func (sm *scaleManager) describeRequest(id int32) *matchingservice.DescribeTaskQ
 	}
 }
 
-func (sm *scaleManager) updateBacklogStats(ctx context.Context, read int32, prevBacklog []byte) {
+func (sm *scaleManager) updateBacklogStats(ctx context.Context, scaleState *persistencespb.PartitionScaleState) {
+	read := scaleStateToReadCount(scaleState)
+	prevBacklog := scaleState.GetBacklogCounts()
 	newBacklog := make([]byte, read)
 	changed := false
 
@@ -281,9 +280,20 @@ func (sm *scaleManager) updateBacklogStats(ctx context.Context, read int32, prev
 	sm.lock.Lock()
 	defer sm.lock.Unlock()
 
-	sm.backlogCounts = newBacklog
-	newInfo := scaleStateToInfo(sm.scaleState, sm.backlogCounts)
-	sm.userDataManager.SetPartitionScale(newInfo)
+	if sm.scaleState != scaleState {
+		return // we were operating from an old state
+	}
+
+	newState := common.CloneProto(scaleState)
+	if newState == nil {
+		newState = &persistencespb.PartitionScaleState{}
+	}
+	newState.BacklogCounts = newBacklog
+
+	// update db but don't sync
+	_ = sm.scaleDB.UpdateScaleState(newState, false)
+
+	sm.setStateLocked(newState)
 }
 
 func totalBacklogFromDescribeResponse(res *matchingservice.DescribeTaskQueuePartitionResponse) (total int64) {
@@ -306,7 +316,7 @@ func (sm *scaleManager) checkDrained(ctx context.Context, scaleState *persistenc
 
 	// we have partitions that should be draining, see if they are yet
 	var toClear []int32
-	info := scaleStateToInfo(scaleState, nil)
+	info := scaleStateToInfo(scaleState)
 	for id := info.Write; id < info.Read; id++ {
 		if !getBacklogStateBit(scaleState, id) {
 			continue
@@ -340,7 +350,7 @@ func (sm *scaleManager) checkDrained(ctx context.Context, scaleState *persistenc
 	}
 
 	// write to the db before making new state active
-	if err := sm.scaleDB.UpdateScaleState(newState); err != nil {
+	if err := sm.scaleDB.UpdateScaleState(newState, true); err != nil {
 		sm.logger.Error("failed to update state", tag.Error(err), tag.Operation("drain"))
 		return
 	}
@@ -380,13 +390,13 @@ func scaleStateToReadCount(scaleState *persistencespb.PartitionScaleState) int32
 	return max(scaleState.GetTarget(), readPartitionsFromBacklogState(scaleState))
 }
 
-func scaleStateToInfo(scaleState *persistencespb.PartitionScaleState, backlogCounts []byte) *taskqueuespb.PartitionScaleInfo {
+func scaleStateToInfo(scaleState *persistencespb.PartitionScaleState) *taskqueuespb.PartitionScaleInfo {
 	// note if scaleState == nil, read and write will both be 0
 	return &taskqueuespb.PartitionScaleInfo{
 		Read:          scaleStateToReadCount(scaleState),
 		Write:         scaleState.GetTarget(),
 		Version:       scaleState.GetTargetVersion(),
-		BacklogCounts: backlogCounts,
+		BacklogCounts: scaleState.GetBacklogCounts(),
 	}
 }
 

@@ -464,12 +464,17 @@ func (db *taskQueueDB) SetOtherHasTasks(ctx context.Context, value bool) error {
 	return db.updateTaskQueueLocked(ctx, false)
 }
 
-func (db *taskQueueDB) UpdateScaleState(ctx context.Context, scaleState *persistencespb.PartitionScaleState) error {
+// UpdateScaleState sets the partition scale state (in memory). If sync is true, it also tries to persist it to the db.
+// If sync is false, ctx is not used and may be nil.
+func (db *taskQueueDB) UpdateScaleState(ctx context.Context, scaleState *persistencespb.PartitionScaleState, sync bool) error {
 	db.Lock()
 	defer db.Unlock()
 	db.scaleState = scaleState
 	db.lastChange = time.Now()
-	return db.updateTaskQueueLocked(ctx, false)
+	if sync {
+		return db.updateTaskQueueLocked(ctx, false)
+	}
+	return nil
 }
 
 // CreateTasks creates a batch of given tasks for this task queue
