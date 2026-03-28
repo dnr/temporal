@@ -10,9 +10,14 @@ import (
 	"go.temporal.io/server/common/goro"
 )
 
-// should be power of 2
+// Shards should be a power of 2.
 const partitionCacheShards = 8
 
+// How long for a full rotation of the cache.
+const partitionCacheRotateInterval = time.Hour
+
+// partitionCache is a cache of PartitionCounts values for task queues.
+// It uses a sharded map+mutex and periodic rotation for efficiency.
 type partitionCache struct {
 	shards [partitionCacheShards]partitionCacheShard
 	rotate *goro.Handle
@@ -25,6 +30,7 @@ type partitionCacheShard struct {
 	_      [64 - 24 - 8 - 8]byte // eliminate false sharing
 }
 
+// newPartitionCache returns a new partitionCache. Start() must be called before using it.
 func newPartitionCache() *partitionCache {
 	return &partitionCache{}
 }
@@ -34,7 +40,7 @@ func (c *partitionCache) Start() {
 		c.shards[i].rotate()
 	}
 	c.rotate = goro.NewHandle(context.Background()).Go(func(ctx context.Context) error {
-		t := time.NewTicker(time.Hour / partitionCacheShards)
+		t := time.NewTicker(partitionCacheRotateInterval / partitionCacheShards)
 		for i := 0; ; i = (i + 1) % partitionCacheShards {
 			select {
 			case <-t.C:
@@ -58,7 +64,7 @@ func (*partitionCache) makeKey(
 	nsidBytes, err := uuid.Parse(nsid)
 	if err != nil {
 		// this shouldn't fail, but use the string form as a backup, append a 0xff to differentiate
-		return nsid + tqname + string([]byte{byte(tqtype), 0xff})
+		return nsid + string([]byte{0xff}) + tqname + string([]byte{byte(tqtype), 0xff})
 	}
 	return string(nsidBytes[:]) + tqname + string([]byte{byte(tqtype)})
 }
@@ -66,7 +72,7 @@ func (*partitionCache) makeKey(
 func (*partitionCache) shardFromKey(key string) int {
 	// mix a few bits to pick a shard
 	l := len(key)
-	shard := int(key[14] ^ key[l-2] ^ key[l-1])
+	shard := int(key[min(14, l-3)] ^ key[l-2] ^ key[l-1])
 	return shard % partitionCacheShards
 }
 

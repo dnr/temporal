@@ -41,7 +41,7 @@ type clientImpl struct {
 	partitionCache  *partitionCache
 }
 
-// NewClient creates a new history service gRPC client
+// NewClient creates a new matching service gRPC client
 func NewClient(
 	timeout time.Duration,
 	longPollTimeout time.Duration,

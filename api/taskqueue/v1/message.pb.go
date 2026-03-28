@@ -889,8 +889,8 @@ func (x *PartitionScaleInfo) GetVersion() int64 {
 	return 0
 }
 
-// ClientPartitionCounts is propagated from the matching service to clients in grpc
-// headers/trailers. It may be a subset of PartitionScaleInfo.
+// ClientPartitionCounts is propagated from the matching service to clients in grpc headers/trailers.
+// It may be a subset of PartitionScaleInfo.
 type ClientPartitionCounts struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Read          int32                  `protobuf:"varint,1,opt,name=read,proto3" json:"read,omitempty"`
