@@ -14,7 +14,9 @@ import (
 )
 
 // setTrailerInOpts finds the grpc.TrailerCallOption in opts and populates it.
-func setTrailerInOpts(opts []grpc.CallOption, md metadata.MD) {
+func setTrailerInOpts(opts []grpc.CallOption, pc PartitionCounts) {
+	v, _ := pc.encode()
+	md := metadata.Pairs(partitionCountsTrailerName, v)
 	for _, opt := range opts {
 		if t, ok := opt.(grpc.TrailerCallOption); ok {
 			*t.TrailerAddr = md
@@ -23,23 +25,19 @@ func setTrailerInOpts(opts []grpc.CallOption, md metadata.MD) {
 	}
 }
 
-func makeTrailer(pc PartitionCounts) metadata.MD {
-	v, _ := pc.encode()
-	return metadata.Pairs(partitionCountsTrailerName, v)
-}
-
 type hpcReq struct{}
 type hpcRes struct{ value string }
 
-func newTestCache() *partitionCache {
+func newTestCache(t *testing.T) *partitionCache {
 	cache := newPartitionCache()
 	cache.Start()
+	t.Cleanup(cache.Stop)
 	return cache
 }
 
 func TestHandlePartitionCounts_NonNormalSkipsCache(t *testing.T) {
 	t.Parallel()
-	cache := newTestCache()
+	cache := newTestCache(t)
 
 	calls := 0
 	op := func(ctx context.Context, pc PartitionCounts, req *hpcReq, opts []grpc.CallOption) (*hpcRes, error) {
@@ -57,7 +55,7 @@ func TestHandlePartitionCounts_NonNormalSkipsCache(t *testing.T) {
 
 func TestHandlePartitionCounts_CacheMissSuccess(t *testing.T) {
 	t.Parallel()
-	cache := newTestCache()
+	cache := newTestCache(t)
 
 	pkey := cache.makeKey(testNsID, "my-tq", enumspb.TASK_QUEUE_TYPE_WORKFLOW)
 	serverPC := PartitionCounts{Read: 4, Write: 4}
@@ -66,7 +64,7 @@ func TestHandlePartitionCounts_CacheMissSuccess(t *testing.T) {
 	op := func(ctx context.Context, pc PartitionCounts, req *hpcReq, opts []grpc.CallOption) (*hpcRes, error) {
 		calls++
 		assert.Equal(t, PartitionCounts{}, pc) // cache miss
-		setTrailerInOpts(opts, makeTrailer(serverPC))
+		setTrailerInOpts(opts, serverPC)
 		return &hpcRes{value: "ok"}, nil
 	}
 
@@ -75,13 +73,13 @@ func TestHandlePartitionCounts_CacheMissSuccess(t *testing.T) {
 	assert.Equal(t, "ok", res.value)
 	assert.Equal(t, 1, calls)
 
-	// Cache should be updated
+	// cache should be updated
 	assert.Equal(t, serverPC, cache.lookup(pkey))
 }
 
 func TestHandlePartitionCounts_CacheHitSuccess(t *testing.T) {
 	t.Parallel()
-	cache := newTestCache()
+	cache := newTestCache(t)
 
 	pkey := cache.makeKey(testNsID, "my-tq", enumspb.TASK_QUEUE_TYPE_WORKFLOW)
 	cachedPC := PartitionCounts{Read: 4, Write: 4}
@@ -89,8 +87,8 @@ func TestHandlePartitionCounts_CacheHitSuccess(t *testing.T) {
 
 	op := func(ctx context.Context, pc PartitionCounts, req *hpcReq, opts []grpc.CallOption) (*hpcRes, error) {
 		assert.Equal(t, cachedPC, pc)
-		// Server confirms same counts
-		setTrailerInOpts(opts, makeTrailer(cachedPC))
+		// server confirms same counts
+		setTrailerInOpts(opts, cachedPC)
 		return &hpcRes{value: "ok"}, nil
 	}
 
@@ -102,28 +100,28 @@ func TestHandlePartitionCounts_CacheHitSuccess(t *testing.T) {
 
 func TestHandlePartitionCounts_ServerUpdatesCount(t *testing.T) {
 	t.Parallel()
-	cache := newTestCache()
+	cache := newTestCache(t)
 
 	pkey := cache.makeKey(testNsID, "my-tq", enumspb.TASK_QUEUE_TYPE_WORKFLOW)
 	cache.put(pkey, PartitionCounts{Read: 4, Write: 4})
 	newPC := PartitionCounts{Read: 8, Write: 8}
 
 	op := func(ctx context.Context, pc PartitionCounts, req *hpcReq, opts []grpc.CallOption) (*hpcRes, error) {
-		// Server returns different counts
-		setTrailerInOpts(opts, makeTrailer(newPC))
+		// server returns different counts
+		setTrailerInOpts(opts, newPC)
 		return &hpcRes{value: "ok"}, nil
 	}
 
 	_, err := handlePartitionCounts(context.Background(), log.NewNoopLogger(), cache, pkey, enumspb.TASK_QUEUE_KIND_NORMAL, &hpcReq{}, nil, op)
 	require.NoError(t, err)
 
-	// Cache should be updated to new value
+	// cache should be updated
 	assert.Equal(t, newPC, cache.lookup(pkey))
 }
 
-func TestHandlePartitionCounts_StaleRetrySucceeds(t *testing.T) {
+func TestHandlePartitionCounts_StaleRetry_Succeeds(t *testing.T) {
 	t.Parallel()
-	cache := newTestCache()
+	cache := newTestCache(t)
 
 	pkey := cache.makeKey(testNsID, "my-tq", enumspb.TASK_QUEUE_TYPE_WORKFLOW)
 	serverPC := PartitionCounts{Read: 8, Write: 8}
@@ -131,7 +129,7 @@ func TestHandlePartitionCounts_StaleRetrySucceeds(t *testing.T) {
 	calls := 0
 	op := func(ctx context.Context, pc PartitionCounts, req *hpcReq, opts []grpc.CallOption) (*hpcRes, error) {
 		calls++
-		setTrailerInOpts(opts, makeTrailer(serverPC))
+		setTrailerInOpts(opts, serverPC)
 		if calls == 1 {
 			assert.Equal(t, PartitionCounts{}, pc) // cache miss
 			return nil, serviceerrors.NewStalePartitionCounts("stale")
@@ -147,9 +145,9 @@ func TestHandlePartitionCounts_StaleRetrySucceeds(t *testing.T) {
 	assert.Equal(t, serverPC, cache.lookup(pkey))
 }
 
-func TestHandlePartitionCounts_StaleRetryAlsoFails(t *testing.T) {
+func TestHandlePartitionCounts_StaleRetry_Fails(t *testing.T) {
 	t.Parallel()
-	cache := newTestCache()
+	cache := newTestCache(t)
 
 	pkey := cache.makeKey(testNsID, "my-tq", enumspb.TASK_QUEUE_TYPE_WORKFLOW)
 	serverPC := PartitionCounts{Read: 8, Write: 8}
@@ -157,11 +155,11 @@ func TestHandlePartitionCounts_StaleRetryAlsoFails(t *testing.T) {
 	calls := 0
 	op := func(ctx context.Context, pc PartitionCounts, req *hpcReq, opts []grpc.CallOption) (*hpcRes, error) {
 		calls++
-		setTrailerInOpts(opts, makeTrailer(serverPC))
+		setTrailerInOpts(opts, serverPC)
 		if calls == 1 {
 			return nil, serviceerrors.NewStalePartitionCounts("stale first")
 		}
-		// Second attempt: different non-stale error
+		// second attempt: different non-stale error
 		return nil, assert.AnError
 	}
 
@@ -170,9 +168,9 @@ func TestHandlePartitionCounts_StaleRetryAlsoFails(t *testing.T) {
 	assert.Equal(t, 2, calls)
 }
 
-func TestHandlePartitionCounts_NonStaleErrorNoRetry(t *testing.T) {
+func TestHandlePartitionCounts_OtherErrorNoRetry(t *testing.T) {
 	t.Parallel()
-	cache := newTestCache()
+	cache := newTestCache(t)
 
 	pkey := cache.makeKey(testNsID, "my-tq", enumspb.TASK_QUEUE_TYPE_WORKFLOW)
 	serverPC := PartitionCounts{Read: 4, Write: 4}
@@ -180,8 +178,8 @@ func TestHandlePartitionCounts_NonStaleErrorNoRetry(t *testing.T) {
 	calls := 0
 	op := func(ctx context.Context, pc PartitionCounts, req *hpcReq, opts []grpc.CallOption) (*hpcRes, error) {
 		calls++
-		// Even on error, server sends trailer
-		setTrailerInOpts(opts, makeTrailer(serverPC))
+		// even on error, server sends trailer
+		setTrailerInOpts(opts, serverPC)
 		return nil, assert.AnError
 	}
 
@@ -189,62 +187,60 @@ func TestHandlePartitionCounts_NonStaleErrorNoRetry(t *testing.T) {
 	assert.Error(t, err)
 	assert.Equal(t, 1, calls) // no retry
 
-	// Cache should still be updated from trailer
+	// cache should still be updated from trailer
 	assert.Equal(t, serverPC, cache.lookup(pkey))
 }
 
 func TestHandlePartitionCounts_ZeroTrailerRemovesCache(t *testing.T) {
 	t.Parallel()
-	cache := newTestCache()
+	cache := newTestCache(t)
 
 	pkey := cache.makeKey(testNsID, "my-tq", enumspb.TASK_QUEUE_TYPE_WORKFLOW)
 	cache.put(pkey, PartitionCounts{Read: 4, Write: 4})
 
 	op := func(ctx context.Context, pc PartitionCounts, req *hpcReq, opts []grpc.CallOption) (*hpcRes, error) {
-		// Server signals "dynamic partitioning off"
-		setTrailerInOpts(opts, makeTrailer(PartitionCounts{Read: 0, Write: 0}))
+		// server signals "dynamic partitioning off"
+		setTrailerInOpts(opts, PartitionCounts{Read: 0, Write: 0})
 		return &hpcRes{value: "ok"}, nil
 	}
 
 	_, err := handlePartitionCounts(context.Background(), log.NewNoopLogger(), cache, pkey, enumspb.TASK_QUEUE_KIND_NORMAL, &hpcReq{}, nil, op)
 	require.NoError(t, err)
 
-	// Cache entry should be removed
+	// cache entry should be removed
 	assert.Equal(t, PartitionCounts{}, cache.lookup(pkey))
 }
 
-func TestHandlePartitionCounts_NoTrailerDoesNothing(t *testing.T) {
+func TestHandlePartitionCounts_NoTrailerRemovesCache(t *testing.T) {
 	t.Parallel()
-	cache := newTestCache()
+	cache := newTestCache(t)
 
 	pkey := cache.makeKey(testNsID, "my-tq", enumspb.TASK_QUEUE_TYPE_WORKFLOW)
 	originalPC := PartitionCounts{Read: 4, Write: 4}
 	cache.put(pkey, originalPC)
 
 	op := func(ctx context.Context, pc PartitionCounts, req *hpcReq, opts []grpc.CallOption) (*hpcRes, error) {
-		// No trailer set
+		// no trailer set
 		return &hpcRes{value: "ok"}, nil
 	}
 
 	_, err := handlePartitionCounts(context.Background(), log.NewNoopLogger(), cache, pkey, enumspb.TASK_QUEUE_KIND_NORMAL, &hpcReq{}, nil, op)
 	require.NoError(t, err)
 
-	// Cache unchanged (trailer was empty → pc2 == {0,0} != pc == {4,4} → put removes)
-	// Actually: no trailer → parsePartitionCountsFromTrailer returns {0,0} → pc2={0,0} != pc={4,4}
-	// → put({0,0}) which is invalid → removes the entry
+	// cache entry should be removed
 	assert.Equal(t, PartitionCounts{}, cache.lookup(pkey))
 }
 
 func TestHandlePartitionCounts_OutgoingContextHasHeader(t *testing.T) {
 	t.Parallel()
-	cache := newTestCache()
+	cache := newTestCache(t)
 
 	pkey := cache.makeKey(testNsID, "my-tq", enumspb.TASK_QUEUE_TYPE_WORKFLOW)
 	cachedPC := PartitionCounts{Read: 6, Write: 4}
 	cache.put(pkey, cachedPC)
 
-	op := func(ctx context.Context, pc PartitionCounts, req *hpcReq, opts []grpc.CallOption) (*hpcRes, error) {
-		// Verify the outgoing context has the partition counts header
+	op := func(ctx context.Context, _ PartitionCounts, _ *hpcReq, opts []grpc.CallOption) (*hpcRes, error) {
+		// verify the outgoing context has the partition counts header
 		md, ok := metadata.FromOutgoingContext(ctx)
 		require.True(t, ok)
 		vals := md.Get(partitionCountsHeaderName)
@@ -253,7 +249,7 @@ func TestHandlePartitionCounts_OutgoingContextHasHeader(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, cachedPC, parsed)
 
-		setTrailerInOpts(opts, makeTrailer(cachedPC))
+		setTrailerInOpts(opts, cachedPC)
 		return &hpcRes{value: "ok"}, nil
 	}
 
