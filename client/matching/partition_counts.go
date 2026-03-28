@@ -8,6 +8,7 @@ import (
 	"github.com/gogo/protobuf/proto"
 	enumspb "go.temporal.io/api/enums/v1"
 	taskqueuespb "go.temporal.io/server/api/taskqueue/v1"
+	"go.temporal.io/server/common/log"
 	"go.temporal.io/server/common/log/tag"
 	serviceerrors "go.temporal.io/server/common/serviceerror"
 	"google.golang.org/grpc"
@@ -83,9 +84,13 @@ func parsePartitionCountsFromTrailer(trailer metadata.MD) (PartitionCounts, erro
 	return parsePartitionCounts(vals[0])
 }
 
+// handlePartitionCounts encapsulates the pattern of passing a partition count header to a
+// matchingservice function, retrying on StalePartitionCounts errors, and processing the
+// trailer.
 func handlePartitionCounts[Req, Res any](
 	ctx context.Context,
-	c *clientImpl,
+	logger log.Logger,
+	cache *partitionCache,
 	pkey string,
 	kind enumspb.TaskQueueKind,
 	request Req,
@@ -106,24 +111,22 @@ func handlePartitionCounts[Req, Res any](
 	var trailer metadata.MD
 	opts = append(slices.Clone(opts), grpc.Trailer(&trailer))
 
-	// get current idea of partition counts
-	pc := c.partitionCache.lookup(pkey)
+	// get current idea of partition counts. if missing from the cache, this will send zeros
+	// for counts, which the server will always accept as not-stale.
+	pc := cache.lookup(pkey)
 
 	// try once
-	// Note: If missing from the cache, this sends "0,0" for counts, which the server will
-	// always accept as not-stale if using dynamic scaling (but may reject for being invalid).
-	// The first reply will have current counts if using scaling, or nothing if not.
 	res, err := op(pc.appendToOutgoingContext(ctx), pc, request, opts)
 
 	// update cache on trailer on both success and error. if the trailer has no data,
 	// this removes the key from the cache.
 	pc2, err2 := parsePartitionCountsFromTrailer(trailer)
 	if err2 != nil {
-		c.logger.Info("partition count trailer parse error", tag.Error(err2))
+		logger.Info("partition count trailer parse error", tag.Error(err2))
 		// continue with zero value for pc2
 	}
 	if pc2 != pc {
-		c.partitionCache.put(pkey, pc2)
+		cache.put(pkey, pc2)
 	}
 
 	if _, ok := errors.AsType[*serviceerrors.StalePartitionCounts](err); ok {
@@ -133,11 +136,11 @@ func handlePartitionCounts[Req, Res any](
 		// update again
 		pc3, err3 := parsePartitionCountsFromTrailer(trailer)
 		if err3 != nil {
-			c.logger.Info("partition count trailer parse error", tag.Error(err3))
+			logger.Info("partition count trailer parse error", tag.Error(err3))
 			// continue with zero value for pc3
 		}
 		if pc3 != pc2 {
-			c.partitionCache.put(pkey, pc3)
+			cache.put(pkey, pc3)
 		}
 	}
 
