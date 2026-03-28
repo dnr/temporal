@@ -5,9 +5,7 @@ package matching
 
 import (
 	"context"
-	"errors"
 	"runtime"
-	"slices"
 	"time"
 
 	enumspb "go.temporal.io/api/enums/v1"
@@ -19,10 +17,8 @@ import (
 	"go.temporal.io/server/common/log"
 	"go.temporal.io/server/common/log/tag"
 	"go.temporal.io/server/common/metrics"
-	serviceerrors "go.temporal.io/server/common/serviceerror"
 	"go.temporal.io/server/common/tqid"
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/metadata"
 )
 
 var _ matchingservice.MatchingServiceClient = (*clientImpl)(nil)
@@ -72,67 +68,6 @@ func NewClient(
 	runtime.AddCleanup(c, func(cache *partitionCache) { cache.Stop() }, c.partitionCache)
 
 	return c
-}
-
-func handlePartitionCounts[Req, Res any](
-	ctx context.Context,
-	c *clientImpl,
-	pkey string,
-	kind enumspb.TaskQueueKind,
-	request Req,
-	opts []grpc.CallOption,
-	op func(
-		ctx context.Context,
-		pc PartitionCounts,
-		request Req,
-		opts []grpc.CallOption,
-	) (Res, error),
-) (Res, error) {
-	if kind != enumspb.TASK_QUEUE_KIND_NORMAL {
-		// only normal partitions participate in scaling
-		return op(ctx, PartitionCounts{}, request, opts)
-	}
-
-	// capture trailer
-	var trailer metadata.MD
-	opts = append(slices.Clone(opts), grpc.Trailer(&trailer))
-
-	// get current idea of partition counts
-	pc := c.partitionCache.lookup(pkey)
-
-	// try once
-	// Note: If missing from the cache, this sends "0,0" for counts, which the server will
-	// always accept as not-stale if using dynamic scaling (but may reject for being invalid).
-	// The first reply will have current counts if using scaling, or nothing if not.
-	res, err := op(pc.appendToOutgoingContext(ctx), pc, request, opts)
-
-	// update cache on trailer on both success and error. if the trailer has no data,
-	// this removes the key from the cache.
-	pc2, err2 := parsePartitionCountsFromTrailer(trailer)
-	if err2 != nil {
-		c.logger.Info("partition count trailer parse error", tag.Error(err2))
-		// continue with zero value for pc2
-	}
-	if pc2 != pc {
-		c.partitionCache.put(pkey, pc2)
-	}
-
-	if _, ok := errors.AsType[*serviceerrors.StalePartitionCounts](err); ok {
-		// if we got a StalePartitionCounts, retry once
-		trailer = nil
-		res, err = op(pc2.appendToOutgoingContext(ctx), pc2, request, opts)
-		// update again
-		pc3, err3 := parsePartitionCountsFromTrailer(trailer)
-		if err3 != nil {
-			c.logger.Info("partition count trailer parse error", tag.Error(err3))
-			// continue with zero value for pc3
-		}
-		if pc3 != pc2 {
-			c.partitionCache.put(pkey, pc3)
-		}
-	}
-
-	return res, err
 }
 
 func (c *clientImpl) AddActivityTask(

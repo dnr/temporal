@@ -23,7 +23,8 @@ func setTrailerInOpts(opts []grpc.CallOption, md metadata.MD) {
 }
 
 func makeTrailer(pc PartitionCounts) metadata.MD {
-	return metadata.Pairs(partitionCountsTrailerName, pc.encode())
+	v, _ := pc.encode()
+	return metadata.Pairs(partitionCountsTrailerName, v)
 }
 
 type hpcReq struct{}
