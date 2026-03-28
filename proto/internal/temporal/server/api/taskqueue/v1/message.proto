@@ -171,9 +171,12 @@ message VersionedEphemeralData {
 
 // PartitionScaleInfo is propagated among task queue partitions in ephemeral data.
 message PartitionScaleInfo {
-    int32 read = 1;
-    int32 write = 2;
-    sfixed64 version = 3;
+  int32 read = 1;
+  int32 write = 2;
+  // Backlog counts per partition, 8 bits per partition (see common/number/e5m3.go).
+  bytes backlog_counts = 3;
+
+  sfixed64 version = 10;
 }
 
 // ClientPartitionCounts is propagated from the matching service to clients in grpc headers/trailers.
@@ -181,4 +184,6 @@ message PartitionScaleInfo {
 message ClientPartitionCounts {
   int32 read = 1;
   int32 write = 2;
+  // Backlog counts per partition, 8 bits per partition (see common/number/e5m3.go).
+  bytes backlog_count = 3;
 }

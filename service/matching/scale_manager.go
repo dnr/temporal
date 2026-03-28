@@ -18,6 +18,7 @@ import (
 	"go.temporal.io/server/common/log"
 	"go.temporal.io/server/common/log/tag"
 	"go.temporal.io/server/common/metrics"
+	"go.temporal.io/server/common/number"
 	"go.temporal.io/server/common/quotas"
 	"go.temporal.io/server/common/tqid"
 	"google.golang.org/protobuf/proto"
@@ -42,7 +43,9 @@ type scaleManager struct {
 
 	lock       sync.Mutex
 	scaleState *persistencespb.PartitionScaleState
-	scaleDB    scaleDB
+	// FIXME: maybe we should just persist this???
+	backlogCounts []byte
+	scaleDB       scaleDB
 
 	batch atomic.Int64
 }
@@ -191,11 +194,11 @@ func (sm *scaleManager) SetTarget(targeti int) {
 // setStateLocked updates the current scale state and syncs it to ephemeral data.
 // This should only be called _after_ the state is persisted to the db.
 func (sm *scaleManager) setStateLocked(newState *persistencespb.PartitionScaleState) {
-	prevInfo := scaleStateToInfo(sm.scaleState)
+	prevInfo := scaleStateToInfo(sm.scaleState, sm.backlogCounts)
 
 	sm.scaleState = newState
 
-	newInfo := scaleStateToInfo(sm.scaleState)
+	newInfo := scaleStateToInfo(sm.scaleState, sm.backlogCounts)
 
 	// only push ephemeral data if read/write changed, not on any state change
 	if !proto.Equal(prevInfo, newInfo) {
@@ -217,11 +220,15 @@ func (sm *scaleManager) backgroundWork(ctx context.Context) error {
 		case <-time.After(backoff.Jitter(sm.settings.BackgroundInterval, 0.05)):
 			sm.lock.Lock()
 			scaleState := sm.scaleState
+			prevBacklog := sm.backlogCounts
 			sm.lock.Unlock()
 
 			// notify once
 			tasks := int(sm.batch.Swap(0))
 			sm.partitionScaler.OnTasks(tasks, int(scaleState.GetTarget()), sm.setTarget)
+
+			// update backlog stats
+			sm.updateBacklogStats(ctx, scaleStateToReadCount(scaleState), prevBacklog)
 
 			// check drained state
 			sm.checkDrained(ctx, scaleState)
@@ -229,7 +236,68 @@ func (sm *scaleManager) backgroundWork(ctx context.Context) error {
 	}
 }
 
+func (sm *scaleManager) describeRequest(id int32) *matchingservice.DescribeTaskQueuePartitionRequest {
+	return &matchingservice.DescribeTaskQueuePartitionRequest{
+		NamespaceId: sm.partition.NamespaceId(),
+		TaskQueuePartition: &taskqueuespb.TaskQueuePartition{
+			TaskQueue:     sm.partition.TaskQueue().Name(),
+			TaskQueueType: sm.partition.TaskType(),
+			PartitionId:   &taskqueuespb.TaskQueuePartition_NormalPartitionId{NormalPartitionId: id},
+		},
+		Versions: &taskqueuepb.TaskQueueVersionSelection{
+			Unversioned: true,
+			// TODO: what about "inactive" versions?
+			AllActive: true,
+		},
+		ReportInternalTaskQueueStatus: true,
+	}
+}
+
+func (sm *scaleManager) updateBacklogStats(ctx context.Context, read int32, prevBacklog []byte) {
+	newBacklog := make([]byte, read)
+	changed := false
+
+	for id := range read {
+		callCtx, cancel := context.WithTimeout(ctx, ioTimeout)
+		res, err := sm.matchingClient.DescribeTaskQueuePartition(callCtx, sm.describeRequest(id))
+		cancel()
+		if err != nil {
+			continue
+		}
+
+		total := totalBacklogFromDescribeResponse(res)
+		var prev number.E5M3
+		if id < int32(len(prevBacklog)) {
+			prev = prevBacklog[id]
+		}
+		newBacklog[id] = number.UpdateE5M3(total, prev)
+		changed = changed || newBacklog[id] != prev
+	}
+
+	if !changed {
+		return
+	}
+
+	sm.lock.Lock()
+	defer sm.lock.Unlock()
+
+	sm.backlogCounts = newBacklog
+	newInfo := scaleStateToInfo(sm.scaleState, sm.backlogCounts)
+	sm.userDataManager.SetPartitionScale(newInfo)
+}
+
+func totalBacklogFromDescribeResponse(res *matchingservice.DescribeTaskQueuePartitionResponse) (total int64) {
+	for _, v := range res.GetVersionsInfoInternal() {
+		for _, q := range v.GetPhysicalTaskQueueInfo().GetInternalTaskQueueStatus() {
+			total += q.ApproximateBacklogCount
+		}
+	}
+	return
+}
+
 func (sm *scaleManager) checkDrained(ctx context.Context, scaleState *persistencespb.PartitionScaleState) {
+	// FIXME: consolidate this with updateBacklogStats
+
 	if scaleState.GetTarget() == 0 {
 		return // managed scaling disabled
 	} else if time.Since(time.Unix(0, scaleState.GetTargetVersion())) < sm.settings.DrainBufferTime {
@@ -238,27 +306,14 @@ func (sm *scaleManager) checkDrained(ctx context.Context, scaleState *persistenc
 
 	// we have partitions that should be draining, see if they are yet
 	var toClear []int32
-	info := scaleStateToInfo(scaleState)
+	info := scaleStateToInfo(scaleState, nil)
 	for id := info.Write; id < info.Read; id++ {
 		if !getBacklogStateBit(scaleState, id) {
 			continue
 		}
 
 		callCtx, cancel := context.WithTimeout(ctx, ioTimeout)
-		res, err := sm.matchingClient.DescribeTaskQueuePartition(callCtx, &matchingservice.DescribeTaskQueuePartitionRequest{
-			NamespaceId: sm.partition.NamespaceId(),
-			TaskQueuePartition: &taskqueuespb.TaskQueuePartition{
-				TaskQueue:     sm.partition.TaskQueue().Name(),
-				TaskQueueType: sm.partition.TaskType(),
-				PartitionId:   &taskqueuespb.TaskQueuePartition_NormalPartitionId{NormalPartitionId: id},
-			},
-			Versions: &taskqueuepb.TaskQueueVersionSelection{
-				Unversioned: true,
-				// TODO: what about "inactive" versions?
-				AllActive: true,
-			},
-			ReportInternalTaskQueueStatus: true,
-		})
+		res, err := sm.matchingClient.DescribeTaskQueuePartition(callCtx, sm.describeRequest(id))
 		cancel()
 		if err == nil && partitionIsFullyDrained(res, info) {
 			toClear = append(toClear, id)
@@ -303,10 +358,11 @@ func partitionIsFullyDrained(
 	res *matchingservice.DescribeTaskQueuePartitionResponse,
 	info *taskqueuespb.PartitionScaleInfo,
 ) bool {
-	if !proto.Equal(res.GetScaleInfo(), info) {
-		// Require that the partition agrees with the current scale state, i.e. it knows that
-		// it's draining, i.e. it knows it can't accept any new tasks. We include the version
-		// as well as just the read+write counts to avoid an ABA problem.
+	// Require that the partition agrees with the current scale state, i.e. it knows that
+	// it's draining, i.e. it knows it can't accept any new tasks. We include the version
+	// as well as just the read+write counts to avoid an ABA problem.
+	resInfo := res.GetScaleInfo()
+	if resInfo == nil || resInfo.Version != info.Version || resInfo.Read != info.Read || resInfo.Write != info.Write {
 		return false
 	}
 
@@ -320,12 +376,17 @@ func partitionIsFullyDrained(
 	return true
 }
 
-func scaleStateToInfo(scaleState *persistencespb.PartitionScaleState) *taskqueuespb.PartitionScaleInfo {
+func scaleStateToReadCount(scaleState *persistencespb.PartitionScaleState) int32 {
+	return max(scaleState.GetTarget(), readPartitionsFromBacklogState(scaleState))
+}
+
+func scaleStateToInfo(scaleState *persistencespb.PartitionScaleState, backlogCounts []byte) *taskqueuespb.PartitionScaleInfo {
 	// note if scaleState == nil, read and write will both be 0
 	return &taskqueuespb.PartitionScaleInfo{
-		Read:    max(scaleState.GetTarget(), readPartitionsFromBacklogState(scaleState)),
-		Write:   scaleState.GetTarget(),
-		Version: scaleState.GetTargetVersion(),
+		Read:          scaleStateToReadCount(scaleState),
+		Write:         scaleState.GetTarget(),
+		Version:       scaleState.GetTargetVersion(),
+		BacklogCounts: backlogCounts,
 	}
 }
 

@@ -848,10 +848,12 @@ func (x *VersionedEphemeralData) GetVersion() int64 {
 
 // PartitionScaleInfo is propagated among task queue partitions in ephemeral data.
 type PartitionScaleInfo struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Read          int32                  `protobuf:"varint,1,opt,name=read,proto3" json:"read,omitempty"`
-	Write         int32                  `protobuf:"varint,2,opt,name=write,proto3" json:"write,omitempty"`
-	Version       int64                  `protobuf:"fixed64,3,opt,name=version,proto3" json:"version,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	Read  int32                  `protobuf:"varint,1,opt,name=read,proto3" json:"read,omitempty"`
+	Write int32                  `protobuf:"varint,2,opt,name=write,proto3" json:"write,omitempty"`
+	// Backlog counts per partition, 8 bits per partition (see common/number/e5m3.go).
+	BacklogCounts []byte `protobuf:"bytes,3,opt,name=backlog_counts,json=backlogCounts,proto3" json:"backlog_counts,omitempty"`
+	Version       int64  `protobuf:"fixed64,10,opt,name=version,proto3" json:"version,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -900,6 +902,13 @@ func (x *PartitionScaleInfo) GetWrite() int32 {
 	return 0
 }
 
+func (x *PartitionScaleInfo) GetBacklogCounts() []byte {
+	if x != nil {
+		return x.BacklogCounts
+	}
+	return nil
+}
+
 func (x *PartitionScaleInfo) GetVersion() int64 {
 	if x != nil {
 		return x.Version
@@ -910,9 +919,11 @@ func (x *PartitionScaleInfo) GetVersion() int64 {
 // ClientPartitionCounts is propagated from the matching service to clients in grpc headers/trailers.
 // It may be a subset of PartitionScaleInfo.
 type ClientPartitionCounts struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Read          int32                  `protobuf:"varint,1,opt,name=read,proto3" json:"read,omitempty"`
-	Write         int32                  `protobuf:"varint,2,opt,name=write,proto3" json:"write,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	Read  int32                  `protobuf:"varint,1,opt,name=read,proto3" json:"read,omitempty"`
+	Write int32                  `protobuf:"varint,2,opt,name=write,proto3" json:"write,omitempty"`
+	// Backlog counts per partition, 8 bits per partition (see common/number/e5m3.go).
+	BacklogCount  []byte `protobuf:"bytes,3,opt,name=backlog_count,json=backlogCount,proto3" json:"backlog_count,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -959,6 +970,13 @@ func (x *ClientPartitionCounts) GetWrite() int32 {
 		return x.Write
 	}
 	return 0
+}
+
+func (x *ClientPartitionCounts) GetBacklogCount() []byte {
+	if x != nil {
+		return x.BacklogCount
+	}
+	return nil
 }
 
 type EphemeralData_ByVersion struct {
@@ -1144,14 +1162,17 @@ const file_temporal_server_api_taskqueue_v1_message_proto_rawDesc = "" +
 	"\aversion\x18\x02 \x03(\v29.temporal.server.api.taskqueue.v1.EphemeralData.ByVersionR\aversion\"w\n" +
 	"\x16VersionedEphemeralData\x12C\n" +
 	"\x04data\x18\x01 \x01(\v2/.temporal.server.api.taskqueue.v1.EphemeralDataR\x04data\x12\x18\n" +
-	"\aversion\x18\x02 \x01(\x03R\aversion\"X\n" +
+	"\aversion\x18\x02 \x01(\x03R\aversion\"\x7f\n" +
 	"\x12PartitionScaleInfo\x12\x12\n" +
 	"\x04read\x18\x01 \x01(\x05R\x04read\x12\x14\n" +
-	"\x05write\x18\x02 \x01(\x05R\x05write\x12\x18\n" +
-	"\aversion\x18\x03 \x01(\x10R\aversion\"A\n" +
+	"\x05write\x18\x02 \x01(\x05R\x05write\x12%\n" +
+	"\x0ebacklog_counts\x18\x03 \x01(\fR\rbacklogCounts\x12\x18\n" +
+	"\aversion\x18\n" +
+	" \x01(\x10R\aversion\"f\n" +
 	"\x15ClientPartitionCounts\x12\x12\n" +
 	"\x04read\x18\x01 \x01(\x05R\x04read\x12\x14\n" +
-	"\x05write\x18\x02 \x01(\x05R\x05writeB2Z0go.temporal.io/server/api/taskqueue/v1;taskqueueb\x06proto3"
+	"\x05write\x18\x02 \x01(\x05R\x05write\x12#\n" +
+	"\rbacklog_count\x18\x03 \x01(\fR\fbacklogCountB2Z0go.temporal.io/server/api/taskqueue/v1;taskqueueb\x06proto3"
 
 var (
 	file_temporal_server_api_taskqueue_v1_message_proto_rawDescOnce sync.Once
