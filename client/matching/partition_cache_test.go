@@ -16,6 +16,7 @@ func TestPartitionCache_BasicPutLookup(t *testing.T) {
 	t.Parallel()
 	c := newPartitionCache()
 	c.Start()
+	defer c.Stop()
 
 	key := c.makeKey(testNsID, "my-tq", enumspb.TASK_QUEUE_TYPE_WORKFLOW)
 	pc := PartitionCounts{Read: 4, Write: 4}
@@ -29,6 +30,7 @@ func TestPartitionCache_Miss(t *testing.T) {
 	t.Parallel()
 	c := newPartitionCache()
 	c.Start()
+	defer c.Stop()
 
 	key := c.makeKey(testNsID, "nonexistent", enumspb.TASK_QUEUE_TYPE_WORKFLOW)
 	got := c.lookup(key)
@@ -39,6 +41,7 @@ func TestPartitionCache_InvalidRemoves(t *testing.T) {
 	t.Parallel()
 	c := newPartitionCache()
 	c.Start()
+	defer c.Stop()
 
 	key := c.makeKey(testNsID, "my-tq", enumspb.TASK_QUEUE_TYPE_WORKFLOW)
 	c.put(key, PartitionCounts{Read: 4, Write: 4})
@@ -53,6 +56,7 @@ func TestPartitionCache_PromotionFromPrev(t *testing.T) {
 	t.Parallel()
 	c := newPartitionCache()
 	c.Start()
+	defer c.Stop()
 
 	key := c.makeKey(testNsID, "my-tq", enumspb.TASK_QUEUE_TYPE_WORKFLOW)
 	pc := PartitionCounts{Read: 8, Write: 8}
@@ -76,6 +80,7 @@ func TestPartitionCache_ExpiryAfterTwoRotations(t *testing.T) {
 	t.Parallel()
 	c := newPartitionCache()
 	c.Start()
+	defer c.Stop()
 
 	key := c.makeKey(testNsID, "my-tq", enumspb.TASK_QUEUE_TYPE_WORKFLOW)
 	c.put(key, PartitionCounts{Read: 4, Write: 4})
@@ -124,6 +129,7 @@ func TestPartitionCache_ConcurrentAccess(t *testing.T) {
 	t.Parallel()
 	c := newPartitionCache()
 	c.Start()
+	defer c.Stop()
 
 	const goroutines = 20
 	const iterations = 100
@@ -149,6 +155,7 @@ func TestPartitionCache_OverwriteValue(t *testing.T) {
 	t.Parallel()
 	c := newPartitionCache()
 	c.Start()
+	defer c.Stop()
 
 	key := c.makeKey(testNsID, "my-tq", enumspb.TASK_QUEUE_TYPE_WORKFLOW)
 	c.put(key, PartitionCounts{Read: 4, Write: 4})
@@ -162,6 +169,7 @@ func TestPartitionCache_MultipleKeys(t *testing.T) {
 	t.Parallel()
 	c := newPartitionCache()
 	c.Start()
+	defer c.Stop()
 
 	key1 := c.makeKey(testNsID, "tq-1", enumspb.TASK_QUEUE_TYPE_WORKFLOW)
 	key2 := c.makeKey(testNsID, "tq-2", enumspb.TASK_QUEUE_TYPE_ACTIVITY)

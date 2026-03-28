@@ -31,7 +31,7 @@ type hpcRes struct{ value string }
 
 func newTestClient() *clientImpl {
 	c := &clientImpl{
-		partitionCache: *newPartitionCache(),
+		partitionCache: newPartitionCache(),
 	}
 	c.partitionCache.Start()
 	return c

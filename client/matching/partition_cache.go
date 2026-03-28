@@ -1,11 +1,13 @@
 package matching
 
 import (
+	"context"
 	"sync"
 	"time"
 
 	"github.com/google/uuid"
 	enumspb "go.temporal.io/api/enums/v1"
+	"go.temporal.io/server/common/goro"
 )
 
 // should be power of 2
@@ -13,6 +15,7 @@ const partitionCacheShards = 8
 
 type partitionCache struct {
 	shards [partitionCacheShards]partitionCacheShard
+	rotate *goro.Handle
 }
 
 type partitionCacheShard struct {
@@ -30,13 +33,21 @@ func (c *partitionCache) Start() {
 	for i := range c.shards {
 		c.shards[i].rotate()
 	}
-	go func() {
-		i := 0
-		for range time.NewTicker(time.Hour / partitionCacheShards).C {
-			c.shards[i].rotate()
-			i = (i + 1) % partitionCacheShards
+	c.rotate = goro.NewHandle(context.Background()).Go(func(ctx context.Context) error {
+		t := time.NewTicker(time.Hour / partitionCacheShards)
+		for i := 0; ; i = (i + 1) % partitionCacheShards {
+			select {
+			case <-t.C:
+				c.shards[i].rotate()
+			case <-ctx.Done():
+				return ctx.Err()
+			}
 		}
-	}()
+	})
+}
+
+func (c *partitionCache) Stop() {
+	c.rotate.Cancel()
 }
 
 func (*partitionCache) makeKey(

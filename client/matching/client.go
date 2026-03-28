@@ -6,6 +6,7 @@ package matching
 import (
 	"context"
 	"errors"
+	"runtime"
 	"slices"
 	"time"
 
@@ -41,7 +42,7 @@ type clientImpl struct {
 	logger          log.Logger
 	loadBalancer    LoadBalancer
 	spreadRouting   dynamicconfig.TypedPropertyFn[dynamicconfig.GradualChange[int]]
-	partitionCache  partitionCache
+	partitionCache  *partitionCache
 }
 
 // NewClient creates a new history service gRPC client
@@ -62,10 +63,14 @@ func NewClient(
 		logger:          logger,
 		loadBalancer:    lb,
 		spreadRouting:   spreadRouting,
-		partitionCache:  *newPartitionCache(),
+		partitionCache:  newPartitionCache(),
 	}
-	// background goroutine to prune partition count cache
+
+	// Start goroutine to prune partition count cache.
+	// Clean up on gc, since we can't easily hook into fx here.
 	c.partitionCache.Start()
+	runtime.AddCleanup(c, func(cache *partitionCache) { cache.Stop() }, c.partitionCache)
+
 	return c
 }
 
