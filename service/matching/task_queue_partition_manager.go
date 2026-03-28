@@ -401,10 +401,13 @@ func (pm *taskQueuePartitionManagerImpl) sendPartitionCountTrailer(ctx context.C
 	// note this sends the trailer even if there is no scale info (i.e. dynamic partition
 	// scaling is not enabled). that will instruct clients to fall back to dynamic config.
 	scaleInfo := pm.userDataManager.PartitionScale()
-	matching.PartitionCounts{
+	err := matching.PartitionCounts{
 		Read:  scaleInfo.GetRead(),
 		Write: scaleInfo.GetWrite(),
 	}.SetTrailer(ctx)
+	if err != nil {
+		pm.throttledLogger.Warn("error setting partition count trailer", tag.Error(err))
+	}
 }
 
 func (pm *taskQueuePartitionManagerImpl) GetRateLimitManager() *rateLimitManager {
