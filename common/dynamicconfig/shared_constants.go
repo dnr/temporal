@@ -117,3 +117,53 @@ var DefaultHistoryCacheBackgroundEvictSettings = CacheBackgroundEvictSettings{
 	LoopInterval:    1 * time.Minute,
 	MaxEntryPerCall: 1024,
 }
+
+type PartitionScaleManagerSettings struct {
+	// MaxRate limits scale change frequency. (Needs task queue reload.)
+	MaxRate float32
+	// BatchSize is the size of a batch to send to the partition scaler. (Needs task queue
+	// reload.)
+	BatchSize int32
+	// BackgroundInterval is the interval for background work:
+	// - send signals to the scaler even if not a full batch of tasks has been received yet
+	// - check drained partition state
+	// (Needs task queue reload.)
+	BackgroundInterval time.Duration
+	// DrainBufferTime is how long to wait until after scaling down before we can consider
+	// draining queues. It's needed because there's a tiny window where tasks may be written
+	// after a scale down, since draining state is only checked at the start of an RPC. This
+	// should be set to the maximum time of an AddTask call. Note that query/nexus tasks will
+	// be processed without interruption even after scale down.
+	DrainBufferTime time.Duration
+
+	// AllowedDelta and AllowedRatio controls how far off client counts can be before we reject
+	// an RPC. If the client count is within either the delta or ratio, then it's allowed.
+	// To always allow: set Delta to 10000 and Ratio to 1.0.
+	// To never allow except on exact match: set Delta to 0 and Ratio to 1.0.
+	AllowedDelta int32
+	AllowedRatio float32
+}
+
+type SimplePartitionScalerSettings struct {
+	// If Enabled is false, scaler will remove dynamic scale state and fall back to dynamic
+	// config. If Enabled is true but Ups and Downs are empty, dynamic scale state will be
+	// preserved and used as-is without changes.
+	Enabled bool
+
+	// If non-zero, Fixed will be used as the scaling decision (Ups/Downs will be ignored).
+	Fixed int
+
+	// Ups and Downs control scaling based on add rate: The TargetRate measured over the
+	// Interval is used to calculate a target number of partitions. Ups may move the actual
+	// partition target higher, Downs may move it lower. Ups take priority.
+	//
+	// Note the TargetRate for Downs should be _higher_ than for Ups to leave a deadband in the
+	// middle for hysteresis (avoid changing too often).
+	Downs []SimplePartitionScalerThreshold
+	Ups   []SimplePartitionScalerThreshold
+}
+
+type SimplePartitionScalerThreshold struct {
+	Window     time.Duration // window to measure add rate over
+	TargetRate int           // target tasks/second per partition
+}

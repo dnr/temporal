@@ -46,6 +46,7 @@ type (
 		rangeID       int64
 		subqueues     []*dbSubqueue
 		otherHasTasks bool
+		scaleState    *persistencespb.PartitionScaleState
 
 		// used to avoid unnecessary metadata writes:
 		lastChange time.Time // updated when metadata is changed in memory
@@ -63,6 +64,7 @@ type (
 		ackLevel      int64 // TODO(pri): old matcher cleanup, delete later
 		subqueues     []persistencespb.SubqueueInfo
 		otherHasTasks bool
+		scaleState    *persistencespb.PartitionScaleState
 	}
 
 	subqueueIndex int
@@ -166,6 +168,7 @@ func (db *taskQueueDB) RenewLease(
 		ackLevel:      db.subqueues[subqueueZero].AckLevel, // TODO(pri): cleanup, only used by old backlog manager
 		subqueues:     db.cloneSubqueues(),
 		otherHasTasks: !db.isDraining && db.otherHasTasks,
+		scaleState:    db.scaleState,
 	}, nil
 }
 
@@ -188,6 +191,7 @@ func (db *taskQueueDB) takeOverTaskQueueLocked(
 			response.TaskQueueInfo.AckLevel,
 			response.TaskQueueInfo.ApproximateBacklogCount,
 		)
+		db.scaleState = response.TaskQueueInfo.PartitionScaleState
 		err := db.updateTaskQueueLocked(ctx, true)
 		if err != nil {
 			db.rangeID = 0
@@ -457,6 +461,14 @@ func (db *taskQueueDB) SetOtherHasTasks(ctx context.Context, value bool) error {
 		return nil
 	}
 	db.otherHasTasks = value
+	db.lastChange = time.Now()
+	return db.updateTaskQueueLocked(ctx, false)
+}
+
+func (db *taskQueueDB) UpdateScaleState(ctx context.Context, scaleState *persistencespb.PartitionScaleState) error {
+	db.Lock()
+	defer db.Unlock()
+	db.scaleState = scaleState
 	db.lastChange = time.Now()
 	return db.updateTaskQueueLocked(ctx, false)
 }
@@ -759,6 +771,7 @@ func (db *taskQueueDB) cachedQueueInfo() *persistencespb.TaskQueueInfo {
 		ApproximateBacklogCount: db.subqueues[subqueueZero].ApproximateBacklogCount, // backwards compatibility
 		Subqueues:               infos,
 		OtherHasTasks:           db.otherHasTasks,
+		PartitionScaleState:     db.scaleState,
 	}
 }
 

@@ -1460,6 +1460,23 @@ default as namespace cardinality can be high and this requires a metrics collect
 		false,
 		`MatchingAutoEnableV2 automatically enables fairness when a fairness or priority key is seen`,
 	)
+	MatchingPartitionScaleManager = NewTaskQueueTypedSetting(
+		"matching.partitionScaleManager",
+		PartitionScaleManagerSettings{
+			MaxRate:            0.33,
+			BatchSize:          100,
+			BackgroundInterval: 37 * time.Second,
+			DrainBufferTime:    15 * time.Second,
+			AllowedDelta:       1,
+			AllowedRatio:       1.5,
+		},
+		`Settings for partition scale manager. Some fields require a task queue reload to take effect.`,
+	)
+	MatchingSimplePartitionScaler = NewTaskQueueTypedSetting(
+		"matching.simplePartitionScaler",
+		SimplePartitionScalerSettings{},
+		`Settings for simple partition scaler.`,
+	)
 
 	// Worker registry settings
 	MatchingWorkerRegistryNumBuckets = NewGlobalIntSetting(

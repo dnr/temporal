@@ -5219,6 +5219,7 @@ type DescribeTaskQueuePartitionResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// contains k-v pairs of the type: buildID -> TaskQueueVersionInfoInternal
 	VersionsInfoInternal map[string]*v114.TaskQueueVersionInfoInternal `protobuf:"bytes,1,rep,name=versions_info_internal,json=versionsInfoInternal,proto3" json:"versions_info_internal,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	ScaleInfo            *v114.PartitionScaleInfo                      `protobuf:"bytes,2,opt,name=scale_info,json=scaleInfo,proto3" json:"scale_info,omitempty"`
 	unknownFields        protoimpl.UnknownFields
 	sizeCache            protoimpl.SizeCache
 }
@@ -5256,6 +5257,13 @@ func (*DescribeTaskQueuePartitionResponse) Descriptor() ([]byte, []int) {
 func (x *DescribeTaskQueuePartitionResponse) GetVersionsInfoInternal() map[string]*v114.TaskQueueVersionInfoInternal {
 	if x != nil {
 		return x.VersionsInfoInternal
+	}
+	return nil
+}
+
+func (x *DescribeTaskQueuePartitionResponse) GetScaleInfo() *v114.PartitionScaleInfo {
+	if x != nil {
+		return x.ScaleInfo
 	}
 	return nil
 }
@@ -6173,9 +6181,11 @@ const file_temporal_server_api_adminservice_v1_request_response_proto_rawDesc = 
 	"!DescribeTaskQueuePartitionRequest\x12\x1c\n" +
 	"\tnamespace\x18\x01 \x01(\tR\tnamespace\x12f\n" +
 	"\x14task_queue_partition\x18\x02 \x01(\v24.temporal.server.api.taskqueue.v1.TaskQueuePartitionR\x12taskQueuePartition\x12Q\n" +
-	"\tbuild_ids\x18\x03 \x01(\v24.temporal.api.taskqueue.v1.TaskQueueVersionSelectionR\bbuildIds\"\xc8\x02\n" +
+	"\tbuild_ids\x18\x03 \x01(\v24.temporal.api.taskqueue.v1.TaskQueueVersionSelectionR\bbuildIds\"\x9d\x03\n" +
 	"\"DescribeTaskQueuePartitionResponse\x12\x97\x01\n" +
-	"\x16versions_info_internal\x18\x01 \x03(\v2a.temporal.server.api.adminservice.v1.DescribeTaskQueuePartitionResponse.VersionsInfoInternalEntryR\x14versionsInfoInternal\x1a\x87\x01\n" +
+	"\x16versions_info_internal\x18\x01 \x03(\v2a.temporal.server.api.adminservice.v1.DescribeTaskQueuePartitionResponse.VersionsInfoInternalEntryR\x14versionsInfoInternal\x12S\n" +
+	"\n" +
+	"scale_info\x18\x02 \x01(\v24.temporal.server.api.taskqueue.v1.PartitionScaleInfoR\tscaleInfo\x1a\x87\x01\n" +
 	"\x19VersionsInfoInternalEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12T\n" +
 	"\x05value\x18\x02 \x01(\v2>.temporal.server.api.taskqueue.v1.TaskQueueVersionInfoInternalR\x05value:\x028\x01\"\xac\x01\n" +
@@ -6373,8 +6383,9 @@ var file_temporal_server_api_adminservice_v1_request_response_proto_goTypes = []
 	(*v15.VersionedTransitionArtifact)(nil),             // 142: temporal.server.api.replication.v1.VersionedTransitionArtifact
 	(*v114.TaskQueuePartition)(nil),                     // 143: temporal.server.api.taskqueue.v1.TaskQueuePartition
 	(*v115.TaskQueueVersionSelection)(nil),              // 144: temporal.api.taskqueue.v1.TaskQueueVersionSelection
-	(v16.IndexedValueType)(0),                           // 145: temporal.api.enums.v1.IndexedValueType
-	(*v114.TaskQueueVersionInfoInternal)(nil),           // 146: temporal.server.api.taskqueue.v1.TaskQueueVersionInfoInternal
+	(*v114.PartitionScaleInfo)(nil),                     // 145: temporal.server.api.taskqueue.v1.PartitionScaleInfo
+	(v16.IndexedValueType)(0),                           // 146: temporal.api.enums.v1.IndexedValueType
+	(*v114.TaskQueueVersionInfoInternal)(nil),           // 147: temporal.server.api.taskqueue.v1.TaskQueueVersionInfoInternal
 }
 var file_temporal_server_api_adminservice_v1_request_response_proto_depIdxs = []int32{
 	104, // 0: temporal.server.api.adminservice.v1.RebuildMutableStateRequest.execution:type_name -> temporal.api.common.v1.WorkflowExecution
@@ -6458,21 +6469,22 @@ var file_temporal_server_api_adminservice_v1_request_response_proto_depIdxs = []
 	143, // 78: temporal.server.api.adminservice.v1.DescribeTaskQueuePartitionRequest.task_queue_partition:type_name -> temporal.server.api.taskqueue.v1.TaskQueuePartition
 	144, // 79: temporal.server.api.adminservice.v1.DescribeTaskQueuePartitionRequest.build_ids:type_name -> temporal.api.taskqueue.v1.TaskQueueVersionSelection
 	103, // 80: temporal.server.api.adminservice.v1.DescribeTaskQueuePartitionResponse.versions_info_internal:type_name -> temporal.server.api.adminservice.v1.DescribeTaskQueuePartitionResponse.VersionsInfoInternalEntry
-	143, // 81: temporal.server.api.adminservice.v1.ForceUnloadTaskQueuePartitionRequest.task_queue_partition:type_name -> temporal.server.api.taskqueue.v1.TaskQueuePartition
-	104, // 82: temporal.server.api.adminservice.v1.StartAdminBatchOperationRequest.executions:type_name -> temporal.api.common.v1.WorkflowExecution
-	91,  // 83: temporal.server.api.adminservice.v1.StartAdminBatchOperationRequest.refresh_tasks_operation:type_name -> temporal.server.api.adminservice.v1.BatchOperationRefreshTasks
-	0,   // 84: temporal.server.api.adminservice.v1.MigrateScheduleRequest.target:type_name -> temporal.server.api.adminservice.v1.MigrateScheduleRequest.SchedulerTarget
-	114, // 85: temporal.server.api.adminservice.v1.GetReplicationMessagesResponse.ShardMessagesEntry.value:type_name -> temporal.server.api.replication.v1.ReplicationMessages
-	145, // 86: temporal.server.api.adminservice.v1.AddSearchAttributesRequest.SearchAttributesEntry.value:type_name -> temporal.api.enums.v1.IndexedValueType
-	145, // 87: temporal.server.api.adminservice.v1.GetSearchAttributesResponse.CustomAttributesEntry.value:type_name -> temporal.api.enums.v1.IndexedValueType
-	145, // 88: temporal.server.api.adminservice.v1.GetSearchAttributesResponse.SystemAttributesEntry.value:type_name -> temporal.api.enums.v1.IndexedValueType
-	105, // 89: temporal.server.api.adminservice.v1.AddTasksRequest.Task.blob:type_name -> temporal.api.common.v1.DataBlob
-	146, // 90: temporal.server.api.adminservice.v1.DescribeTaskQueuePartitionResponse.VersionsInfoInternalEntry.value:type_name -> temporal.server.api.taskqueue.v1.TaskQueueVersionInfoInternal
-	91,  // [91:91] is the sub-list for method output_type
-	91,  // [91:91] is the sub-list for method input_type
-	91,  // [91:91] is the sub-list for extension type_name
-	91,  // [91:91] is the sub-list for extension extendee
-	0,   // [0:91] is the sub-list for field type_name
+	145, // 81: temporal.server.api.adminservice.v1.DescribeTaskQueuePartitionResponse.scale_info:type_name -> temporal.server.api.taskqueue.v1.PartitionScaleInfo
+	143, // 82: temporal.server.api.adminservice.v1.ForceUnloadTaskQueuePartitionRequest.task_queue_partition:type_name -> temporal.server.api.taskqueue.v1.TaskQueuePartition
+	104, // 83: temporal.server.api.adminservice.v1.StartAdminBatchOperationRequest.executions:type_name -> temporal.api.common.v1.WorkflowExecution
+	91,  // 84: temporal.server.api.adminservice.v1.StartAdminBatchOperationRequest.refresh_tasks_operation:type_name -> temporal.server.api.adminservice.v1.BatchOperationRefreshTasks
+	0,   // 85: temporal.server.api.adminservice.v1.MigrateScheduleRequest.target:type_name -> temporal.server.api.adminservice.v1.MigrateScheduleRequest.SchedulerTarget
+	114, // 86: temporal.server.api.adminservice.v1.GetReplicationMessagesResponse.ShardMessagesEntry.value:type_name -> temporal.server.api.replication.v1.ReplicationMessages
+	146, // 87: temporal.server.api.adminservice.v1.AddSearchAttributesRequest.SearchAttributesEntry.value:type_name -> temporal.api.enums.v1.IndexedValueType
+	146, // 88: temporal.server.api.adminservice.v1.GetSearchAttributesResponse.CustomAttributesEntry.value:type_name -> temporal.api.enums.v1.IndexedValueType
+	146, // 89: temporal.server.api.adminservice.v1.GetSearchAttributesResponse.SystemAttributesEntry.value:type_name -> temporal.api.enums.v1.IndexedValueType
+	105, // 90: temporal.server.api.adminservice.v1.AddTasksRequest.Task.blob:type_name -> temporal.api.common.v1.DataBlob
+	147, // 91: temporal.server.api.adminservice.v1.DescribeTaskQueuePartitionResponse.VersionsInfoInternalEntry.value:type_name -> temporal.server.api.taskqueue.v1.TaskQueueVersionInfoInternal
+	92,  // [92:92] is the sub-list for method output_type
+	92,  // [92:92] is the sub-list for method input_type
+	92,  // [92:92] is the sub-list for extension type_name
+	92,  // [92:92] is the sub-list for extension extendee
+	0,   // [0:92] is the sub-list for field type_name
 }
 
 func init() { file_temporal_server_api_adminservice_v1_request_response_proto_init() }

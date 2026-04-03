@@ -73,3 +73,28 @@ history.enableChasm:
   - value: true
 activity.enableStandalone:
   - value: true
+
+matching.useNewMatcher:
+  - value: true
+
+matching.partitionScaleManager:
+  - value:
+      BatchSize: 10
+      BackgroundInterval: "5s"
+      DrainBufferTime: "5s"
+      AllowedDelta: 1
+      AllowedRatio: 1.5
+
+matching.simplePartitionScaler:
+  - value:
+      Enabled: true
+      Ups:
+        - Window: "10s"
+          TargetRate: 10
+      Downs:
+        - Window: "10s"
+          TargetRate: 20
+
+matching.backlogMetricsEmitInterval:
+  - value: "0s"
+

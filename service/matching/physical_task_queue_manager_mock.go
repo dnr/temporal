@@ -213,6 +213,18 @@ func (mr *MockphysicalTaskQueueManagerMockRecorder) LegacyDescribeTaskQueue(incl
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "LegacyDescribeTaskQueue", reflect.TypeOf((*MockphysicalTaskQueueManager)(nil).LegacyDescribeTaskQueue), includeTaskQueueStatus)
 }
 
+// LoadedMetadata mocks base method.
+func (m *MockphysicalTaskQueueManager) LoadedMetadata(arg0 *persistence.PartitionScaleState) {
+	m.ctrl.T.Helper()
+	m.ctrl.Call(m, "LoadedMetadata", arg0)
+}
+
+// LoadedMetadata indicates an expected call of LoadedMetadata.
+func (mr *MockphysicalTaskQueueManagerMockRecorder) LoadedMetadata(arg0 any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "LoadedMetadata", reflect.TypeOf((*MockphysicalTaskQueueManager)(nil).LoadedMetadata), arg0)
+}
+
 // MakePollerScalingDecision mocks base method.
 func (m *MockphysicalTaskQueueManager) MakePollerScalingDecision(ctx context.Context, pollStartTime time.Time) *taskqueue.PollerScalingDecision {
 	m.ctrl.T.Helper()
@@ -405,6 +417,20 @@ func (m *MockphysicalTaskQueueManager) UpdateRemotePriorityBacklogs(arg0 remoteP
 func (mr *MockphysicalTaskQueueManagerMockRecorder) UpdateRemotePriorityBacklogs(arg0 any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UpdateRemotePriorityBacklogs", reflect.TypeOf((*MockphysicalTaskQueueManager)(nil).UpdateRemotePriorityBacklogs), arg0)
+}
+
+// UpdateScaleState mocks base method.
+func (m *MockphysicalTaskQueueManager) UpdateScaleState(arg0 *persistence.PartitionScaleState) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "UpdateScaleState", arg0)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// UpdateScaleState indicates an expected call of UpdateScaleState.
+func (mr *MockphysicalTaskQueueManagerMockRecorder) UpdateScaleState(arg0 any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UpdateScaleState", reflect.TypeOf((*MockphysicalTaskQueueManager)(nil).UpdateScaleState), arg0)
 }
 
 // UserDataChanged mocks base method.

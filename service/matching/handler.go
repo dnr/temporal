@@ -70,6 +70,7 @@ type (
 		RateLimiter                   TaskDispatchRateLimiter `optional:"true"`
 		WorkersRegistry               workers.Registry
 		Serializer                    serialization.Serializer
+		PartitionScalerFactory        PartitionScalerFactory
 	}
 )
 
@@ -112,6 +113,7 @@ func NewHandler(
 			params.SearchAttributeMapperProvider,
 			params.RateLimiter,
 			params.Serializer,
+			params.PartitionScalerFactory,
 		),
 		namespaceRegistry: params.NamespaceRegistry,
 		workersRegistry:   params.WorkersRegistry,

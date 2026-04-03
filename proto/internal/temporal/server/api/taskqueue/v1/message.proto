@@ -150,9 +150,26 @@ message EphemeralData {
         repeated ByVersion version = 2;
     }
     repeated ByPartition partition = 1;
+
+    // Current state of dynamic partition scaling
+    PartitionScaleInfo scale = 2;
 }
 
 message VersionedEphemeralData {
     EphemeralData data = 1;
     int64 version = 2;
+}
+
+// PartitionScaleInfo is propagated among task queue partitions in ephemeral data.
+message PartitionScaleInfo {
+    int32 read = 1;
+    int32 write = 2;
+    sfixed64 version = 3;
+}
+
+// ClientPartitionCounts is propagated from the matching service to clients in grpc headers/trailers.
+// It may be a subset of PartitionScaleInfo.
+message ClientPartitionCounts {
+    int32 read = 1;
+    int32 write = 2;
 }

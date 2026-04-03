@@ -23,6 +23,7 @@ import (
 	"go.temporal.io/server/api/matchingservice/v1"
 	persistencespb "go.temporal.io/server/api/persistence/v1"
 	taskqueuespb "go.temporal.io/server/api/taskqueue/v1"
+	"go.temporal.io/server/client/matching"
 	"go.temporal.io/server/common/backoff"
 	"go.temporal.io/server/common/cache"
 	"go.temporal.io/server/common/dynamicconfig"
@@ -44,7 +45,12 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
-var errDefaultQueueNotInit = serviceerror.NewInternal("defaultQueue is not initializaed")
+var (
+	errDefaultQueueNotInit  = serviceerror.NewInternal("defaultQueue is not initializaed")
+	errPartitionInvalid     = serviceerrors.NewStalePartitionCounts("partition is invalid")
+	errPartitionDraining    = serviceerrors.NewStalePartitionCounts("partition is draining")
+	errPartitionCountsStale = serviceerrors.NewStalePartitionCounts("counts are too far off")
+)
 
 const (
 	defaultTaskDispatchRPS    = 100000.0
@@ -92,6 +98,8 @@ type (
 		// rateLimitManager is used to manage the rate limit for task queues.
 		rateLimitManager *rateLimitManager
 
+		scaleManager *scaleManager
+
 		// loadTime tracks when this partition manager was started, used to prevent
 		// false positives in the no-recent-poller metric for newly loaded queues
 		loadTime time.Time
@@ -122,6 +130,31 @@ func newTaskQueuePartitionManager(
 		userDataManager,
 		tqConfig,
 		partition.TaskQueue().TaskType())
+
+	// create partition scaler + manager if root
+	var scaleManager *scaleManager
+	if partition.IsRoot() && e.partitionScalerFactory != nil {
+		partitionScaler := e.partitionScalerFactory.New(
+			ns.Name(),
+			partition.TaskQueue().Name(),
+			partition.TaskQueue().TaskType(),
+		)
+		if partitionScaler != nil {
+			baseCtx := headers.SetCallerInfo(context.Background(), headers.NewBackgroundLowCallerInfo(ns.Name().String()))
+			scaleManager = newScaleManager(
+				baseCtx,
+				partition,
+				logger,
+				metricsHandler,
+				userDataManager,
+				e.matchingRawClient,
+				partitionScaler,
+				tqConfig.PartitionScaleManagerSettings(),
+				tqConfig.NumWritePartitions,
+				tqConfig.BreakdownMetricsByTaskQueue,
+			)
+		}
+	}
 	pm := &taskQueuePartitionManagerImpl{
 		engine:                e,
 		partition:             partition,
@@ -134,6 +167,7 @@ func newTaskQueuePartitionManager(
 		versionedQueues:       make(map[PhysicalTaskQueueVersion]physicalTaskQueueManager),
 		userDataManager:       userDataManager,
 		rateLimitManager:      rateLimitManager,
+		scaleManager:          scaleManager,
 		defaultQueueFuture:    future.NewFuture[physicalTaskQueueManager](),
 		autoEnableRateLimiter: quotas.NewRateLimiter(1.0/60, 1),
 	}
@@ -249,6 +283,7 @@ func (pm *taskQueuePartitionManagerImpl) Stop(unloadCause unloadCause) {
 	if pm.cancelNewMatcherSub != nil {
 		pm.cancelNewMatcherSub()
 	}
+	pm.scaleManager.Stop()
 
 	pm.versionedQueuesLock.Lock()
 	for version, vq := range pm.versionedQueues {
@@ -266,6 +301,113 @@ func (pm *taskQueuePartitionManagerImpl) Stop(unloadCause unloadCause) {
 	pm.engine.updateTaskQueuePartitionGauge(pm.Namespace(), pm.partition, -1)
 
 	pm.goroGroup.Cancel()
+}
+
+func (pm *taskQueuePartitionManagerImpl) LoadedMetadata(scaleState *persistencespb.PartitionScaleState) {
+	// Note that this must be called before defaultQueue is marked initialized!
+	// Otherwise child partitions will see empty scale info in their first ephemeral data update.
+	pm.scaleManager.LoadedMetadata(scaleState, pm.defaultQueue())
+}
+
+func (pm *taskQueuePartitionManagerImpl) checkPartitionCounts(ctx context.Context, forWrite, forwarded bool) error {
+	normal, ok := pm.partition.(*tqid.NormalPartition)
+	if !ok {
+		return nil // only normal partitions do dynamic scaling
+	}
+	id := normal.PartitionId()
+
+	// userDataManager must be initialized here already
+	scaleInfo := pm.userDataManager.PartitionScale()
+
+	// on root partition, send signal to scaler
+	if forWrite && !forwarded && pm.scaleManager != nil {
+		// note that write == target, so we can use write for target
+		target := int(scaleInfo.GetWrite())
+		// we can assume the effective number of write partitions is equal to the target
+		effective := target
+		// if no target is set yet, get effective count from dynamic config (matches client behavior)
+		if effective == 0 {
+			effective = max(1, pm.config.NumWritePartitions())
+		}
+		// we assume that tasks are balanced uniformly across partitions, so if the root has
+		// seen 1 task then all have seen ~1 task, so the whole queue has seen 'effective'
+		// tasks in total.
+		// TODO: we could aggregate real stats instead of assuming
+		pm.scaleManager.OnTasks(effective, target)
+	}
+
+	clientPC, parseErr := matching.ParsePartitionCountsFromIncomingContext(ctx)
+	if parseErr != nil {
+		pm.throttledLogger.Info("partition count header parse error", tag.Error(parseErr))
+		// do not return here! we always need to call validatePartitionCounts
+	}
+	settings := pm.config.PartitionScaleManagerSettings()
+	return validatePartitionCounts(id, scaleInfo, clientPC, forWrite, settings.AllowedDelta, settings.AllowedRatio)
+}
+
+// validatePartitionCounts checks whether a partition should accept an RPC based on
+// the current scale info and the client's idea of partition counts. It returns nil if
+// the RPC should be accepted, or an error if it should be rejected.
+func validatePartitionCounts(
+	partitionID int,
+	scaleInfo *taskqueuespb.PartitionScaleInfo,
+	clientPC matching.PartitionCounts,
+	forWrite bool,
+	allowedDelta int32,
+	allowedRatio float32,
+) error {
+	if scaleInfo.GetRead() <= 0 || scaleInfo.GetWrite() <= 0 || scaleInfo.Write > scaleInfo.Read {
+		return nil // missing or invalid scale info
+	}
+
+	// handle cases where we can't accept the rpc at all: any call for invalid,
+	// write calls for draining
+	switch {
+	case partitionID < 0:
+		return serviceerror.NewInternal("negative partition id")
+	case partitionID >= int(scaleInfo.Read):
+		return errPartitionInvalid
+	case partitionID >= int(scaleInfo.Write) && forWrite:
+		return errPartitionDraining
+	}
+
+	// if client did not send any/valid counts, don't reject (as long as partition is valid).
+	// this handles cases where the server is upgraded before the client.
+	if !clientPC.Valid() {
+		return nil
+	}
+
+	// check what the client thought the counts were
+	var delta int32
+	var ratio float32
+	if forWrite {
+		delta = clientPC.Write - scaleInfo.Write
+		ratio = float32(clientPC.Write) / float32(scaleInfo.Write)
+	} else {
+		delta = clientPC.Read - scaleInfo.Read
+		ratio = float32(clientPC.Read) / float32(scaleInfo.Read)
+	}
+	effectiveRatio := max(1.001, allowedRatio)
+	if delta > -allowedDelta && delta < allowedDelta ||
+		ratio > 1/effectiveRatio && ratio < effectiveRatio {
+		return nil
+	}
+
+	// otherwise reject to improve load balancing
+	return errPartitionCountsStale
+}
+
+func (pm *taskQueuePartitionManagerImpl) sendPartitionCountTrailer(ctx context.Context) {
+	// note this sends the trailer even if there is no scale info (i.e. dynamic partition
+	// scaling is not enabled). that will instruct clients to fall back to dynamic config.
+	scaleInfo := pm.userDataManager.PartitionScale()
+	err := matching.PartitionCounts{
+		Read:  scaleInfo.GetRead(),
+		Write: scaleInfo.GetWrite(),
+	}.SetTrailer(ctx)
+	if err != nil {
+		pm.throttledLogger.Warn("error setting partition count trailer", tag.Error(err))
+	}
 }
 
 func (pm *taskQueuePartitionManagerImpl) GetRateLimitManager() *rateLimitManager {
@@ -326,6 +468,11 @@ func (pm *taskQueuePartitionManagerImpl) AddTask(
 	ctx context.Context,
 	params addTaskParams,
 ) (buildId string, syncMatched bool, err error) {
+	defer pm.sendPartitionCountTrailer(ctx)
+	if err := pm.checkPartitionCounts(ctx, true, params.forwardInfo != nil); err != nil {
+		return "", false, err
+	}
+
 	var spoolQueue, syncMatchQueue physicalTaskQueueManager
 	directive := params.taskInfo.GetVersionDirective()
 
@@ -425,6 +572,11 @@ func (pm *taskQueuePartitionManagerImpl) PollTask(
 	ctx context.Context,
 	pollMetadata *pollMetadata,
 ) (*internalTask, bool, error) {
+	defer pm.sendPartitionCountTrailer(ctx)
+	if err := pm.checkPartitionCounts(ctx, false, pollMetadata.forwardedFrom != ""); err != nil {
+		return nil, false, err
+	}
+
 	var err error
 	dbq := pm.defaultQueue()
 	if dbq == nil {
@@ -700,6 +852,12 @@ func (pm *taskQueuePartitionManagerImpl) DispatchQueryTask(
 	taskID string,
 	request *matchingservice.QueryWorkflowRequest,
 ) (*matchingservice.QueryWorkflowResponse, error) {
+	// query counts as "write" for partition load balancing
+	defer pm.sendPartitionCountTrailer(ctx)
+	if err := pm.checkPartitionCounts(ctx, true, request.ForwardInfo != nil); err != nil {
+		return nil, err
+	}
+
 	task := newInternalQueryTask(taskID, request)
 	pm.config.setDefaultPriority(task)
 
@@ -742,6 +900,12 @@ func (pm *taskQueuePartitionManagerImpl) DispatchNexusTask(
 	taskId string,
 	request *matchingservice.DispatchNexusTaskRequest,
 ) (*matchingservice.DispatchNexusTaskResponse, error) {
+	// nexus counts as "write" for partition load balancing
+	defer pm.sendPartitionCountTrailer(ctx)
+	if err := pm.checkPartitionCounts(ctx, true, request.ForwardInfo != nil); err != nil {
+		return nil, err
+	}
+
 	deadline, _ := ctx.Deadline() // If not set by user, our client will set a default.
 	var opDeadline time.Time
 	if header := nexus.Header(request.GetRequest().GetHeader()); header != nil {
@@ -1126,6 +1290,7 @@ func (pm *taskQueuePartitionManagerImpl) describe(
 
 	return &matchingservice.DescribeTaskQueuePartitionResponse{
 		VersionsInfoInternal: versionsInfo,
+		ScaleInfo:            pm.userDataManager.PartitionScale(),
 	}, nil
 }
 
@@ -1523,12 +1688,16 @@ func (pm *taskQueuePartitionManagerImpl) callerInfoContext(ctx context.Context) 
 }
 
 // ForceLoadAllChildPartitions force-loads known child (read) partitions in new goroutines.
+// TODO: consider moving this into scaleManager.backgroundWork after auto-scaling is enabled everywhere.
 func (pm *taskQueuePartitionManagerImpl) ForceLoadAllChildPartitions() {
 	if !pm.partition.IsRoot() {
 		return
 	}
 
-	partitions := int32(pm.config.NumReadPartitions())
+	partitions := pm.userDataManager.PartitionScale().GetRead()
+	if partitions == 0 {
+		partitions = int32(pm.config.NumReadPartitions())
+	}
 	if partitions <= 1 {
 		return
 	}
