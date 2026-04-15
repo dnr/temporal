@@ -179,6 +179,6 @@ message PartitionScaleInfo {
 // ClientPartitionCounts is propagated from the matching service to clients in grpc headers/trailers.
 // It may be a subset of PartitionScaleInfo.
 message ClientPartitionCounts {
-    int32 read = 1;
-    int32 write = 2;
+  int32 read = 1;
+  int32 write = 2;
 }
