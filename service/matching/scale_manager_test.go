@@ -191,15 +191,17 @@ func TestPartitionIsFullyDrained_NoVersions(t *testing.T) {
 // -- scaleManager helpers --
 
 type testScaleDB struct {
-	state *persistencespb.PartitionScaleState
-	err   error
+	state    *persistencespb.PartitionScaleState
+	lastSync bool
+	err      error
 }
 
-func (m *testScaleDB) UpdateScaleState(s *persistencespb.PartitionScaleState) error {
+func (m *testScaleDB) UpdateScaleState(s *persistencespb.PartitionScaleState, sync bool) error {
 	if m.err != nil {
 		return m.err
 	}
 	m.state = s
+	m.lastSync = sync
 	return nil
 }
 

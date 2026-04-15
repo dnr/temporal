@@ -224,11 +224,8 @@ func (sm *scaleManager) backgroundWork(ctx context.Context) error {
 			tasks := int(sm.batch.Swap(0))
 			sm.partitionScaler.OnTasks(tasks, int(scaleState.GetTarget()), sm.setTarget)
 
-			// update backlog stats
-			sm.updateBacklogStats(ctx, scaleState)
-
-			// check drained state
-			sm.checkDrained(ctx, scaleState)
+			// query all child partitions for backlog counts and drain state
+			sm.updateBacklogAndDrainState(ctx, scaleState)
 		}
 	}
 }
@@ -250,11 +247,22 @@ func (sm *scaleManager) describeRequest(id int32) *matchingservice.DescribeTaskQ
 	}
 }
 
-func (sm *scaleManager) updateBacklogStats(ctx context.Context, scaleState *persistencespb.PartitionScaleState) {
+func (sm *scaleManager) updateBacklogAndDrainState(ctx context.Context, scaleState *persistencespb.PartitionScaleState) {
 	read := scaleStateToReadCount(scaleState)
+	if read == 0 {
+		return
+	}
+
 	prevBacklog := scaleState.GetBacklogCounts()
 	newBacklog := make([]byte, read)
-	changed := false
+	backlogChanged := false
+
+	// Check if we should also evaluate drain state
+	target := scaleState.GetTarget()
+	checkDrain := target > 0 &&
+		time.Since(time.Unix(0, scaleState.GetTargetVersion())) >= sm.settings.DrainBufferTime
+	info := scaleStateToInfo(scaleState)
+	var toClear []int32
 
 	for id := range read {
 		callCtx, cancel := context.WithTimeout(ctx, ioTimeout)
@@ -264,16 +272,22 @@ func (sm *scaleManager) updateBacklogStats(ctx context.Context, scaleState *pers
 			continue
 		}
 
+		// Update backlog count
 		total := totalBacklogFromDescribeResponse(res)
 		var prev number.E5M3
 		if id < int32(len(prevBacklog)) {
 			prev = prevBacklog[id]
 		}
 		newBacklog[id] = number.UpdateE5M3(total, prev)
-		changed = changed || newBacklog[id] != prev
+		backlogChanged = backlogChanged || newBacklog[id] != prev
+
+		// Check drain state for partitions in the draining range
+		if checkDrain && id >= target && getBacklogStateBit(scaleState, id) && partitionIsFullyDrained(res, info) {
+			toClear = append(toClear, id)
+		}
 	}
 
-	if !changed {
+	if !backlogChanged && len(toClear) == 0 {
 		return
 	}
 
@@ -289,9 +303,25 @@ func (sm *scaleManager) updateBacklogStats(ctx context.Context, scaleState *pers
 		newState = &persistencespb.PartitionScaleState{}
 	}
 	newState.BacklogCounts = newBacklog
+	for _, i := range toClear {
+		clearBacklogStateBit(newState, i)
+	}
 
-	// update db but don't sync
-	_ = sm.scaleDB.UpdateScaleState(newState, false)
+	// Sync to DB only when drain bits changed (must be persisted before taking effect).
+	// For backlog-count-only updates, write without sync and tolerate errors.
+	needSync := len(toClear) > 0
+	if err := sm.scaleDB.UpdateScaleState(newState, needSync); err != nil {
+		sm.logger.Error("failed to update state", tag.Error(err), tag.Operation("drain"))
+		return
+	}
+
+	if len(toClear) > 0 {
+		sm.logger.Info("drain",
+			tag.Any("drained-partitions", toClear),
+			tag.Int32("target", info.Write),
+			tag.Int32("prev-read", info.Read),
+			tag.Int32("read", readPartitionsFromBacklogState(newState)))
+	}
 
 	sm.setStateLocked(newState)
 }
@@ -303,65 +333,6 @@ func totalBacklogFromDescribeResponse(res *matchingservice.DescribeTaskQueuePart
 		}
 	}
 	return
-}
-
-func (sm *scaleManager) checkDrained(ctx context.Context, scaleState *persistencespb.PartitionScaleState) {
-	// FIXME: consolidate this with updateBacklogStats
-
-	if scaleState.GetTarget() == 0 {
-		return // managed scaling disabled
-	} else if time.Since(time.Unix(0, scaleState.GetTargetVersion())) < sm.settings.DrainBufferTime {
-		return // too soon: wait for some buffer before draining
-	}
-
-	// we have partitions that should be draining, see if they are yet
-	var toClear []int32
-	info := scaleStateToInfo(scaleState)
-	for id := info.Write; id < info.Read; id++ {
-		if !getBacklogStateBit(scaleState, id) {
-			continue
-		}
-
-		callCtx, cancel := context.WithTimeout(ctx, ioTimeout)
-		res, err := sm.matchingClient.DescribeTaskQueuePartition(callCtx, sm.describeRequest(id))
-		cancel()
-		if err == nil && partitionIsFullyDrained(res, info) {
-			toClear = append(toClear, id)
-		}
-	}
-
-	if len(toClear) == 0 {
-		return
-	}
-
-	sm.lock.Lock()
-	defer sm.lock.Unlock()
-
-	if sm.scaleState != scaleState {
-		return // we were operating from an old state
-	}
-
-	newState := common.CloneProto(scaleState)
-	if newState == nil {
-		newState = &persistencespb.PartitionScaleState{}
-	}
-	for _, i := range toClear {
-		clearBacklogStateBit(newState, i)
-	}
-
-	// write to the db before making new state active
-	if err := sm.scaleDB.UpdateScaleState(newState, true); err != nil {
-		sm.logger.Error("failed to update state", tag.Error(err), tag.Operation("drain"))
-		return
-	}
-
-	sm.logger.Info("drain",
-		tag.Any("drained-partitions", toClear),
-		tag.Int32("target", info.Write),
-		tag.Int32("prev-read", info.Read),
-		tag.Int32("read", readPartitionsFromBacklogState(newState)))
-
-	sm.setStateLocked(newState)
 }
 
 func partitionIsFullyDrained(
