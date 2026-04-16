@@ -567,7 +567,7 @@ type PartitionScaleState struct {
 	//
 	//	aip.dev/not-precedent: This is a bit field --)
 	BacklogState []uint64 `protobuf:"varint,4,rep,packed,name=backlog_state,json=backlogState,proto3" json:"backlog_state,omitempty"`
-	// Summary of backlog counts, 8 bits per partition (see common/number/e5m3.go).
+	// Summary of backlog counts, 8 bits per partition (see common/number/compact8.go).
 	// This is different from backlog_state: a partition will have a 1 bit in backlog_state
 	// unless it is draining and we know for sure that it's fully drained. It may have zero
 	// actual backlog most of that time, so it would have a zero here. Also, we commit changes to

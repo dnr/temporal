@@ -851,7 +851,7 @@ type PartitionScaleInfo struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	Read  int32                  `protobuf:"varint,1,opt,name=read,proto3" json:"read,omitempty"`
 	Write int32                  `protobuf:"varint,2,opt,name=write,proto3" json:"write,omitempty"`
-	// Backlog counts per partition, 8 bits per partition (see common/number/e5m3.go).
+	// Backlog counts per partition, 8 bits per partition (see common/number/compact8.go).
 	BacklogCounts []byte `protobuf:"bytes,3,opt,name=backlog_counts,json=backlogCounts,proto3" json:"backlog_counts,omitempty"`
 	Version       int64  `protobuf:"fixed64,10,opt,name=version,proto3" json:"version,omitempty"`
 	unknownFields protoimpl.UnknownFields
@@ -922,7 +922,7 @@ type ClientPartitionCounts struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	Read  int32                  `protobuf:"varint,1,opt,name=read,proto3" json:"read,omitempty"`
 	Write int32                  `protobuf:"varint,2,opt,name=write,proto3" json:"write,omitempty"`
-	// Backlog counts per partition, 8 bits per partition (see common/number/e5m3.go).
+	// Backlog counts per partition, 8 bits per partition (see common/number/compact8.go).
 	BacklogCount  []byte `protobuf:"bytes,3,opt,name=backlog_count,json=backlogCount,proto3" json:"backlog_count,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache

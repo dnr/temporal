@@ -274,11 +274,11 @@ func (sm *scaleManager) updateBacklogAndDrainState(ctx context.Context, scaleSta
 
 		// Update backlog count
 		total := totalBacklogFromDescribeResponse(res)
-		var prev number.E5M3
+		var prev number.Compact8
 		if id < int32(len(prevBacklog)) {
 			prev = prevBacklog[id]
 		}
-		newBacklog[id] = number.UpdateE5M3(total, prev)
+		newBacklog[id] = number.UpdateCompact8(total, prev)
 		backlogChanged = backlogChanged || newBacklog[id] != prev
 
 		// Check drain state for partitions in the draining range
