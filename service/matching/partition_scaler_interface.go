@@ -24,7 +24,7 @@ type PartitionScaler interface {
 	//
 	// It will also be called periodically with less than a full batch, or even zero, to allow
 	// timely scale down when there are no/few tasks.
-	OnTasks(numTasks, currentTarget int, setTarget func(newTarget int))
+	OnTasks(numTasks, currentTarget int, backlogCounts []byte, setTarget func(newTarget int))
 	// Stop will be called when unloading the partition.
 	Stop()
 }

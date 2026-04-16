@@ -372,7 +372,7 @@ func (pm *taskQueuePartitionManagerImpl) checkPartitionCounts(ctx context.Contex
 		// seen 1 task then all have seen ~1 task, so the whole queue has seen 'effective'
 		// tasks in total.
 		// TODO: we could aggregate real stats instead of assuming
-		pm.scaleManager.OnTasks(effective, target)
+		pm.scaleManager.OnTasks(effective, target, scaleInfo.GetBacklogCounts())
 	}
 
 	clientPC, parseErr := matching.ParsePartitionCountsFromIncomingContext(ctx)

@@ -112,10 +112,10 @@ func (sm *scaleManager) LoadedMetadata(scaleState *persistencespb.PartitionScale
 }
 
 // OnTasks is called on a batch of tasks added. The caller is required to pass in the current
-// target even though we have it already, so that in the common case, we only have to one
+// target even though we have it already, so that in the common case, we only have to do one
 // atomic increment. The caller in this case (partitionManager checkPartitionCounts) has
 // already gotten the partition counts from ephemeral data, which should match our target.
-func (sm *scaleManager) OnTasks(numTasks, currentTarget int) {
+func (sm *scaleManager) OnTasks(numTasks, currentTarget int, backlogCounts []byte) {
 	if sm == nil {
 		return
 	}
@@ -125,7 +125,7 @@ func (sm *scaleManager) OnTasks(numTasks, currentTarget int) {
 
 	if tasks := sm.batch.Add(int64(numTasks)); tasks >= batchSize {
 		tasks = sm.batch.Swap(0)
-		sm.partitionScaler.OnTasks(int(tasks), currentTarget, sm.setTarget)
+		sm.partitionScaler.OnTasks(int(tasks), currentTarget, backlogCounts, sm.setTarget)
 	}
 }
 
@@ -222,7 +222,7 @@ func (sm *scaleManager) backgroundWork(ctx context.Context) error {
 
 			// notify once
 			tasks := int(sm.batch.Swap(0))
-			sm.partitionScaler.OnTasks(tasks, int(scaleState.GetTarget()), sm.setTarget)
+			sm.partitionScaler.OnTasks(tasks, int(scaleState.GetTarget()), scaleState.GetBacklogCounts(), sm.setTarget)
 
 			// query all child partitions for backlog counts and drain state
 			sm.updateBacklogAndDrainState(ctx, scaleState)

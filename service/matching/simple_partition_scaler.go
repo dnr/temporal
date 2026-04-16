@@ -8,6 +8,7 @@ import (
 	"go.temporal.io/server/common/clock"
 	"go.temporal.io/server/common/dynamicconfig"
 	"go.temporal.io/server/common/namespace"
+	"go.temporal.io/server/common/number"
 )
 
 type scalerFactoryCfg = dynamicconfig.TypedPropertyFnWithTaskQueueFilter[dynamicconfig.SimplePartitionScalerSettings]
@@ -52,7 +53,7 @@ func (s *simplePartitionScaler) getTracker(interval time.Duration) *taskTracker 
 	return t.(*taskTracker)
 }
 
-func (s *simplePartitionScaler) OnTasks(num, currentTarget int, setTarget func(newTarget int)) {
+func (s *simplePartitionScaler) OnTasks(num, currentTarget int, backlogCounts []byte, setTarget func(newTarget int)) {
 	cfg := s.cfg()
 
 	if !cfg.Enabled {
@@ -73,6 +74,16 @@ func (s *simplePartitionScaler) OnTasks(num, currentTarget int, setTarget func(n
 		t.(*taskTracker).inc(num)
 		return true
 	})
+
+	// look at backlog
+	fromBacklog := 0
+	for _, v := range backlogCounts {
+		count := int(number.DecodeCompact8(v))
+		if count > cfg.BacklogBase {
+			fromBacklog++
+		}
+	}
+	// FIXME: use this and combine with rate-based number
 
 	newTarget := currentTarget
 

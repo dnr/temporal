@@ -150,7 +150,7 @@ type SimplePartitionScalerSettings struct {
 	// preserved and used as-is without changes.
 	Enabled bool
 
-	// If non-zero, Fixed will be used as the scaling decision (Ups/Downs will be ignored).
+	// If non-zero, Fixed will be used as the scaling decision (overrides everything else).
 	Fixed int
 
 	// Ups and Downs control scaling based on add rate: The TargetRate measured over the
@@ -162,7 +162,13 @@ type SimplePartitionScalerSettings struct {
 	Downs []SimplePartitionScalerThreshold
 	Ups   []SimplePartitionScalerThreshold
 
-	// Overall bounds (0 means don't enforce)
+	// Backlog-based scaling: add new partitions when existing ones hit BacklogBase, stop
+	// adding tasks to them when they hit BacklogCap. (TODO: we also need these numbers for
+	// backlog-based load balancing, how do we propagate them?)
+	BacklogBase int
+	BacklogCap  int
+
+	// Overall bounds (0 means don't enforce).
 	Min int
 	Max int
 }
