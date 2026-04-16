@@ -101,6 +101,13 @@ func (s *simplePartitionScaler) OnTasks(num, currentTarget int, setTarget func(n
 		)
 	}
 
+	if cfg.Min > 0 {
+		newTarget = max(newTarget, cfg.Min)
+	}
+	if cfg.Max > 0 {
+		newTarget = min(newTarget, cfg.Max)
+	}
+
 	if newTarget != currentTarget {
 		setTarget(newTarget)
 	}

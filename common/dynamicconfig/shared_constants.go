@@ -161,6 +161,10 @@ type SimplePartitionScalerSettings struct {
 	// middle for hysteresis (avoid changing too often).
 	Downs []SimplePartitionScalerThreshold
 	Ups   []SimplePartitionScalerThreshold
+
+	// Overall bounds (0 means don't enforce)
+	Min int
+	Max int
 }
 
 type SimplePartitionScalerThreshold struct {
