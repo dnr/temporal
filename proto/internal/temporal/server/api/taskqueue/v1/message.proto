@@ -175,6 +175,9 @@ message PartitionScaleInfo {
   int32 write = 2;
   // Backlog counts per partition, 8 bits per partition (see common/number/compact8.go).
   bytes backlog_counts = 3;
+  // Backlog load balancing config from scaler, in compact8 format.
+  int32 backlog_base = 4;
+  int32 backlog_cap = 5;
 
   sfixed64 version = 10;
 }
@@ -186,4 +189,7 @@ message ClientPartitionCounts {
   int32 write = 2;
   // Backlog counts per partition, 8 bits per partition (see common/number/compact8.go).
   bytes backlog_count = 3;
+  // Backlog load balancing config from scaler, in compact8 format.
+  int32 backlog_base = 4;
+  int32 backlog_cap = 5;
 }

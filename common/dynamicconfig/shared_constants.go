@@ -162,11 +162,13 @@ type SimplePartitionScalerSettings struct {
 	Downs []SimplePartitionScalerThreshold
 	Ups   []SimplePartitionScalerThreshold
 
-	// Backlog-based scaling: add new partitions when existing ones hit BacklogBase, stop
-	// adding tasks to them when they hit BacklogCap. (TODO: we also need these numbers for
-	// backlog-based load balancing, how do we propagate them?)
-	BacklogBase int
-	BacklogCap  int
+	// Backlog-based scaling: add new partitions when existing count hits BacklogBase, reset
+	// when it falls below BacklogReset (for hysteresis). When it gets up to BacklogCap, stop
+	// adding tasks entirely. (TODO: we also need these numbers for backlog-based load
+	// balancing, how do we propagate them?)
+	BacklogReset int
+	BacklogBase  int
+	BacklogCap   int
 
 	// Overall bounds (0 means don't enforce).
 	Min int
