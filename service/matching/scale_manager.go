@@ -2,7 +2,6 @@ package matching
 
 import (
 	"context"
-	"math/bits"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -188,7 +187,7 @@ func (sm *scaleManager) setTarget(scaleState *persistencespb.PartitionScaleState
 			mayHaveBacklog = max(mayHaveBacklog, int32(sm.getWritePartitions()))
 		}
 		for i := range mayHaveBacklog {
-			setBacklogStateBit(newState, i)
+			(*bitSet)(&newState.BacklogState).set(i)
 		}
 
 		// we must succesfully write to the db before making new state active
@@ -299,7 +298,7 @@ func (sm *scaleManager) updateBacklogAndDrainState(ctx context.Context, scaleSta
 		backlogChanged = backlogChanged || newBacklog[id] != prev
 
 		// Check drain state for partitions in the draining range
-		if checkDrain && id >= target && getBacklogStateBit(scaleState, id) && partitionIsFullyDrained(res, info) {
+		if checkDrain && id >= target && bitSet(scaleState.BacklogState).get(id) && partitionIsFullyDrained(res, info) {
 			toClear = append(toClear, id)
 		}
 	}
@@ -321,7 +320,7 @@ func (sm *scaleManager) updateBacklogAndDrainState(ctx context.Context, scaleSta
 	}
 	newState.BacklogCounts = newBacklog
 	for _, i := range toClear {
-		clearBacklogStateBit(newState, i)
+		(*bitSet)(&newState.BacklogState).clear(i)
 	}
 
 	// Sync to DB only when drain bits changed (must be persisted before taking effect).
@@ -337,7 +336,7 @@ func (sm *scaleManager) updateBacklogAndDrainState(ctx context.Context, scaleSta
 			tag.Any("drained-partitions", toClear),
 			tag.Int32("target", info.Write),
 			tag.Int32("prev-read", info.Read),
-			tag.Int32("read", readPartitionsFromBacklogState(newState)))
+			tag.Int32("read", bitSet(newState.BacklogState).len()))
 	}
 
 	sm.setStateLocked(newState)
@@ -375,7 +374,7 @@ func partitionIsFullyDrained(
 }
 
 func scaleStateToReadCount(scaleState *persistencespb.PartitionScaleState) int32 {
-	return max(scaleState.GetTarget(), readPartitionsFromBacklogState(scaleState))
+	return max(scaleState.GetTarget(), bitSet(scaleState.BacklogState).len())
 }
 
 func scaleStateToInfo(scaleState *persistencespb.PartitionScaleState) *taskqueuespb.PartitionScaleInfo {
@@ -385,37 +384,5 @@ func scaleStateToInfo(scaleState *persistencespb.PartitionScaleState) *taskqueue
 		Write:         scaleState.GetTarget(),
 		Version:       scaleState.GetTargetVersion(),
 		BacklogCounts: scaleState.GetBacklogCounts(),
-	}
-}
-
-func readPartitionsFromBacklogState(state *persistencespb.PartitionScaleState) int32 {
-	i := len(state.GetBacklogState()) - 1
-	if i < 0 {
-		return 0
-	}
-	return int32(bits.Len64(state.BacklogState[i]) + i*64)
-}
-
-func getBacklogStateBit(state *persistencespb.PartitionScaleState, i int32) bool {
-	if len(state.BacklogState) < int(i)/64+1 {
-		return false
-	}
-	return state.BacklogState[i/64]&(1<<(i%64)) != 0
-}
-
-func setBacklogStateBit(state *persistencespb.PartitionScaleState, i int32) {
-	for len(state.BacklogState) < int(i)/64+1 {
-		state.BacklogState = append(state.BacklogState, 0)
-	}
-	state.BacklogState[i/64] |= 1 << (i % 64)
-}
-
-func clearBacklogStateBit(state *persistencespb.PartitionScaleState, i int32) {
-	if len(state.BacklogState) < int(i)/64+1 {
-		return
-	}
-	state.BacklogState[i/64] &^= 1 << (i % 64)
-	for len(state.BacklogState) > 0 && state.BacklogState[len(state.BacklogState)-1] == 0 {
-		state.BacklogState = state.BacklogState[:len(state.BacklogState)-1]
 	}
 }

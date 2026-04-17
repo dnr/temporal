@@ -84,7 +84,7 @@ func (s *simplePartitionScaler) OnTasks(in PartitionScalerInput) PartitionScaler
 	state.AddTarget = int32(addTarget)
 
 	// update backlog target based on counts
-	backlogTarget := updateBacklogTarget(cfg, in.BacklogCounts, &state)
+	backlogTarget := updateBacklogTarget(cfg, in.BacklogCounts, (*bitSet)(&state.BacklogTarget))
 
 	// add them and clamp
 	totalTarget := addTarget + backlogTarget
@@ -144,22 +144,22 @@ func validateSimplePartitionScalerThreshold(t dynamicconfig.SimplePartitionScale
 func updateBacklogTarget(
 	cfg dynamicconfig.SimplePartitionScalerSettings,
 	counts []byte,
-	state *persistencespb.SimplePartitionScalerState,
+	bs *bitSet,
 ) int {
 	if cfg.BacklogBase <= 0 || cfg.BacklogReset <= 0 {
 		return 0
 	}
 
 	target := 0
-	for _, v := range counts {
+	for i, v := range counts {
 		count := int32(number.DecodeCompact8(v))
 		if count > cfg.BacklogBase {
-			// FIXME: ensure 1 bit set
+			bs.set(int32(i))
 		} else if count < cfg.BacklogReset {
-			// FIXME: ensure 0 bit set
+			bs.clear(int32(i))
 		}
 
-		if /*FIXME:  bit set*/ isBitSet {
+		if bs.get(int32(i)) {
 			target++
 		}
 	}
