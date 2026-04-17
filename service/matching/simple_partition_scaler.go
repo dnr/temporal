@@ -61,7 +61,7 @@ func (s *simplePartitionScaler) OnTasks(in PartitionScalerInput) PartitionScaler
 	if !cfg.Enabled {
 		return PartitionScalerDecision{NewTarget: 0}
 	} else if cfg.Fixed > 0 {
-		return PartitionScalerDecision{NewTarget: int(cfg.Fixed)}
+		return PartitionScalerDecision{NewTarget: int(cfg.Fixed), BacklogCap: int(cfg.BacklogCap)}
 	}
 
 	// TODO: optimization: use one tracker and query it for different intervals.
@@ -98,6 +98,7 @@ func (s *simplePartitionScaler) OnTasks(in PartitionScalerInput) PartitionScaler
 	privateState, _ := anypb.New(&state) // ignore error, just use nil
 	return PartitionScalerDecision{
 		NewTarget:    totalTarget,
+		BacklogCap:   int(cfg.BacklogCap),
 		PrivateState: privateState,
 	}
 }

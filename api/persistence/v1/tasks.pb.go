@@ -575,11 +575,13 @@ type PartitionScaleState struct {
 	// backlog_state to persistence before changing counts, but we don't have to keep
 	// backlog_counts as consistent.
 	BacklogCounts []byte `protobuf:"bytes,5,opt,name=backlog_counts,json=backlogCounts,proto3" json:"backlog_counts,omitempty"`
+	// Backlog load balancing config from scaler, in compact8 format.
+	BacklogCap int32 `protobuf:"varint,6,opt,name=backlog_cap,json=backlogCap,proto3" json:"backlog_cap,omitempty"`
 	// Arbitrary state kept by the scaler implementation.
 	// (-- api-linter: core::0146::any=disabled
 	//
 	//	aip.dev/not-precedent: This is not public. --)
-	PrivateScalerState *anypb.Any `protobuf:"bytes,6,opt,name=private_scaler_state,json=privateScalerState,proto3" json:"private_scaler_state,omitempty"`
+	PrivateScalerState *anypb.Any `protobuf:"bytes,100,opt,name=private_scaler_state,json=privateScalerState,proto3" json:"private_scaler_state,omitempty"`
 	unknownFields      protoimpl.UnknownFields
 	sizeCache          protoimpl.SizeCache
 }
@@ -647,6 +649,13 @@ func (x *PartitionScaleState) GetBacklogCounts() []byte {
 		return x.BacklogCounts
 	}
 	return nil
+}
+
+func (x *PartitionScaleState) GetBacklogCap() int32 {
+	if x != nil {
+		return x.BacklogCap
+	}
+	return 0
 }
 
 func (x *PartitionScaleState) GetPrivateScalerState() *anypb.Any {
@@ -817,15 +826,17 @@ const file_temporal_server_api_persistence_v1_tasks_proto_rawDesc = "" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05count\x18\x02 \x01(\x03R\x05count\")\n" +
 	"\vSubqueueKey\x12\x1a\n" +
-	"\bpriority\x18\x01 \x01(\x05R\bpriority\"\x87\x02\n" +
+	"\bpriority\x18\x01 \x01(\x05R\bpriority\"\xa8\x02\n" +
 	"\x13PartitionScaleState\x12\x16\n" +
 	"\x06target\x18\x01 \x01(\x05R\x06target\x12\x1d\n" +
 	"\n" +
 	"max_target\x18\x02 \x01(\x05R\tmaxTarget\x12%\n" +
 	"\x0etarget_version\x18\x03 \x01(\x10R\rtargetVersion\x12#\n" +
 	"\rbacklog_state\x18\x04 \x03(\x04R\fbacklogState\x12%\n" +
-	"\x0ebacklog_counts\x18\x05 \x01(\fR\rbacklogCounts\x12F\n" +
-	"\x14private_scaler_state\x18\x06 \x01(\v2\x14.google.protobuf.AnyR\x12privateScalerState\"b\n" +
+	"\x0ebacklog_counts\x18\x05 \x01(\fR\rbacklogCounts\x12\x1f\n" +
+	"\vbacklog_cap\x18\x06 \x01(\x05R\n" +
+	"backlogCap\x12F\n" +
+	"\x14private_scaler_state\x18d \x01(\v2\x14.google.protobuf.AnyR\x12privateScalerState\"b\n" +
 	"\x1aSimplePartitionScalerState\x12\x1d\n" +
 	"\n" +
 	"add_target\x18\x01 \x01(\x05R\taddTarget\x12%\n" +

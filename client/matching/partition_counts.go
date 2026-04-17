@@ -24,7 +24,6 @@ const partitionCountsTrailerName = "pcnt-bin"
 // easily pass around and put in a map.
 type PartitionCounts struct {
 	Read, Write  int32
-	BacklogBase  number.Compact8
 	BacklogCap   number.Compact8
 	BacklogCount []number.Compact8
 	// TODO: inline for small numbers:
@@ -42,7 +41,6 @@ func (pc PartitionCounts) encode(includeBacklogInfo bool) (string, error) {
 		Write: pc.Write,
 	}
 	if includeBacklogInfo {
-		cpc.BacklogBase = int32(pc.BacklogBase)
 		cpc.BacklogCap = int32(pc.BacklogCap)
 		cpc.BacklogCount = pc.BacklogCount
 	}
@@ -72,7 +70,6 @@ func (pc PartitionCounts) SetTrailer(ctx context.Context) error {
 func (pc PartitionCounts) Equal(other PartitionCounts) bool {
 	return pc.Read == other.Read &&
 		pc.Write == other.Write &&
-		pc.BacklogBase == other.BacklogBase &&
 		pc.BacklogCap == other.BacklogCap &&
 		bytes.Equal(pc.BacklogCount, other.BacklogCount)
 }

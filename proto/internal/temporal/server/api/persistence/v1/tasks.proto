@@ -131,11 +131,13 @@ message PartitionScaleState {
   // backlog_state to persistence before changing counts, but we don't have to keep
   // backlog_counts as consistent.
   bytes backlog_counts = 5;
+  // Backlog load balancing config from scaler, in compact8 format.
+  int32 backlog_cap = 6;
 
   // Arbitrary state kept by the scaler implementation.
   // (-- api-linter: core::0146::any=disabled
   //     aip.dev/not-precedent: This is not public. --)
-  google.protobuf.Any private_scaler_state = 6;
+  google.protobuf.Any private_scaler_state = 100;
 }
 
 message SimplePartitionScalerState {

@@ -443,7 +443,6 @@ func (pm *taskQueuePartitionManagerImpl) sendPartitionCountTrailer(ctx context.C
 	err := matching.PartitionCounts{
 		Read:         scaleInfo.GetRead(),
 		Write:        scaleInfo.GetWrite(),
-		BacklogBase:  number.Compact8(scaleInfo.GetBacklogBase()),
 		BacklogCap:   number.Compact8(scaleInfo.GetBacklogCap()),
 		BacklogCount: []byte(scaleInfo.GetBacklogCounts()),
 	}.SetTrailer(ctx)

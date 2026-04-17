@@ -164,8 +164,7 @@ type SimplePartitionScalerSettings struct {
 
 	// Backlog-based scaling: add new partitions when existing count hits BacklogBase, reset
 	// when it falls below BacklogReset (for hysteresis). When it gets up to BacklogCap, stop
-	// adding tasks entirely. (TODO: we also need these numbers for backlog-based load
-	// balancing, how do we propagate them?)
+	// adding tasks entirely.
 	BacklogReset int32
 	BacklogBase  int32
 	BacklogCap   int32

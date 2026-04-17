@@ -21,7 +21,6 @@ import (
 	"go.temporal.io/server/common/quotas"
 	"go.temporal.io/server/common/tqid"
 	"google.golang.org/protobuf/proto"
-	"google.golang.org/protobuf/types/known/anypb"
 )
 
 // scaleManager keeps some state and manages the interaction with partitionScaler.
@@ -137,15 +136,11 @@ func (sm *scaleManager) callScaler(scaleState *persistencespb.PartitionScaleStat
 		BacklogCounts: scaleState.GetBacklogCounts(),
 		PrivateState:  scaleState.GetPrivateScalerState(),
 	})
-	if decision.NoChange || decision.NewTarget == int(scaleState.GetTarget()) {
+	if decision.NoChange {
 		return
 	}
-	sm.setTarget(scaleState, decision.NewTarget, decision.PrivateState)
-}
-
-// setTarget is called in the task add path; it shouldn't block.
-func (sm *scaleManager) setTarget(scaleState *persistencespb.PartitionScaleState, targeti int, privateState *anypb.Any) {
-	if sm == nil {
+	backlogCapC8 := number.EncodeCompact8(int64(decision.BacklogCap))
+	if decision.NewTarget == int(scaleState.GetTarget()) && backlogCapC8 == number.Compact8(scaleState.GetBacklogCap()) {
 		return
 	}
 
@@ -165,7 +160,7 @@ func (sm *scaleManager) setTarget(scaleState *persistencespb.PartitionScaleState
 	go func() {
 		defer sm.lock.Unlock()
 
-		target := int32(targeti)
+		target := int32(decision.NewTarget)
 
 		newState := common.CloneProto(sm.scaleState)
 		if newState == nil {
@@ -174,11 +169,10 @@ func (sm *scaleManager) setTarget(scaleState *persistencespb.PartitionScaleState
 		prevTarget := newState.Target
 		newState.Target = target
 		newState.MaxTarget = max(newState.MaxTarget, target)
-		// Use timestamp instead of just incrementing here for extra safety: if we just
-		// incremented, and scaleDB.UpdateScaleState fails, then we could have two "states"
-		// with the same version but different targets, which could confuse things.
 		newState.TargetVersion = time.Now().UnixNano()
-		newState.PrivateScalerState = privateState
+		newState.BacklogCounts = scaleState.GetBacklogCounts()
+		newState.BacklogCap = int32(backlogCapC8)
+		newState.PrivateScalerState = decision.PrivateState
 
 		mayHaveBacklog := target
 		if prevTarget == 0 {
@@ -215,7 +209,7 @@ func (sm *scaleManager) setStateLocked(newState *persistencespb.PartitionScaleSt
 
 	newInfo := scaleStateToInfo(sm.scaleState)
 
-	// only push ephemeral data if read/write changed, not on any state change
+	// only push ephemeral data if _info_ changed, not on any state change
 	if !proto.Equal(prevInfo, newInfo) {
 		sm.userDataManager.SetPartitionScale(newInfo)
 	}
@@ -384,5 +378,6 @@ func scaleStateToInfo(scaleState *persistencespb.PartitionScaleState) *taskqueue
 		Write:         scaleState.GetTarget(),
 		Version:       scaleState.GetTargetVersion(),
 		BacklogCounts: scaleState.GetBacklogCounts(),
+		BacklogCap:    scaleState.GetBacklogCap(),
 	}
 }

@@ -854,8 +854,7 @@ type PartitionScaleInfo struct {
 	// Backlog counts per partition, 8 bits per partition (see common/number/compact8.go).
 	BacklogCounts []byte `protobuf:"bytes,3,opt,name=backlog_counts,json=backlogCounts,proto3" json:"backlog_counts,omitempty"`
 	// Backlog load balancing config from scaler, in compact8 format.
-	BacklogBase   int32 `protobuf:"varint,4,opt,name=backlog_base,json=backlogBase,proto3" json:"backlog_base,omitempty"`
-	BacklogCap    int32 `protobuf:"varint,5,opt,name=backlog_cap,json=backlogCap,proto3" json:"backlog_cap,omitempty"`
+	BacklogCap    int32 `protobuf:"varint,4,opt,name=backlog_cap,json=backlogCap,proto3" json:"backlog_cap,omitempty"`
 	Version       int64 `protobuf:"fixed64,10,opt,name=version,proto3" json:"version,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -912,13 +911,6 @@ func (x *PartitionScaleInfo) GetBacklogCounts() []byte {
 	return nil
 }
 
-func (x *PartitionScaleInfo) GetBacklogBase() int32 {
-	if x != nil {
-		return x.BacklogBase
-	}
-	return 0
-}
-
 func (x *PartitionScaleInfo) GetBacklogCap() int32 {
 	if x != nil {
 		return x.BacklogCap
@@ -942,8 +934,7 @@ type ClientPartitionCounts struct {
 	// Backlog counts per partition, 8 bits per partition (see common/number/compact8.go).
 	BacklogCount []byte `protobuf:"bytes,3,opt,name=backlog_count,json=backlogCount,proto3" json:"backlog_count,omitempty"`
 	// Backlog load balancing config from scaler, in compact8 format.
-	BacklogBase   int32 `protobuf:"varint,4,opt,name=backlog_base,json=backlogBase,proto3" json:"backlog_base,omitempty"`
-	BacklogCap    int32 `protobuf:"varint,5,opt,name=backlog_cap,json=backlogCap,proto3" json:"backlog_cap,omitempty"`
+	BacklogCap    int32 `protobuf:"varint,4,opt,name=backlog_cap,json=backlogCap,proto3" json:"backlog_cap,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -997,13 +988,6 @@ func (x *ClientPartitionCounts) GetBacklogCount() []byte {
 		return x.BacklogCount
 	}
 	return nil
-}
-
-func (x *ClientPartitionCounts) GetBacklogBase() int32 {
-	if x != nil {
-		return x.BacklogBase
-	}
-	return 0
 }
 
 func (x *ClientPartitionCounts) GetBacklogCap() int32 {
@@ -1196,22 +1180,20 @@ const file_temporal_server_api_taskqueue_v1_message_proto_rawDesc = "" +
 	"\aversion\x18\x02 \x03(\v29.temporal.server.api.taskqueue.v1.EphemeralData.ByVersionR\aversion\"w\n" +
 	"\x16VersionedEphemeralData\x12C\n" +
 	"\x04data\x18\x01 \x01(\v2/.temporal.server.api.taskqueue.v1.EphemeralDataR\x04data\x12\x18\n" +
-	"\aversion\x18\x02 \x01(\x03R\aversion\"\xc3\x01\n" +
+	"\aversion\x18\x02 \x01(\x03R\aversion\"\xa0\x01\n" +
 	"\x12PartitionScaleInfo\x12\x12\n" +
 	"\x04read\x18\x01 \x01(\x05R\x04read\x12\x14\n" +
 	"\x05write\x18\x02 \x01(\x05R\x05write\x12%\n" +
-	"\x0ebacklog_counts\x18\x03 \x01(\fR\rbacklogCounts\x12!\n" +
-	"\fbacklog_base\x18\x04 \x01(\x05R\vbacklogBase\x12\x1f\n" +
-	"\vbacklog_cap\x18\x05 \x01(\x05R\n" +
+	"\x0ebacklog_counts\x18\x03 \x01(\fR\rbacklogCounts\x12\x1f\n" +
+	"\vbacklog_cap\x18\x04 \x01(\x05R\n" +
 	"backlogCap\x12\x18\n" +
 	"\aversion\x18\n" +
-	" \x01(\x10R\aversion\"\xaa\x01\n" +
+	" \x01(\x10R\aversion\"\x87\x01\n" +
 	"\x15ClientPartitionCounts\x12\x12\n" +
 	"\x04read\x18\x01 \x01(\x05R\x04read\x12\x14\n" +
 	"\x05write\x18\x02 \x01(\x05R\x05write\x12#\n" +
-	"\rbacklog_count\x18\x03 \x01(\fR\fbacklogCount\x12!\n" +
-	"\fbacklog_base\x18\x04 \x01(\x05R\vbacklogBase\x12\x1f\n" +
-	"\vbacklog_cap\x18\x05 \x01(\x05R\n" +
+	"\rbacklog_count\x18\x03 \x01(\fR\fbacklogCount\x12\x1f\n" +
+	"\vbacklog_cap\x18\x04 \x01(\x05R\n" +
 	"backlogCapB2Z0go.temporal.io/server/api/taskqueue/v1;taskqueueb\x06proto3"
 
 var (
