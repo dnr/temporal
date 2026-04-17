@@ -34,6 +34,7 @@ import (
 	"go.temporal.io/server/common/log/tag"
 	"go.temporal.io/server/common/metrics"
 	"go.temporal.io/server/common/namespace"
+	"go.temporal.io/server/common/number"
 	"go.temporal.io/server/common/quotas"
 	serviceerrors "go.temporal.io/server/common/serviceerror"
 	"go.temporal.io/server/common/softassert"
@@ -440,8 +441,11 @@ func (pm *taskQueuePartitionManagerImpl) sendPartitionCountTrailer(ctx context.C
 	// scaling is not enabled). that will instruct clients to fall back to dynamic config.
 	scaleInfo := pm.userDataManager.PartitionScale()
 	err := matching.PartitionCounts{
-		Read:  scaleInfo.GetRead(),
-		Write: scaleInfo.GetWrite(),
+		Read:         scaleInfo.GetRead(),
+		Write:        scaleInfo.GetWrite(),
+		BacklogBase:  number.Compact8(scaleInfo.GetBacklogBase()),
+		BacklogCap:   number.Compact8(scaleInfo.GetBacklogCap()),
+		BacklogCount: []byte(scaleInfo.GetBacklogCounts()),
 	}.SetTrailer(ctx)
 	if err != nil {
 		pm.throttledLogger.Warn("error setting partition count trailer", tag.Error(err))
