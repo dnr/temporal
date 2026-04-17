@@ -235,7 +235,7 @@ func newTestScaleManager(
 ) *scaleManager {
 	f, _ := tqid.NewTaskQueueFamily("test-ns-id", "test-tq")
 	partition := f.TaskQueue(1).RootPartition()
-	sm := &scaleManager{
+	return &scaleManager{
 		partition:          partition,
 		logger:             log.NewNoopLogger(),
 		metricsHandler:     metrics.NoopMetricsHandler,
@@ -247,8 +247,6 @@ func newTestScaleManager(
 		background:         goro.NewHandle(context.Background()),
 		limiter:            quotas.NewRateLimiter(100, 1), // generous
 	}
-	sm.setTarget = sm.SetTarget
-	return sm
 }
 
 // scaleManagerUDMAdapter adapts testUserDataManager to the userDataManager interface

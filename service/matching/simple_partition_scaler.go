@@ -5,10 +5,12 @@ import (
 	"time"
 
 	enumspb "go.temporal.io/api/enums/v1"
+	persistencespb "go.temporal.io/server/api/persistence/v1"
 	"go.temporal.io/server/common/clock"
 	"go.temporal.io/server/common/dynamicconfig"
 	"go.temporal.io/server/common/namespace"
 	"go.temporal.io/server/common/number"
+	"google.golang.org/protobuf/types/known/anypb"
 )
 
 type scalerFactoryCfg = dynamicconfig.TypedPropertyFnWithTaskQueueFilter[dynamicconfig.SimplePartitionScalerSettings]
@@ -53,48 +55,68 @@ func (s *simplePartitionScaler) getTracker(interval time.Duration) *taskTracker 
 	return t.(*taskTracker)
 }
 
-func (s *simplePartitionScaler) OnTasks(num, currentTarget int, backlogCounts []byte, setTarget func(newTarget int)) {
+func (s *simplePartitionScaler) OnTasks(in PartitionScalerInput) PartitionScalerDecision {
 	cfg := s.cfg()
 
 	if !cfg.Enabled {
-		if currentTarget != 0 {
-			setTarget(0)
-		}
-		return
+		return PartitionScalerDecision{NewTarget: 0}
 	} else if cfg.Fixed > 0 {
-		if currentTarget != cfg.Fixed {
-			setTarget(cfg.Fixed)
-		}
-		return
+		return PartitionScalerDecision{NewTarget: int(cfg.Fixed)}
 	}
 
 	// TODO: optimization: use one tracker and query it for different intervals.
 	// TODO: clean up trackers that are unused after config change.
 	s.trackers.Range(func(_, t any) bool {
-		t.(*taskTracker).inc(num)
+		t.(*taskTracker).inc(in.NumTasks)
 		return true
 	})
 
-	// look at backlog
-	fromBacklog := 0
-	for _, v := range backlogCounts {
-		count := int(number.DecodeCompact8(v))
-		if count > cfg.BacklogBase {
-			fromBacklog++
-		}
+	// unmarshal our state
+	// TODO: maybe we can avoid deserializing this each time?
+	var state persistencespb.SimplePartitionScalerState
+	if in.PrivateState.UnmarshalTo(&state) != nil {
+		// initialize from scaler if unset
+		state.AddTarget = int32(in.CurrentTarget)
 	}
-	// FIXME: use this and combine with rate-based number
 
-	newTarget := currentTarget
+	// update add target based on rates
+	addTarget := s.updateAddTarget(cfg, int(state.AddTarget))
+	state.AddTarget = int32(addTarget)
 
+	// update backlog target based on counts
+	backlogTarget := updateBacklogTarget(cfg, in.BacklogCounts, &state)
+
+	// add them and clamp
+	totalTarget := addTarget + backlogTarget
+	if cfg.Min > 0 {
+		totalTarget = max(totalTarget, int(cfg.Min))
+	}
+	if cfg.Max > 0 {
+		totalTarget = min(totalTarget, int(cfg.Max))
+	}
+
+	privateState, _ := anypb.New(&state) // ignore error, just use nil
+	return PartitionScalerDecision{
+		NewTarget:    totalTarget,
+		PrivateState: privateState,
+	}
+}
+
+func (*simplePartitionScaler) Stop() {
+}
+
+func (s *simplePartitionScaler) updateAddTarget(
+	cfg dynamicconfig.SimplePartitionScalerSettings,
+	target int,
+) int {
 	for _, down := range cfg.Downs {
 		if !validateSimplePartitionScalerThreshold(down) {
 			continue
 		}
 		rate := s.getTracker(down.Window).rate()
 		// decrease target so that each partition is ~= target rate
-		newTarget = max(1, min(
-			newTarget,
+		target = max(1, min(
+			target,
 			int(rate/float32(down.TargetRate)+0.5),
 		))
 	}
@@ -105,28 +127,41 @@ func (s *simplePartitionScaler) OnTasks(num, currentTarget int, backlogCounts []
 		}
 		rate := s.getTracker(up.Window).rate()
 		// increase target so that each partition is ~= target rate
-		newTarget = max(
-			newTarget,
+		target = max(
+			target,
 			int(rate/float32(up.TargetRate)+0.5),
 			1,
 		)
 	}
 
-	if cfg.Min > 0 {
-		newTarget = max(newTarget, cfg.Min)
-	}
-	if cfg.Max > 0 {
-		newTarget = min(newTarget, cfg.Max)
-	}
-
-	if newTarget != currentTarget {
-		setTarget(newTarget)
-	}
-}
-
-func (s *simplePartitionScaler) Stop() {
+	return target
 }
 
 func validateSimplePartitionScalerThreshold(t dynamicconfig.SimplePartitionScalerThreshold) bool {
 	return t.Window >= 100*time.Millisecond && t.TargetRate >= 1
+}
+
+func updateBacklogTarget(
+	cfg dynamicconfig.SimplePartitionScalerSettings,
+	counts []byte,
+	state *persistencespb.SimplePartitionScalerState,
+) int {
+	if cfg.BacklogBase <= 0 || cfg.BacklogReset <= 0 {
+		return 0
+	}
+
+	target := 0
+	for _, v := range counts {
+		count := int32(number.DecodeCompact8(v))
+		if count > cfg.BacklogBase {
+			// FIXME: ensure 1 bit set
+		} else if count < cfg.BacklogReset {
+			// FIXME: ensure 0 bit set
+		}
+
+		if /*FIXME:  bit set*/ isBitSet {
+			target++
+		}
+	}
+	return target
 }

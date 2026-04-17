@@ -22,6 +22,7 @@ import (
 	"go.temporal.io/server/common/quotas"
 	"go.temporal.io/server/common/tqid"
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/anypb"
 )
 
 // scaleManager keeps some state and manages the interaction with partitionScaler.
@@ -37,7 +38,6 @@ type scaleManager struct {
 	settings           dynamicconfig.PartitionScaleManagerSettings
 	getWritePartitions dynamicconfig.IntPropertyFn
 	emitGaugeMetrics   dynamicconfig.BoolPropertyFn
-	setTarget          func(int)
 	background         *goro.Handle
 	limiter            quotas.RateLimiter
 
@@ -66,7 +66,7 @@ func newScaleManager(
 	getWritePartitions dynamicconfig.IntPropertyFn,
 	emitGaugeMetrics dynamicconfig.BoolPropertyFn,
 ) *scaleManager {
-	sm := &scaleManager{
+	return &scaleManager{
 		partition:          partition,
 		logger:             log.With(logger, tag.ComponentPartitionScaler),
 		metricsHandler:     metricsHandler,
@@ -79,8 +79,6 @@ func newScaleManager(
 		background:         goro.NewHandle(baseCtx),
 		limiter:            quotas.NewRateLimiter(float64(settings.MaxRate), 1),
 	}
-	sm.setTarget = sm.SetTarget // allocate closure once
-	return sm
 }
 
 func (sm *scaleManager) Stop() {
@@ -111,11 +109,8 @@ func (sm *scaleManager) LoadedMetadata(scaleState *persistencespb.PartitionScale
 	sm.background.Go(sm.backgroundWork)
 }
 
-// OnTasks is called on a batch of tasks added. The caller is required to pass in the current
-// target even though we have it already, so that in the common case, we only have to do one
-// atomic increment. The caller in this case (partitionManager checkPartitionCounts) has
-// already gotten the partition counts from ephemeral data, which should match our target.
-func (sm *scaleManager) OnTasks(numTasks, currentTarget int, backlogCounts []byte) {
+// AddedTasks is called on a batch of tasks added.
+func (sm *scaleManager) AddedTasks(numTasks int) {
 	if sm == nil {
 		return
 	}
@@ -124,13 +119,33 @@ func (sm *scaleManager) OnTasks(numTasks, currentTarget int, backlogCounts []byt
 	batchSize := int64(numTasks) * int64(sm.settings.BatchSize)
 
 	if tasks := sm.batch.Add(int64(numTasks)); tasks >= batchSize {
-		tasks = sm.batch.Swap(0)
-		sm.partitionScaler.OnTasks(int(tasks), currentTarget, backlogCounts, sm.setTarget)
+		// FIXME: let's try to avoid this lock again
+		sm.lock.Lock()
+		scaleState := sm.scaleState
+		sm.lock.Unlock()
+
+		sm.callScaler(scaleState)
 	}
 }
 
-// SetTarget may be called in the task add path; it shouldn't block.
-func (sm *scaleManager) SetTarget(targeti int) {
+// callScaler is called in the task add path; it shouldn't block.
+func (sm *scaleManager) callScaler(scaleState *persistencespb.PartitionScaleState) {
+	tasks := int(sm.batch.Swap(0))
+
+	decision := sm.partitionScaler.OnTasks(PartitionScalerInput{
+		NumTasks:      tasks,
+		CurrentTarget: int(scaleState.GetTarget()),
+		BacklogCounts: scaleState.GetBacklogCounts(),
+		PrivateState:  scaleState.GetPrivateScalerState(),
+	})
+	if decision.NoChange || decision.NewTarget == int(scaleState.GetTarget()) {
+		return
+	}
+	sm.setTarget(scaleState, decision.NewTarget, decision.PrivateState)
+}
+
+// setTarget is called in the task add path; it shouldn't block.
+func (sm *scaleManager) setTarget(scaleState *persistencespb.PartitionScaleState, targeti int, privateState *anypb.Any) {
 	if sm == nil {
 		return
 	}
@@ -139,7 +154,9 @@ func (sm *scaleManager) SetTarget(targeti int) {
 		return // don't block on contention
 	}
 
-	if sm.scaleDB == nil || !sm.limiter.Allow() {
+	if sm.scaleDB == nil || // not initialized yet
+		!sm.limiter.Allow() || // rate limited
+		sm.scaleState != scaleState { // state changed across call to scaler
 		sm.lock.Unlock()
 		return
 	}
@@ -162,6 +179,7 @@ func (sm *scaleManager) SetTarget(targeti int) {
 		// incremented, and scaleDB.UpdateScaleState fails, then we could have two "states"
 		// with the same version but different targets, which could confuse things.
 		newState.TargetVersion = time.Now().UnixNano()
+		newState.PrivateScalerState = privateState
 
 		mayHaveBacklog := target
 		if prevTarget == 0 {
@@ -221,8 +239,7 @@ func (sm *scaleManager) backgroundWork(ctx context.Context) error {
 			sm.lock.Unlock()
 
 			// notify once
-			tasks := int(sm.batch.Swap(0))
-			sm.partitionScaler.OnTasks(tasks, int(scaleState.GetTarget()), scaleState.GetBacklogCounts(), sm.setTarget)
+			sm.callScaler(scaleState)
 
 			// query all child partitions for backlog counts and drain state
 			sm.updateBacklogAndDrainState(ctx, scaleState)

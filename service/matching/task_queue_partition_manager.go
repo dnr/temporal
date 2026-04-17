@@ -360,10 +360,9 @@ func (pm *taskQueuePartitionManagerImpl) checkPartitionCounts(ctx context.Contex
 
 	// on root partition, send signal to scaler
 	if forWrite && !forwarded && pm.scaleManager != nil {
-		// note that write == target, so we can use write for target
-		target := int(scaleInfo.GetWrite())
-		// we can assume the effective number of write partitions is equal to the target
-		effective := target
+		// note that write == target, so we can use write for target, and we can assume the
+		// effective number of write partitions is equal to the target.
+		effective := int(scaleInfo.GetWrite())
 		// if no target is set yet, get effective count from dynamic config (matches client behavior)
 		if effective == 0 {
 			effective = max(1, pm.config.NumWritePartitions())
@@ -371,8 +370,8 @@ func (pm *taskQueuePartitionManagerImpl) checkPartitionCounts(ctx context.Contex
 		// we assume that tasks are balanced uniformly across partitions, so if the root has
 		// seen 1 task then all have seen ~1 task, so the whole queue has seen 'effective'
 		// tasks in total.
-		// TODO: we could aggregate real stats instead of assuming
-		pm.scaleManager.OnTasks(effective, target, scaleInfo.GetBacklogCounts())
+		// TODO: we should eventually aggregate real stats instead of assuming
+		pm.scaleManager.AddedTasks(effective)
 	}
 
 	clientPC, parseErr := matching.ParsePartitionCountsFromIncomingContext(ctx)

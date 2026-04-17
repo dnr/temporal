@@ -151,7 +151,7 @@ type SimplePartitionScalerSettings struct {
 	Enabled bool
 
 	// If non-zero, Fixed will be used as the scaling decision (overrides everything else).
-	Fixed int
+	Fixed int32
 
 	// Ups and Downs control scaling based on add rate: The TargetRate measured over the
 	// Interval is used to calculate a target number of partitions. Ups may move the actual
@@ -166,13 +166,13 @@ type SimplePartitionScalerSettings struct {
 	// when it falls below BacklogReset (for hysteresis). When it gets up to BacklogCap, stop
 	// adding tasks entirely. (TODO: we also need these numbers for backlog-based load
 	// balancing, how do we propagate them?)
-	BacklogReset int
-	BacklogBase  int
-	BacklogCap   int
+	BacklogReset int32
+	BacklogBase  int32
+	BacklogCap   int32
 
 	// Overall bounds (0 means don't enforce).
-	Min int
-	Max int
+	Min int32
+	Max int32
 }
 
 type SimplePartitionScalerThreshold struct {
