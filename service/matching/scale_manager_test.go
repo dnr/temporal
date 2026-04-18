@@ -19,6 +19,7 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
+<<<<<<< Side #1 (Conflict 1 of 9)
 func TestBacklogStateBits(t *testing.T) {
 	state := &persistencespb.PartitionScaleState{}
 
@@ -91,7 +92,7 @@ func TestScaleStateToInfo_TargetOnly(t *testing.T) {
 func TestScaleStateToInfo_BacklogAboveTarget(t *testing.T) {
 	t.Parallel()
 	state := &persistencespb.PartitionScaleState{Target: 4}
-	setBacklogStateBit(state, 7) // partition 7 has backlog
+	(*bitSet)(&state.BacklogState).set(7) // partition 7 has backlog
 	info := scaleStateToInfo(state)
 	assert.Equal(t, int32(8), info.Read)  // max(4, 8) = 8
 	assert.Equal(t, int32(4), info.Write) // always target
@@ -100,7 +101,7 @@ func TestScaleStateToInfo_BacklogAboveTarget(t *testing.T) {
 func TestScaleStateToInfo_TargetAboveBacklog(t *testing.T) {
 	t.Parallel()
 	state := &persistencespb.PartitionScaleState{Target: 10}
-	setBacklogStateBit(state, 3)
+	(*bitSet)(&state.BacklogState).set(3)
 	info := scaleStateToInfo(state)
 	assert.Equal(t, int32(10), info.Read)  // max(10, 4) = 10
 	assert.Equal(t, int32(10), info.Write) // target
@@ -338,7 +339,7 @@ func TestScaleManager_SetTarget_GrowFromZero(t *testing.T) {
 	assert.Equal(t, int32(4), db.state.MaxTarget)
 	// Backlog bits should be set for 0..3, and also 0..3 from DC (getWritePartitions=4)
 	for i := range 4 {
-		assert.True(t, getBacklogStateBit(db.state, int32(i)), "bit %d should be set", i)
+		assert.True(t, bitSet(db.state.BacklogState).get(int32(i)), "bit %d should be set", i)
 	}
 	// Ephemeral data should be updated
 	require.NotNil(t, udm.scaleInfo)
@@ -361,7 +362,7 @@ func TestScaleManager_SetTarget_GrowFromExisting(t *testing.T) {
 		TargetVersion: 100,
 	}
 	for i := range 4 {
-		setBacklogStateBit(sm.scaleState, int32(i))
+		(*bitSet)(&sm.scaleState.BacklogState).set(int32(i))
 	}
 
 	sm.SetTarget(8)
@@ -373,7 +374,7 @@ func TestScaleManager_SetTarget_GrowFromExisting(t *testing.T) {
 	assert.Equal(t, int32(8), db.state.MaxTarget)
 	// Backlog bits 0..7 should be set
 	for i := range 8 {
-		assert.True(t, getBacklogStateBit(db.state, int32(i)), "bit %d should be set", i)
+		assert.True(t, bitSet(db.state.BacklogState).get(int32(i)), "bit %d should be set", i)
 	}
 }
 
@@ -393,7 +394,7 @@ func TestScaleManager_SetTarget_Shrink(t *testing.T) {
 		TargetVersion: 100,
 	}
 	for i := range 8 {
-		setBacklogStateBit(sm.scaleState, int32(i))
+		(*bitSet)(&sm.scaleState.BacklogState).set(int32(i))
 	}
 
 	sm.SetTarget(4)
@@ -404,7 +405,7 @@ func TestScaleManager_SetTarget_Shrink(t *testing.T) {
 	assert.Equal(t, int32(4), db.state.Target)
 	// Backlog bits should be UNCHANGED (draining partitions still tracked)
 	for i := range 8 {
-		assert.True(t, getBacklogStateBit(db.state, int32(i)), "bit %d should still be set", i)
+		assert.True(t, bitSet(db.state.BacklogState).get(int32(i)), "bit %d should still be set", i)
 	}
 	// Ephemeral data: write=4, read=8 (max of target and backlog)
 	require.NotNil(t, udm.scaleInfo)
@@ -483,6 +484,6 @@ func TestScaleManager_SetTarget_TurningOn_IncludesDCPartitions(t *testing.T) {
 	assert.Equal(t, int32(2), db.state.Target)
 	// Backlog bits should cover max(2, 6) = 6 partitions
 	for i := range 6 {
-		assert.True(t, getBacklogStateBit(db.state, int32(i)), "bit %d should be set", i)
+		assert.True(t, bitSet(db.state.BacklogState).get(int32(i)), "bit %d should be set", i)
 	}
 }
