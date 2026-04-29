@@ -118,6 +118,16 @@ var DefaultHistoryCacheBackgroundEvictSettings = CacheBackgroundEvictSettings{
 	MaxEntryPerCall: 1024,
 }
 
+type PartitionScaleDifference struct {
+	// AllowedDelta and AllowedRatio controls how far off client counts can be before we reject
+	// an RPC. If the client count is within either the delta or ratio, then it's allowed.
+	// To always allow: set Delta to a very high number and Ratio to 1.0.
+	// To never allow except on exact match: set Delta to 0 and Ratio to 1.0.
+	// Allowing more means fewer retries, allowing less means more accurate load balancing.
+	AllowedDelta int32
+	AllowedRatio float32
+}
+
 type PartitionScaleManagerSettings struct {
 	// MaxRate limits scale change frequency. (Needs task queue reload.)
 	MaxRate float32
@@ -135,13 +145,6 @@ type PartitionScaleManagerSettings struct {
 	// should be set to the maximum time of an AddTask call. Note that query/nexus tasks will
 	// be processed without interruption even after scale down.
 	DrainBufferTime time.Duration
-
-	// AllowedDelta and AllowedRatio controls how far off client counts can be before we reject
-	// an RPC. If the client count is within either the delta or ratio, then it's allowed.
-	// To always allow: set Delta to 10000 and Ratio to 1.0.
-	// To never allow except on exact match: set Delta to 0 and Ratio to 1.0.
-	AllowedDelta int32
-	AllowedRatio float32
 }
 
 type SimplePartitionScalerSettings struct {

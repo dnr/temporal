@@ -1475,6 +1475,14 @@ default as namespace cardinality can be high and this requires a metrics collect
 		false,
 		`MatchingAutoEnableV2 automatically enables fairness when a fairness or priority key is seen`,
 	)
+	MatchingPartitionScaleDifference = NewTaskQueueTypedSetting(
+		"matching.partitionScaleDifference",
+		PartitionScaleDifference{
+			AllowedDelta: 1,
+			AllowedRatio: 1.5,
+		},
+		`How far off client partition scale values have to be to reject RPCs.`,
+	)
 	MatchingPartitionScaleManager = NewTaskQueueTypedSetting(
 		"matching.partitionScaleManager",
 		PartitionScaleManagerSettings{
@@ -1482,8 +1490,6 @@ default as namespace cardinality can be high and this requires a metrics collect
 			BatchSize:          100,
 			BackgroundInterval: 37 * time.Second,
 			DrainBufferTime:    15 * time.Second,
-			AllowedDelta:       1,
-			AllowedRatio:       1.5,
 		},
 		`Settings for partition scale manager. Some fields require a task queue reload to take effect.`,
 	)
