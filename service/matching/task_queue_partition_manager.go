@@ -349,7 +349,7 @@ func (pm *taskQueuePartitionManagerImpl) LoadedMetadata(scaleState *persistences
 	pm.scaleManager.LoadedMetadata(scaleState, pm.defaultQueue())
 }
 
-func (pm *taskQueuePartitionManagerImpl) checkPartitionCounts(ctx context.Context, forWrite, forwarded bool) error {
+func (pm *taskQueuePartitionManagerImpl) checkPartitionCounts(ctx context.Context, forWrite bool) error {
 	normal, ok := pm.partition.(*tqid.NormalPartition)
 	if !ok {
 		return nil // only normal partitions do dynamic scaling
@@ -426,6 +426,28 @@ func validatePartitionCountDifference(
 
 	// otherwise reject to improve load balancing
 	return errPartitionCountsStale
+}
+
+// signalPartitionScaler sends a signal to the partition scaler that a new task has arrived
+// (directly from history, not forwarded).
+func (pm *taskQueuePartitionManagerImpl) signalPartitionScaler() {
+	if pm.scaleManager == nil {
+		return // only run on root partition
+	}
+	scaleInfo := pm.userDataManager.PartitionScale()
+	// note that write == target, so we can use write for target, and we can assume the
+	// effective number of write partitions is equal to the target.
+	effective := int(scaleInfo.GetWrite())
+	// if no target is set yet, get effective count from dynamic config (matches client behavior)
+	if effective == 0 {
+		effective = max(1, pm.config.NumWritePartitions())
+	}
+	// we assume that tasks are balanced uniformly across partitions, so if the root has
+	// seen 1 task then all have seen ~1 task, so the whole queue has seen 'effective'
+	// tasks in total.
+	// TODO: this will change when we add non-uniform load balancing. we should eventually
+	// aggregate real stats instead of assuming
+	pm.scaleManager.AddedTasks(effective)
 }
 
 func (pm *taskQueuePartitionManagerImpl) sendPartitionCountTrailer(ctx context.Context) {
@@ -532,8 +554,11 @@ func (pm *taskQueuePartitionManagerImpl) AddTask(
 	params addTaskParams,
 ) (buildId string, syncMatched bool, err error) {
 	defer pm.sendPartitionCountTrailer(ctx)
-	if err := pm.checkPartitionCounts(ctx, true, params.forwardInfo != nil); err != nil {
+	if err := pm.checkPartitionCounts(ctx, true); err != nil {
 		return "", false, err
+	}
+	if params.forwardInfo == nil {
+		pm.signalPartitionScaler()
 	}
 
 	var spoolQueue, syncMatchQueue physicalTaskQueueManager
@@ -651,7 +676,7 @@ func (pm *taskQueuePartitionManagerImpl) PollTask(
 	pollMetadata *pollMetadata,
 ) (*internalTask, bool, error) {
 	defer pm.sendPartitionCountTrailer(ctx)
-	if err := pm.checkPartitionCounts(ctx, false, pollMetadata.forwardedFrom != ""); err != nil {
+	if err := pm.checkPartitionCounts(ctx, false); err != nil {
 		return nil, false, err
 	}
 
@@ -932,8 +957,11 @@ func (pm *taskQueuePartitionManagerImpl) DispatchQueryTask(
 ) (*matchingservice.QueryWorkflowResponse, error) {
 	// query counts as "write" for partition load balancing
 	defer pm.sendPartitionCountTrailer(ctx)
-	if err := pm.checkPartitionCounts(ctx, true, request.ForwardInfo != nil); err != nil {
+	if err := pm.checkPartitionCounts(ctx, true); err != nil {
 		return nil, err
+	}
+	if request.ForwardInfo == nil {
+		pm.signalPartitionScaler()
 	}
 
 	task := newInternalQueryTask(taskID, request)
@@ -980,8 +1008,11 @@ func (pm *taskQueuePartitionManagerImpl) DispatchNexusTask(
 ) (*matchingservice.DispatchNexusTaskResponse, error) {
 	// nexus counts as "write" for partition load balancing
 	defer pm.sendPartitionCountTrailer(ctx)
-	if err := pm.checkPartitionCounts(ctx, true, request.ForwardInfo != nil); err != nil {
+	if err := pm.checkPartitionCounts(ctx, true); err != nil {
 		return nil, err
+	}
+	if request.ForwardInfo == nil {
+		pm.signalPartitionScaler()
 	}
 
 	deadline, _ := ctx.Deadline() // If not set by user, our client will set a default.
