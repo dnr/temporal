@@ -461,7 +461,8 @@ func (pm *taskQueuePartitionManagerImpl) sendPartitionCountTrailer(ctx context.C
 		BacklogCount: []byte(scaleInfo.GetBacklogCounts()),
 	}.SetTrailer(ctx)
 	if err != nil {
-		pm.throttledLogger.Warn("error setting partition count trailer", tag.Error(err))
+		// TODO: this is very noisy in unit tests, figure out how to log it only in non-test
+		pm.throttledLogger.Debug("error setting partition count trailer", tag.Error(err))
 	}
 }
 

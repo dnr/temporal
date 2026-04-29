@@ -1488,7 +1488,7 @@ default as namespace cardinality can be high and this requires a metrics collect
 		PartitionScaleManagerSettings{
 			MaxRate:            0.33,
 			BatchSize:          100,
-			BackgroundInterval: 37 * time.Second,
+			BackgroundInterval: 23 * time.Second,
 			DrainBufferTime:    15 * time.Second,
 		},
 		`Settings for partition scale manager. Some fields require a task queue reload to take effect.`,
