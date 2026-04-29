@@ -181,7 +181,7 @@ func (sm *scaleManager) callScaler(scaleState *persistencespb.PartitionScaleStat
 			mayHaveBacklog = max(mayHaveBacklog, int32(sm.getWritePartitions()))
 		}
 		for i := range mayHaveBacklog {
-			(*bitSet)(&newState.BacklogState).set(i)
+			newState.BacklogState = bitSet(newState.BacklogState).set(i)
 		}
 
 		// we must succesfully write to the db before making new state active
@@ -314,7 +314,7 @@ func (sm *scaleManager) updateBacklogAndDrainState(ctx context.Context, scaleSta
 	}
 	newState.BacklogCounts = newBacklog
 	for _, i := range toClear {
-		(*bitSet)(&newState.BacklogState).clear(i)
+		newState.BacklogState = bitSet(newState.BacklogState).clear(i)
 	}
 
 	// Sync to DB only when drain bits changed (must be persisted before taking effect).

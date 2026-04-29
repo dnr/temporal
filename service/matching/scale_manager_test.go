@@ -39,7 +39,7 @@ func TestScaleStateToInfo_TargetOnly(t *testing.T) {
 func TestScaleStateToInfo_BacklogAboveTarget(t *testing.T) {
 	t.Parallel()
 	state := &persistencespb.PartitionScaleState{Target: 4}
-	(*bitSet)(&state.BacklogState).set(7) // partition 7 has backlog
+	state.BacklogState = bitSet(state.BacklogState).set(7) // partition 7 has backlog
 	info := scaleStateToInfo(state)
 	assert.Equal(t, int32(8), info.Read)  // max(4, 8) = 8
 	assert.Equal(t, int32(4), info.Write) // always target
@@ -48,7 +48,7 @@ func TestScaleStateToInfo_BacklogAboveTarget(t *testing.T) {
 func TestScaleStateToInfo_TargetAboveBacklog(t *testing.T) {
 	t.Parallel()
 	state := &persistencespb.PartitionScaleState{Target: 10}
-	(*bitSet)(&state.BacklogState).set(3)
+	state.BacklogState = bitSet(state.BacklogState).set(3)
 	info := scaleStateToInfo(state)
 	assert.Equal(t, int32(10), info.Read)  // max(10, 4) = 10
 	assert.Equal(t, int32(10), info.Write) // target
@@ -309,7 +309,7 @@ func TestScaleManager_SetTarget_GrowFromExisting(t *testing.T) {
 		TargetVersion: 100,
 	}
 	for i := range 4 {
-		(*bitSet)(&sm.scaleState.BacklogState).set(int32(i))
+		sm.scaleState.BacklogState = bitSet(sm.scaleState.BacklogState).set(int32(i))
 	}
 
 	sm.SetTarget(8)
@@ -341,7 +341,7 @@ func TestScaleManager_SetTarget_Shrink(t *testing.T) {
 		TargetVersion: 100,
 	}
 	for i := range 8 {
-		(*bitSet)(&sm.scaleState.BacklogState).set(int32(i))
+		sm.scaleState.BacklogState = bitSet(sm.scaleState.BacklogState).set(int32(i))
 	}
 
 	sm.SetTarget(4)
