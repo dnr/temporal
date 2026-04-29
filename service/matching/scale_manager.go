@@ -108,6 +108,7 @@ func (sm *scaleManager) LoadedMetadata(scaleState *persistencespb.PartitionScale
 }
 
 // AddedTasks is called on a batch of tasks added.
+// This is called in the task add path, so it shouldn't block.
 func (sm *scaleManager) AddedTasks(numTasks int) {
 	if sm == nil {
 		return
@@ -116,47 +117,44 @@ func (sm *scaleManager) AddedTasks(numTasks int) {
 	// scale target batch size by numTasks (since numTasks is scaled by partitions)
 	batchSize := int64(numTasks) * int64(sm.settings.BatchSize)
 
-	if tasks := sm.batch.Add(int64(numTasks)); tasks >= batchSize {
-		// FIXME: let's try to avoid this lock again
-		sm.lock.Lock()
-		scaleState := sm.scaleState
-		sm.lock.Unlock()
-
-		sm.callScaler(scaleState)
+	tasks := sm.batch.Add(int64(numTasks))
+	if tasks < batchSize {
+		return // not enough for a batch yet
 	}
+
+	if !sm.lock.TryLock() {
+		return // don't block if something else is updating scaler
+	}
+	sm.callScalerLockedAndRelease()
 }
 
-// callScaler is called in the task add path; it shouldn't block.
-func (sm *scaleManager) callScaler(scaleState *persistencespb.PartitionScaleState) {
+// callScalerLockedAndRelease calls the scaling algorithm with a batch of tasks. If it
+// indicates a change and the change is allowed, it performs the change (asynchronously).
+//
+// Note that this function expects sm.lock to be held on entry, and it unlocks it either
+// synchronously or asynchronously. The caller must not unlock.
+//
+// This is called in the task add path, so it shouldn't block.
+func (sm *scaleManager) callScalerLockedAndRelease() {
 	tasks := int(sm.batch.Swap(0))
 
 	decision := sm.partitionScaler.OnTasks(PartitionScalerInput{
 		NumTasks:      tasks,
-		CurrentTarget: int(scaleState.GetTarget()),
-		BacklogCounts: scaleState.GetBacklogCounts(),
-		PrivateState:  scaleState.GetPrivateScalerState(),
+		CurrentTarget: int(sm.scaleState.GetTarget()),
+		BacklogCounts: sm.scaleState.GetBacklogCounts(),
+		PrivateState:  sm.scaleState.GetPrivateScalerState(),
 	})
-	if decision.NoChange {
-		return
-	}
-	backlogCapC8 := number.EncodeCompact8(int64(decision.BacklogCap))
-	if decision.NewTarget == int(scaleState.GetTarget()) && backlogCapC8 == number.Compact8(scaleState.GetBacklogCap()) {
-		return
-	}
-
-	if !sm.lock.TryLock() {
-		return // don't block on contention
-	}
-
-	if sm.scaleDB == nil || // not initialized yet
-		!sm.limiter.Allow() || // rate limited
-		sm.scaleState != scaleState { // state changed across call to scaler
+	if decision.NoChange || // explicit "no change"
+		decision.NewTarget == int(sm.scaleState.GetTarget()) &&
+			number.EncodeCompact8(int64(decision.BacklogCap)) == number.Compact8(scaleState.GetBacklogCap()) || // no actual change
+		sm.scaleDB == nil || // not initialized yet
+		!sm.limiter.Allow() { // rate limited
 		sm.lock.Unlock()
 		return
 	}
 
 	// Do the rest async so that we don't block the task add.
-	// Note that we unlock sm.lock in another goroutine.
+	// Note that we unlock sm.lock in the new goroutine.
 	go func() {
 		defer sm.lock.Unlock()
 
@@ -229,10 +227,9 @@ func (sm *scaleManager) backgroundWork(ctx context.Context) error {
 		case <-time.After(backoff.Jitter(sm.settings.BackgroundInterval, 0.05)):
 			sm.lock.Lock()
 			scaleState := sm.scaleState
-			sm.lock.Unlock()
 
-			// notify once
-			sm.callScaler(scaleState)
+			sm.callScalerLockedAndRelease()
+			// note that sm.lock may or may not be locked here. assume that it's not.
 
 			// query all child partitions for backlog counts and drain state
 			sm.updateBacklogAndDrainState(ctx, scaleState)
@@ -267,7 +264,7 @@ func (sm *scaleManager) updateBacklogAndDrainState(ctx context.Context, scaleSta
 	newBacklog := make([]byte, read)
 	backlogChanged := false
 
-	// Check if we should also evaluate drain state
+	// check if we should also evaluate drain state
 	target := scaleState.GetTarget()
 	checkDrain := target > 0 &&
 		time.Since(time.Unix(0, scaleState.GetTargetVersion())) >= sm.settings.DrainBufferTime
@@ -282,7 +279,7 @@ func (sm *scaleManager) updateBacklogAndDrainState(ctx context.Context, scaleSta
 			continue
 		}
 
-		// Update backlog count
+		// update backlog count
 		total := totalBacklogFromDescribeResponse(res)
 		var prev number.Compact8
 		if id < int32(len(prevBacklog)) {
@@ -291,7 +288,7 @@ func (sm *scaleManager) updateBacklogAndDrainState(ctx context.Context, scaleSta
 		newBacklog[id] = number.UpdateCompact8(total, prev)
 		backlogChanged = backlogChanged || newBacklog[id] != prev
 
-		// Check drain state for partitions in the draining range
+		// check drain state for partitions in the draining range
 		if checkDrain && id >= target && bitSet(scaleState.BacklogState).get(id) && partitionIsFullyDrained(res, info) {
 			toClear = append(toClear, id)
 		}
@@ -317,8 +314,9 @@ func (sm *scaleManager) updateBacklogAndDrainState(ctx context.Context, scaleSta
 		newState.BacklogState = bitSet(newState.BacklogState).clear(i)
 	}
 
-	// Sync to DB only when drain bits changed (must be persisted before taking effect).
-	// For backlog-count-only updates, write without sync and tolerate errors.
+	// sync to DB only when drain bits changed (must be persisted before taking effect).
+	// for backlog-count-only updates, update in-memory state only (will be persisted
+	// periodically).
 	needSync := len(toClear) > 0
 	if err := sm.scaleDB.UpdateScaleState(newState, needSync); err != nil {
 		sm.logger.Error("failed to update state", tag.Error(err), tag.Operation("drain"))
@@ -334,15 +332,6 @@ func (sm *scaleManager) updateBacklogAndDrainState(ctx context.Context, scaleSta
 	}
 
 	sm.setStateLocked(newState)
-}
-
-func totalBacklogFromDescribeResponse(res *matchingservice.DescribeTaskQueuePartitionResponse) (total int64) {
-	for _, v := range res.GetVersionsInfoInternal() {
-		for _, q := range v.GetPhysicalTaskQueueInfo().GetInternalTaskQueueStatus() {
-			total += q.ApproximateBacklogCount
-		}
-	}
-	return
 }
 
 func partitionIsFullyDrained(
