@@ -1,0 +1,62 @@
+syntax = "proto3";
+
+package temporal.server.chasm.lib.semaphore.proto.v1;
+
+option go_package = "go.temporal.io/server/chasm/lib/semaphore/gen/semaphorepb;semaphorepb";
+
+// SetLimit creates the semaphore if it does not yet exist, or updates the
+// limit on an existing semaphore. Increasing the limit may promote queued
+// waiters into holders.
+message SetLimitRequest {
+  string namespace_id = 1;
+  // BusinessID identifying this semaphore.
+  string semaphore_id = 2;
+  int32 limit = 3;
+}
+
+message SetLimitResponse {
+  int32 limit = 1;
+}
+
+message GetLimitRequest {
+  string namespace_id = 1;
+  string semaphore_id = 2;
+}
+
+message GetLimitResponse {
+  int32 limit = 1;
+}
+
+message GetHoldersRequest {
+  string namespace_id = 1;
+  string semaphore_id = 2;
+}
+
+message GetHoldersResponse {
+  repeated string holders = 1;
+  repeated string waiters = 2;
+}
+
+// AcquireRequest attempts to add the given id to the holders. If a slot is
+// available (or id is already a holder) it returns immediately with
+// acquired = true. Otherwise the id is enqueued as a waiter and the call
+// long-polls until either a slot opens up or the deadline is reached.
+message AcquireRequest {
+  string namespace_id = 1;
+  string semaphore_id = 2;
+  string holder_id = 3;
+}
+
+message AcquireResponse {
+  bool acquired = 1;
+}
+
+// ReleaseRequest removes the id from the holders (or waiters, if still
+// queued). No-op if id is not present in either list.
+message ReleaseRequest {
+  string namespace_id = 1;
+  string semaphore_id = 2;
+  string holder_id = 3;
+}
+
+message ReleaseResponse {}

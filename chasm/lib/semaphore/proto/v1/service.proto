@@ -1,0 +1,36 @@
+syntax = "proto3";
+
+package temporal.server.chasm.lib.semaphore.proto.v1;
+
+import "chasm/lib/semaphore/proto/v1/request_response.proto";
+import "temporal/server/api/common/v1/api_category.proto";
+import "temporal/server/api/routing/v1/extension.proto";
+
+option go_package = "go.temporal.io/server/chasm/lib/semaphore/gen/semaphorepb;semaphorepb";
+
+service SemaphoreService {
+  rpc SetLimit(SetLimitRequest) returns (SetLimitResponse) {
+    option (temporal.server.api.routing.v1.routing).business_id = "semaphore_id";
+    option (temporal.server.api.common.v1.api_category).category = API_CATEGORY_STANDARD;
+  }
+
+  rpc GetLimit(GetLimitRequest) returns (GetLimitResponse) {
+    option (temporal.server.api.routing.v1.routing).business_id = "semaphore_id";
+    option (temporal.server.api.common.v1.api_category).category = API_CATEGORY_STANDARD;
+  }
+
+  rpc GetHolders(GetHoldersRequest) returns (GetHoldersResponse) {
+    option (temporal.server.api.routing.v1.routing).business_id = "semaphore_id";
+    option (temporal.server.api.common.v1.api_category).category = API_CATEGORY_STANDARD;
+  }
+
+  rpc Acquire(AcquireRequest) returns (AcquireResponse) {
+    option (temporal.server.api.routing.v1.routing).business_id = "semaphore_id";
+    option (temporal.server.api.common.v1.api_category).category = API_CATEGORY_LONG_POLL;
+  }
+
+  rpc Release(ReleaseRequest) returns (ReleaseResponse) {
+    option (temporal.server.api.routing.v1.routing).business_id = "semaphore_id";
+    option (temporal.server.api.common.v1.api_category).category = API_CATEGORY_STANDARD;
+  }
+}

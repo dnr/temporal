@@ -1,0 +1,18 @@
+syntax = "proto3";
+
+package temporal.server.chasm.lib.semaphore.proto.v1;
+
+option go_package = "go.temporal.io/server/chasm/lib/semaphore/gen/semaphorepb;semaphorepb";
+
+// SemaphoreState is the persisted state of a Semaphore component.
+message SemaphoreState {
+  // Maximum number of concurrent holders allowed.
+  int32 limit = 1;
+
+  // IDs that currently hold a slot. Order is not significant.
+  repeated string holders = 2;
+
+  // IDs waiting for a slot to open up, in FIFO order. Front of the queue
+  // is promoted first when a holder releases or the limit increases.
+  repeated string waiters = 3;
+}
