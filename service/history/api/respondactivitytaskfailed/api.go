@@ -112,9 +112,12 @@ func Invoke(
 			}
 			// TODO uncomment once RETRY_STATE_PAUSED is supported
 			// if retryState != enumspb.RETRY_STATE_IN_PROGRESS && retryState != enumspb.RETRY_STATE_PAUSED {
+			// The semaphore slot is held per-attempt. We release on every
+			// failure (terminal or retrying); the next dispatch will
+			// Reserve a fresh slot for the next attempt.
+			releaseAi = proto.Clone(ai).(*persistencespb.ActivityInfo)
 			if retryState != enumspb.RETRY_STATE_IN_PROGRESS {
 				// no more retry, and we want to record the failure event
-				releaseAi = proto.Clone(ai).(*persistencespb.ActivityInfo)
 				if _, err := mutableState.AddActivityTaskFailedEvent(scheduledEventID, ai.StartedEventId, failure, retryState, request.GetIdentity(), request.GetWorkerVersion()); err != nil {
 					// Unable to add ActivityTaskFailed event to history
 					return nil, err
@@ -149,17 +152,16 @@ func Invoke(
 			metrics.ActivityTypeTag(token.ActivityType),
 			metrics.VersioningBehaviorTag(versioningBehavior))
 
-		// Release the semaphore slot only on terminal failure (no retry).
-		// While the activity is retrying it still holds the slot.
+		// Release the semaphore slot on every failure — the slot is held
+		// per-attempt, not across retries. If the activity is retrying,
+		// the next dispatch will Reserve a fresh slot.
 		//
 		// TODO: thread a real SemaphoreServiceClient. Until then this is
 		// a no-op via the nil client.
-		if closed {
-			if releaseErr := api.ReleaseActivitySemaphore(
-				ctx, nil, token.NamespaceId, token.WorkflowId, token.RunId, releaseAi,
-			); releaseErr != nil {
-				return nil, releaseErr
-			}
+		if releaseErr := api.ReleaseActivitySemaphore(
+			ctx, nil, token.NamespaceId, token.WorkflowId, token.RunId, releaseAi,
+		); releaseErr != nil {
+			return nil, releaseErr
 		}
 	}
 	return &historyservice.RespondActivityTaskFailedResponse{}, err

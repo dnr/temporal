@@ -275,6 +275,13 @@ Loop:
 		release(nil) // so mutable state is not unloaded from cache
 		return errNoTimerFired
 	}
+	// TODO(activity-flow-control): for every activity attempt that
+	// processSingleActivityTimeoutTask terminated above (whether it transitioned
+	// to retry or to a terminal timeout), call api.ReleaseActivitySemaphore for
+	// that attempt before returning success. Each timeout ends one attempt and
+	// the next attempt will Reserve a fresh slot. Capture the relevant
+	// ActivityInfos in the inner loop above (before RetryActivity mutates them)
+	// and pass them through to here once the SemaphoreServiceClient is plumbed.
 	return t.updateWorkflowExecution(ctx, weContext, mutableState, scheduleWorkflowTask)
 }
 

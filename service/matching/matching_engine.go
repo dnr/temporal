@@ -1097,18 +1097,24 @@ pollLoop:
 		}
 
 		// Commit the semaphore reservation now that history accepted the
-		// start. If Commit fails because the reservation already expired,
-		// the activity will be re-driven by start-to-close / heartbeat
-		// timeouts at history — we proceed with the dispatch regardless so
-		// the poller still gets the task.
+		// start. Under "hard" semantics, a Commit failure means we cannot
+		// safely dispatch — the reservation expired (or otherwise vanished)
+		// and proceeding would put us above the limit. Drop the task; the
+		// activity will be re-driven by start-to-close / heartbeat timeout
+		// at history, which Reserves fresh.
+		//
+		// TODO: when "soft" semantics is introduced, branch on the
+		// semaphore policy and allow dispatch-anyway in soft mode.
 		if commitErr := gate.commit(ctx); commitErr != nil {
-			e.logger.Warn("activity semaphore Commit failed; proceeding with dispatch",
+			e.logger.Warn("activity semaphore Commit failed; dropping task to preserve hard limit",
 				tag.WorkflowNamespaceID(task.event.Data.GetNamespaceId()),
 				tag.WorkflowID(task.event.Data.GetWorkflowId()),
 				tag.WorkflowRunID(task.event.Data.GetRunId()),
 				tag.WorkflowScheduledEventID(task.event.Data.GetScheduledEventId()),
 				tag.Error(commitErr),
 			)
+			task.finish(nil, false)
+			continue pollLoop
 		}
 
 		task.finish(nil, true)
