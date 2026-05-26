@@ -29,6 +29,7 @@ import (
 	replicationspb "go.temporal.io/server/api/replication/v1"
 	taskqueuespb "go.temporal.io/server/api/taskqueue/v1"
 	tokenspb "go.temporal.io/server/api/token/v1"
+	semaphorepb "go.temporal.io/server/chasm/lib/semaphore/gen/semaphorepb/v1"
 	"go.temporal.io/server/client/matching"
 	"go.temporal.io/server/common"
 	"go.temporal.io/server/common/backoff"
@@ -193,6 +194,11 @@ type (
 		rateLimiter TaskDispatchRateLimiter
 
 		taskHookFactories []hooks.TaskHookFactory
+
+		// Used to Reserve/Commit/Unreserve slots when a task has an
+		// associated semaphore. Nil in tests; gateActivityDispatch is a
+		// no-op when nil.
+		semaphoreClient semaphorepb.SemaphoreServiceClient
 	}
 )
 
@@ -273,6 +279,7 @@ func NewEngine(
 	rateLimiter TaskDispatchRateLimiter,
 	historySerializer serialization.Serializer,
 	taskHookFactories []hooks.TaskHookFactory,
+	semaphoreClient semaphorepb.SemaphoreServiceClient,
 ) Engine {
 	scopedMetricsHandler := metricsHandler.WithTags(metrics.OperationTag(metrics.MatchingEngineScope))
 	e := &matchingEngineImpl{
@@ -317,6 +324,7 @@ func NewEngine(
 		userDataUpdateBatchers:    collection.NewSyncMap[namespace.ID, *stream_batcher.Batcher[*userDataUpdate, error]](),
 		rateLimiter:               rateLimiter,
 		taskHookFactories:         taskHookFactories,
+		semaphoreClient:           semaphoreClient,
 	}
 	e.nexusEndpointsOwnershipLostCh.Store(make(chan struct{}))
 	e.reachabilityCache = newReachabilityCache(
@@ -987,8 +995,19 @@ pollLoop:
 			requestClone = common.CloneProto(request)
 			requestClone.WorkerVersionCapabilities.BuildId = ""
 		}
+
+		// If this activity is gated by a semaphore, Reserve a slot before
+		// RecordActivityTaskStarted. The reservation is committed below on
+		// success; defer ensures we Unreserve on every non-success path.
+		gate := beginActivitySemaphoreGate(e, task)
+		if err := gate.reserve(ctx); err != nil {
+			task.finish(err, false)
+			return nil, err
+		}
+
 		resp, err := e.recordActivityTaskStarted(ctx, requestClone, task)
 		if err != nil {
+			gate.unreserveIfNotCommitted(ctx)
 			switch err := err.(type) {
 			case *serviceerror.Internal, *serviceerror.DataLoss:
 				e.nonRetryableErrorsDropTask(task, taskQueueName, err)
@@ -1076,6 +1095,22 @@ pollLoop:
 
 			continue pollLoop
 		}
+
+		// Commit the semaphore reservation now that history accepted the
+		// start. If Commit fails because the reservation already expired,
+		// the activity will be re-driven by start-to-close / heartbeat
+		// timeouts at history — we proceed with the dispatch regardless so
+		// the poller still gets the task.
+		if commitErr := gate.commit(ctx); commitErr != nil {
+			e.logger.Warn("activity semaphore Commit failed; proceeding with dispatch",
+				tag.WorkflowNamespaceID(task.event.Data.GetNamespaceId()),
+				tag.WorkflowID(task.event.Data.GetWorkflowId()),
+				tag.WorkflowRunID(task.event.Data.GetRunId()),
+				tag.WorkflowScheduledEventID(task.event.Data.GetScheduledEventId()),
+				tag.Error(commitErr),
+			)
+		}
+
 		task.finish(nil, true)
 		e.emitTaskDispatchLatency(task, partition, req.GetNamespaceId(), request.Namespace, pollMetadata)
 		return e.createPollActivityTaskQueueResponse(task, resp, opMetrics), nil

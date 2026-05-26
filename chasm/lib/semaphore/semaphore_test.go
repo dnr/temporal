@@ -36,13 +36,13 @@ func (l *testLibrary) Components() []*chasm.RegistrableComponent {
 		),
 	}
 }
-func (l *testLibrary) Tasks() []*chasm.RegistrableTask {
-	return []*chasm.RegistrableTask{
-		chasm.NewRegistrablePureTask("reservationExpiry", newReservationExpiryTaskHandler()),
-	}
-}
 
 func setupSemaphore(t *testing.T, limit int32) (*Semaphore, chasm.MutableContext) {
+	sem, ctx, _, _ := setupSemaphoreWithClock(t, limit)
+	return sem, ctx
+}
+
+func setupSemaphoreWithClock(t *testing.T, limit int32) (*Semaphore, chasm.MutableContext, *clock.EventTimeSource, *chasm.Node) {
 	t.Helper()
 
 	logger := testlogger.NewTestLogger(t, testlogger.FailOnExpectedErrorOnly)
@@ -79,7 +79,7 @@ func setupSemaphore(t *testing.T, limit int32) (*Semaphore, chasm.MutableContext
 	_, err = node.CloseTransaction()
 	require.NoError(t, err)
 
-	return sem, chasm.NewMutableContext(context.Background(), node)
+	return sem, chasm.NewMutableContext(context.Background(), node), timeSource, node
 }
 
 func TestReserveBasic(t *testing.T) {
@@ -174,17 +174,50 @@ func TestSetLimit_RejectsNegative(t *testing.T) {
 	require.ErrorIs(t, err, ErrInvalidLimit)
 }
 
+// TestOnDemandSweep_FreesExpiredSlot uses an EventTimeSource so we can fast
+// forward past reservationTTL and observe that the next Reserve sweeps the
+// stale slot.
+func TestOnDemandSweep_FreesExpiredSlot(t *testing.T) {
+	sem, _, ts, node := setupSemaphoreWithClock(t, 1)
+
+	// Reserve A (no Commit).
+	ctx := chasm.NewMutableContext(context.Background(), node)
+	_, err := sem.Reserve(ctx, &semaphorepb.ReserveRequest{HolderId: "a"})
+	require.NoError(t, err)
+	_, err = node.CloseTransaction()
+	require.NoError(t, err)
+
+	// Reserve B before TTL expires: no room.
+	ctx = chasm.NewMutableContext(context.Background(), node)
+	r, err := sem.Reserve(ctx, &semaphorepb.ReserveRequest{HolderId: "b"})
+	require.NoError(t, err)
+	require.Equal(t, reserveOutcomeNoRoom, r.outcome)
+	require.False(t, r.soonestExpiry.IsZero(), "soonestExpiry should be reported when NoRoom")
+
+	// Advance past TTL. Next Reserve should sweep "a" and succeed for "b".
+	ts.Update(ts.Now().Add(reservationTTL + time.Millisecond))
+	ctx = chasm.NewMutableContext(context.Background(), node)
+	r, err = sem.Reserve(ctx, &semaphorepb.ReserveRequest{HolderId: "b"})
+	require.NoError(t, err)
+	require.Equal(t, reserveOutcomeReserved, r.outcome)
+
+	// "a" was swept; only "b" is now reserved.
+	h, err := sem.GetHolders(ctx, &semaphorepb.GetHoldersRequest{})
+	require.NoError(t, err)
+	require.ElementsMatch(t, []string{"b"}, h.Reserved)
+}
+
 func TestHolderIDForTask_Deterministic(t *testing.T) {
 	k := TaskKey{
-		NamespaceID:   "ns",
-		TaskQueue:     "tq",
-		TaskQueueKind: 1,
-		WorkflowID:    "wf",
-		RunID:         "run",
-		ActivityID:    "act",
+		NamespaceID:      "ns",
+		TaskQueue:        "tq",
+		TaskQueueKind:    1,
+		WorkflowID:       "wf",
+		RunID:            "run",
+		ScheduledEventID: 42,
 	}
 	require.Equal(t, HolderIDForTask(k), HolderIDForTask(k))
 	k2 := k
-	k2.ActivityID = "act-other"
+	k2.ScheduledEventID = 43
 	require.NotEqual(t, HolderIDForTask(k), HolderIDForTask(k2))
 }

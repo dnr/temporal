@@ -7,6 +7,7 @@ import (
 	enumspb "go.temporal.io/api/enums/v1"
 	"go.temporal.io/api/workflowservice/v1"
 	"go.temporal.io/server/api/historyservice/v1"
+	persistencespb "go.temporal.io/server/api/persistence/v1"
 	"go.temporal.io/server/common"
 	"go.temporal.io/server/common/definition"
 	"go.temporal.io/server/common/metrics"
@@ -17,6 +18,7 @@ import (
 	"go.temporal.io/server/service/history/consts"
 	historyi "go.temporal.io/server/service/history/interfaces"
 	"go.temporal.io/server/service/history/workflow"
+	"google.golang.org/protobuf/proto"
 )
 
 func Invoke(
@@ -47,6 +49,8 @@ func Invoke(
 	var workflowTypeName string
 	var closed bool
 	var versioningBehavior enumspb.VersioningBehavior
+	// Captured for the post-commit semaphore Release on terminal failure.
+	var releaseAi *persistencespb.ActivityInfo
 	err = api.GetAndUpdateWorkflowWithNew(
 		ctx,
 		token.Clock,
@@ -110,6 +114,7 @@ func Invoke(
 			// if retryState != enumspb.RETRY_STATE_IN_PROGRESS && retryState != enumspb.RETRY_STATE_PAUSED {
 			if retryState != enumspb.RETRY_STATE_IN_PROGRESS {
 				// no more retry, and we want to record the failure event
+				releaseAi = proto.Clone(ai).(*persistencespb.ActivityInfo)
 				if _, err := mutableState.AddActivityTaskFailedEvent(scheduledEventID, ai.StartedEventId, failure, retryState, request.GetIdentity(), request.GetWorkerVersion()); err != nil {
 					// Unable to add ActivityTaskFailed event to history
 					return nil, err
@@ -143,6 +148,19 @@ func Invoke(
 			metrics.WorkflowTypeTag(workflowTypeName),
 			metrics.ActivityTypeTag(token.ActivityType),
 			metrics.VersioningBehaviorTag(versioningBehavior))
+
+		// Release the semaphore slot only on terminal failure (no retry).
+		// While the activity is retrying it still holds the slot.
+		//
+		// TODO: thread a real SemaphoreServiceClient. Until then this is
+		// a no-op via the nil client.
+		if closed {
+			if releaseErr := api.ReleaseActivitySemaphore(
+				ctx, nil, token.NamespaceId, token.WorkflowId, token.RunId, releaseAi,
+			); releaseErr != nil {
+				return nil, releaseErr
+			}
+		}
 	}
 	return &historyservice.RespondActivityTaskFailedResponse{}, err
 }

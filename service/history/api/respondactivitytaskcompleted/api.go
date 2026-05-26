@@ -6,6 +6,7 @@ import (
 
 	enumspb "go.temporal.io/api/enums/v1"
 	"go.temporal.io/server/api/historyservice/v1"
+	persistencespb "go.temporal.io/server/api/persistence/v1"
 	"go.temporal.io/server/common"
 	"go.temporal.io/server/common/definition"
 	"go.temporal.io/server/common/metrics"
@@ -16,6 +17,7 @@ import (
 	"go.temporal.io/server/service/history/consts"
 	historyi "go.temporal.io/server/service/history/interfaces"
 	"go.temporal.io/server/service/history/workflow"
+	"google.golang.org/protobuf/proto"
 )
 
 func Invoke(
@@ -46,6 +48,10 @@ func Invoke(
 	var workflowTypeName string
 	var fabricateStartedEvent bool
 	var versioningBehavior enumspb.VersioningBehavior
+	// Captured for the post-commit semaphore Release. The ActivityInfo is
+	// removed from mutable state during the closure, so we have to clone
+	// before AddActivityTaskCompletedEvent.
+	var releaseAi *persistencespb.ActivityInfo
 	err = api.GetAndUpdateWorkflowWithNew(
 		ctx,
 		token.Clock,
@@ -107,6 +113,7 @@ func Invoke(
 			}
 
 			ai, _ = mutableState.GetActivityInfo(scheduledEventID)
+			releaseAi = proto.Clone(ai).(*persistencespb.ActivityInfo)
 			if _, err = mutableState.AddActivityTaskCompletedEvent(scheduledEventID, ai.StartedEventId, request); err != nil {
 				// Unable to add ActivityTaskCompleted event to history
 				return nil, err
@@ -144,6 +151,18 @@ func Invoke(
 			metrics.ActivityTypeTag(token.ActivityType),
 			metrics.VersioningBehaviorTag(versioningBehavior),
 		)
+
+		// Release the semaphore slot now that the activity completion has
+		// been durably persisted. The API does not return success until
+		// this Release also persists (per the flow-control design).
+		//
+		// TODO: thread a real SemaphoreServiceClient here. Until then the
+		// helper is a no-op for nil clients.
+		if releaseErr := api.ReleaseActivitySemaphore(
+			ctx, nil, token.NamespaceId, token.WorkflowId, token.RunId, releaseAi,
+		); releaseErr != nil {
+			return nil, releaseErr
+		}
 	}
 	return &historyservice.RespondActivityTaskCompletedResponse{}, err
 }

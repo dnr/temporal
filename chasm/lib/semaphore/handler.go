@@ -3,12 +3,18 @@ package semaphore
 import (
 	"context"
 	"errors"
+	"time"
 
 	"go.temporal.io/server/chasm"
 	semaphorepb "go.temporal.io/server/chasm/lib/semaphore/gen/semaphorepb/v1"
 	"go.temporal.io/server/common/log"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
+
+// wakeupSkew is added to the per-RPC wake-up timer so the retry happens
+// strictly after the soonest reservation expiry — otherwise we can race
+// the wall clock and the sweep finds nothing to evict.
+const wakeupSkew = 5 * time.Millisecond
 
 type handler struct {
 	semaphorepb.UnimplementedSemaphoreServiceServer
@@ -76,21 +82,17 @@ func (h *handler) GetHolders(
 	)
 }
 
-// Reserve is the long-poll RPC: it tries to attach holder_id to a Reserved
-// slot, blocking via PollComponent until a slot opens or the caller's
-// deadline expires.
+// Reserve loops UpdateComponent + PollComponent until a slot is acquired or
+// the caller's deadline expires. The Reserve mutation does the on-demand
+// expiry sweep, so each iteration sees fresh state.
 //
-// Loop sketch (no durable waiter queue):
+// Wake-up sources for the long-poll:
+//   - Any other Reserve/Commit/Unreserve/Release transition (Notify wakes
+//     all blocked Polls on the execution).
+//   - A per-RPC timer set to the soonest reservation_expires_at + skew, so
+//     this caller wakes up as soon as it could plausibly sweep a slot.
 //
-//  1. UpdateComponent attempts Reserve. On success (Reserved or
-//     AlreadyCommitted) we return immediately.
-//  2. On NoRoom, PollComponent waits for any state change. The predicate is
-//     intentionally lax ("at least one slot is free now") because the
-//     real arbitration happens at the UpdateComponent retry in step 1.
-//  3. Loop until deadline.
-//
-// FIFO across competing Reserve callers is NOT guaranteed in this design —
-// "fifo for now" is a future optimization.
+// FIFO across competing Reserve callers is NOT guaranteed.
 func (h *handler) Reserve(
 	ctx context.Context,
 	req *semaphorepb.ReserveRequest,
@@ -103,6 +105,10 @@ func (h *handler) Reserve(
 	})
 
 	for {
+		if err := ctx.Err(); err != nil {
+			return &semaphorepb.ReserveResponse{Reserved: false}, nil
+		}
+
 		result, _, err := chasm.UpdateComponent(ctx, ref, (*Semaphore).Reserve, req)
 		if err != nil {
 			return nil, err
@@ -117,23 +123,39 @@ func (h *handler) Reserve(
 		case reserveOutcomeAlreadyCommitted:
 			return &semaphorepb.ReserveResponse{AlreadyCommitted: true}, nil
 		case reserveOutcomeNoRoom:
-			// Wait for some state change, then retry the update.
+			// Wait for either (a) a transition to wake the poll, or (b) the
+			// per-RPC timer to fire when the soonest reservation expires.
+			waitCtx, cancel := pollWaitContext(ctx, result.soonestExpiry)
 			_, _, err := chasm.PollComponent(
-				ctx,
+				waitCtx,
 				ref,
 				func(s *Semaphore, _ chasm.Context, _ *semaphorepb.ReserveRequest) (chasm.NoValue, bool, error) {
-					return nil, s.hasRoom(), nil
+					// Any state change wakes us; we re-attempt via the outer
+					// UpdateComponent. A trivial predicate is fine.
+					return nil, false, nil
 				},
 				req,
 			)
-			if err != nil {
-				if ctx.Err() != nil {
-					return &semaphorepb.ReserveResponse{Reserved: false}, nil
-				}
-				return nil, err
+			cancel()
+			// We treat both "predicate satisfied" (won't happen with this
+			// predicate) and "waitCtx done" (timer or change) the same: loop.
+			// Only bubble up if it's the caller's outer ctx that expired.
+			if err != nil && ctx.Err() != nil {
+				return &semaphorepb.ReserveResponse{Reserved: false}, nil
 			}
 		}
 	}
+}
+
+// pollWaitContext derives a child context that fires at the earlier of the
+// caller's deadline and the soonest reservation expiry. When soonestExpiry
+// is zero (no Reserved slots), the child just inherits the caller's
+// deadline.
+func pollWaitContext(parent context.Context, soonestExpiry time.Time) (context.Context, context.CancelFunc) {
+	if soonestExpiry.IsZero() {
+		return context.WithCancel(parent)
+	}
+	return context.WithDeadline(parent, soonestExpiry.Add(wakeupSkew))
 }
 
 func (h *handler) Commit(
@@ -175,9 +197,9 @@ func (h *handler) Unreserve(
 	return resp, err
 }
 
-// Release is durable: UpdateComponent does not return until the transition is
-// persisted. Callers (history's RespondActivityTask*/timer handlers) can
-// rely on a successful Release to mean the slot is released.
+// Release is durable: UpdateComponent does not return until the transition
+// is persisted. Callers (history's RespondActivityTask*/timer handlers) can
+// rely on a successful Release meaning the slot is released.
 func (h *handler) Release(
 	ctx context.Context,
 	req *semaphorepb.ReleaseRequest,

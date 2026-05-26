@@ -6,6 +6,7 @@ import (
 
 	enumspb "go.temporal.io/api/enums/v1"
 	"go.temporal.io/server/api/historyservice/v1"
+	persistencespb "go.temporal.io/server/api/persistence/v1"
 	"go.temporal.io/server/common"
 	"go.temporal.io/server/common/definition"
 	"go.temporal.io/server/common/metrics"
@@ -16,6 +17,7 @@ import (
 	"go.temporal.io/server/service/history/consts"
 	historyi "go.temporal.io/server/service/history/interfaces"
 	"go.temporal.io/server/service/history/workflow"
+	"google.golang.org/protobuf/proto"
 )
 
 func Invoke(
@@ -45,6 +47,8 @@ func Invoke(
 	var taskQueue string
 	var workflowTypeName string
 	var versioningBehavior enumspb.VersioningBehavior
+	// Captured for the post-commit semaphore Release.
+	var releaseAi *persistencespb.ActivityInfo
 	err = api.GetAndUpdateWorkflowWithNew(
 		ctx,
 		token.Clock,
@@ -87,6 +91,7 @@ func Invoke(
 				return nil, consts.ErrActivityTaskNotCancelRequested
 			}
 
+			releaseAi = proto.Clone(ai).(*persistencespb.ActivityInfo)
 			if _, err := mutableState.AddActivityTaskCanceledEvent(
 				scheduledEventID,
 				ai.StartedEventId,
@@ -126,6 +131,16 @@ func Invoke(
 			metrics.WorkflowTypeTag(workflowTypeName),
 			metrics.ActivityTypeTag(token.ActivityType),
 			metrics.VersioningBehaviorTag(versioningBehavior))
+
+		// Release the semaphore slot now that the cancellation has been
+		// durably persisted.
+		//
+		// TODO: thread a real SemaphoreServiceClient. No-op via nil today.
+		if releaseErr := api.ReleaseActivitySemaphore(
+			ctx, nil, token.NamespaceId, token.WorkflowId, token.RunId, releaseAi,
+		); releaseErr != nil {
+			return nil, releaseErr
+		}
 	}
 	return &historyservice.RespondActivityTaskCanceledResponse{}, err
 }

@@ -13,7 +13,6 @@ var HistoryModule = fx.Module(
 	"chasm.lib.semaphore.history",
 	fx.Provide(
 		newHandler,
-		newReservationExpiryTaskHandler,
 		newLibrary,
 	),
 	fx.Invoke(func(l *library, registry *chasm.Registry) error {

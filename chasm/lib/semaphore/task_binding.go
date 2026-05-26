@@ -9,13 +9,18 @@ import (
 // the fields that matching uses to dispatch an activity task. The semaphore
 // HolderID is derived deterministically from these so that retries produce
 // the same id.
+//
+// ScheduledEventID rather than ActivityID is used because matching's
+// TaskInfo doesn't carry the user-facing ActivityID; the scheduled-event id
+// uniquely identifies the activity instance within a workflow and is
+// available on both matching and history sides.
 type TaskKey struct {
-	NamespaceID  string
-	TaskQueue    string
-	TaskQueueKind int32
-	WorkflowID   string
-	RunID        string
-	ActivityID   string
+	NamespaceID      string
+	TaskQueue        string
+	TaskQueueKind    int32
+	WorkflowID       string
+	RunID            string
+	ScheduledEventID int64
 }
 
 // SemaphoreBinding describes which semaphore (if any) gates a task, and the
@@ -58,10 +63,10 @@ func HolderIDForTask(t TaskKey) string {
 	for _, f := range []string{
 		t.NamespaceID,
 		t.TaskQueue,
-		intToHex(t.TaskQueueKind),
+		int32Hex(t.TaskQueueKind),
 		t.WorkflowID,
 		t.RunID,
-		t.ActivityID,
+		int64Hex(t.ScheduledEventID),
 	} {
 		_, _ = h.Write([]byte{byte(len(f) >> 8), byte(len(f))})
 		_, _ = h.Write([]byte(f))
@@ -69,11 +74,18 @@ func HolderIDForTask(t TaskKey) string {
 	return hex.EncodeToString(h.Sum(nil))
 }
 
-func intToHex(v int32) string {
+func int32Hex(v int32) string {
 	var b [4]byte
-	b[0] = byte(v >> 24)
-	b[1] = byte(v >> 16)
-	b[2] = byte(v >> 8)
-	b[3] = byte(v)
+	for i := 0; i < 4; i++ {
+		b[3-i] = byte(v >> (8 * i))
+	}
+	return hex.EncodeToString(b[:])
+}
+
+func int64Hex(v int64) string {
+	var b [8]byte
+	for i := 0; i < 8; i++ {
+		b[7-i] = byte(v >> (8 * i))
+	}
 	return hex.EncodeToString(b[:])
 }

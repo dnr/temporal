@@ -341,6 +341,20 @@ func (task *internalTask) setEvicted() {
 	(*remove)()
 }
 
+// semaphoreID returns the semaphore that this task should be dispatched
+// through (and the holder id to use), or ("", false) when the task is not
+// gated by any semaphore.
+//
+// Placeholder: this will eventually pull a semaphore reference off the
+// task's metadata (similar to how priority is attached). For now it always
+// reports no semaphore, so the dispatch path is unchanged.
+//
+// TODO: read the semaphore reference once the proto field lands in the
+// other repo. See chasm/lib/semaphore.BindingForTask.
+func (task *internalTask) semaphoreID() (string, bool) {
+	return "", false
+}
+
 // finish marks a task as finished. Must be called after a poller picks up a task
 // and marks it as started. If the task is unable to marked as started, then this
 // method should be called with a non-nil error argument.
