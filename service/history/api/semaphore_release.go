@@ -4,8 +4,14 @@ import (
 	"context"
 
 	persistencespb "go.temporal.io/server/api/persistence/v1"
+	tokenspb "go.temporal.io/server/api/token/v1"
 	chasmsemaphore "go.temporal.io/server/chasm/lib/semaphore"
 	semaphorepb "go.temporal.io/server/chasm/lib/semaphore/gen/semaphorepb/v1"
+	"go.temporal.io/server/common"
+	"go.temporal.io/server/common/definition"
+	"go.temporal.io/server/common/locks"
+	historyi "go.temporal.io/server/service/history/interfaces"
+	"google.golang.org/protobuf/proto"
 )
 
 // SemaphoreIDForActivity returns the semaphore ID (if any) gating dispatch
@@ -21,22 +27,14 @@ func SemaphoreIDForActivity(_ *persistencespb.ActivityInfo) (string, bool) {
 	return "", false
 }
 
-// ReleaseActivitySemaphore frees the semaphore slot held by a terminal
-// activity. It must be called from any path that transitions an activity
-// out of a running state — RespondActivityTask{Completed,Failed,Canceled},
-// activity timeouts, workflow termination — and the calling handler must
-// not return success until this call has succeeded.
+// ReleaseActivitySemaphore frees the semaphore slot for one activity
+// attempt. The slot is held per-attempt, so this is called whenever an
+// attempt ends — completion, failure (retrying or terminal), cancellation,
+// or timeout.
 //
 // Durability contract: the call blocks until the semaphore component has
-// persisted the Release transition. The caller is responsible for
-// sequencing this after the workflow's own state update has committed.
-//
-// When client is nil or the activity has no associated semaphore, the
-// call is a no-op.
-//
-// TODO: plumb a SemaphoreServiceClient into the history engine and each
-// Respond/timer handler so this can actually fire. For now the call sites
-// pass nil and this is effectively dead code.
+// persisted the Release transition. When client is nil or the activity
+// has no associated semaphore, the call is a no-op.
 func ReleaseActivitySemaphore(
 	ctx context.Context,
 	client semaphorepb.SemaphoreServiceClient,
@@ -66,4 +64,70 @@ func ReleaseActivitySemaphore(
 		HolderId:    holderID,
 	})
 	return err
+}
+
+// PreReleaseActivitySemaphore performs a Release-first activity-semaphore
+// release: it reads the ActivityInfo with a read-only lease, then calls
+// Release before the caller's workflow update transaction runs.
+//
+// Why Release-first (hard semantics): if we released after the workflow
+// update, then a Release failure after a successful update would return
+// an error to the worker; the worker retries the API and the second call
+// sees ActivityTaskNotFound (workflow already past this activity), never
+// reaches the Release path, and the slot leaks forever — Committed slots
+// have no TTL. Doing the Release first means a retry re-attempts both
+// steps idempotently until both succeed.
+//
+// Placeholder optimization: when client is nil (the current state, until
+// the SemaphoreServiceClient is plumbed into history), this returns
+// immediately without doing any reads. Same when SemaphoreIDForActivity
+// reports no semaphore for the activity.
+func PreReleaseActivitySemaphore(
+	ctx context.Context,
+	shardContext historyi.ShardContext,
+	consistencyChecker WorkflowConsistencyChecker,
+	client semaphorepb.SemaphoreServiceClient,
+	workflowKey definition.WorkflowKey,
+	token *tokenspb.Task,
+) (retErr error) {
+	if client == nil {
+		return nil
+	}
+
+	lease, err := consistencyChecker.GetWorkflowLease(
+		ctx, nil, workflowKey, locks.PriorityHigh,
+	)
+	if err != nil {
+		return err
+	}
+	defer func() { lease.GetReleaseFn()(retErr) }()
+
+	mutableState, err := lease.GetContext().LoadMutableState(ctx, shardContext)
+	if err != nil {
+		return err
+	}
+
+	scheduledEventID := token.GetScheduledEventId()
+	if scheduledEventID == common.EmptyEventID {
+		scheduledEventID, err = GetActivityScheduledEventID(token.GetActivityId(), mutableState)
+		if err != nil {
+			return err
+		}
+	}
+
+	ai, ok := mutableState.GetActivityInfo(scheduledEventID)
+	if !ok {
+		// Activity is already gone — nothing to release. The next caller
+		// will see the same state and also no-op.
+		return nil
+	}
+
+	// Snapshot the AI before calling Release; we want to drop the workflow
+	// lease as soon as possible.
+	aiSnapshot := proto.Clone(ai).(*persistencespb.ActivityInfo)
+	return ReleaseActivitySemaphore(
+		ctx, client,
+		workflowKey.NamespaceID, workflowKey.WorkflowID, workflowKey.RunID,
+		aiSnapshot,
+	)
 }

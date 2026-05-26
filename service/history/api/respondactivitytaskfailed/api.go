@@ -7,7 +7,6 @@ import (
 	enumspb "go.temporal.io/api/enums/v1"
 	"go.temporal.io/api/workflowservice/v1"
 	"go.temporal.io/server/api/historyservice/v1"
-	persistencespb "go.temporal.io/server/api/persistence/v1"
 	"go.temporal.io/server/common"
 	"go.temporal.io/server/common/definition"
 	"go.temporal.io/server/common/metrics"
@@ -18,7 +17,6 @@ import (
 	"go.temporal.io/server/service/history/consts"
 	historyi "go.temporal.io/server/service/history/interfaces"
 	"go.temporal.io/server/service/history/workflow"
-	"google.golang.org/protobuf/proto"
 )
 
 func Invoke(
@@ -43,14 +41,26 @@ func Invoke(
 		return nil, err
 	}
 
+	// Release the semaphore slot before the workflow update. The slot is
+	// held per-attempt: Release happens whether the activity will retry
+	// or terminate. The next attempt's dispatch in matching does a fresh
+	// Reserve.
+	//
+	// TODO: thread a real SemaphoreServiceClient. No-op via nil today.
+	if err := api.PreReleaseActivitySemaphore(
+		ctx, shard, workflowConsistencyChecker, nil,
+		definition.NewWorkflowKey(token.NamespaceId, token.WorkflowId, token.RunId),
+		token,
+	); err != nil {
+		return nil, err
+	}
+
 	var attemptStartedTime time.Time
 	var firstScheduledTime time.Time
 	var taskQueue string
 	var workflowTypeName string
 	var closed bool
 	var versioningBehavior enumspb.VersioningBehavior
-	// Captured for the post-commit semaphore Release on terminal failure.
-	var releaseAi *persistencespb.ActivityInfo
 	err = api.GetAndUpdateWorkflowWithNew(
 		ctx,
 		token.Clock,
@@ -112,10 +122,6 @@ func Invoke(
 			}
 			// TODO uncomment once RETRY_STATE_PAUSED is supported
 			// if retryState != enumspb.RETRY_STATE_IN_PROGRESS && retryState != enumspb.RETRY_STATE_PAUSED {
-			// The semaphore slot is held per-attempt. We release on every
-			// failure (terminal or retrying); the next dispatch will
-			// Reserve a fresh slot for the next attempt.
-			releaseAi = proto.Clone(ai).(*persistencespb.ActivityInfo)
 			if retryState != enumspb.RETRY_STATE_IN_PROGRESS {
 				// no more retry, and we want to record the failure event
 				if _, err := mutableState.AddActivityTaskFailedEvent(scheduledEventID, ai.StartedEventId, failure, retryState, request.GetIdentity(), request.GetWorkerVersion()); err != nil {
@@ -151,18 +157,6 @@ func Invoke(
 			metrics.WorkflowTypeTag(workflowTypeName),
 			metrics.ActivityTypeTag(token.ActivityType),
 			metrics.VersioningBehaviorTag(versioningBehavior))
-
-		// Release the semaphore slot on every failure — the slot is held
-		// per-attempt, not across retries. If the activity is retrying,
-		// the next dispatch will Reserve a fresh slot.
-		//
-		// TODO: thread a real SemaphoreServiceClient. Until then this is
-		// a no-op via the nil client.
-		if releaseErr := api.ReleaseActivitySemaphore(
-			ctx, nil, token.NamespaceId, token.WorkflowId, token.RunId, releaseAi,
-		); releaseErr != nil {
-			return nil, releaseErr
-		}
 	}
 	return &historyservice.RespondActivityTaskFailedResponse{}, err
 }
