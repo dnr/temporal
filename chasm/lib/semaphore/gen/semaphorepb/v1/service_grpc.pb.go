@@ -23,7 +23,9 @@ const (
 	SemaphoreService_SetLimit_FullMethodName   = "/temporal.server.chasm.lib.semaphore.proto.v1.SemaphoreService/SetLimit"
 	SemaphoreService_GetLimit_FullMethodName   = "/temporal.server.chasm.lib.semaphore.proto.v1.SemaphoreService/GetLimit"
 	SemaphoreService_GetHolders_FullMethodName = "/temporal.server.chasm.lib.semaphore.proto.v1.SemaphoreService/GetHolders"
-	SemaphoreService_Acquire_FullMethodName    = "/temporal.server.chasm.lib.semaphore.proto.v1.SemaphoreService/Acquire"
+	SemaphoreService_Reserve_FullMethodName    = "/temporal.server.chasm.lib.semaphore.proto.v1.SemaphoreService/Reserve"
+	SemaphoreService_Commit_FullMethodName     = "/temporal.server.chasm.lib.semaphore.proto.v1.SemaphoreService/Commit"
+	SemaphoreService_Unreserve_FullMethodName  = "/temporal.server.chasm.lib.semaphore.proto.v1.SemaphoreService/Unreserve"
 	SemaphoreService_Release_FullMethodName    = "/temporal.server.chasm.lib.semaphore.proto.v1.SemaphoreService/Release"
 )
 
@@ -34,7 +36,12 @@ type SemaphoreServiceClient interface {
 	SetLimit(ctx context.Context, in *SetLimitRequest, opts ...grpc.CallOption) (*SetLimitResponse, error)
 	GetLimit(ctx context.Context, in *GetLimitRequest, opts ...grpc.CallOption) (*GetLimitResponse, error)
 	GetHolders(ctx context.Context, in *GetHoldersRequest, opts ...grpc.CallOption) (*GetHoldersResponse, error)
-	Acquire(ctx context.Context, in *AcquireRequest, opts ...grpc.CallOption) (*AcquireResponse, error)
+	// Reserve blocks until a slot is available (or the caller's deadline
+	// expires). It is the first half of a two-phase commit; the caller must
+	// follow up with Commit within the reservation TTL.
+	Reserve(ctx context.Context, in *ReserveRequest, opts ...grpc.CallOption) (*ReserveResponse, error)
+	Commit(ctx context.Context, in *CommitRequest, opts ...grpc.CallOption) (*CommitResponse, error)
+	Unreserve(ctx context.Context, in *UnreserveRequest, opts ...grpc.CallOption) (*UnreserveResponse, error)
 	Release(ctx context.Context, in *ReleaseRequest, opts ...grpc.CallOption) (*ReleaseResponse, error)
 }
 
@@ -73,9 +80,27 @@ func (c *semaphoreServiceClient) GetHolders(ctx context.Context, in *GetHoldersR
 	return out, nil
 }
 
-func (c *semaphoreServiceClient) Acquire(ctx context.Context, in *AcquireRequest, opts ...grpc.CallOption) (*AcquireResponse, error) {
-	out := new(AcquireResponse)
-	err := c.cc.Invoke(ctx, SemaphoreService_Acquire_FullMethodName, in, out, opts...)
+func (c *semaphoreServiceClient) Reserve(ctx context.Context, in *ReserveRequest, opts ...grpc.CallOption) (*ReserveResponse, error) {
+	out := new(ReserveResponse)
+	err := c.cc.Invoke(ctx, SemaphoreService_Reserve_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *semaphoreServiceClient) Commit(ctx context.Context, in *CommitRequest, opts ...grpc.CallOption) (*CommitResponse, error) {
+	out := new(CommitResponse)
+	err := c.cc.Invoke(ctx, SemaphoreService_Commit_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *semaphoreServiceClient) Unreserve(ctx context.Context, in *UnreserveRequest, opts ...grpc.CallOption) (*UnreserveResponse, error) {
+	out := new(UnreserveResponse)
+	err := c.cc.Invoke(ctx, SemaphoreService_Unreserve_FullMethodName, in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -98,7 +123,12 @@ type SemaphoreServiceServer interface {
 	SetLimit(context.Context, *SetLimitRequest) (*SetLimitResponse, error)
 	GetLimit(context.Context, *GetLimitRequest) (*GetLimitResponse, error)
 	GetHolders(context.Context, *GetHoldersRequest) (*GetHoldersResponse, error)
-	Acquire(context.Context, *AcquireRequest) (*AcquireResponse, error)
+	// Reserve blocks until a slot is available (or the caller's deadline
+	// expires). It is the first half of a two-phase commit; the caller must
+	// follow up with Commit within the reservation TTL.
+	Reserve(context.Context, *ReserveRequest) (*ReserveResponse, error)
+	Commit(context.Context, *CommitRequest) (*CommitResponse, error)
+	Unreserve(context.Context, *UnreserveRequest) (*UnreserveResponse, error)
 	Release(context.Context, *ReleaseRequest) (*ReleaseResponse, error)
 	mustEmbedUnimplementedSemaphoreServiceServer()
 }
@@ -116,8 +146,14 @@ func (UnimplementedSemaphoreServiceServer) GetLimit(context.Context, *GetLimitRe
 func (UnimplementedSemaphoreServiceServer) GetHolders(context.Context, *GetHoldersRequest) (*GetHoldersResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetHolders not implemented")
 }
-func (UnimplementedSemaphoreServiceServer) Acquire(context.Context, *AcquireRequest) (*AcquireResponse, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method Acquire not implemented")
+func (UnimplementedSemaphoreServiceServer) Reserve(context.Context, *ReserveRequest) (*ReserveResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method Reserve not implemented")
+}
+func (UnimplementedSemaphoreServiceServer) Commit(context.Context, *CommitRequest) (*CommitResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method Commit not implemented")
+}
+func (UnimplementedSemaphoreServiceServer) Unreserve(context.Context, *UnreserveRequest) (*UnreserveResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method Unreserve not implemented")
 }
 func (UnimplementedSemaphoreServiceServer) Release(context.Context, *ReleaseRequest) (*ReleaseResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Release not implemented")
@@ -189,20 +225,56 @@ func _SemaphoreService_GetHolders_Handler(srv interface{}, ctx context.Context, 
 	return interceptor(ctx, in, info, handler)
 }
 
-func _SemaphoreService_Acquire_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(AcquireRequest)
+func _SemaphoreService_Reserve_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ReserveRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(SemaphoreServiceServer).Acquire(ctx, in)
+		return srv.(SemaphoreServiceServer).Reserve(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: SemaphoreService_Acquire_FullMethodName,
+		FullMethod: SemaphoreService_Reserve_FullMethodName,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(SemaphoreServiceServer).Acquire(ctx, req.(*AcquireRequest))
+		return srv.(SemaphoreServiceServer).Reserve(ctx, req.(*ReserveRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _SemaphoreService_Commit_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CommitRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(SemaphoreServiceServer).Commit(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: SemaphoreService_Commit_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(SemaphoreServiceServer).Commit(ctx, req.(*CommitRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _SemaphoreService_Unreserve_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(UnreserveRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(SemaphoreServiceServer).Unreserve(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: SemaphoreService_Unreserve_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(SemaphoreServiceServer).Unreserve(ctx, req.(*UnreserveRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -245,8 +317,16 @@ var SemaphoreService_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _SemaphoreService_GetHolders_Handler,
 		},
 		{
-			MethodName: "Acquire",
-			Handler:    _SemaphoreService_Acquire_Handler,
+			MethodName: "Reserve",
+			Handler:    _SemaphoreService_Reserve_Handler,
+		},
+		{
+			MethodName: "Commit",
+			Handler:    _SemaphoreService_Commit_Handler,
+		},
+		{
+			MethodName: "Unreserve",
+			Handler:    _SemaphoreService_Unreserve_Handler,
 		},
 		{
 			MethodName: "Release",

@@ -2,6 +2,7 @@ package matching
 
 import (
 	"go.temporal.io/server/chasm"
+	chasmsemaphore "go.temporal.io/server/chasm/lib/semaphore"
 	"go.temporal.io/server/common"
 	"go.temporal.io/server/common/cluster"
 	"go.temporal.io/server/common/config"
@@ -31,6 +32,7 @@ import (
 var Module = fx.Options(
 	resource.Module,
 	workerdeployment.Module,
+	chasmsemaphore.ClientModule,
 	fx.Provide(ConfigProvider),
 	fx.Provide(PersistenceRateLimitingParamsProvider),
 	service.PersistenceLazyLoadedServiceResolverModule,

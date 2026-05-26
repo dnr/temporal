@@ -1,49 +1,57 @@
 package semaphore
 
 import (
-	"slices"
+	"time"
 
 	"go.temporal.io/api/serviceerror"
 	"go.temporal.io/server/chasm"
 	semaphorepb "go.temporal.io/server/chasm/lib/semaphore/gen/semaphorepb/v1"
+	"google.golang.org/protobuf/types/known/timestamppb"
 )
+
+// reservationTTL is how long a Reserved slot lives before being auto-released
+// if Commit is not called. Matching is expected to do Reserve ->
+// RecordActivityTaskStarted -> Commit within this window.
+//
+// TODO: make this dynamic config.
+const reservationTTL = 1 * time.Second
 
 var (
-	ErrSemaphoreNotFound = serviceerror.NewNotFound("semaphore not found")
-	ErrInvalidLimit      = serviceerror.NewInvalidArgument("limit must be >= 0")
-	ErrEmptyHolderID     = serviceerror.NewInvalidArgument("holder id must not be empty")
+	ErrSlotNotFound     = serviceerror.NewNotFound("semaphore slot not found")
+	ErrInvalidLimit     = serviceerror.NewInvalidArgument("limit must be >= 0")
+	ErrEmptyHolderID    = serviceerror.NewInvalidArgument("holder id must not be empty")
+	ErrNoSlotsAvailable = serviceerror.NewResourceExhausted(0, "no slot available")
 )
 
-// Semaphore is a CHASM root component representing a counting semaphore. It
-// keeps a configurable limit, the current set of holders, and a FIFO queue of
-// waiters that get promoted into holders as slots free up.
+// Semaphore is a CHASM root component representing a counting semaphore with
+// two-phase (Reserve + Commit) acquisition.
+//
+// The persisted state is just a limit and a map of currently-active slots
+// (each either Reserved or Committed). There is intentionally no durable
+// waiter queue: blocked Reserve callers are just open RPCs.
 type Semaphore struct {
 	chasm.UnimplementedComponent
 
 	*semaphorepb.SemaphoreState
 }
 
-// newSemaphore is used internally by Create / UpdateWithStart flows.
 func newSemaphore(limit int32) *Semaphore {
 	return &Semaphore{
 		SemaphoreState: &semaphorepb.SemaphoreState{
 			Limit: limit,
+			Slots: map[string]*semaphorepb.SlotInfo{},
 		},
 	}
 }
 
-// LifecycleState implements chasm.Component. Semaphores never reach a terminal
-// state on their own; the caller deletes them explicitly.
 func (s *Semaphore) LifecycleState(_ chasm.Context) chasm.LifecycleState {
 	return chasm.LifecycleStateRunning
 }
 
-// ContextMetadata implements chasm.RootComponent.
 func (s *Semaphore) ContextMetadata(_ chasm.Context) map[string]string {
 	return nil
 }
 
-// Terminate implements chasm.RootComponent.
 func (s *Semaphore) Terminate(
 	_ chasm.MutableContext,
 	_ chasm.TerminateComponentRequest,
@@ -51,8 +59,7 @@ func (s *Semaphore) Terminate(
 	return chasm.TerminateComponentResponse{}, nil
 }
 
-// CreateSemaphore is the StartExecution factory used by SetLimit when the
-// semaphore does not yet exist.
+// CreateSemaphore is the StartExecution factory used by SetLimit.
 func CreateSemaphore(
 	_ chasm.MutableContext,
 	req *semaphorepb.SetLimitRequest,
@@ -63,9 +70,9 @@ func CreateSemaphore(
 	return newSemaphore(req.Limit), nil
 }
 
-// SetLimit updates the limit on an existing semaphore. Increasing the limit
-// promotes queued waiters into holders, in FIFO order, until the limit is
-// reached or the queue is empty.
+// SetLimit updates the limit on an existing semaphore. The framework does
+// not evict existing holders when the limit is reduced; new Reserves will
+// just block until the active count falls below the new limit.
 func (s *Semaphore) SetLimit(
 	_ chasm.MutableContext,
 	req *semaphorepb.SetLimitRequest,
@@ -74,11 +81,9 @@ func (s *Semaphore) SetLimit(
 		return nil, ErrInvalidLimit
 	}
 	s.Limit = req.Limit
-	s.promoteWaiters()
 	return &semaphorepb.SetLimitResponse{Limit: s.Limit}, nil
 }
 
-// GetLimit returns the current limit.
 func (s *Semaphore) GetLimit(
 	_ chasm.Context,
 	_ *semaphorepb.GetLimitRequest,
@@ -86,48 +91,103 @@ func (s *Semaphore) GetLimit(
 	return &semaphorepb.GetLimitResponse{Limit: s.Limit}, nil
 }
 
-// GetHolders returns the current holders and waiters.
 func (s *Semaphore) GetHolders(
 	_ chasm.Context,
 	_ *semaphorepb.GetHoldersRequest,
 ) (*semaphorepb.GetHoldersResponse, error) {
-	return &semaphorepb.GetHoldersResponse{
-		Holders: append([]string(nil), s.Holders...),
-		Waiters: append([]string(nil), s.Waiters...),
-	}, nil
+	resp := &semaphorepb.GetHoldersResponse{}
+	for id, slot := range s.Slots {
+		if slot.GetReservationExpiresAt() == nil {
+			resp.Committed = append(resp.Committed, id)
+		} else {
+			resp.Reserved = append(resp.Reserved, id)
+		}
+	}
+	return resp, nil
 }
 
-// enrollResult signals to the caller whether the long-poll phase is needed.
-type enrollResult struct {
-	acquired bool
+// reserveOutcome is the result of a single Reserve attempt. The handler uses
+// it to decide whether to return immediately or long-poll for state changes.
+type reserveOutcome int
+
+const (
+	reserveOutcomeReserved reserveOutcome = iota
+	reserveOutcomeAlreadyCommitted
+	reserveOutcomeNoRoom
+)
+
+type reserveResult struct {
+	outcome   reserveOutcome
+	expiresAt time.Time
 }
 
-// Enroll is the mutation half of Acquire: add holder_id to the holders if
-// possible, otherwise enqueue it as a waiter. Idempotent for ids already
-// present in either list.
-func (s *Semaphore) Enroll(
-	_ chasm.MutableContext,
-	req *semaphorepb.AcquireRequest,
-) (enrollResult, error) {
+// Reserve attempts to add holder_id as a Reserved slot. If the holder is
+// already present, the call is idempotent: a Reserved slot has its
+// expiration refreshed, a Committed slot returns alreadyCommitted.
+func (s *Semaphore) Reserve(
+	ctx chasm.MutableContext,
+	req *semaphorepb.ReserveRequest,
+) (reserveResult, error) {
 	if req.HolderId == "" {
-		return enrollResult{}, ErrEmptyHolderID
+		return reserveResult{}, ErrEmptyHolderID
 	}
-	if slices.Contains(s.Holders, req.HolderId) {
-		return enrollResult{acquired: true}, nil
+
+	if existing, ok := s.Slots[req.HolderId]; ok {
+		if existing.ReservationExpiresAt == nil {
+			return reserveResult{outcome: reserveOutcomeAlreadyCommitted}, nil
+		}
+		// Refresh existing reservation.
+		expiresAt := ctx.Now(s).Add(reservationTTL)
+		existing.ReservationExpiresAt = timestamppb.New(expiresAt)
+		s.scheduleExpiryTask(ctx, req.HolderId, expiresAt)
+		return reserveResult{outcome: reserveOutcomeReserved, expiresAt: expiresAt}, nil
 	}
-	if int32(len(s.Holders)) < s.Limit {
-		s.Holders = append(s.Holders, req.HolderId)
-		return enrollResult{acquired: true}, nil
+
+	if int32(len(s.Slots)) >= s.Limit {
+		return reserveResult{outcome: reserveOutcomeNoRoom}, nil
 	}
-	if !slices.Contains(s.Waiters, req.HolderId) {
-		s.Waiters = append(s.Waiters, req.HolderId)
+
+	expiresAt := ctx.Now(s).Add(reservationTTL)
+	s.Slots[req.HolderId] = &semaphorepb.SlotInfo{
+		ReservationExpiresAt: timestamppb.New(expiresAt),
 	}
-	return enrollResult{acquired: false}, nil
+	s.scheduleExpiryTask(ctx, req.HolderId, expiresAt)
+	return reserveResult{outcome: reserveOutcomeReserved, expiresAt: expiresAt}, nil
 }
 
-// Release removes holder_id from the holders, then promotes the next waiter
-// into a holder if one is queued. If holder_id is only queued as a waiter, it
-// is removed from the wait queue instead. No-op otherwise.
+// Commit promotes a Reserved slot to Committed. Idempotent if already
+// Committed. Returns NotFound if the slot is gone (expired).
+func (s *Semaphore) Commit(
+	_ chasm.MutableContext,
+	req *semaphorepb.CommitRequest,
+) (*semaphorepb.CommitResponse, error) {
+	if req.HolderId == "" {
+		return nil, ErrEmptyHolderID
+	}
+	slot, ok := s.Slots[req.HolderId]
+	if !ok {
+		return nil, ErrSlotNotFound
+	}
+	slot.ReservationExpiresAt = nil
+	return &semaphorepb.CommitResponse{}, nil
+}
+
+// Unreserve explicitly removes a Reserved slot before its TTL. No-op for
+// Committed or absent slots.
+func (s *Semaphore) Unreserve(
+	_ chasm.MutableContext,
+	req *semaphorepb.UnreserveRequest,
+) (*semaphorepb.UnreserveResponse, error) {
+	if req.HolderId == "" {
+		return nil, ErrEmptyHolderID
+	}
+	if slot, ok := s.Slots[req.HolderId]; ok && slot.ReservationExpiresAt != nil {
+		delete(s.Slots, req.HolderId)
+	}
+	return &semaphorepb.UnreserveResponse{}, nil
+}
+
+// Release removes a slot regardless of state. No-op if absent.
 func (s *Semaphore) Release(
 	_ chasm.MutableContext,
 	req *semaphorepb.ReleaseRequest,
@@ -135,23 +195,29 @@ func (s *Semaphore) Release(
 	if req.HolderId == "" {
 		return nil, ErrEmptyHolderID
 	}
-	if i := slices.Index(s.Holders, req.HolderId); i >= 0 {
-		s.Holders = slices.Delete(s.Holders, i, i+1)
-		s.promoteWaiters()
-		return &semaphorepb.ReleaseResponse{}, nil
-	}
-	if i := slices.Index(s.Waiters, req.HolderId); i >= 0 {
-		s.Waiters = slices.Delete(s.Waiters, i, i+1)
-	}
+	delete(s.Slots, req.HolderId)
+	// TODO: push req.HolderId onto a bounded "recently released" cache so
+	// ABA-style stale Reserves can be detected and rejected.
 	return &semaphorepb.ReleaseResponse{}, nil
 }
 
-// promoteWaiters moves waiters into holders, in FIFO order, while there is
-// capacity. Called whenever the available capacity may have increased (a
-// release happened, or the limit was raised).
-func (s *Semaphore) promoteWaiters() {
-	for int32(len(s.Holders)) < s.Limit && len(s.Waiters) > 0 {
-		s.Holders = append(s.Holders, s.Waiters[0])
-		s.Waiters = s.Waiters[1:]
-	}
+// hasRoom is the predicate used by Reserve's long-poll: returns true if a
+// new Reserve could plausibly succeed. The check is best-effort — another
+// caller may have grabbed the slot by the time the handler retries.
+func (s *Semaphore) hasRoom() bool {
+	return int32(len(s.Slots)) < s.Limit
+}
+
+func (s *Semaphore) scheduleExpiryTask(
+	ctx chasm.MutableContext,
+	holderID string,
+	expiresAt time.Time,
+) {
+	ctx.AddTask(s,
+		chasm.TaskAttributes{ScheduledTime: expiresAt},
+		&semaphorepb.ReservationExpiryTask{
+			HolderId:          holderID,
+			ExpectedExpiresAt: timestamppb.New(expiresAt),
+		},
+	)
 }

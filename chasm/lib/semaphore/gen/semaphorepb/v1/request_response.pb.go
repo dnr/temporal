@@ -13,6 +13,7 @@ import (
 
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
+	timestamppb "google.golang.org/protobuf/types/known/timestamppb"
 )
 
 const (
@@ -23,8 +24,7 @@ const (
 )
 
 // SetLimit creates the semaphore if it does not yet exist, or updates the
-// limit on an existing semaphore. Increasing the limit may promote queued
-// waiters into holders.
+// limit on an existing semaphore.
 type SetLimitRequest struct {
 	state       protoimpl.MessageState `protogen:"open.v1"`
 	NamespaceId string                 `protobuf:"bytes,1,opt,name=namespace_id,json=namespaceId,proto3" json:"namespace_id,omitempty"`
@@ -279,9 +279,11 @@ func (x *GetHoldersRequest) GetSemaphoreId() string {
 }
 
 type GetHoldersResponse struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Holders       []string               `protobuf:"bytes,1,rep,name=holders,proto3" json:"holders,omitempty"`
-	Waiters       []string               `protobuf:"bytes,2,rep,name=waiters,proto3" json:"waiters,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Holder IDs of Committed slots.
+	Committed []string `protobuf:"bytes,1,rep,name=committed,proto3" json:"committed,omitempty"`
+	// Holder IDs of Reserved (uncommitted) slots.
+	Reserved      []string `protobuf:"bytes,2,rep,name=reserved,proto3" json:"reserved,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -316,25 +318,31 @@ func (*GetHoldersResponse) Descriptor() ([]byte, []int) {
 	return file_temporal_server_chasm_lib_semaphore_proto_v1_request_response_proto_rawDescGZIP(), []int{5}
 }
 
-func (x *GetHoldersResponse) GetHolders() []string {
+func (x *GetHoldersResponse) GetCommitted() []string {
 	if x != nil {
-		return x.Holders
+		return x.Committed
 	}
 	return nil
 }
 
-func (x *GetHoldersResponse) GetWaiters() []string {
+func (x *GetHoldersResponse) GetReserved() []string {
 	if x != nil {
-		return x.Waiters
+		return x.Reserved
 	}
 	return nil
 }
 
-// AcquireRequest attempts to add the given id to the holders. If a slot is
-// available (or id is already a holder) it returns immediately with
-// acquired = true. Otherwise the id is enqueued as a waiter and the call
-// long-polls until either a slot opens up or the deadline is reached.
-type AcquireRequest struct {
+// ReserveRequest takes a reservation on a slot. If no slot is available the
+// RPC blocks until one opens or the caller's deadline expires (FIFO order
+// among waiters is not guaranteed; head-of-line is undefined).
+//
+// On success, the caller MUST call Commit(holder_id) within the reservation
+// TTL or the slot will be returned to the pool by the framework.
+//
+// Reserve is idempotent for an id that is already Reserved or Committed:
+//   - already Reserved -> the existing reservation's expiration is refreshed.
+//   - already Committed -> returned as already_committed = true.
+type ReserveRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	NamespaceId   string                 `protobuf:"bytes,1,opt,name=namespace_id,json=namespaceId,proto3" json:"namespace_id,omitempty"`
 	SemaphoreId   string                 `protobuf:"bytes,2,opt,name=semaphore_id,json=semaphoreId,proto3" json:"semaphore_id,omitempty"`
@@ -343,20 +351,20 @@ type AcquireRequest struct {
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *AcquireRequest) Reset() {
-	*x = AcquireRequest{}
+func (x *ReserveRequest) Reset() {
+	*x = ReserveRequest{}
 	mi := &file_temporal_server_chasm_lib_semaphore_proto_v1_request_response_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *AcquireRequest) String() string {
+func (x *ReserveRequest) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*AcquireRequest) ProtoMessage() {}
+func (*ReserveRequest) ProtoMessage() {}
 
-func (x *AcquireRequest) ProtoReflect() protoreflect.Message {
+func (x *ReserveRequest) ProtoReflect() protoreflect.Message {
 	mi := &file_temporal_server_chasm_lib_semaphore_proto_v1_request_response_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -368,53 +376,60 @@ func (x *AcquireRequest) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use AcquireRequest.ProtoReflect.Descriptor instead.
-func (*AcquireRequest) Descriptor() ([]byte, []int) {
+// Deprecated: Use ReserveRequest.ProtoReflect.Descriptor instead.
+func (*ReserveRequest) Descriptor() ([]byte, []int) {
 	return file_temporal_server_chasm_lib_semaphore_proto_v1_request_response_proto_rawDescGZIP(), []int{6}
 }
 
-func (x *AcquireRequest) GetNamespaceId() string {
+func (x *ReserveRequest) GetNamespaceId() string {
 	if x != nil {
 		return x.NamespaceId
 	}
 	return ""
 }
 
-func (x *AcquireRequest) GetSemaphoreId() string {
+func (x *ReserveRequest) GetSemaphoreId() string {
 	if x != nil {
 		return x.SemaphoreId
 	}
 	return ""
 }
 
-func (x *AcquireRequest) GetHolderId() string {
+func (x *ReserveRequest) GetHolderId() string {
 	if x != nil {
 		return x.HolderId
 	}
 	return ""
 }
 
-type AcquireResponse struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Acquired      bool                   `protobuf:"varint,1,opt,name=acquired,proto3" json:"acquired,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+type ReserveResponse struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// True if the holder now has a Reserved (or refreshed-Reserved) slot.
+	Reserved bool `protobuf:"varint,1,opt,name=reserved,proto3" json:"reserved,omitempty"`
+	// True if the holder was already Committed when Reserve was called. Treat
+	// as a successful reservation that does not need a follow-up Commit.
+	AlreadyCommitted bool `protobuf:"varint,2,opt,name=already_committed,json=alreadyCommitted,proto3" json:"already_committed,omitempty"`
+	// When the current reservation expires if Commit is not called. Unset when
+	// already_committed = true.
+	ReservationExpiresAt *timestamppb.Timestamp `protobuf:"bytes,3,opt,name=reservation_expires_at,json=reservationExpiresAt,proto3" json:"reservation_expires_at,omitempty"`
+	unknownFields        protoimpl.UnknownFields
+	sizeCache            protoimpl.SizeCache
 }
 
-func (x *AcquireResponse) Reset() {
-	*x = AcquireResponse{}
+func (x *ReserveResponse) Reset() {
+	*x = ReserveResponse{}
 	mi := &file_temporal_server_chasm_lib_semaphore_proto_v1_request_response_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *AcquireResponse) String() string {
+func (x *ReserveResponse) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*AcquireResponse) ProtoMessage() {}
+func (*ReserveResponse) ProtoMessage() {}
 
-func (x *AcquireResponse) ProtoReflect() protoreflect.Message {
+func (x *ReserveResponse) ProtoReflect() protoreflect.Message {
 	mi := &file_temporal_server_chasm_lib_semaphore_proto_v1_request_response_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -426,20 +441,232 @@ func (x *AcquireResponse) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use AcquireResponse.ProtoReflect.Descriptor instead.
-func (*AcquireResponse) Descriptor() ([]byte, []int) {
+// Deprecated: Use ReserveResponse.ProtoReflect.Descriptor instead.
+func (*ReserveResponse) Descriptor() ([]byte, []int) {
 	return file_temporal_server_chasm_lib_semaphore_proto_v1_request_response_proto_rawDescGZIP(), []int{7}
 }
 
-func (x *AcquireResponse) GetAcquired() bool {
+func (x *ReserveResponse) GetReserved() bool {
 	if x != nil {
-		return x.Acquired
+		return x.Reserved
 	}
 	return false
 }
 
-// ReleaseRequest removes the id from the holders (or waiters, if still
-// queued). No-op if id is not present in either list.
+func (x *ReserveResponse) GetAlreadyCommitted() bool {
+	if x != nil {
+		return x.AlreadyCommitted
+	}
+	return false
+}
+
+func (x *ReserveResponse) GetReservationExpiresAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.ReservationExpiresAt
+	}
+	return nil
+}
+
+// CommitRequest promotes a Reserved slot to Committed. Idempotent if the slot
+// is already Committed. Returns NotFound if the slot is not present (e.g.,
+// the reservation already expired).
+type CommitRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	NamespaceId   string                 `protobuf:"bytes,1,opt,name=namespace_id,json=namespaceId,proto3" json:"namespace_id,omitempty"`
+	SemaphoreId   string                 `protobuf:"bytes,2,opt,name=semaphore_id,json=semaphoreId,proto3" json:"semaphore_id,omitempty"`
+	HolderId      string                 `protobuf:"bytes,3,opt,name=holder_id,json=holderId,proto3" json:"holder_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CommitRequest) Reset() {
+	*x = CommitRequest{}
+	mi := &file_temporal_server_chasm_lib_semaphore_proto_v1_request_response_proto_msgTypes[8]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CommitRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CommitRequest) ProtoMessage() {}
+
+func (x *CommitRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_temporal_server_chasm_lib_semaphore_proto_v1_request_response_proto_msgTypes[8]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CommitRequest.ProtoReflect.Descriptor instead.
+func (*CommitRequest) Descriptor() ([]byte, []int) {
+	return file_temporal_server_chasm_lib_semaphore_proto_v1_request_response_proto_rawDescGZIP(), []int{8}
+}
+
+func (x *CommitRequest) GetNamespaceId() string {
+	if x != nil {
+		return x.NamespaceId
+	}
+	return ""
+}
+
+func (x *CommitRequest) GetSemaphoreId() string {
+	if x != nil {
+		return x.SemaphoreId
+	}
+	return ""
+}
+
+func (x *CommitRequest) GetHolderId() string {
+	if x != nil {
+		return x.HolderId
+	}
+	return ""
+}
+
+type CommitResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CommitResponse) Reset() {
+	*x = CommitResponse{}
+	mi := &file_temporal_server_chasm_lib_semaphore_proto_v1_request_response_proto_msgTypes[9]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CommitResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CommitResponse) ProtoMessage() {}
+
+func (x *CommitResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_temporal_server_chasm_lib_semaphore_proto_v1_request_response_proto_msgTypes[9]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CommitResponse.ProtoReflect.Descriptor instead.
+func (*CommitResponse) Descriptor() ([]byte, []int) {
+	return file_temporal_server_chasm_lib_semaphore_proto_v1_request_response_proto_rawDescGZIP(), []int{9}
+}
+
+// UnreserveRequest explicitly releases a Reserved slot before its TTL
+// expires. No-op for slots that are Committed (matching should not call
+// Unreserve in that case) or absent.
+type UnreserveRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	NamespaceId   string                 `protobuf:"bytes,1,opt,name=namespace_id,json=namespaceId,proto3" json:"namespace_id,omitempty"`
+	SemaphoreId   string                 `protobuf:"bytes,2,opt,name=semaphore_id,json=semaphoreId,proto3" json:"semaphore_id,omitempty"`
+	HolderId      string                 `protobuf:"bytes,3,opt,name=holder_id,json=holderId,proto3" json:"holder_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *UnreserveRequest) Reset() {
+	*x = UnreserveRequest{}
+	mi := &file_temporal_server_chasm_lib_semaphore_proto_v1_request_response_proto_msgTypes[10]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *UnreserveRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*UnreserveRequest) ProtoMessage() {}
+
+func (x *UnreserveRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_temporal_server_chasm_lib_semaphore_proto_v1_request_response_proto_msgTypes[10]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use UnreserveRequest.ProtoReflect.Descriptor instead.
+func (*UnreserveRequest) Descriptor() ([]byte, []int) {
+	return file_temporal_server_chasm_lib_semaphore_proto_v1_request_response_proto_rawDescGZIP(), []int{10}
+}
+
+func (x *UnreserveRequest) GetNamespaceId() string {
+	if x != nil {
+		return x.NamespaceId
+	}
+	return ""
+}
+
+func (x *UnreserveRequest) GetSemaphoreId() string {
+	if x != nil {
+		return x.SemaphoreId
+	}
+	return ""
+}
+
+func (x *UnreserveRequest) GetHolderId() string {
+	if x != nil {
+		return x.HolderId
+	}
+	return ""
+}
+
+type UnreserveResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *UnreserveResponse) Reset() {
+	*x = UnreserveResponse{}
+	mi := &file_temporal_server_chasm_lib_semaphore_proto_v1_request_response_proto_msgTypes[11]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *UnreserveResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*UnreserveResponse) ProtoMessage() {}
+
+func (x *UnreserveResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_temporal_server_chasm_lib_semaphore_proto_v1_request_response_proto_msgTypes[11]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use UnreserveResponse.ProtoReflect.Descriptor instead.
+func (*UnreserveResponse) Descriptor() ([]byte, []int) {
+	return file_temporal_server_chasm_lib_semaphore_proto_v1_request_response_proto_rawDescGZIP(), []int{11}
+}
+
+// ReleaseRequest removes a slot (Reserved or Committed). No-op if absent.
+// The semaphore must durably persist this before returning.
 type ReleaseRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	NamespaceId   string                 `protobuf:"bytes,1,opt,name=namespace_id,json=namespaceId,proto3" json:"namespace_id,omitempty"`
@@ -451,7 +678,7 @@ type ReleaseRequest struct {
 
 func (x *ReleaseRequest) Reset() {
 	*x = ReleaseRequest{}
-	mi := &file_temporal_server_chasm_lib_semaphore_proto_v1_request_response_proto_msgTypes[8]
+	mi := &file_temporal_server_chasm_lib_semaphore_proto_v1_request_response_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -463,7 +690,7 @@ func (x *ReleaseRequest) String() string {
 func (*ReleaseRequest) ProtoMessage() {}
 
 func (x *ReleaseRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_temporal_server_chasm_lib_semaphore_proto_v1_request_response_proto_msgTypes[8]
+	mi := &file_temporal_server_chasm_lib_semaphore_proto_v1_request_response_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -476,7 +703,7 @@ func (x *ReleaseRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReleaseRequest.ProtoReflect.Descriptor instead.
 func (*ReleaseRequest) Descriptor() ([]byte, []int) {
-	return file_temporal_server_chasm_lib_semaphore_proto_v1_request_response_proto_rawDescGZIP(), []int{8}
+	return file_temporal_server_chasm_lib_semaphore_proto_v1_request_response_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *ReleaseRequest) GetNamespaceId() string {
@@ -508,7 +735,7 @@ type ReleaseResponse struct {
 
 func (x *ReleaseResponse) Reset() {
 	*x = ReleaseResponse{}
-	mi := &file_temporal_server_chasm_lib_semaphore_proto_v1_request_response_proto_msgTypes[9]
+	mi := &file_temporal_server_chasm_lib_semaphore_proto_v1_request_response_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -520,7 +747,7 @@ func (x *ReleaseResponse) String() string {
 func (*ReleaseResponse) ProtoMessage() {}
 
 func (x *ReleaseResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_temporal_server_chasm_lib_semaphore_proto_v1_request_response_proto_msgTypes[9]
+	mi := &file_temporal_server_chasm_lib_semaphore_proto_v1_request_response_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -533,14 +760,14 @@ func (x *ReleaseResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReleaseResponse.ProtoReflect.Descriptor instead.
 func (*ReleaseResponse) Descriptor() ([]byte, []int) {
-	return file_temporal_server_chasm_lib_semaphore_proto_v1_request_response_proto_rawDescGZIP(), []int{9}
+	return file_temporal_server_chasm_lib_semaphore_proto_v1_request_response_proto_rawDescGZIP(), []int{13}
 }
 
 var File_temporal_server_chasm_lib_semaphore_proto_v1_request_response_proto protoreflect.FileDescriptor
 
 const file_temporal_server_chasm_lib_semaphore_proto_v1_request_response_proto_rawDesc = "" +
 	"\n" +
-	"Ctemporal/server/chasm/lib/semaphore/proto/v1/request_response.proto\x12,temporal.server.chasm.lib.semaphore.proto.v1\"m\n" +
+	"Ctemporal/server/chasm/lib/semaphore/proto/v1/request_response.proto\x12,temporal.server.chasm.lib.semaphore.proto.v1\x1a\x1fgoogle/protobuf/timestamp.proto\"m\n" +
 	"\x0fSetLimitRequest\x12!\n" +
 	"\fnamespace_id\x18\x01 \x01(\tR\vnamespaceId\x12!\n" +
 	"\fsemaphore_id\x18\x02 \x01(\tR\vsemaphoreId\x12\x14\n" +
@@ -554,16 +781,28 @@ const file_temporal_server_chasm_lib_semaphore_proto_v1_request_response_proto_r
 	"\x05limit\x18\x01 \x01(\x05R\x05limit\"Y\n" +
 	"\x11GetHoldersRequest\x12!\n" +
 	"\fnamespace_id\x18\x01 \x01(\tR\vnamespaceId\x12!\n" +
-	"\fsemaphore_id\x18\x02 \x01(\tR\vsemaphoreId\"H\n" +
-	"\x12GetHoldersResponse\x12\x18\n" +
-	"\aholders\x18\x01 \x03(\tR\aholders\x12\x18\n" +
-	"\awaiters\x18\x02 \x03(\tR\awaiters\"s\n" +
-	"\x0eAcquireRequest\x12!\n" +
+	"\fsemaphore_id\x18\x02 \x01(\tR\vsemaphoreId\"N\n" +
+	"\x12GetHoldersResponse\x12\x1c\n" +
+	"\tcommitted\x18\x01 \x03(\tR\tcommitted\x12\x1a\n" +
+	"\breserved\x18\x02 \x03(\tR\breserved\"s\n" +
+	"\x0eReserveRequest\x12!\n" +
 	"\fnamespace_id\x18\x01 \x01(\tR\vnamespaceId\x12!\n" +
 	"\fsemaphore_id\x18\x02 \x01(\tR\vsemaphoreId\x12\x1b\n" +
-	"\tholder_id\x18\x03 \x01(\tR\bholderId\"-\n" +
-	"\x0fAcquireResponse\x12\x1a\n" +
-	"\bacquired\x18\x01 \x01(\bR\bacquired\"s\n" +
+	"\tholder_id\x18\x03 \x01(\tR\bholderId\"\xac\x01\n" +
+	"\x0fReserveResponse\x12\x1a\n" +
+	"\breserved\x18\x01 \x01(\bR\breserved\x12+\n" +
+	"\x11already_committed\x18\x02 \x01(\bR\x10alreadyCommitted\x12P\n" +
+	"\x16reservation_expires_at\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampR\x14reservationExpiresAt\"r\n" +
+	"\rCommitRequest\x12!\n" +
+	"\fnamespace_id\x18\x01 \x01(\tR\vnamespaceId\x12!\n" +
+	"\fsemaphore_id\x18\x02 \x01(\tR\vsemaphoreId\x12\x1b\n" +
+	"\tholder_id\x18\x03 \x01(\tR\bholderId\"\x10\n" +
+	"\x0eCommitResponse\"u\n" +
+	"\x10UnreserveRequest\x12!\n" +
+	"\fnamespace_id\x18\x01 \x01(\tR\vnamespaceId\x12!\n" +
+	"\fsemaphore_id\x18\x02 \x01(\tR\vsemaphoreId\x12\x1b\n" +
+	"\tholder_id\x18\x03 \x01(\tR\bholderId\"\x13\n" +
+	"\x11UnreserveResponse\"s\n" +
 	"\x0eReleaseRequest\x12!\n" +
 	"\fnamespace_id\x18\x01 \x01(\tR\vnamespaceId\x12!\n" +
 	"\fsemaphore_id\x18\x02 \x01(\tR\vsemaphoreId\x12\x1b\n" +
@@ -582,25 +821,31 @@ func file_temporal_server_chasm_lib_semaphore_proto_v1_request_response_proto_ra
 	return file_temporal_server_chasm_lib_semaphore_proto_v1_request_response_proto_rawDescData
 }
 
-var file_temporal_server_chasm_lib_semaphore_proto_v1_request_response_proto_msgTypes = make([]protoimpl.MessageInfo, 10)
+var file_temporal_server_chasm_lib_semaphore_proto_v1_request_response_proto_msgTypes = make([]protoimpl.MessageInfo, 14)
 var file_temporal_server_chasm_lib_semaphore_proto_v1_request_response_proto_goTypes = []any{
-	(*SetLimitRequest)(nil),    // 0: temporal.server.chasm.lib.semaphore.proto.v1.SetLimitRequest
-	(*SetLimitResponse)(nil),   // 1: temporal.server.chasm.lib.semaphore.proto.v1.SetLimitResponse
-	(*GetLimitRequest)(nil),    // 2: temporal.server.chasm.lib.semaphore.proto.v1.GetLimitRequest
-	(*GetLimitResponse)(nil),   // 3: temporal.server.chasm.lib.semaphore.proto.v1.GetLimitResponse
-	(*GetHoldersRequest)(nil),  // 4: temporal.server.chasm.lib.semaphore.proto.v1.GetHoldersRequest
-	(*GetHoldersResponse)(nil), // 5: temporal.server.chasm.lib.semaphore.proto.v1.GetHoldersResponse
-	(*AcquireRequest)(nil),     // 6: temporal.server.chasm.lib.semaphore.proto.v1.AcquireRequest
-	(*AcquireResponse)(nil),    // 7: temporal.server.chasm.lib.semaphore.proto.v1.AcquireResponse
-	(*ReleaseRequest)(nil),     // 8: temporal.server.chasm.lib.semaphore.proto.v1.ReleaseRequest
-	(*ReleaseResponse)(nil),    // 9: temporal.server.chasm.lib.semaphore.proto.v1.ReleaseResponse
+	(*SetLimitRequest)(nil),       // 0: temporal.server.chasm.lib.semaphore.proto.v1.SetLimitRequest
+	(*SetLimitResponse)(nil),      // 1: temporal.server.chasm.lib.semaphore.proto.v1.SetLimitResponse
+	(*GetLimitRequest)(nil),       // 2: temporal.server.chasm.lib.semaphore.proto.v1.GetLimitRequest
+	(*GetLimitResponse)(nil),      // 3: temporal.server.chasm.lib.semaphore.proto.v1.GetLimitResponse
+	(*GetHoldersRequest)(nil),     // 4: temporal.server.chasm.lib.semaphore.proto.v1.GetHoldersRequest
+	(*GetHoldersResponse)(nil),    // 5: temporal.server.chasm.lib.semaphore.proto.v1.GetHoldersResponse
+	(*ReserveRequest)(nil),        // 6: temporal.server.chasm.lib.semaphore.proto.v1.ReserveRequest
+	(*ReserveResponse)(nil),       // 7: temporal.server.chasm.lib.semaphore.proto.v1.ReserveResponse
+	(*CommitRequest)(nil),         // 8: temporal.server.chasm.lib.semaphore.proto.v1.CommitRequest
+	(*CommitResponse)(nil),        // 9: temporal.server.chasm.lib.semaphore.proto.v1.CommitResponse
+	(*UnreserveRequest)(nil),      // 10: temporal.server.chasm.lib.semaphore.proto.v1.UnreserveRequest
+	(*UnreserveResponse)(nil),     // 11: temporal.server.chasm.lib.semaphore.proto.v1.UnreserveResponse
+	(*ReleaseRequest)(nil),        // 12: temporal.server.chasm.lib.semaphore.proto.v1.ReleaseRequest
+	(*ReleaseResponse)(nil),       // 13: temporal.server.chasm.lib.semaphore.proto.v1.ReleaseResponse
+	(*timestamppb.Timestamp)(nil), // 14: google.protobuf.Timestamp
 }
 var file_temporal_server_chasm_lib_semaphore_proto_v1_request_response_proto_depIdxs = []int32{
-	0, // [0:0] is the sub-list for method output_type
-	0, // [0:0] is the sub-list for method input_type
-	0, // [0:0] is the sub-list for extension type_name
-	0, // [0:0] is the sub-list for extension extendee
-	0, // [0:0] is the sub-list for field type_name
+	14, // 0: temporal.server.chasm.lib.semaphore.proto.v1.ReserveResponse.reservation_expires_at:type_name -> google.protobuf.Timestamp
+	1,  // [1:1] is the sub-list for method output_type
+	1,  // [1:1] is the sub-list for method input_type
+	1,  // [1:1] is the sub-list for extension type_name
+	1,  // [1:1] is the sub-list for extension extendee
+	0,  // [0:1] is the sub-list for field type_name
 }
 
 func init() { file_temporal_server_chasm_lib_semaphore_proto_v1_request_response_proto_init() }
@@ -614,7 +859,7 @@ func file_temporal_server_chasm_lib_semaphore_proto_v1_request_response_proto_in
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_temporal_server_chasm_lib_semaphore_proto_v1_request_response_proto_rawDesc), len(file_temporal_server_chasm_lib_semaphore_proto_v1_request_response_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   10,
+			NumMessages:   14,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

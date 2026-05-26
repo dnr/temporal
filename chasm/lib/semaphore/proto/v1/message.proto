@@ -2,17 +2,38 @@ syntax = "proto3";
 
 package temporal.server.chasm.lib.semaphore.proto.v1;
 
+import "google/protobuf/timestamp.proto";
+
 option go_package = "go.temporal.io/server/chasm/lib/semaphore/gen/semaphorepb;semaphorepb";
 
 // SemaphoreState is the persisted state of a Semaphore component.
+//
+// There is intentionally no durable waiter queue: callers that don't get a
+// slot just block in their RPC (PollComponent) until state changes. FIFO
+// ordering among blocked Reserves is not guaranteed.
 message SemaphoreState {
-  // Maximum number of concurrent holders allowed.
+  // Maximum number of slots that may be reserved or committed at once.
   int32 limit = 1;
 
-  // IDs that currently hold a slot. Order is not significant.
-  repeated string holders = 2;
+  // Active slots, keyed by holder_id. Includes both Reserved (with
+  // reservation_expires_at set) and Committed (with it unset) entries.
+  // The total count is always <= limit.
+  map<string, SlotInfo> slots = 2;
+}
 
-  // IDs waiting for a slot to open up, in FIFO order. Front of the queue
-  // is promoted first when a holder releases or the limit increases.
-  repeated string waiters = 3;
+message SlotInfo {
+  // When set, the slot is in Reserved state and will be removed if Commit is
+  // not called by this time. Unset means the slot is Committed (held until
+  // an explicit Release).
+  google.protobuf.Timestamp reservation_expires_at = 1;
+}
+
+// ReservationExpiryTask fires reserve_ttl after a reservation is made. The
+// validator drops the task if the slot has already been Committed or removed,
+// or if a newer reservation supersedes this one.
+message ReservationExpiryTask {
+  string holder_id = 1;
+  // Used by the validator to detect superseded reservations: if the slot's
+  // current reservation_expires_at differs, this task is stale.
+  google.protobuf.Timestamp expected_expires_at = 2;
 }

@@ -227,35 +227,35 @@ func (this *GetHoldersResponse) Equal(that interface{}) bool {
 	return proto.Equal(this, that1)
 }
 
-// Marshal an object of type AcquireRequest to the protobuf v3 wire format
-func (val *AcquireRequest) Marshal() ([]byte, error) {
+// Marshal an object of type ReserveRequest to the protobuf v3 wire format
+func (val *ReserveRequest) Marshal() ([]byte, error) {
 	return proto.Marshal(val)
 }
 
-// Unmarshal an object of type AcquireRequest from the protobuf v3 wire format
-func (val *AcquireRequest) Unmarshal(buf []byte) error {
+// Unmarshal an object of type ReserveRequest from the protobuf v3 wire format
+func (val *ReserveRequest) Unmarshal(buf []byte) error {
 	return proto.Unmarshal(buf, val)
 }
 
 // Size returns the size of the object, in bytes, once serialized
-func (val *AcquireRequest) Size() int {
+func (val *ReserveRequest) Size() int {
 	return proto.Size(val)
 }
 
-// Equal returns whether two AcquireRequest values are equivalent by recursively
+// Equal returns whether two ReserveRequest values are equivalent by recursively
 // comparing the message's fields.
 // For more information see the documentation for
 // https://pkg.go.dev/google.golang.org/protobuf/proto#Equal
-func (this *AcquireRequest) Equal(that interface{}) bool {
+func (this *ReserveRequest) Equal(that interface{}) bool {
 	if that == nil {
 		return this == nil
 	}
 
-	var that1 *AcquireRequest
+	var that1 *ReserveRequest
 	switch t := that.(type) {
-	case *AcquireRequest:
+	case *ReserveRequest:
 		that1 = t
-	case AcquireRequest:
+	case ReserveRequest:
 		that1 = &t
 	default:
 		return false
@@ -264,35 +264,183 @@ func (this *AcquireRequest) Equal(that interface{}) bool {
 	return proto.Equal(this, that1)
 }
 
-// Marshal an object of type AcquireResponse to the protobuf v3 wire format
-func (val *AcquireResponse) Marshal() ([]byte, error) {
+// Marshal an object of type ReserveResponse to the protobuf v3 wire format
+func (val *ReserveResponse) Marshal() ([]byte, error) {
 	return proto.Marshal(val)
 }
 
-// Unmarshal an object of type AcquireResponse from the protobuf v3 wire format
-func (val *AcquireResponse) Unmarshal(buf []byte) error {
+// Unmarshal an object of type ReserveResponse from the protobuf v3 wire format
+func (val *ReserveResponse) Unmarshal(buf []byte) error {
 	return proto.Unmarshal(buf, val)
 }
 
 // Size returns the size of the object, in bytes, once serialized
-func (val *AcquireResponse) Size() int {
+func (val *ReserveResponse) Size() int {
 	return proto.Size(val)
 }
 
-// Equal returns whether two AcquireResponse values are equivalent by recursively
+// Equal returns whether two ReserveResponse values are equivalent by recursively
 // comparing the message's fields.
 // For more information see the documentation for
 // https://pkg.go.dev/google.golang.org/protobuf/proto#Equal
-func (this *AcquireResponse) Equal(that interface{}) bool {
+func (this *ReserveResponse) Equal(that interface{}) bool {
 	if that == nil {
 		return this == nil
 	}
 
-	var that1 *AcquireResponse
+	var that1 *ReserveResponse
 	switch t := that.(type) {
-	case *AcquireResponse:
+	case *ReserveResponse:
 		that1 = t
-	case AcquireResponse:
+	case ReserveResponse:
+		that1 = &t
+	default:
+		return false
+	}
+
+	return proto.Equal(this, that1)
+}
+
+// Marshal an object of type CommitRequest to the protobuf v3 wire format
+func (val *CommitRequest) Marshal() ([]byte, error) {
+	return proto.Marshal(val)
+}
+
+// Unmarshal an object of type CommitRequest from the protobuf v3 wire format
+func (val *CommitRequest) Unmarshal(buf []byte) error {
+	return proto.Unmarshal(buf, val)
+}
+
+// Size returns the size of the object, in bytes, once serialized
+func (val *CommitRequest) Size() int {
+	return proto.Size(val)
+}
+
+// Equal returns whether two CommitRequest values are equivalent by recursively
+// comparing the message's fields.
+// For more information see the documentation for
+// https://pkg.go.dev/google.golang.org/protobuf/proto#Equal
+func (this *CommitRequest) Equal(that interface{}) bool {
+	if that == nil {
+		return this == nil
+	}
+
+	var that1 *CommitRequest
+	switch t := that.(type) {
+	case *CommitRequest:
+		that1 = t
+	case CommitRequest:
+		that1 = &t
+	default:
+		return false
+	}
+
+	return proto.Equal(this, that1)
+}
+
+// Marshal an object of type CommitResponse to the protobuf v3 wire format
+func (val *CommitResponse) Marshal() ([]byte, error) {
+	return proto.Marshal(val)
+}
+
+// Unmarshal an object of type CommitResponse from the protobuf v3 wire format
+func (val *CommitResponse) Unmarshal(buf []byte) error {
+	return proto.Unmarshal(buf, val)
+}
+
+// Size returns the size of the object, in bytes, once serialized
+func (val *CommitResponse) Size() int {
+	return proto.Size(val)
+}
+
+// Equal returns whether two CommitResponse values are equivalent by recursively
+// comparing the message's fields.
+// For more information see the documentation for
+// https://pkg.go.dev/google.golang.org/protobuf/proto#Equal
+func (this *CommitResponse) Equal(that interface{}) bool {
+	if that == nil {
+		return this == nil
+	}
+
+	var that1 *CommitResponse
+	switch t := that.(type) {
+	case *CommitResponse:
+		that1 = t
+	case CommitResponse:
+		that1 = &t
+	default:
+		return false
+	}
+
+	return proto.Equal(this, that1)
+}
+
+// Marshal an object of type UnreserveRequest to the protobuf v3 wire format
+func (val *UnreserveRequest) Marshal() ([]byte, error) {
+	return proto.Marshal(val)
+}
+
+// Unmarshal an object of type UnreserveRequest from the protobuf v3 wire format
+func (val *UnreserveRequest) Unmarshal(buf []byte) error {
+	return proto.Unmarshal(buf, val)
+}
+
+// Size returns the size of the object, in bytes, once serialized
+func (val *UnreserveRequest) Size() int {
+	return proto.Size(val)
+}
+
+// Equal returns whether two UnreserveRequest values are equivalent by recursively
+// comparing the message's fields.
+// For more information see the documentation for
+// https://pkg.go.dev/google.golang.org/protobuf/proto#Equal
+func (this *UnreserveRequest) Equal(that interface{}) bool {
+	if that == nil {
+		return this == nil
+	}
+
+	var that1 *UnreserveRequest
+	switch t := that.(type) {
+	case *UnreserveRequest:
+		that1 = t
+	case UnreserveRequest:
+		that1 = &t
+	default:
+		return false
+	}
+
+	return proto.Equal(this, that1)
+}
+
+// Marshal an object of type UnreserveResponse to the protobuf v3 wire format
+func (val *UnreserveResponse) Marshal() ([]byte, error) {
+	return proto.Marshal(val)
+}
+
+// Unmarshal an object of type UnreserveResponse from the protobuf v3 wire format
+func (val *UnreserveResponse) Unmarshal(buf []byte) error {
+	return proto.Unmarshal(buf, val)
+}
+
+// Size returns the size of the object, in bytes, once serialized
+func (val *UnreserveResponse) Size() int {
+	return proto.Size(val)
+}
+
+// Equal returns whether two UnreserveResponse values are equivalent by recursively
+// comparing the message's fields.
+// For more information see the documentation for
+// https://pkg.go.dev/google.golang.org/protobuf/proto#Equal
+func (this *UnreserveResponse) Equal(that interface{}) bool {
+	if that == nil {
+		return this == nil
+	}
+
+	var that1 *UnreserveResponse
+	switch t := that.(type) {
+	case *UnreserveResponse:
+		that1 = t
+	case UnreserveResponse:
 		that1 = &t
 	default:
 		return false

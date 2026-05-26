@@ -187,18 +187,18 @@ func (c *SemaphoreServiceLayeredClient) GetHolders(
 	}
 	return backoff.ThrottleRetryContextWithReturn(ctx, call, c.retryPolicy, common.IsServiceClientTransientError)
 }
-func (c *SemaphoreServiceLayeredClient) callAcquireNoRetry(
+func (c *SemaphoreServiceLayeredClient) callReserveNoRetry(
 	ctx context.Context,
-	request *AcquireRequest,
+	request *ReserveRequest,
 	opts ...grpc.CallOption,
-) (*AcquireResponse, error) {
-	var response *AcquireResponse
+) (*ReserveResponse, error) {
+	var response *ReserveResponse
 	var err error
 	startTime := time.Now().UTC()
 	// the caller is a namespace, hence the tag below.
 	caller := headers.GetCallerInfo(ctx).CallerName
 	metricsHandler := c.metricsHandler.WithTags(
-		metrics.OperationTag("SemaphoreService.Acquire"),
+		metrics.OperationTag("SemaphoreService.Reserve"),
 		metrics.NamespaceTag(caller),
 		metrics.ServiceRoleTag(metrics.HistoryRoleTagValue),
 	)
@@ -214,19 +214,105 @@ func (c *SemaphoreServiceLayeredClient) callAcquireNoRetry(
 		var err error
 		ctx, cancel := context.WithTimeout(ctx, history.DefaultTimeout)
 		defer cancel()
-		response, err = client.Acquire(ctx, request, opts...)
+		response, err = client.Reserve(ctx, request, opts...)
 		return err
 	}
 	err = c.redirector.Execute(ctx, shardID, op)
 	return response, err
 }
-func (c *SemaphoreServiceLayeredClient) Acquire(
+func (c *SemaphoreServiceLayeredClient) Reserve(
 	ctx context.Context,
-	request *AcquireRequest,
+	request *ReserveRequest,
 	opts ...grpc.CallOption,
-) (*AcquireResponse, error) {
-	call := func(ctx context.Context) (*AcquireResponse, error) {
-		return c.callAcquireNoRetry(ctx, request, opts...)
+) (*ReserveResponse, error) {
+	call := func(ctx context.Context) (*ReserveResponse, error) {
+		return c.callReserveNoRetry(ctx, request, opts...)
+	}
+	return backoff.ThrottleRetryContextWithReturn(ctx, call, c.retryPolicy, common.IsServiceClientTransientError)
+}
+func (c *SemaphoreServiceLayeredClient) callCommitNoRetry(
+	ctx context.Context,
+	request *CommitRequest,
+	opts ...grpc.CallOption,
+) (*CommitResponse, error) {
+	var response *CommitResponse
+	var err error
+	startTime := time.Now().UTC()
+	// the caller is a namespace, hence the tag below.
+	caller := headers.GetCallerInfo(ctx).CallerName
+	metricsHandler := c.metricsHandler.WithTags(
+		metrics.OperationTag("SemaphoreService.Commit"),
+		metrics.NamespaceTag(caller),
+		metrics.ServiceRoleTag(metrics.HistoryRoleTagValue),
+	)
+	metrics.ClientRequests.With(metricsHandler).Record(1)
+	defer func() {
+		if err != nil {
+			metrics.ClientFailures.With(metricsHandler).Record(1, metrics.ServiceErrorTypeTag(err))
+		}
+		metrics.ClientLatency.With(metricsHandler).Record(time.Since(startTime))
+	}()
+	shardID := common.WorkflowIDToHistoryShard(request.GetNamespaceId(), request.GetSemaphoreId(), c.numShards)
+	op := func(ctx context.Context, client SemaphoreServiceClient) error {
+		var err error
+		ctx, cancel := context.WithTimeout(ctx, history.DefaultTimeout)
+		defer cancel()
+		response, err = client.Commit(ctx, request, opts...)
+		return err
+	}
+	err = c.redirector.Execute(ctx, shardID, op)
+	return response, err
+}
+func (c *SemaphoreServiceLayeredClient) Commit(
+	ctx context.Context,
+	request *CommitRequest,
+	opts ...grpc.CallOption,
+) (*CommitResponse, error) {
+	call := func(ctx context.Context) (*CommitResponse, error) {
+		return c.callCommitNoRetry(ctx, request, opts...)
+	}
+	return backoff.ThrottleRetryContextWithReturn(ctx, call, c.retryPolicy, common.IsServiceClientTransientError)
+}
+func (c *SemaphoreServiceLayeredClient) callUnreserveNoRetry(
+	ctx context.Context,
+	request *UnreserveRequest,
+	opts ...grpc.CallOption,
+) (*UnreserveResponse, error) {
+	var response *UnreserveResponse
+	var err error
+	startTime := time.Now().UTC()
+	// the caller is a namespace, hence the tag below.
+	caller := headers.GetCallerInfo(ctx).CallerName
+	metricsHandler := c.metricsHandler.WithTags(
+		metrics.OperationTag("SemaphoreService.Unreserve"),
+		metrics.NamespaceTag(caller),
+		metrics.ServiceRoleTag(metrics.HistoryRoleTagValue),
+	)
+	metrics.ClientRequests.With(metricsHandler).Record(1)
+	defer func() {
+		if err != nil {
+			metrics.ClientFailures.With(metricsHandler).Record(1, metrics.ServiceErrorTypeTag(err))
+		}
+		metrics.ClientLatency.With(metricsHandler).Record(time.Since(startTime))
+	}()
+	shardID := common.WorkflowIDToHistoryShard(request.GetNamespaceId(), request.GetSemaphoreId(), c.numShards)
+	op := func(ctx context.Context, client SemaphoreServiceClient) error {
+		var err error
+		ctx, cancel := context.WithTimeout(ctx, history.DefaultTimeout)
+		defer cancel()
+		response, err = client.Unreserve(ctx, request, opts...)
+		return err
+	}
+	err = c.redirector.Execute(ctx, shardID, op)
+	return response, err
+}
+func (c *SemaphoreServiceLayeredClient) Unreserve(
+	ctx context.Context,
+	request *UnreserveRequest,
+	opts ...grpc.CallOption,
+) (*UnreserveResponse, error) {
+	call := func(ctx context.Context) (*UnreserveResponse, error) {
+		return c.callUnreserveNoRetry(ctx, request, opts...)
 	}
 	return backoff.ThrottleRetryContextWithReturn(ctx, call, c.retryPolicy, common.IsServiceClientTransientError)
 }

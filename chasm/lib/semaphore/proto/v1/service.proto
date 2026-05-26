@@ -8,6 +8,8 @@ import "temporal/server/api/routing/v1/extension.proto";
 
 option go_package = "go.temporal.io/server/chasm/lib/semaphore/gen/semaphorepb;semaphorepb";
 
+// SemaphoreService is an internal service called by matching and history. It
+// is intentionally NOT exposed through the frontend service.
 service SemaphoreService {
   rpc SetLimit(SetLimitRequest) returns (SetLimitResponse) {
     option (temporal.server.api.routing.v1.routing).business_id = "semaphore_id";
@@ -24,9 +26,22 @@ service SemaphoreService {
     option (temporal.server.api.common.v1.api_category).category = API_CATEGORY_STANDARD;
   }
 
-  rpc Acquire(AcquireRequest) returns (AcquireResponse) {
+  // Reserve blocks until a slot is available (or the caller's deadline
+  // expires). It is the first half of a two-phase commit; the caller must
+  // follow up with Commit within the reservation TTL.
+  rpc Reserve(ReserveRequest) returns (ReserveResponse) {
     option (temporal.server.api.routing.v1.routing).business_id = "semaphore_id";
     option (temporal.server.api.common.v1.api_category).category = API_CATEGORY_LONG_POLL;
+  }
+
+  rpc Commit(CommitRequest) returns (CommitResponse) {
+    option (temporal.server.api.routing.v1.routing).business_id = "semaphore_id";
+    option (temporal.server.api.common.v1.api_category).category = API_CATEGORY_STANDARD;
+  }
+
+  rpc Unreserve(UnreserveRequest) returns (UnreserveResponse) {
+    option (temporal.server.api.routing.v1.routing).business_id = "semaphore_id";
+    option (temporal.server.api.common.v1.api_category).category = API_CATEGORY_STANDARD;
   }
 
   rpc Release(ReleaseRequest) returns (ReleaseResponse) {

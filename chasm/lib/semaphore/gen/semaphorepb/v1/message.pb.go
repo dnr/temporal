@@ -13,6 +13,7 @@ import (
 
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
+	timestamppb "google.golang.org/protobuf/types/known/timestamppb"
 )
 
 const (
@@ -23,15 +24,18 @@ const (
 )
 
 // SemaphoreState is the persisted state of a Semaphore component.
+//
+// There is intentionally no durable waiter queue: callers that don't get a
+// slot just block in their RPC (PollComponent) until state changes. FIFO
+// ordering among blocked Reserves is not guaranteed.
 type SemaphoreState struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// Maximum number of concurrent holders allowed.
+	// Maximum number of slots that may be reserved or committed at once.
 	Limit int32 `protobuf:"varint,1,opt,name=limit,proto3" json:"limit,omitempty"`
-	// IDs that currently hold a slot. Order is not significant.
-	Holders []string `protobuf:"bytes,2,rep,name=holders,proto3" json:"holders,omitempty"`
-	// IDs waiting for a slot to open up, in FIFO order. Front of the queue
-	// is promoted first when a holder releases or the limit increases.
-	Waiters       []string `protobuf:"bytes,3,rep,name=waiters,proto3" json:"waiters,omitempty"`
+	// Active slots, keyed by holder_id. Includes both Reserved (with
+	// reservation_expires_at set) and Committed (with it unset) entries.
+	// The total count is always <= limit.
+	Slots         map[string]*SlotInfo `protobuf:"bytes,2,rep,name=slots,proto3" json:"slots,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -73,16 +77,113 @@ func (x *SemaphoreState) GetLimit() int32 {
 	return 0
 }
 
-func (x *SemaphoreState) GetHolders() []string {
+func (x *SemaphoreState) GetSlots() map[string]*SlotInfo {
 	if x != nil {
-		return x.Holders
+		return x.Slots
 	}
 	return nil
 }
 
-func (x *SemaphoreState) GetWaiters() []string {
+type SlotInfo struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// When set, the slot is in Reserved state and will be removed if Commit is
+	// not called by this time. Unset means the slot is Committed (held until
+	// an explicit Release).
+	ReservationExpiresAt *timestamppb.Timestamp `protobuf:"bytes,1,opt,name=reservation_expires_at,json=reservationExpiresAt,proto3" json:"reservation_expires_at,omitempty"`
+	unknownFields        protoimpl.UnknownFields
+	sizeCache            protoimpl.SizeCache
+}
+
+func (x *SlotInfo) Reset() {
+	*x = SlotInfo{}
+	mi := &file_temporal_server_chasm_lib_semaphore_proto_v1_message_proto_msgTypes[1]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SlotInfo) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SlotInfo) ProtoMessage() {}
+
+func (x *SlotInfo) ProtoReflect() protoreflect.Message {
+	mi := &file_temporal_server_chasm_lib_semaphore_proto_v1_message_proto_msgTypes[1]
 	if x != nil {
-		return x.Waiters
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SlotInfo.ProtoReflect.Descriptor instead.
+func (*SlotInfo) Descriptor() ([]byte, []int) {
+	return file_temporal_server_chasm_lib_semaphore_proto_v1_message_proto_rawDescGZIP(), []int{1}
+}
+
+func (x *SlotInfo) GetReservationExpiresAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.ReservationExpiresAt
+	}
+	return nil
+}
+
+// ReservationExpiryTask fires reserve_ttl after a reservation is made. The
+// validator drops the task if the slot has already been Committed or removed,
+// or if a newer reservation supersedes this one.
+type ReservationExpiryTask struct {
+	state    protoimpl.MessageState `protogen:"open.v1"`
+	HolderId string                 `protobuf:"bytes,1,opt,name=holder_id,json=holderId,proto3" json:"holder_id,omitempty"`
+	// Used by the validator to detect superseded reservations: if the slot's
+	// current reservation_expires_at differs, this task is stale.
+	ExpectedExpiresAt *timestamppb.Timestamp `protobuf:"bytes,2,opt,name=expected_expires_at,json=expectedExpiresAt,proto3" json:"expected_expires_at,omitempty"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
+}
+
+func (x *ReservationExpiryTask) Reset() {
+	*x = ReservationExpiryTask{}
+	mi := &file_temporal_server_chasm_lib_semaphore_proto_v1_message_proto_msgTypes[2]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ReservationExpiryTask) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ReservationExpiryTask) ProtoMessage() {}
+
+func (x *ReservationExpiryTask) ProtoReflect() protoreflect.Message {
+	mi := &file_temporal_server_chasm_lib_semaphore_proto_v1_message_proto_msgTypes[2]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ReservationExpiryTask.ProtoReflect.Descriptor instead.
+func (*ReservationExpiryTask) Descriptor() ([]byte, []int) {
+	return file_temporal_server_chasm_lib_semaphore_proto_v1_message_proto_rawDescGZIP(), []int{2}
+}
+
+func (x *ReservationExpiryTask) GetHolderId() string {
+	if x != nil {
+		return x.HolderId
+	}
+	return ""
+}
+
+func (x *ReservationExpiryTask) GetExpectedExpiresAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.ExpectedExpiresAt
 	}
 	return nil
 }
@@ -91,11 +192,19 @@ var File_temporal_server_chasm_lib_semaphore_proto_v1_message_proto protoreflect
 
 const file_temporal_server_chasm_lib_semaphore_proto_v1_message_proto_rawDesc = "" +
 	"\n" +
-	":temporal/server/chasm/lib/semaphore/proto/v1/message.proto\x12,temporal.server.chasm.lib.semaphore.proto.v1\"Z\n" +
+	":temporal/server/chasm/lib/semaphore/proto/v1/message.proto\x12,temporal.server.chasm.lib.semaphore.proto.v1\x1a\x1fgoogle/protobuf/timestamp.proto\"\xf7\x01\n" +
 	"\x0eSemaphoreState\x12\x14\n" +
-	"\x05limit\x18\x01 \x01(\x05R\x05limit\x12\x18\n" +
-	"\aholders\x18\x02 \x03(\tR\aholders\x12\x18\n" +
-	"\awaiters\x18\x03 \x03(\tR\awaitersBGZEgo.temporal.io/server/chasm/lib/semaphore/gen/semaphorepb;semaphorepbb\x06proto3"
+	"\x05limit\x18\x01 \x01(\x05R\x05limit\x12]\n" +
+	"\x05slots\x18\x02 \x03(\v2G.temporal.server.chasm.lib.semaphore.proto.v1.SemaphoreState.SlotsEntryR\x05slots\x1ap\n" +
+	"\n" +
+	"SlotsEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12L\n" +
+	"\x05value\x18\x02 \x01(\v26.temporal.server.chasm.lib.semaphore.proto.v1.SlotInfoR\x05value:\x028\x01\"\\\n" +
+	"\bSlotInfo\x12P\n" +
+	"\x16reservation_expires_at\x18\x01 \x01(\v2\x1a.google.protobuf.TimestampR\x14reservationExpiresAt\"\x80\x01\n" +
+	"\x15ReservationExpiryTask\x12\x1b\n" +
+	"\tholder_id\x18\x01 \x01(\tR\bholderId\x12J\n" +
+	"\x13expected_expires_at\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\x11expectedExpiresAtBGZEgo.temporal.io/server/chasm/lib/semaphore/gen/semaphorepb;semaphorepbb\x06proto3"
 
 var (
 	file_temporal_server_chasm_lib_semaphore_proto_v1_message_proto_rawDescOnce sync.Once
@@ -109,16 +218,24 @@ func file_temporal_server_chasm_lib_semaphore_proto_v1_message_proto_rawDescGZIP
 	return file_temporal_server_chasm_lib_semaphore_proto_v1_message_proto_rawDescData
 }
 
-var file_temporal_server_chasm_lib_semaphore_proto_v1_message_proto_msgTypes = make([]protoimpl.MessageInfo, 1)
+var file_temporal_server_chasm_lib_semaphore_proto_v1_message_proto_msgTypes = make([]protoimpl.MessageInfo, 4)
 var file_temporal_server_chasm_lib_semaphore_proto_v1_message_proto_goTypes = []any{
-	(*SemaphoreState)(nil), // 0: temporal.server.chasm.lib.semaphore.proto.v1.SemaphoreState
+	(*SemaphoreState)(nil),        // 0: temporal.server.chasm.lib.semaphore.proto.v1.SemaphoreState
+	(*SlotInfo)(nil),              // 1: temporal.server.chasm.lib.semaphore.proto.v1.SlotInfo
+	(*ReservationExpiryTask)(nil), // 2: temporal.server.chasm.lib.semaphore.proto.v1.ReservationExpiryTask
+	nil,                           // 3: temporal.server.chasm.lib.semaphore.proto.v1.SemaphoreState.SlotsEntry
+	(*timestamppb.Timestamp)(nil), // 4: google.protobuf.Timestamp
 }
 var file_temporal_server_chasm_lib_semaphore_proto_v1_message_proto_depIdxs = []int32{
-	0, // [0:0] is the sub-list for method output_type
-	0, // [0:0] is the sub-list for method input_type
-	0, // [0:0] is the sub-list for extension type_name
-	0, // [0:0] is the sub-list for extension extendee
-	0, // [0:0] is the sub-list for field type_name
+	3, // 0: temporal.server.chasm.lib.semaphore.proto.v1.SemaphoreState.slots:type_name -> temporal.server.chasm.lib.semaphore.proto.v1.SemaphoreState.SlotsEntry
+	4, // 1: temporal.server.chasm.lib.semaphore.proto.v1.SlotInfo.reservation_expires_at:type_name -> google.protobuf.Timestamp
+	4, // 2: temporal.server.chasm.lib.semaphore.proto.v1.ReservationExpiryTask.expected_expires_at:type_name -> google.protobuf.Timestamp
+	1, // 3: temporal.server.chasm.lib.semaphore.proto.v1.SemaphoreState.SlotsEntry.value:type_name -> temporal.server.chasm.lib.semaphore.proto.v1.SlotInfo
+	4, // [4:4] is the sub-list for method output_type
+	4, // [4:4] is the sub-list for method input_type
+	4, // [4:4] is the sub-list for extension type_name
+	4, // [4:4] is the sub-list for extension extendee
+	0, // [0:4] is the sub-list for field type_name
 }
 
 func init() { file_temporal_server_chasm_lib_semaphore_proto_v1_message_proto_init() }
@@ -132,7 +249,7 @@ func file_temporal_server_chasm_lib_semaphore_proto_v1_message_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_temporal_server_chasm_lib_semaphore_proto_v1_message_proto_rawDesc), len(file_temporal_server_chasm_lib_semaphore_proto_v1_message_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   1,
+			NumMessages:   4,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

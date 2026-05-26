@@ -17,7 +17,8 @@ var (
 )
 
 // componentOnlyLibrary registers just the component, with no task or service
-// handlers. Used by the frontend service so it can serialize ComponentRefs.
+// handlers. Used by services that are only clients of the SemaphoreService
+// (so they can serialize ComponentRefs and use the layered client).
 type componentOnlyLibrary struct {
 	chasm.UnimplementedLibrary
 }
@@ -40,20 +41,34 @@ func (l *componentOnlyLibrary) Components() []*chasm.RegistrableComponent {
 }
 
 // library is the full library used by the service that owns the engine
-// (history): it includes the gRPC handler.
+// (history): it includes the gRPC handler and task handlers.
 type library struct {
 	componentOnlyLibrary
 
-	handler *handler
+	handler             *handler
+	expiryTaskHandler   *reservationExpiryTaskHandler
 }
 
-func newLibrary(handler *handler) *library {
+func newLibrary(
+	handler *handler,
+	expiryTaskHandler *reservationExpiryTaskHandler,
+) *library {
 	return &library{
 		componentOnlyLibrary: *newComponentOnlyLibrary(),
 		handler:              handler,
+		expiryTaskHandler:    expiryTaskHandler,
 	}
 }
 
 func (l *library) RegisterServices(server *grpc.Server) {
 	server.RegisterService(&semaphorepb.SemaphoreService_ServiceDesc, l.handler)
+}
+
+func (l *library) Tasks() []*chasm.RegistrableTask {
+	return []*chasm.RegistrableTask{
+		chasm.NewRegistrablePureTask(
+			"reservationExpiry",
+			l.expiryTaskHandler,
+		),
+	}
 }

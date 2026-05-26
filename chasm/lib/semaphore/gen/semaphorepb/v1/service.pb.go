@@ -27,43 +27,53 @@ var File_temporal_server_chasm_lib_semaphore_proto_v1_service_proto protoreflect
 
 const file_temporal_server_chasm_lib_semaphore_proto_v1_service_proto_rawDesc = "" +
 	"\n" +
-	":temporal/server/chasm/lib/semaphore/proto/v1/service.proto\x12,temporal.server.chasm.lib.semaphore.proto.v1\x1aCtemporal/server/chasm/lib/semaphore/proto/v1/request_response.proto\x1a0temporal/server/api/common/v1/api_category.proto\x1a.temporal/server/api/routing/v1/extension.proto2\xd0\x06\n" +
+	":temporal/server/chasm/lib/semaphore/proto/v1/service.proto\x12,temporal.server.chasm.lib.semaphore.proto.v1\x1aCtemporal/server/chasm/lib/semaphore/proto/v1/request_response.proto\x1a0temporal/server/api/common/v1/api_category.proto\x1a.temporal/server/api/routing/v1/extension.proto2\x99\t\n" +
 	"\x10SemaphoreService\x12\xa3\x01\n" +
 	"\bSetLimit\x12=.temporal.server.chasm.lib.semaphore.proto.v1.SetLimitRequest\x1a>.temporal.server.chasm.lib.semaphore.proto.v1.SetLimitResponse\"\x18\x8a\xb5\x18\x02\b\x01\xd2\xc3\x18\x0e\x1a\fsemaphore_id\x12\xa3\x01\n" +
 	"\bGetLimit\x12=.temporal.server.chasm.lib.semaphore.proto.v1.GetLimitRequest\x1a>.temporal.server.chasm.lib.semaphore.proto.v1.GetLimitResponse\"\x18\x8a\xb5\x18\x02\b\x01\xd2\xc3\x18\x0e\x1a\fsemaphore_id\x12\xa9\x01\n" +
 	"\n" +
 	"GetHolders\x12?.temporal.server.chasm.lib.semaphore.proto.v1.GetHoldersRequest\x1a@.temporal.server.chasm.lib.semaphore.proto.v1.GetHoldersResponse\"\x18\x8a\xb5\x18\x02\b\x01\xd2\xc3\x18\x0e\x1a\fsemaphore_id\x12\xa0\x01\n" +
-	"\aAcquire\x12<.temporal.server.chasm.lib.semaphore.proto.v1.AcquireRequest\x1a=.temporal.server.chasm.lib.semaphore.proto.v1.AcquireResponse\"\x18\x8a\xb5\x18\x02\b\x02\xd2\xc3\x18\x0e\x1a\fsemaphore_id\x12\xa0\x01\n" +
+	"\aReserve\x12<.temporal.server.chasm.lib.semaphore.proto.v1.ReserveRequest\x1a=.temporal.server.chasm.lib.semaphore.proto.v1.ReserveResponse\"\x18\x8a\xb5\x18\x02\b\x02\xd2\xc3\x18\x0e\x1a\fsemaphore_id\x12\x9d\x01\n" +
+	"\x06Commit\x12;.temporal.server.chasm.lib.semaphore.proto.v1.CommitRequest\x1a<.temporal.server.chasm.lib.semaphore.proto.v1.CommitResponse\"\x18\x8a\xb5\x18\x02\b\x01\xd2\xc3\x18\x0e\x1a\fsemaphore_id\x12\xa6\x01\n" +
+	"\tUnreserve\x12>.temporal.server.chasm.lib.semaphore.proto.v1.UnreserveRequest\x1a?.temporal.server.chasm.lib.semaphore.proto.v1.UnreserveResponse\"\x18\x8a\xb5\x18\x02\b\x01\xd2\xc3\x18\x0e\x1a\fsemaphore_id\x12\xa0\x01\n" +
 	"\aRelease\x12<.temporal.server.chasm.lib.semaphore.proto.v1.ReleaseRequest\x1a=.temporal.server.chasm.lib.semaphore.proto.v1.ReleaseResponse\"\x18\x8a\xb5\x18\x02\b\x01\xd2\xc3\x18\x0e\x1a\fsemaphore_idBGZEgo.temporal.io/server/chasm/lib/semaphore/gen/semaphorepb;semaphorepbb\x06proto3"
 
 var file_temporal_server_chasm_lib_semaphore_proto_v1_service_proto_goTypes = []any{
 	(*SetLimitRequest)(nil),    // 0: temporal.server.chasm.lib.semaphore.proto.v1.SetLimitRequest
 	(*GetLimitRequest)(nil),    // 1: temporal.server.chasm.lib.semaphore.proto.v1.GetLimitRequest
 	(*GetHoldersRequest)(nil),  // 2: temporal.server.chasm.lib.semaphore.proto.v1.GetHoldersRequest
-	(*AcquireRequest)(nil),     // 3: temporal.server.chasm.lib.semaphore.proto.v1.AcquireRequest
-	(*ReleaseRequest)(nil),     // 4: temporal.server.chasm.lib.semaphore.proto.v1.ReleaseRequest
-	(*SetLimitResponse)(nil),   // 5: temporal.server.chasm.lib.semaphore.proto.v1.SetLimitResponse
-	(*GetLimitResponse)(nil),   // 6: temporal.server.chasm.lib.semaphore.proto.v1.GetLimitResponse
-	(*GetHoldersResponse)(nil), // 7: temporal.server.chasm.lib.semaphore.proto.v1.GetHoldersResponse
-	(*AcquireResponse)(nil),    // 8: temporal.server.chasm.lib.semaphore.proto.v1.AcquireResponse
-	(*ReleaseResponse)(nil),    // 9: temporal.server.chasm.lib.semaphore.proto.v1.ReleaseResponse
+	(*ReserveRequest)(nil),     // 3: temporal.server.chasm.lib.semaphore.proto.v1.ReserveRequest
+	(*CommitRequest)(nil),      // 4: temporal.server.chasm.lib.semaphore.proto.v1.CommitRequest
+	(*UnreserveRequest)(nil),   // 5: temporal.server.chasm.lib.semaphore.proto.v1.UnreserveRequest
+	(*ReleaseRequest)(nil),     // 6: temporal.server.chasm.lib.semaphore.proto.v1.ReleaseRequest
+	(*SetLimitResponse)(nil),   // 7: temporal.server.chasm.lib.semaphore.proto.v1.SetLimitResponse
+	(*GetLimitResponse)(nil),   // 8: temporal.server.chasm.lib.semaphore.proto.v1.GetLimitResponse
+	(*GetHoldersResponse)(nil), // 9: temporal.server.chasm.lib.semaphore.proto.v1.GetHoldersResponse
+	(*ReserveResponse)(nil),    // 10: temporal.server.chasm.lib.semaphore.proto.v1.ReserveResponse
+	(*CommitResponse)(nil),     // 11: temporal.server.chasm.lib.semaphore.proto.v1.CommitResponse
+	(*UnreserveResponse)(nil),  // 12: temporal.server.chasm.lib.semaphore.proto.v1.UnreserveResponse
+	(*ReleaseResponse)(nil),    // 13: temporal.server.chasm.lib.semaphore.proto.v1.ReleaseResponse
 }
 var file_temporal_server_chasm_lib_semaphore_proto_v1_service_proto_depIdxs = []int32{
-	0, // 0: temporal.server.chasm.lib.semaphore.proto.v1.SemaphoreService.SetLimit:input_type -> temporal.server.chasm.lib.semaphore.proto.v1.SetLimitRequest
-	1, // 1: temporal.server.chasm.lib.semaphore.proto.v1.SemaphoreService.GetLimit:input_type -> temporal.server.chasm.lib.semaphore.proto.v1.GetLimitRequest
-	2, // 2: temporal.server.chasm.lib.semaphore.proto.v1.SemaphoreService.GetHolders:input_type -> temporal.server.chasm.lib.semaphore.proto.v1.GetHoldersRequest
-	3, // 3: temporal.server.chasm.lib.semaphore.proto.v1.SemaphoreService.Acquire:input_type -> temporal.server.chasm.lib.semaphore.proto.v1.AcquireRequest
-	4, // 4: temporal.server.chasm.lib.semaphore.proto.v1.SemaphoreService.Release:input_type -> temporal.server.chasm.lib.semaphore.proto.v1.ReleaseRequest
-	5, // 5: temporal.server.chasm.lib.semaphore.proto.v1.SemaphoreService.SetLimit:output_type -> temporal.server.chasm.lib.semaphore.proto.v1.SetLimitResponse
-	6, // 6: temporal.server.chasm.lib.semaphore.proto.v1.SemaphoreService.GetLimit:output_type -> temporal.server.chasm.lib.semaphore.proto.v1.GetLimitResponse
-	7, // 7: temporal.server.chasm.lib.semaphore.proto.v1.SemaphoreService.GetHolders:output_type -> temporal.server.chasm.lib.semaphore.proto.v1.GetHoldersResponse
-	8, // 8: temporal.server.chasm.lib.semaphore.proto.v1.SemaphoreService.Acquire:output_type -> temporal.server.chasm.lib.semaphore.proto.v1.AcquireResponse
-	9, // 9: temporal.server.chasm.lib.semaphore.proto.v1.SemaphoreService.Release:output_type -> temporal.server.chasm.lib.semaphore.proto.v1.ReleaseResponse
-	5, // [5:10] is the sub-list for method output_type
-	0, // [0:5] is the sub-list for method input_type
-	0, // [0:0] is the sub-list for extension type_name
-	0, // [0:0] is the sub-list for extension extendee
-	0, // [0:0] is the sub-list for field type_name
+	0,  // 0: temporal.server.chasm.lib.semaphore.proto.v1.SemaphoreService.SetLimit:input_type -> temporal.server.chasm.lib.semaphore.proto.v1.SetLimitRequest
+	1,  // 1: temporal.server.chasm.lib.semaphore.proto.v1.SemaphoreService.GetLimit:input_type -> temporal.server.chasm.lib.semaphore.proto.v1.GetLimitRequest
+	2,  // 2: temporal.server.chasm.lib.semaphore.proto.v1.SemaphoreService.GetHolders:input_type -> temporal.server.chasm.lib.semaphore.proto.v1.GetHoldersRequest
+	3,  // 3: temporal.server.chasm.lib.semaphore.proto.v1.SemaphoreService.Reserve:input_type -> temporal.server.chasm.lib.semaphore.proto.v1.ReserveRequest
+	4,  // 4: temporal.server.chasm.lib.semaphore.proto.v1.SemaphoreService.Commit:input_type -> temporal.server.chasm.lib.semaphore.proto.v1.CommitRequest
+	5,  // 5: temporal.server.chasm.lib.semaphore.proto.v1.SemaphoreService.Unreserve:input_type -> temporal.server.chasm.lib.semaphore.proto.v1.UnreserveRequest
+	6,  // 6: temporal.server.chasm.lib.semaphore.proto.v1.SemaphoreService.Release:input_type -> temporal.server.chasm.lib.semaphore.proto.v1.ReleaseRequest
+	7,  // 7: temporal.server.chasm.lib.semaphore.proto.v1.SemaphoreService.SetLimit:output_type -> temporal.server.chasm.lib.semaphore.proto.v1.SetLimitResponse
+	8,  // 8: temporal.server.chasm.lib.semaphore.proto.v1.SemaphoreService.GetLimit:output_type -> temporal.server.chasm.lib.semaphore.proto.v1.GetLimitResponse
+	9,  // 9: temporal.server.chasm.lib.semaphore.proto.v1.SemaphoreService.GetHolders:output_type -> temporal.server.chasm.lib.semaphore.proto.v1.GetHoldersResponse
+	10, // 10: temporal.server.chasm.lib.semaphore.proto.v1.SemaphoreService.Reserve:output_type -> temporal.server.chasm.lib.semaphore.proto.v1.ReserveResponse
+	11, // 11: temporal.server.chasm.lib.semaphore.proto.v1.SemaphoreService.Commit:output_type -> temporal.server.chasm.lib.semaphore.proto.v1.CommitResponse
+	12, // 12: temporal.server.chasm.lib.semaphore.proto.v1.SemaphoreService.Unreserve:output_type -> temporal.server.chasm.lib.semaphore.proto.v1.UnreserveResponse
+	13, // 13: temporal.server.chasm.lib.semaphore.proto.v1.SemaphoreService.Release:output_type -> temporal.server.chasm.lib.semaphore.proto.v1.ReleaseResponse
+	7,  // [7:14] is the sub-list for method output_type
+	0,  // [0:7] is the sub-list for method input_type
+	0,  // [0:0] is the sub-list for extension type_name
+	0,  // [0:0] is the sub-list for extension extendee
+	0,  // [0:0] is the sub-list for field type_name
 }
 
 func init() { file_temporal_server_chasm_lib_semaphore_proto_v1_service_proto_init() }

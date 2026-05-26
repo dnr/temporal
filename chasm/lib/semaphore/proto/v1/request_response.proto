@@ -2,11 +2,12 @@ syntax = "proto3";
 
 package temporal.server.chasm.lib.semaphore.proto.v1;
 
+import "google/protobuf/timestamp.proto";
+
 option go_package = "go.temporal.io/server/chasm/lib/semaphore/gen/semaphorepb;semaphorepb";
 
 // SetLimit creates the semaphore if it does not yet exist, or updates the
-// limit on an existing semaphore. Increasing the limit may promote queued
-// waiters into holders.
+// limit on an existing semaphore.
 message SetLimitRequest {
   string namespace_id = 1;
   // BusinessID identifying this semaphore.
@@ -33,26 +34,63 @@ message GetHoldersRequest {
 }
 
 message GetHoldersResponse {
-  repeated string holders = 1;
-  repeated string waiters = 2;
+  // Holder IDs of Committed slots.
+  repeated string committed = 1;
+  // Holder IDs of Reserved (uncommitted) slots.
+  repeated string reserved = 2;
 }
 
-// AcquireRequest attempts to add the given id to the holders. If a slot is
-// available (or id is already a holder) it returns immediately with
-// acquired = true. Otherwise the id is enqueued as a waiter and the call
-// long-polls until either a slot opens up or the deadline is reached.
-message AcquireRequest {
+// ReserveRequest takes a reservation on a slot. If no slot is available the
+// RPC blocks until one opens or the caller's deadline expires (FIFO order
+// among waiters is not guaranteed; head-of-line is undefined).
+//
+// On success, the caller MUST call Commit(holder_id) within the reservation
+// TTL or the slot will be returned to the pool by the framework.
+//
+// Reserve is idempotent for an id that is already Reserved or Committed:
+//  - already Reserved -> the existing reservation's expiration is refreshed.
+//  - already Committed -> returned as already_committed = true.
+message ReserveRequest {
   string namespace_id = 1;
   string semaphore_id = 2;
   string holder_id = 3;
 }
 
-message AcquireResponse {
-  bool acquired = 1;
+message ReserveResponse {
+  // True if the holder now has a Reserved (or refreshed-Reserved) slot.
+  bool reserved = 1;
+  // True if the holder was already Committed when Reserve was called. Treat
+  // as a successful reservation that does not need a follow-up Commit.
+  bool already_committed = 2;
+  // When the current reservation expires if Commit is not called. Unset when
+  // already_committed = true.
+  google.protobuf.Timestamp reservation_expires_at = 3;
 }
 
-// ReleaseRequest removes the id from the holders (or waiters, if still
-// queued). No-op if id is not present in either list.
+// CommitRequest promotes a Reserved slot to Committed. Idempotent if the slot
+// is already Committed. Returns NotFound if the slot is not present (e.g.,
+// the reservation already expired).
+message CommitRequest {
+  string namespace_id = 1;
+  string semaphore_id = 2;
+  string holder_id = 3;
+}
+
+message CommitResponse {}
+
+// UnreserveRequest explicitly releases a Reserved slot before its TTL
+// expires. No-op for slots that are Committed (matching should not call
+// Unreserve in that case) or absent.
+message UnreserveRequest {
+  string namespace_id = 1;
+  string semaphore_id = 2;
+  string holder_id = 3;
+}
+
+message UnreserveResponse {}
+
+// ReleaseRequest removes a slot (Reserved or Committed). No-op if absent.
+// The semaphore must durably persist this before returning.
 message ReleaseRequest {
   string namespace_id = 1;
   string semaphore_id = 2;
