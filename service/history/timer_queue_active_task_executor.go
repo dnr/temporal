@@ -206,6 +206,17 @@ func (t *timerQueueActiveTaskExecutor) executeActivityTimeoutTask(
 	ctx, cancel := context.WithTimeout(ctx, taskTimeout)
 	defer cancel()
 
+	// Release any semaphore slots held by attempts this timer task is about
+	// to terminate, BEFORE the workflow update. Release-first preserves the
+	// hard-limit guarantee: if Release fails, the queue retries the task
+	// and re-attempts both steps idempotently. See PreReleaseActivitySemaphore.
+	//
+	// TODO: thread a real SemaphoreServiceClient. Until then the helper
+	// short-circuits via the nil client and does no work.
+	if err := t.preReleaseForActivityTimeout(ctx, task, nil); err != nil {
+		return err
+	}
+
 	weContext, release, err := getWorkflowExecutionContextForTask(ctx, t.shardContext, t.cache, task)
 	if err != nil {
 		return err
@@ -275,13 +286,6 @@ Loop:
 		release(nil) // so mutable state is not unloaded from cache
 		return errNoTimerFired
 	}
-	// TODO(activity-flow-control): for every activity attempt that
-	// processSingleActivityTimeoutTask terminated above (whether it transitioned
-	// to retry or to a terminal timeout), call api.ReleaseActivitySemaphore for
-	// that attempt before returning success. Each timeout ends one attempt and
-	// the next attempt will Reserve a fresh slot. Capture the relevant
-	// ActivityInfos in the inner loop above (before RetryActivity mutates them)
-	// and pass them through to here once the SemaphoreServiceClient is plumbed.
 	return t.updateWorkflowExecution(ctx, weContext, mutableState, scheduleWorkflowTask)
 }
 

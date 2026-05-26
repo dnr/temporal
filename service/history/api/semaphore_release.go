@@ -67,8 +67,9 @@ func ReleaseActivitySemaphore(
 }
 
 // PreReleaseActivitySemaphore performs a Release-first activity-semaphore
-// release: it reads the ActivityInfo with a read-only lease, then calls
-// Release before the caller's workflow update transaction runs.
+// release: it reads the ActivityInfo with a read-only lease, drops the
+// lease, then calls Release before the caller's workflow update
+// transaction runs.
 //
 // Why Release-first (hard semantics): if we released after the workflow
 // update, then a Release failure after a successful update would return
@@ -77,6 +78,10 @@ func ReleaseActivitySemaphore(
 // reaches the Release path, and the slot leaks forever — Committed slots
 // have no TTL. Doing the Release first means a retry re-attempts both
 // steps idempotently until both succeed.
+//
+// The workflow lease is released with a nil error before the Release RPC,
+// so an RPC failure does NOT invalidate the mutable-state cache (the RPC
+// failure says nothing about workflow state correctness).
 //
 // Placeholder optimization: when client is nil (the current state, until
 // the SemaphoreServiceClient is plumbed into history), this returns
@@ -89,45 +94,58 @@ func PreReleaseActivitySemaphore(
 	client semaphorepb.SemaphoreServiceClient,
 	workflowKey definition.WorkflowKey,
 	token *tokenspb.Task,
-) (retErr error) {
+) error {
 	if client == nil {
 		return nil
 	}
 
+	aiSnapshot, err := readActivityInfoForRelease(ctx, shardContext, consistencyChecker, workflowKey, token)
+	if err != nil || aiSnapshot == nil {
+		return err
+	}
+
+	return ReleaseActivitySemaphore(
+		ctx, client,
+		workflowKey.NamespaceID, workflowKey.WorkflowID, workflowKey.RunID,
+		aiSnapshot,
+	)
+}
+
+// readActivityInfoForRelease takes a read-only workflow lease, snapshots
+// the ActivityInfo for the given token, and releases the lease (with nil
+// so the cache is preserved). Returns (nil, nil) when the activity is
+// already gone — nothing to release.
+func readActivityInfoForRelease(
+	ctx context.Context,
+	shardContext historyi.ShardContext,
+	consistencyChecker WorkflowConsistencyChecker,
+	workflowKey definition.WorkflowKey,
+	token *tokenspb.Task,
+) (_ *persistencespb.ActivityInfo, retErr error) {
 	lease, err := consistencyChecker.GetWorkflowLease(
 		ctx, nil, workflowKey, locks.PriorityHigh,
 	)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer func() { lease.GetReleaseFn()(retErr) }()
 
 	mutableState, err := lease.GetContext().LoadMutableState(ctx, shardContext)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	scheduledEventID := token.GetScheduledEventId()
 	if scheduledEventID == common.EmptyEventID {
 		scheduledEventID, err = GetActivityScheduledEventID(token.GetActivityId(), mutableState)
 		if err != nil {
-			return err
+			return nil, err
 		}
 	}
 
 	ai, ok := mutableState.GetActivityInfo(scheduledEventID)
 	if !ok {
-		// Activity is already gone — nothing to release. The next caller
-		// will see the same state and also no-op.
-		return nil
+		return nil, nil
 	}
-
-	// Snapshot the AI before calling Release; we want to drop the workflow
-	// lease as soon as possible.
-	aiSnapshot := proto.Clone(ai).(*persistencespb.ActivityInfo)
-	return ReleaseActivitySemaphore(
-		ctx, client,
-		workflowKey.NamespaceID, workflowKey.WorkflowID, workflowKey.RunID,
-		aiSnapshot,
-	)
+	return proto.Clone(ai).(*persistencespb.ActivityInfo), nil
 }
