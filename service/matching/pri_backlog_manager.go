@@ -158,7 +158,7 @@ func (c *priBacklogManagerImpl) initState(state taskQueueState, err error) {
 
 	// pass scale info back to physical tq from unversioned (default) queue
 	if c.queueKey().Partition().IsRoot() && !c.queueKey().IsVersioned() {
-		c.pqMgr.LoadedMetadata(state.scaleState)
+		c.pqMgr.StartScaleManager(state.scaleState)
 	}
 
 	if state.otherHasTasks {

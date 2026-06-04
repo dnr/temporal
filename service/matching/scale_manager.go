@@ -2,7 +2,6 @@ package matching
 
 import (
 	"context"
-	"sync"
 	"sync/atomic"
 	"time"
 
@@ -39,9 +38,10 @@ type scaleManager struct {
 	background         *goro.Handle
 	limiter            quotas.RateLimiter
 
-	lock       sync.Mutex
-	scaleState *persistencespb.PartitionScaleState
-	scaleDB    scaleDB
+	// owned by the worker goroutine after Start starts it
+	scaleState   *persistencespb.PartitionScaleState
+	scaleDB      scaleDB
+	nextDecision time.Time
 
 	batch atomic.Int64
 }
@@ -92,8 +92,9 @@ func (sm *scaleManager) Stop() {
 	}
 }
 
-// LoadedMetadata is called when the root partitions's default queue has loaded its metadata.
-func (sm *scaleManager) LoadedMetadata(scaleState *persistencespb.PartitionScaleState, scaleDB scaleDB) {
+// Start is called when the root partitions's default queue has loaded its metadata.
+// Must be called at most once.
+func (sm *scaleManager) Start(scaleState *persistencespb.PartitionScaleState, scaleDB scaleDB) {
 	if sm == nil {
 		return
 	}
@@ -247,7 +248,7 @@ func (sm *scaleManager) describeRequest(id int32) *matchingservice.DescribeTaskQ
 		},
 		Versions: &taskqueuepb.TaskQueueVersionSelection{
 			Unversioned: true,
-			// TODO: what about "inactive" versions?
+			// TODO(dp)(carlydf): deal with inactive/deleted versions (use user data version info)
 			AllActive: true,
 		},
 		ReportInternalTaskQueueStatus: true,
@@ -272,6 +273,9 @@ func (sm *scaleManager) updateBacklogAndDrainState(ctx context.Context, scaleSta
 	var toClear []int32
 
 	for id := range read {
+		// note: right now, this call is useless if checkDrain is false, or for partitions < write.
+		// later we'll need these calls to update backlog and other stats, so we just do it always
+		// now to simplify the future diff.
 		callCtx, cancel := context.WithTimeout(ctx, ioTimeout)
 		res, err := sm.matchingClient.DescribeTaskQueuePartition(callCtx, sm.describeRequest(id))
 		cancel()
