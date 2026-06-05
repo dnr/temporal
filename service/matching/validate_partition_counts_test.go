@@ -6,7 +6,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.temporal.io/api/serviceerror"
 	taskqueuespb "go.temporal.io/server/api/taskqueue/v1"
-	matching "go.temporal.io/server/client/matching"
+	"go.temporal.io/server/client/matching"
 	"go.temporal.io/server/common/dynamicconfig"
 	serviceerrors "go.temporal.io/server/common/serviceerror"
 )
@@ -93,9 +93,9 @@ func TestValidatePartitionCountDifference(t *testing.T) {
 
 	var stale *serviceerrors.StalePartitionCounts
 
-	difference := dynamicconfig.PartitionScaleDifference{
-		AllowedDelta: 2,
-		AllowedRatio: 1.5,
+	difference := dynamicconfig.PartitionScaleAllowedDrift{
+		Delta: 2,
+		Ratio: 1.5,
 	}
 
 	tests := []struct {
@@ -165,7 +165,7 @@ func TestValidatePartitionCountDifference(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			err := validatePartitionCountDifference(tc.scaleInfo, tc.forWrite, tc.clientPC, difference)
+			err := validatePartitionScaleDrift(tc.scaleInfo, tc.forWrite, tc.clientPC, difference)
 			if tc.expected == nil {
 				require.NoError(t, err)
 			} else {

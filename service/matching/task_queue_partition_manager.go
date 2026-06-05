@@ -165,7 +165,8 @@ func newTaskQueuePartitionManager(
 				userDataManager,
 				e.matchingRawClient,
 				partitionScaler,
-				tqConfig.PartitionScaleManagerSettings(),
+				e.timeSource,
+				tqConfig.PartitionScaleManagerSettings,
 				tqConfig.NumWritePartitions,
 				tqConfig.BreakdownMetricsByTaskQueue,
 			)
@@ -368,7 +369,7 @@ func (pm *taskQueuePartitionManagerImpl) checkPartitionCounts(ctx context.Contex
 		return err
 	}
 
-	// if client has sent its idea of counts, also validate difference
+	// if client has sent its idea of counts, also validate drift
 	clientPC, err := matching.ParsePartitionCountsFromIncomingContext(ctx)
 	if err != nil {
 		pm.throttledLogger.Info("partition count header parse error", tag.Error(err))
@@ -376,8 +377,8 @@ func (pm *taskQueuePartitionManagerImpl) checkPartitionCounts(ctx context.Contex
 	} else if !clientPC.Valid() {
 		return nil // client didn't send anything or invalid, skip check
 	}
-	difference := pm.config.PartitionScaleDifference()
-	return validatePartitionCountDifference(scaleInfo, forWrite, clientPC, difference)
+	allowedDrift := pm.config.PartitionScaleAllowedDrift()
+	return validatePartitionScaleDrift(scaleInfo, forWrite, clientPC, allowedDrift)
 }
 
 // validatePartitionCounts checks whether a partition should accept an RPC based on the current
@@ -400,14 +401,14 @@ func validatePartitionCounts(
 	}
 }
 
-// validatePartitionCountDifference checks whether a partition should accept an RPC based on
+// validatePartitionScaleDrift checks whether a partition should accept an RPC based on
 // the client's idea of partition counts. It returns nil if the RPC should be accepted, or an
 // error if it should be rejected. scaleInfo and clientPC must both be valid.
-func validatePartitionCountDifference(
+func validatePartitionScaleDrift(
 	scaleInfo *taskqueuespb.PartitionScaleInfo,
 	forWrite bool,
 	clientPC matching.PartitionCounts,
-	difference dynamicconfig.PartitionScaleDifference,
+	allowedDrift dynamicconfig.PartitionScaleAllowedDrift,
 ) error {
 	var delta int32
 	var ratio float32
@@ -418,8 +419,8 @@ func validatePartitionCountDifference(
 		delta = clientPC.Read - scaleInfo.Read
 		ratio = float32(clientPC.Read) / float32(scaleInfo.Read)
 	}
-	effectiveRatio := max(1.001, difference.AllowedRatio)
-	if delta >= -difference.AllowedDelta && delta <= difference.AllowedDelta ||
+	effectiveRatio := max(1.001, allowedDrift.Ratio)
+	if delta >= -allowedDrift.Delta && delta <= allowedDrift.Delta ||
 		ratio >= 1/effectiveRatio && ratio <= effectiveRatio {
 		return nil
 	}
@@ -435,19 +436,17 @@ func (pm *taskQueuePartitionManagerImpl) signalPartitionScaler() {
 		return // only run on root partition
 	}
 	scaleInfo := pm.userDataManager.PartitionScale()
-	// note that write == target, so we can use write for target, and we can assume the
-	// effective number of write partitions is equal to the target.
-	effective := int(scaleInfo.GetWrite())
+	effectiveWrite := int(scaleInfo.GetWrite())
 	// if no target is set yet, get effective count from dynamic config (matches client behavior)
-	if effective == 0 {
-		effective = max(1, pm.config.NumWritePartitions())
+	if effectiveWrite == 0 {
+		effectiveWrite = max(1, pm.config.NumWritePartitions())
 	}
 	// we assume that tasks are balanced uniformly across partitions, so if the root has
 	// seen 1 task then all have seen ~1 task, so the whole queue has seen 'effective'
 	// tasks in total.
 	// TODO(dp): this will change when we add non-uniform load balancing. we should eventually
 	// aggregate real stats instead of assuming
-	pm.scaleManager.AddedTasks(effective)
+	pm.scaleManager.AddedTasks(effectiveWrite)
 }
 
 func (pm *taskQueuePartitionManagerImpl) sendPartitionCountTrailer(ctx context.Context) {
@@ -607,10 +606,25 @@ reredirectTask:
 		return "", false, err
 	}
 
+	behavior := directive.GetBehavior()
+	forwarded := params.forwardInfo != nil
+
+	var outcome syncMatchOutcome
 	if isActive {
-		syncMatched, err = syncMatchQueue.TrySyncMatch(ctx, syncMatchTask)
+		outcome, err = syncMatchQueue.TrySyncMatch(ctx, syncMatchTask)
+		syncMatched = outcome == syncMatchSuccess
 		if syncMatched && !pm.shouldBacklogSyncMatchTaskOnError(err) {
-			pm.processTaskAddHooks(ctx, targetVersion, syncMatched)
+			// Only fire hooks for non-forwarded tasks. Forwarded tasks already had hooks fired
+			// on the child partition that originally received the task.
+			if !forwarded {
+				pm.processTaskAddHooks(ctx, targetVersion, outcome)
+			}
+
+			syncMatchResult := metrics.TaskAddResultSyncMatch
+			if err != nil {
+				syncMatchResult = taskAddErrResult(err)
+			}
+			syncMatchQueue.RecordTaskAdd(syncMatchResult, forwarded, behavior)
 
 			// Build ID is not returned for sync match. The returned build ID is used by History to update
 			// mutable state (and visibility) when the first workflow task is spooled.
@@ -627,6 +641,7 @@ reredirectTask:
 
 	if spoolQueue == nil {
 		// This means the task is being forwarded. Child partition will persist the task when sync match fails.
+		syncMatchQueue.RecordTaskAdd(metrics.TaskAddResultSyncMatchUnavail, forwarded, behavior)
 		return "", false, errRemoteSyncMatchFailed
 	}
 
@@ -638,19 +653,45 @@ reredirectTask:
 
 	err = spoolQueue.SpoolTask(params.taskInfo)
 	if err == nil {
-		pm.processTaskAddHooks(ctx, targetVersion, false)
+		spoolQueue.RecordTaskAdd(metrics.TaskAddResultBacklog, forwarded, behavior)
+		pm.processTaskAddHooks(ctx, targetVersion, outcome)
+	} else {
+		spoolQueue.RecordTaskAdd(taskAddErrResult(err), forwarded, behavior)
 	}
 
 	return assignedBuildId, false, err
 }
 
-func (pm *taskQueuePartitionManagerImpl) processTaskAddHooks(ctx context.Context, targetVersion *deploymentspb.WorkerDeploymentVersion, syncMatched bool) {
+func syncMatchOutcomeToHook(outcome syncMatchOutcome) hooks.SyncMatchOutcome {
+	switch outcome {
+	case syncMatchSuccess:
+		return hooks.SyncMatchOutcomeSuccess
+	case syncMatchRateLimited:
+		return hooks.SyncMatchOutcomeRateLimited
+	case syncMatchUnspecified:
+		return hooks.SyncMatchOutcomeUnspecified
+	default:
+		return hooks.SyncMatchOutcomeNotMatched
+	}
+}
+
+func (pm *taskQueuePartitionManagerImpl) processTaskAddHooks(ctx context.Context, targetVersion *deploymentspb.WorkerDeploymentVersion, outcome syncMatchOutcome) {
 	for _, l := range pm.taskHooks {
+		hookOutcome := syncMatchOutcomeToHook(outcome)
 		l.ProcessTaskAdd(ctx, &hooks.TaskAddHookDetails{
 			DeploymentVersion: worker_versioning.ExternalWorkerDeploymentVersionFromVersion(targetVersion),
-			IsSyncMatch:       syncMatched,
+			IsSyncMatch:       hookOutcome == hooks.SyncMatchOutcomeSuccess,
+			SyncMatchOutcome:  hookOutcome,
 		})
 	}
+}
+
+func taskAddErrResult(err error) string {
+	var resourceExhausted *serviceerror.ResourceExhausted
+	if errors.As(err, &resourceExhausted) {
+		return metrics.TaskAddResultThrottled
+	}
+	return metrics.TaskAddResultFailure
 }
 
 func (pm *taskQueuePartitionManagerImpl) shouldBacklogSyncMatchTaskOnError(err error) bool {
@@ -1228,6 +1269,7 @@ func (pm *taskQueuePartitionManagerImpl) describe(
 		if b == "" {
 			dbq := pm.defaultQueue()
 			if dbq == nil {
+				pm.versionedQueuesLock.RUnlock()
 				return nil, errDefaultQueueNotInit
 			}
 			versions[dbq.QueueKey().Version()] = true
@@ -2074,7 +2116,7 @@ func (pm *taskQueuePartitionManagerImpl) getPhysicalQueuesForAdd(
 	if wfBehavior == enumspb.VERSIONING_BEHAVIOR_PINNED {
 		if pm.partition.Kind() == enumspb.TASK_QUEUE_KIND_STICKY {
 			// TODO (shahab): we can verify the passed deployment matches the last poller's deployment
-			return dbq, dbq, userDataChanged, 0, targetDeploymentVersion, nil
+			return dbq, dbq, userDataChanged, targetDeploymentRevisionNumber, targetDeploymentVersion, nil
 		}
 
 		err = worker_versioning.ValidateDeployment(deployment)
@@ -2104,15 +2146,15 @@ func (pm *taskQueuePartitionManagerImpl) getPhysicalQueuesForAdd(
 		if !isIndependentPinnedActivity {
 			pinnedQueue, err := pm.getVersionedQueue(ctx, "", "", deployment, true)
 			if err != nil {
-				return nil, nil, nil, 0, nil, err // TODO (Shivam): Please add the comment in the proto to explain that pinned tasks and sticky tasks get 0 for the rev number.
+				return nil, nil, nil, 0, nil, err
 			}
 			if forwardInfo == nil {
 				// Task is not forwarded, so it can be spooled if sync match fails.
 				// Spool queue and sync match queue is the same for pinned workflows.
-				return pinnedQueue, pinnedQueue, userDataChanged, 0, targetDeploymentVersion, nil
+				return pinnedQueue, pinnedQueue, userDataChanged, targetDeploymentRevisionNumber, targetDeploymentVersion, nil
 			} else {
 				// Forwarded from child partition - only do sync match.
-				return nil, pinnedQueue, userDataChanged, 0, targetDeploymentVersion, nil
+				return nil, pinnedQueue, userDataChanged, targetDeploymentRevisionNumber, targetDeploymentVersion, nil
 			}
 		}
 	}

@@ -126,10 +126,10 @@ func (s *stateBuilderSuite) SetupTest() {
 	s.mockMutableState.EXPECT().GetCurrentVersion().Return(int64(1)).AnyTimes()
 	s.mockMutableState.EXPECT().NextTransitionCount().Return(int64(2)).AnyTimes()
 
-	taskGeneratorProvider = &testTaskGeneratorProvider{
+	populateTaskGeneratorProvider(&testTaskGeneratorProvider{
 		mockMutableState:  s.mockMutableState,
 		mockTaskGenerator: s.mockTaskGenerator,
-	}
+	})
 	s.stateRebuilder = NewMutableStateRebuilder(
 		s.mockShard,
 		s.logger,
@@ -1083,7 +1083,7 @@ func (s *stateBuilderSuite) TestApplyEvents_EventTypeWorkflowTaskStarted() {
 	}
 	s.mockMutableState.EXPECT().ApplyWorkflowTaskStartedEvent(
 		(*historyi.WorkflowTaskInfo)(nil), event.GetVersion(), scheduledEventID, event.GetEventId(), workflowTaskRequestID, timestamp.TimeValue(event.GetEventTime()),
-		false, gomock.Any(), nil, int64(0), nil, false,
+		false, gomock.Any(), nil, int64(0), nil,
 	).Return(wt, nil)
 	s.mockUpdateVersion(event)
 	s.mockTaskGenerator.EXPECT().GenerateStartWorkflowTaskTasks(

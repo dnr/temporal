@@ -38,7 +38,8 @@ var ErrStandaloneActivityDisabled = serviceerror.NewUnimplemented("Standalone ac
 
 type frontendHandler struct {
 	FrontendHandler
-	callbackValidator *callback.Validator
+	callbackValidator callback.Validator
+	linkValidator     *linkValidator
 	client            activitypb.ActivityServiceClient
 	config            *Config
 	logger            log.Logger
@@ -50,7 +51,8 @@ type frontendHandler struct {
 
 // NewFrontendHandler creates a new FrontendHandler instance for processing activity frontend requests.
 func NewFrontendHandler(
-	callbackValidator *callback.Validator,
+	callbackValidator callback.Validator,
+	linkValidator *linkValidator,
 	client activitypb.ActivityServiceClient,
 	config *Config,
 	logger log.Logger,
@@ -61,6 +63,7 @@ func NewFrontendHandler(
 ) FrontendHandler {
 	return &frontendHandler{
 		callbackValidator: callbackValidator,
+		linkValidator:     linkValidator,
 		client:            client,
 		config:            config,
 		logger:            logger,
@@ -95,7 +98,7 @@ func (h *frontendHandler) StartActivityExecution(ctx context.Context, req *workf
 		return nil, err
 	}
 
-	modifiedReq, err := h.validateAndPopulateStartRequest(req, namespaceID)
+	modifiedReq, err := h.validateAndPopulateStartRequest(ctx, req, namespaceID)
 	if err != nil {
 		return nil, err
 	}
@@ -351,6 +354,7 @@ func (h *frontendHandler) RequestCancelActivityExecution(
 }
 
 func (h *frontendHandler) validateAndPopulateStartRequest(
+	ctx context.Context,
 	req *workflowservice.StartActivityExecutionRequest,
 	namespaceID namespace.ID,
 ) (*workflowservice.StartActivityExecutionRequest, error) {
@@ -366,6 +370,14 @@ func (h *frontendHandler) validateAndPopulateStartRequest(
 	if req.RetryPolicy == nil {
 		req.RetryPolicy = &commonpb.RetryPolicy{}
 	}
+
+	if err := validateStartDelay(req.GetStartDelay()); err != nil {
+		return nil, err
+	}
+	if req.GetStartDelay().AsDuration() > 0 && !h.config.StartDelayEnabled(req.GetNamespace()) {
+		return nil, serviceerror.NewInvalidArgument("start_delay is not enabled for this namespace")
+	}
+	// TODO(saa): when eager start is supported, deny it if start delay > 0 (same as workflow behavior).
 
 	opts := activityOptionsFromStartRequest(req)
 	err := ValidateAndNormalizeStandaloneActivity(
@@ -397,9 +409,13 @@ func (h *frontendHandler) validateAndPopulateStartRequest(
 	}
 
 	if cbs := req.GetCompletionCallbacks(); len(cbs) > 0 {
-		if err := h.callbackValidator.Validate(req.GetNamespace(), cbs); err != nil {
+		if err := h.callbackValidator.Validate(ctx, req.GetNamespace(), cbs); err != nil {
 			return nil, err
 		}
+	}
+
+	if err := h.linkValidator.ValidateRequest(req.GetNamespace(), req.GetLinks()); err != nil {
+		return nil, err
 	}
 
 	return req, nil

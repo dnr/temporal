@@ -156,7 +156,8 @@ func (c *priBacklogManagerImpl) initState(state taskQueueState, err error) {
 		return
 	}
 
-	// pass scale info back to physical tq from unversioned (default) queue
+	// Pass scale info back to physical tq from unversioned (default) queue.
+	// This must be done before c.initializedError.Set().
 	if c.queueKey().Partition().IsRoot() && !c.queueKey().IsVersioned() {
 		c.pqMgr.StartScaleManager(state.scaleState)
 	}

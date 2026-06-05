@@ -1,3 +1,5 @@
+//go:generate mockgen -package $GOPACKAGE -source $GOFILE -destination partition_scaler_mock.go
+
 package matching
 
 import (

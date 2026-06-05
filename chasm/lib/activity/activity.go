@@ -13,6 +13,7 @@ import (
 	enumspb "go.temporal.io/api/enums/v1"
 	failurepb "go.temporal.io/api/failure/v1"
 	historypb "go.temporal.io/api/history/v1"
+	sdkpb "go.temporal.io/api/sdk/v1"
 	"go.temporal.io/api/serviceerror"
 	"go.temporal.io/api/workflowservice/v1"
 	"go.temporal.io/server/api/historyservice/v1"
@@ -24,6 +25,7 @@ import (
 	callbackspb "go.temporal.io/server/chasm/lib/callback/gen/callbackpb/v1"
 	"go.temporal.io/server/common"
 	"go.temporal.io/server/common/backoff"
+	"go.temporal.io/server/common/contextutil"
 	"go.temporal.io/server/common/metrics"
 	"go.temporal.io/server/common/namespace"
 	commonnexus "go.temporal.io/server/common/nexus"
@@ -39,6 +41,11 @@ const (
 	// WorkflowTypeTag is a required workflow tag for standalone activities to ensure consistent
 	// metric labeling between workflows and activities.
 	WorkflowTypeTag = "__temporal_standalone_activity__"
+
+	// ByIDTokenAttempt is used in synthesized tokens for by-ID API calls where the caller does not specify the attempt.
+	// The validator skips the attempt check when it sees this value.
+	// 0 is safe because polled tokens always carry Count >= 1 (TransitionScheduled increments from 0).
+	ByIDTokenAttempt int32 = 0
 )
 
 var (
@@ -118,8 +125,17 @@ func (a *Activity) LifecycleState(_ chasm.Context) chasm.LifecycleState {
 }
 
 func (a *Activity) ContextMetadata(_ chasm.Context) map[string]string {
-	// TODO: Export standalone activity context metadata.
-	return nil
+	md := make(map[string]string, 2)
+	if actType := a.GetActivityType().GetName(); actType != "" {
+		md[contextutil.MetadataKeyStandaloneActivityType] = actType
+	}
+	if tq := a.GetTaskQueue().GetName(); tq != "" {
+		md[contextutil.MetadataKeyStandaloneActivityTaskQueue] = tq
+	}
+	if len(md) == 0 {
+		return nil
+	}
+	return md
 }
 
 // NewStandaloneActivity creates a new activity component and adds associated tasks to start execution.
@@ -143,15 +159,32 @@ func NewStandaloneActivity(
 			HeartbeatTimeout:       request.GetHeartbeatTimeout(),
 			RetryPolicy:            request.GetRetryPolicy(),
 			Priority:               request.Priority,
+			StartDelay:             request.GetStartDelay(),
 		},
 		LastAttempt: chasm.NewDataField(ctx, &activitypb.ActivityAttemptState{}),
 		RequestData: chasm.NewDataField(ctx, &activitypb.ActivityRequestData{
-			Input:        request.Input,
-			Header:       request.Header,
-			UserMetadata: request.UserMetadata,
+			Input:  request.Input,
+			Header: request.Header,
+			// Dual-write user_metadata to the legacy ActivityRequestData field so that a
+			// rolled-back binary (which only reads from here) keeps showing it. The
+			// authoritative copy lives on ChasmComponentAttributes.user_metadata; this
+			// field will be dropped once a rollback to pre-migration code is no longer
+			// supported.
+			UserMetadata: request.GetUserMetadata(), //nolint:staticcheck // intentional dual-write for rollback safety
 		}),
 		Outcome:    chasm.NewDataField(ctx, &activitypb.ActivityOutcome{}),
 		Visibility: chasm.NewComponentField(ctx, visibility),
+	}
+
+	if md := request.GetUserMetadata(); md != nil {
+		if err := ctx.SetUserMetadata(activity, md); err != nil {
+			return nil, err
+		}
+	}
+	if len(request.GetLinks()) > 0 {
+		if err := ctx.SetRequestLinks(activity, request.GetRequestId(), request.GetLinks()); err != nil {
+			return nil, err
+		}
 	}
 
 	activity.ScheduleTime = timestamppb.New(ctx.Now(activity))
@@ -215,6 +248,7 @@ func (a *Activity) GenerateRecordActivityTaskStartedResponse(
 	lastHeartbeat, _ := a.LastHeartbeat.TryGet(ctx)
 	requestData := a.RequestData.Get(ctx)
 	attempt := a.LastAttempt.Get(ctx)
+	links := ctx.Links(a)
 
 	return &historyservice.RecordActivityTaskStartedResponse{
 		StartedTime:                 attempt.GetStartedTime(),
@@ -241,16 +275,17 @@ func (a *Activity) GenerateRecordActivityTaskStartedResponse(
 					HeartbeatTimeout:       a.GetHeartbeatTimeout(),
 				},
 			},
+			Links: links,
 		},
 	}, nil
 }
 
 // attemptScheduleTime returns when the given attempt was scheduled to run:
-// the activity's original schedule time for the first attempt, or
+// the activity's schedule time plus start delay for the first attempt, or
 // calculated from attemptScheduleTimeForRetry on retries.
 func (a *Activity) attemptScheduleTime(attempt *activitypb.ActivityAttemptState) *timestamppb.Timestamp {
 	if attempt.GetCount() == 1 {
-		return a.GetScheduleTime()
+		return timestamppb.New(a.firstDispatchTime())
 	}
 	return attemptScheduleTimeForRetry(attempt)
 }
@@ -327,6 +362,50 @@ func (a *Activity) addCompletionCallbacks(
 	return nil
 }
 
+// effectiveUserMetadata returns the activity's user metadata, preferring the
+// framework-level ChasmComponentAttributes.user_metadata and falling back to
+// the legacy ActivityRequestData.user_metadata for activities persisted before
+// the migration.
+func (a *Activity) effectiveUserMetadata(ctx chasm.Context) *sdkpb.UserMetadata {
+	if md := ctx.UserMetadata(a); md != nil {
+		return md
+	}
+	return a.RequestData.Get(ctx).GetUserMetadata() //nolint:staticcheck // deprecated, read-only fallback
+}
+
+// attachLinks records the given links on the activity keyed by requestID. Duplicates
+// within the same batch are skipped. If the requestID has already been used to attach
+// links the call is a no-op, making retries idempotent even after the activity has
+// closed. Returns an error if the activity is closed (and the requestID is new), if
+// the per-component cap would be exceeded, or if the request's per-link size,
+// per-request count, or variant shape is invalid.
+func (a *Activity) attachLinks(ctx chasm.MutableContext, links []*commonpb.Link, requestID string, validator *linkValidator, namespaceName string) error {
+	if len(links) == 0 {
+		return nil
+	}
+	// Idempotency check must run before IsClosed: if a prior attach succeeded but
+	// the response was lost and the activity closed before the client retried, we
+	// must still return success rather than FailedPrecondition for work already
+	// persisted.
+	priorForRequest, err := ctx.RequestLinks(a, requestID)
+	if err != nil {
+		return err
+	}
+	if len(priorForRequest) > 0 {
+		return nil
+	}
+	if a.LifecycleState(ctx).IsClosed() {
+		return serviceerror.NewFailedPrecondition("cannot attach links to a closed activity")
+	}
+	if err := validator.ValidateRequest(namespaceName, links); err != nil {
+		return err
+	}
+	if err := validator.ValidateComponentTotal(namespaceName, len(ctx.Links(a)), len(links)); err != nil {
+		return err
+	}
+	return ctx.SetRequestLinks(a, requestID, links)
+}
+
 // GetNexusCompletion returns the activity's completion data in the format required by the Nexus callback invocation.
 // Implements callback.CompletionSource.
 func (a *Activity) GetNexusCompletion(ctx chasm.Context, _ string) (nexusrpc.CompleteOperationOptions, error) {
@@ -334,9 +413,17 @@ func (a *Activity) GetNexusCompletion(ctx chasm.Context, _ string) (nexusrpc.Com
 		return nexusrpc.CompleteOperationOptions{}, serviceerror.NewInternal("activity has not completed yet")
 	}
 
+	key := ctx.ExecutionKey()
+	backLink := commonnexus.ConvertLinkActivityToNexusLink(&commonpb.Link_Activity{
+		Namespace:  ctx.NamespaceEntry().Name().String(),
+		ActivityId: key.BusinessID,
+		RunId:      key.RunID,
+	})
+
 	opts := nexusrpc.CompleteOperationOptions{
 		StartTime: a.GetScheduleTime().AsTime(),
 		CloseTime: ctx.ExecutionInfo().CloseTime,
+		Links:     []nexus.Link{backLink},
 	}
 
 	outcome := a.Outcome.Get(ctx)
@@ -653,8 +740,22 @@ func (a *Activity) hasEnoughTimeForRetry(ctx chasm.Context, overridingRetryInter
 		return true, retryInterval
 	}
 
-	deadline := a.ScheduleTime.AsTime().Add(scheduleToClose)
+	deadline := a.scheduleToCloseDeadline()
 	return ctx.Now(a).Add(retryInterval).Before(deadline), retryInterval
+}
+
+func (a *Activity) firstDispatchTime() time.Time {
+	return a.ScheduleTime.AsTime().Add(a.GetStartDelay().AsDuration())
+}
+
+// scheduleToCloseDeadline returns the absolute time at which the ScheduleToClose timeout expires,
+// accounting for start delay. Returns zero time if no ScheduleToClose timeout is set.
+func (a *Activity) scheduleToCloseDeadline() time.Time {
+	timeout := a.GetScheduleToCloseTimeout().AsDuration()
+	if timeout == 0 {
+		return time.Time{}
+	}
+	return a.firstDispatchTime().Add(timeout)
 }
 
 func createStartToCloseTimeoutFailure() *failurepb.Failure {
@@ -688,9 +789,11 @@ func (a *Activity) RecordHeartbeat(
 	if err != nil {
 		return nil, err
 	}
+	prevHeartbeat, _ := a.LastHeartbeat.TryGet(ctx)
 	a.LastHeartbeat = chasm.NewDataField(ctx, &activitypb.ActivityHeartbeatState{
-		RecordedTime: timestamppb.New(ctx.Now(a)),
-		Details:      input.Request.GetHeartbeatRequest().GetDetails(),
+		RecordedTime:        timestamppb.New(ctx.Now(a)),
+		Details:             input.Request.GetHeartbeatRequest().GetDetails(),
+		TotalHeartbeatCount: prevHeartbeat.GetTotalHeartbeatCount() + 1,
 	})
 	if heartbeatTimeout := a.GetHeartbeatTimeout().AsDuration(); heartbeatTimeout > 0 {
 		ctx.AddTask(
@@ -763,7 +866,6 @@ func (a *Activity) buildActivityExecutionInfo(ctx chasm.Context) *apiactivitypb.
 	heartbeat, _ := a.LastHeartbeat.TryGet(ctx)
 	key := ctx.ExecutionKey()
 	executionInfo := ctx.ExecutionInfo()
-
 	var closeTime *timestamppb.Timestamp
 	var executionDuration *durationpb.Duration
 	if a.LifecycleState(ctx) != chasm.LifecycleStateRunning {
@@ -772,8 +874,8 @@ func (a *Activity) buildActivityExecutionInfo(ctx chasm.Context) *apiactivitypb.
 	}
 
 	var expirationTime *timestamppb.Timestamp
-	if timeout := a.GetScheduleToCloseTimeout().AsDuration(); timeout > 0 {
-		expirationTime = timestamppb.New(a.GetScheduleTime().AsTime().Add(timeout))
+	if deadline := a.scheduleToCloseDeadline(); !deadline.IsZero() {
+		expirationTime = timestamppb.New(deadline)
 	}
 
 	sa := &commonpb.SearchAttributes{
@@ -792,11 +894,15 @@ func (a *Activity) buildActivityExecutionInfo(ctx chasm.Context) *apiactivitypb.
 		Header:                  requestData.GetHeader(),
 		HeartbeatDetails:        heartbeat.GetDetails(),
 		HeartbeatTimeout:        a.GetHeartbeatTimeout(),
+		Links:                   ctx.Links(a),
+		TotalHeartbeatCount:     heartbeat.GetTotalHeartbeatCount(),
 		LastAttemptCompleteTime: attempt.GetCompleteTime(),
 		LastFailure:             attempt.GetLastFailureDetails().GetFailure(),
 		LastHeartbeatTime:       heartbeat.GetRecordedTime(),
 		LastStartedTime:         attempt.GetStartedTime(),
 		LastWorkerIdentity:      attempt.GetLastWorkerIdentity(),
+		SdkName:                 attempt.GetSdkName(),
+		SdkVersion:              attempt.GetSdkVersion(),
 		NextAttemptScheduleTime: attemptScheduleTimeForRetry(attempt),
 		Priority:                a.GetPriority(),
 		RetryPolicy:             a.GetRetryPolicy(),
@@ -811,7 +917,7 @@ func (a *Activity) buildActivityExecutionInfo(ctx chasm.Context) *apiactivitypb.
 		SearchAttributes:        sa,
 		Status:                  status,
 		TaskQueue:               a.GetTaskQueue().GetName(),
-		UserMetadata:            requestData.GetUserMetadata(),
+		UserMetadata:            a.effectiveUserMetadata(ctx),
 	}
 
 	return info
@@ -971,7 +1077,7 @@ func (a *Activity) validateActivityTaskToken(
 		a.Status != activitypb.ACTIVITY_EXECUTION_STATUS_CANCEL_REQUESTED {
 		return serviceerror.NewNotFound("activity task not found")
 	}
-	if token.Attempt != a.LastAttempt.Get(ctx).GetCount() {
+	if token.Attempt != ByIDTokenAttempt && token.Attempt != a.LastAttempt.Get(ctx).GetCount() {
 		return serviceerror.NewNotFound("activity task not found")
 	}
 
