@@ -3,7 +3,10 @@ package matching
 import (
 	"context"
 	"errors"
+	"fmt"
+	"os"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/emirpasic/gods/maps/treemap"
@@ -64,10 +67,53 @@ type (
 		inGC       bool
 		numToGC    int       // counts approximately how many tasks we can delete with a GC
 		lastGCTime time.Time // last time GCed
+
+		// debug trace ring (only used when fairReaderDebug is set); appended under lock.
+		trace    []string
+		traceSeq int
 	}
 
 	mergeMode int
 )
+
+// DEBUG: instrumentation for hunting the stuck-reader bug. When fairReaderDebug is set, each reader
+// keeps a bounded ring of recent state transitions and dumps it to stderr the first time any reader
+// is detected stuck. Remove once the root cause is found.
+var (
+	fairReaderDebug    atomic.Bool
+	fairReaderDumpOnce atomic.Bool
+)
+
+// frtrace appends a line to the reader's trace ring. Caller must hold tr.lock.
+func (tr *fairTaskReader) frtrace(format string, args ...any) {
+	if !fairReaderDebug.Load() {
+		return
+	}
+	tr.traceSeq++
+	tr.trace = append(tr.trace, fmt.Sprintf("[%d] ", tr.traceSeq)+fmt.Sprintf(format, args...))
+	if len(tr.trace) > 800 {
+		tr.trace = tr.trace[len(tr.trace)-800:]
+	}
+}
+
+// frstate renders the reader's key state compactly. Caller must hold tr.lock.
+func (tr *fairTaskReader) frstate() string {
+	return fmt.Sprintf("atEnd=%v loaded=%d read=%v ack=%v rp=%v pin=%v nwt=%d evAcks=%d backoff=%v",
+		tr.atEnd, tr.loadedTasks, tr.readLevel, tr.ackLevel, tr.readPending,
+		tr.ackLevelPinnedByWriter, len(tr.newlyWrittenTasks), tr.evictedAcks.Len(), tr.backoffTimer != nil)
+}
+
+// frdump prints the trace ring once, the first time any reader is found stuck. Caller must hold tr.lock.
+func (tr *fairTaskReader) frdump(reason string) {
+	if !fairReaderDebug.Load() || !fairReaderDumpOnce.CompareAndSwap(false, true) {
+		return
+	}
+	fmt.Fprintf(os.Stderr, "\n===== FAIR READER STUCK TRACE (%s) subqueue=%d =====\n", reason, tr.subqueue)
+	for _, s := range tr.trace {
+		fmt.Fprintln(os.Stderr, s)
+	}
+	fmt.Fprintf(os.Stderr, "===== END TRACE | final: %s =====\n\n", tr.frstate())
+}
 
 const (
 	mergeReadMiddle mergeMode = iota
@@ -191,6 +237,7 @@ func (tr *fairTaskReader) completeTaskLocked(task *internalTask) {
 	tr.outstandingTasks.Put(fairLevelFromAllocatedTask(task.event.AllocatedTaskInfo), nil)
 	tr.loadedTasks--
 	softassert.That(tr.logger, tr.loadedTasks >= 0, "loadedTasks went negative")
+	tr.frtrace("complete level=%v loaded->%d pin=%v", fairLevelFromAllocatedTask(task.event.AllocatedTaskInfo), tr.loadedTasks, tr.ackLevelPinnedByWriter)
 
 	tr.advanceAckLevelLocked()
 	tr.maybeReadTasksLocked()
@@ -202,8 +249,11 @@ func (tr *fairTaskReader) maybeReadTasksLocked() {
 	// We also abort here if we're in the middle of a backoff or shutting down.
 	if tr.readPending || !tr.shouldReadMoreLocked() ||
 		tr.backoffTimer != nil || tr.backlogMgr.tqCtx.Err() != nil {
+		tr.frtrace("maybeRead SKIP rp=%v shouldRead=%v backoff=%v ctxErr=%v | %s",
+			tr.readPending, tr.shouldReadMoreLocked(), tr.backoffTimer != nil, tr.backlogMgr.tqCtx.Err() != nil, tr.frstate())
 		return
 	}
+	tr.frtrace("maybeRead START | %s", tr.frstate())
 	tr.readPending = true
 	go tr.readTasksImpl()
 }
@@ -224,9 +274,11 @@ func (tr *fairTaskReader) readTasksImpl() {
 	for {
 		tr.lock.Lock()
 		if lastErr != nil || !tr.shouldReadMoreLocked() {
+			tr.frtrace("readImpl LOOPEXIT lastErr=%v shouldRead=%v | %s", lastErr != nil, tr.shouldReadMoreLocked(), tr.frstate())
 			break // with lock still held
 		}
 		readLevel, loadedTasks := tr.readLevel, tr.loadedTasks
+		tr.frtrace("readImpl batch from read=%v loaded=%d", readLevel, loadedTasks)
 		tr.lock.Unlock()
 
 		lastErr = tr.readTaskBatch(readLevel, loadedTasks)
@@ -234,6 +286,7 @@ func (tr *fairTaskReader) readTasksImpl() {
 
 	// note tr.lock is still held here!
 	tr.readPending = false
+	tr.frtrace("readImpl readPending=false deferredWrites=%d", len(tr.newlyWrittenTasks))
 
 	// process any tasks that were written while readPending was true
 	var newTasks []*internalTask
@@ -380,6 +433,7 @@ func (tr *fairTaskReader) mergeTasks(tasks []*persistencespb.AllocatedTaskInfo, 
 		// concurrent write + read: hold the just-written tasks and merge them after we process
 		// the read.
 		tr.newlyWrittenTasks = append(tr.newlyWrittenTasks, tasks...)
+		tr.frtrace("mergeWrite DEFERRED (readPending) n=%d nwt->%d", len(tasks), len(tr.newlyWrittenTasks))
 		tr.lock.Unlock()
 		return
 	}
@@ -390,12 +444,21 @@ func (tr *fairTaskReader) mergeTasks(tasks []*persistencespb.AllocatedTaskInfo, 
 	// retry pending. In this state, written tasks go only to DB (filtered above readLevel)
 	// and nothing will trigger a read. The root cause is still under investigation.
 	// TODO: remove this once the root cause is found and fixed.
+	// A write can leave the reader at atEnd=false with loadedTasks==0: while the ack level is pinned
+	// by the writer, completed tasks pile up as acked-nil entries; a write that produces an empty
+	// merged set collapses readLevel to ackLevel, and the "evict acked nils above readLevel" step
+	// then evicts those nils, flipping atEnd to false. In that state no completeTask will fire to
+	// trigger a read, and further writes land above readLevel and are skipped, so nothing ever reads
+	// the backlog from the DB -> stuck. (loadedTasks>0 is self-healing: those tasks will be
+	// completed and completeTask calls maybeReadTasksLocked.)
+	//
+	// Enforce the invariant "atEnd==false with nothing loaded implies a read is scheduled" by
+	// scheduling a read here. maybeReadTasksLocked self-gates (no-op if already reading/backing off).
 	if mode == mergeWrite && !tr.atEnd && tr.loadedTasks == 0 && !tr.readPending && tr.backoffTimer == nil {
 		metrics.FairReaderStuckDetected.With(tr.backlogMgr.metricsHandler).Record(1)
-		tr.backlogMgr.throttledLogger.Warn("fair task reader stuck: atEnd=false, loadedTasks=0, no read pending")
-		if tr.backlogMgr.config.ForceReadTasksOnWrite() {
-			tr.maybeReadTasksLocked()
-		}
+		tr.frtrace("STUCK DETECTED on mergeWrite -> scheduling read | %s", tr.frstate())
+		tr.frdump("stuck detected")
+		tr.maybeReadTasksLocked()
 	}
 
 	// unlock before calling addTaskToMatcher
@@ -408,6 +471,7 @@ func (tr *fairTaskReader) mergeTasks(tasks []*persistencespb.AllocatedTaskInfo, 
 
 // nolint:revive,cognitive-complexity // will be simplified in the future
 func (tr *fairTaskReader) mergeTasksLocked(tasks []*persistencespb.AllocatedTaskInfo, mode mergeMode) []*internalTask {
+	tr.frtrace("merge> mode=%d n=%d | %s", mode, len(tasks), tr.frstate())
 	// Collect (1) currently loaded tasks in the matcher plus (2) the tasks we just read/wrote; sorted by level.
 
 	// (1) Note these values are *internalTask.
@@ -421,15 +485,25 @@ func (tr *fairTaskReader) mergeTasksLocked(tasks []*persistencespb.AllocatedTask
 		if !tr.ackLevel.less(level) {
 			// Reads may race with completes/acks such that we read some tasks that are already
 			// acked. We should ignore these.
+			if mode == mergeWrite {
+				tr.frtrace("  skip write level=%v: <=ackLevel %v", level, tr.ackLevel)
+			}
 			continue
 		} else if mode == mergeWrite && !tr.atEnd && tr.readLevel.less(level) {
 			// If we're writing and we're not at the end, then we have to ignore tasks
 			// above readLevel since we don't know what's in between readLevel and there.
+			tr.frtrace("  skip write level=%v: >readLevel %v (!atEnd)", level, tr.readLevel)
 			continue
 		} else if _, have := tr.outstandingTasks.Get(level); have {
 			// If write/read race or we have to re-read a range, we may read something we had
 			// already added to the matcher or acked. Ignore tasks we already have.
+			if mode == mergeWrite {
+				tr.frtrace("  skip write level=%v: already present", level)
+			}
 			continue
+		}
+		if mode == mergeWrite {
+			tr.frtrace("  keep write level=%v", level)
 		}
 		// Note: tasks whose acks were evicted (present in evictedAcks) flow through here as
 		// regular tasks and are turned back into acks in the final loop below, the same way
@@ -454,10 +528,19 @@ func (tr *fairTaskReader) mergeTasksLocked(tasks []*persistencespb.AllocatedTask
 	if highestLevel.id != 0 {
 		// If we have any tasks at all in memory, set readLevel to the maximum of that set.
 		tr.readLevel = highestLevel
-	} else {
-		// Otherwise start reading at ack level next.
+	} else if mode != mergeWrite || !tr.atEnd {
+		// A read found nothing in memory, or a write while we're not at the end: start reading from
+		// the ack level next.
 		tr.readLevel = tr.ackLevel
 	}
+	// Else: a write kept nothing in memory (loadedTasks==0 and every written task was already
+	// present or above readLevel) while atEnd==true. Leave readLevel unchanged. atEnd==true means
+	// outstandingTasks already represents the whole queue, so (ackLevel, readLevel] contains only
+	// completed/acked nil entries -- no evicted real tasks that would need re-reading (eviction
+	// would have cleared atEnd). Those nils advance on the next unpin. Collapsing readLevel to
+	// ackLevel here would make the eviction step below evict that acked-nil pile, spuriously flip
+	// atEnd to false with nothing loaded, and force an unnecessary re-read -- the stuck-reader bug.
+	// (The !atEnd case keeps the old reset and relies on the read trigger in mergeTasks as backstop.)
 
 	// If there are remaining tasks in the merged set, they can't fit in memory. If they came
 	// from the tasks we just wrote, ignore them. If they came from matcher, remove them.
@@ -558,6 +641,8 @@ func (tr *fairTaskReader) mergeTasksLocked(tasks []*persistencespb.AllocatedTask
 		tr.backlogMgr.db.setKnownFairBacklogCount(tr.subqueue, count)
 	}
 
+	tr.frtrace("merge< evT=%d evA=%d highId=%d nNew=%d | %s", evictedTasks, evictedAcks, highestLevel.id, len(internalTasks), tr.frstate())
+
 	return internalTasks
 
 	// TODO: fine-grained metrics for mergeTasks behavior:
@@ -574,10 +659,12 @@ func (tr *fairTaskReader) retryReadAfter(duration time.Duration) {
 	defer tr.lock.Unlock()
 
 	if tr.backoffTimer == nil {
+		tr.frtrace("retryReadAfter %v backoffSet | %s", duration, tr.frstate())
 		tr.backoffTimer = time.AfterFunc(duration, func() {
 			tr.lock.Lock()
 			defer tr.lock.Unlock()
 			tr.backoffTimer = nil
+			tr.frtrace("backoff FIRED -> maybeRead | %s", tr.frstate())
 			tr.maybeReadTasksLocked()
 		})
 	}
@@ -608,6 +695,7 @@ func (tr *fairTaskReader) ackLevelPinnedLocked() bool {
 // false (i.e. when ackLevelPinnedByWriter is set to false or newlyWrittenTasks is cleared).
 func (tr *fairTaskReader) advanceAckLevelLocked() {
 	if tr.ackLevelPinnedLocked() {
+		tr.frtrace("advance SKIP pinned (byWriter=%v nwt=%d)", tr.ackLevelPinnedByWriter, len(tr.newlyWrittenTasks))
 		return
 	}
 
@@ -626,6 +714,9 @@ func (tr *fairTaskReader) advanceAckLevelLocked() {
 	}
 
 	if numAcked > 0 {
+		tr.frtrace("advance acked=%d ack->%v", numAcked, tr.ackLevel)
+	}
+	if numAcked > 0 {
 		tr.numToGC += int(numAcked)
 		tr.maybeGCLocked()
 
@@ -640,6 +731,7 @@ func (tr *fairTaskReader) getAndPinAckLevel() fairLevel {
 
 	softassert.That(tr.logger, !tr.ackLevelPinnedByWriter, "ack level already pinned")
 	tr.ackLevelPinnedByWriter = true
+	tr.frtrace("PIN ack=%v | %s", tr.ackLevel, tr.frstate())
 	return tr.ackLevel
 }
 
@@ -647,6 +739,7 @@ func (tr *fairTaskReader) unpinAckLevel(writeErr error) {
 	tr.lock.Lock()
 	defer tr.lock.Unlock()
 
+	tr.frtrace("UNPIN writeErr=%v | %s", writeErr != nil, tr.frstate())
 	if writeErr != nil {
 		// We got an error writing but the write may have succeeded anyway.
 		// We can't assume we know where the end is anymore.
