@@ -1,7 +1,6 @@
 package matching
 
 import (
-	"sync"
 	"time"
 
 	enumspb "go.temporal.io/api/enums/v1"
@@ -12,6 +11,9 @@ import (
 	"go.temporal.io/server/common/number"
 	"google.golang.org/protobuf/types/known/anypb"
 )
+
+// number of buckets used for task tracker
+const simplePartitionScalerTrackerBuckets = 10
 
 type scalerFactoryCfg = dynamicconfig.TypedPropertyFnWithTaskQueueFilter[dynamicconfig.SimplePartitionScalerSettings]
 type scalerCfg = dynamicconfig.TypedPropertyFn[dynamicconfig.SimplePartitionScalerSettings]
@@ -36,7 +38,7 @@ func (s *simplePartitionScalerFactory) New(
 type simplePartitionScaler struct {
 	cfg      scalerCfg
 	ts       clock.TimeSource
-	trackers sync.Map // time.Duration -> *taskTracker
+	trackers map[time.Duration]*taskTracker
 }
 
 func newSimplePartitionScaler(cfg scalerCfg, ts clock.TimeSource) *simplePartitionScaler {
@@ -47,12 +49,12 @@ func newSimplePartitionScaler(cfg scalerCfg, ts clock.TimeSource) *simplePartiti
 }
 
 func (s *simplePartitionScaler) getTracker(interval time.Duration) *taskTracker {
-	if t, _ := s.trackers.Load(interval); t != nil {
-		return t.(*taskTracker) //nolint:revive
+	if t, ok := s.trackers[interval]; ok {
+		return t
 	}
-	newT := newTaskTracker(s.ts, interval/10, interval)
-	t, _ := s.trackers.LoadOrStore(interval, newT)
-	return t.(*taskTracker)
+	t := newTaskTracker(s.ts, interval/simplePartitionScalerTrackerBuckets, interval)
+	s.trackers[interval] = t
+	return t
 }
 
 func (s *simplePartitionScaler) OnTasks(in PartitionScalerInput) PartitionScalerDecision {
@@ -64,15 +66,21 @@ func (s *simplePartitionScaler) OnTasks(in PartitionScalerInput) PartitionScaler
 		return PartitionScalerDecision{NewTarget: int(cfg.Fixed), BacklogCap: int(cfg.BacklogCap)}
 	}
 
-	// TODO: optimization: use one tracker and query it for different intervals.
-	// TODO: clean up trackers that are unused after config change.
-	s.trackers.Range(func(_, t any) bool {
-		t.(*taskTracker).inc(in.NumTasks)
-		return true
-	})
+	// init trackers in use
+	for _, down := range cfg.Downs {
+		_ = s.getTracker(down.Window)
+	}
+	for _, up := range cfg.Ups {
+		_ = s.getTracker(up.Window)
+	}
+
+	// TODO(dp): optimization: use one tracker and query it for different intervals.
+	// TODO(dp): clean up trackers that are unused after config change.
+	for _, t := range s.trackers {
+		t.inc(in.NumTasks)
+	}
 
 	// unmarshal our state
-	// TODO: maybe we can avoid deserializing this each time?
 	var state persistencespb.SimplePartitionScalerState
 	if in.PrivateState.UnmarshalTo(&state) != nil {
 		// initialize from scaler if unset
@@ -80,7 +88,10 @@ func (s *simplePartitionScaler) OnTasks(in PartitionScalerInput) PartitionScaler
 	}
 
 	// update add target based on rates
-	addTarget := s.updateAddTarget(cfg, int(state.AddTarget))
+	addTarget, fullInterval := s.updateAddTarget(cfg, int(state.AddTarget))
+	if !fullInterval {
+		return PartitionScalerDecision{NoChange: true}
+	}
 	state.AddTarget = int32(addTarget)
 
 	// update backlog target based on counts
@@ -109,12 +120,14 @@ func (*simplePartitionScaler) Stop() {
 func (s *simplePartitionScaler) updateAddTarget(
 	cfg dynamicconfig.SimplePartitionScalerSettings,
 	target int,
-) int {
+) (int, bool) {
+	// TODO(dp): we should return some information about which window made the change and put
+	// a log of those in the scale state
 	for _, down := range cfg.Downs {
-		if !validateSimplePartitionScalerThreshold(down) {
-			continue
+		rate, full := s.getTracker(down.Window).rateAndFull()
+		if !full {
+			return 0, false
 		}
-		rate := s.getTracker(down.Window).rate()
 		// decrease target so that each partition is ~= target rate
 		target = max(1, min(
 			target,
@@ -123,10 +136,10 @@ func (s *simplePartitionScaler) updateAddTarget(
 	}
 
 	for _, up := range cfg.Ups {
-		if !validateSimplePartitionScalerThreshold(up) {
-			continue
+		rate, full := s.getTracker(up.Window).rateAndFull()
+		if !full {
+			return 0, false
 		}
-		rate := s.getTracker(up.Window).rate()
 		// increase target so that each partition is ~= target rate
 		target = max(
 			target,
@@ -135,11 +148,7 @@ func (s *simplePartitionScaler) updateAddTarget(
 		)
 	}
 
-	return target
-}
-
-func validateSimplePartitionScalerThreshold(t dynamicconfig.SimplePartitionScalerThreshold) bool {
-	return t.Window >= 100*time.Millisecond && t.TargetRate >= 1
+	return target, true
 }
 
 func updateBacklogTarget(

@@ -90,6 +90,46 @@ var DefaultDynamicRateLimitingParams = DynamicRateLimitingParams{
 	RateMultiMax:         1.0,
 }
 
+// ScheduleInvariantsScannerParams configures the schedule-invariants scanners. The three
+// invariant checks are independently toggleable but otherwise share their timing and
+// rate-limiting knobs, so they're grouped into a single struct-valued dynamic config.
+type ScheduleInvariantsScannerParams struct {
+	// OverdueNextActionTimeEnabled enables flagging schedules whose TemporalScheduleNextActionTime
+	// lies further in the past than OverdueNextActionTimeTolerance.
+	OverdueNextActionTimeEnabled bool
+	// StuckOpenEnabled enables flagging schedules that appear stuck open long after their CloseTime.
+	StuckOpenEnabled bool
+	// UnknownStateEnabled enables flagging running, unpaused schedules with no
+	// TemporalScheduleNextActionTime. Ship disabled until TemporalScheduleNextActionTime is known
+	// to be backfilled on legacy schedules.
+	UnknownStateEnabled bool
+	// OverdueNextActionTimeTolerance is how far in the past TemporalScheduleNextActionTime must be
+	// before the schedule is flagged.
+	OverdueNextActionTimeTolerance time.Duration
+	// OverdueNextActionTimeMaxChecksPerNamespace bounds how many overdue schedules the
+	// overdue scanner will DescribeSchedule per namespace per scan pass. Schedules beyond
+	// the cap are left unchecked for that pass, so a large backlog can't hammer the frontend.
+	OverdueNextActionTimeMaxChecksPerNamespace int
+	// VisibilityRPS rate-limits visibility calls from the schedule-invariants scanner.
+	VisibilityRPS float64
+	// ScanInterval is how often each schedule-invariants scanner activity kicks off a fresh scan pass.
+	ScanInterval time.Duration
+	// StuckOpenIdleTimeBufferMultiplier multiplies the configured schedule IdleTime to set how far
+	// past a schedule's idle-close deadline it must be before the stuck-open scanner flags it.
+	StuckOpenIdleTimeBufferMultiplier int
+}
+
+var DefaultScheduleInvariantsScannerParams = ScheduleInvariantsScannerParams{
+	OverdueNextActionTimeEnabled:               false,
+	StuckOpenEnabled:                           false,
+	UnknownStateEnabled:                        false,
+	OverdueNextActionTimeTolerance:             10 * time.Minute,
+	OverdueNextActionTimeMaxChecksPerNamespace: 100,
+	VisibilityRPS:                              1.0,
+	ScanInterval:                               15 * time.Minute,
+	StuckOpenIdleTimeBufferMultiplier:          2,
+}
+
 type CircuitBreakerSettings struct {
 	// MaxRequests: Maximum number of requests allowed to pass through when
 	// it is in half-open state (default 1).
@@ -145,6 +185,11 @@ type PartitionScaleManagerSettings struct {
 	// should be set to the maximum time of an AddTask call that may write to a backlog. Note
 	// that query/nexus tasks will be processed without interruption even after scale down.
 	DrainBufferTime time.Duration
+	// ShadowModeLogInterval controls how often shadow decisions are logged. If <= 0, shadow mode
+	// is disabled and enabled scaler decisions are applied normally. If > 0, the configured scaler
+	// is evaluated and logged at that cadence but decisions are not applied. If the partition
+	// scaler is disabled, shadow mode does not log.
+	ShadowModeLogInterval time.Duration
 }
 
 type SimplePartitionScalerSettings struct {
@@ -160,8 +205,9 @@ type SimplePartitionScalerSettings struct {
 	// Interval is used to calculate a target number of partitions. Ups may move the actual
 	// partition target higher, Downs may move it lower. Ups take priority.
 	//
-	// Note the TargetRate for Downs should be _higher_ than for Ups to leave a deadband in the
-	// middle for hysteresis (avoid changing too often).
+	// Note the TargetRate for Downs should be lower than for Ups to leave a deadband in the
+	// middle for hysteresis (avoid changing when the rate fluctuates above and below a
+	// threshold).
 	Downs []SimplePartitionScalerThreshold
 	Ups   []SimplePartitionScalerThreshold
 
