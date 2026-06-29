@@ -179,13 +179,6 @@ func (s *BacklogManagerTestSuite) testBurstBacklog(p burstBacklogParams) {
 	if p.recover {
 		s.cfgcli.OverrideValue(dynamicconfig.MatchingForceReadTasksOnWrite.Key(), true)
 	}
-	// DEBUG: enable the reader trace ring when hunting the stuck bug. Dumps the lead-up to the first
-	// stuck detection to stderr.
-	if os.Getenv("BURST_TRACE") != "" {
-		fairReaderDebug.Store(true)
-		fairReaderDumpOnce.Store(false)
-		s.T().Cleanup(func() { fairReaderDebug.Store(false) })
-	}
 
 	s.taskMgr.delayInjection = p.delayInjection
 	if p.faultInjection > 0 {
