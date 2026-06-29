@@ -154,8 +154,8 @@ func (s *BacklogManagerTestSuite) TestBurstBacklog_HeavyFault() {
 }
 
 func (s *BacklogManagerTestSuite) testBurstBacklog(p burstBacklogParams) {
-	if !s.newMatcher && !s.fairness {
-		s.T().Skip("burst backlog test is for priority + fairness backlog manager only")
+	if !s.fairness {
+		s.T().Skip("burst backlog test targets the fair task reader specifically")
 	}
 
 	seed := p.seed
