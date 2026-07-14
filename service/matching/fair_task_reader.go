@@ -457,14 +457,16 @@ func (tr *fairTaskReader) mergeTasksLocked(tasks []*persistencespb.AllocatedTask
 		// If we have any tasks at all in memory, set readLevel to the maximum of that set.
 		tr.readLevel = highestLevel
 	}
-	// If merged is empty, leave readLevel unchanged. readLevel only ever rises to a level we hold in
-	// memory, and a task only leaves memory by being acked (advancing ackLevel) or evicted to a level
-	// strictly above readLevel -- so no unacked task is ever left at a level <= readLevel while out of
-	// memory, and there is nothing in (ackLevel, readLevel] that needs re-reading. (We previously
-	// reset readLevel to ackLevel here. That was a no-op whenever the ack level wasn't pinned -- since
-	// advanceAckLevelLocked would have pulled ackLevel up to readLevel -- and actively harmful when it
-	// was pinned: it collapsed readLevel below the pinned-up acked nils, causing the eviction step
-	// below to evict that pile and spuriously flip atEnd to false with nothing loaded: a stuck reader.)
+	// If highestLevel == 0, then merged is empty, which means we have no unacked tasks in
+	// memory, only acks. Leave readLevel unchanged.
+	//
+	// This is safe because we only have to move readLevel downwards when we wrote something
+	// below the previous readLevel. If we did do that, then it wouldn't get thrown out above
+	// and we would have a task in merged here.
+	//
+	// (If we did move readLevel down to ackLevel here, then we'd evict all our acks, which
+	// would then set atEnd = false and we would have to trigger an unnecessary read to
+	// re-establish the end. And if we didn't trigger that read, then we would get stuck.)
 
 	// If there are remaining tasks in the merged set, they can't fit in memory. If they came
 	// from the tasks we just wrote, ignore them. If they came from matcher, remove them.
