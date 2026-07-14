@@ -53,10 +53,11 @@ type burstBacklogParams struct {
 	delayInjection time.Duration
 	faultInjection float32
 
-	// recover mode: enable ForceReadTasksOnWrite so a stuck reader is woken by a (prober) write
-	// instead of hanging. This makes stalls non-fatal so the test runs the full duration and we can
-	// *count* how many times the reader entered the stuck state (FairReaderStuckDetected) rather
-	// than failing on the first rare hit. Used to compare stuck frequency before/after a fix.
+	// recover mode: when the drain stalls, spool a prober task to wake the reader (the write path's
+	// read trigger unblocks it) instead of failing. This makes stalls non-fatal so the test runs the
+	// full duration and we can *count* how many times the reader entered the stuck state
+	// (FairReaderStuckDetected) rather than failing on the first rare hit. Used to compare stuck
+	// frequency before/after a fix.
 	recover bool
 }
 
@@ -115,11 +116,11 @@ func (s *BacklogManagerTestSuite) TestBurstBacklog_Long() {
 	s.testBurstBacklog(p)
 }
 
-// TestBurstBacklog_Count runs the bursty workload with ForceReadTasksOnWrite enabled so a stuck
-// reader is woken by a prober write instead of hanging. It then *counts* how often the reader
-// entered the stuck state and asserts that count is zero. Pre-fix this fails with a positive count;
-// after the evicted-ack fix it should pass. This is the before/after fix-validation test, and is far
-// more reliable than waiting for the rare fatal stall. Tune duration via BURST_DURATION.
+// TestBurstBacklog_Count runs the bursty workload in recover mode (a stalled drain is unblocked by a
+// prober write instead of hanging) and *counts* how often the reader entered the stuck state,
+// asserting that count is zero. Pre-fix this fails with a positive count; after the fix it should
+// pass. This is the before/after fix-validation test, and is far more reliable than waiting for the
+// rare fatal stall. Tune duration via BURST_DURATION.
 func (s *BacklogManagerTestSuite) TestBurstBacklog_Count() {
 	testutil.LongTest(s)
 	p := defaultBurstBacklogParams
@@ -175,9 +176,6 @@ func (s *BacklogManagerTestSuite) testBurstBacklog(p burstBacklogParams) {
 
 	for k, v := range p.cfg {
 		s.cfgcli.OverrideValue(k, v)
-	}
-	if p.recover {
-		s.cfgcli.OverrideValue(dynamicconfig.MatchingForceReadTasksOnWrite.Key(), true)
 	}
 
 	s.taskMgr.delayInjection = p.delayInjection
@@ -274,9 +272,9 @@ func (s *BacklogManagerTestSuite) testBurstBacklog(p burstBacklogParams) {
 	}
 
 	// drainToZero polls the backlog down to zero. In recover mode, if inflight stops making progress
-	// it spools a prober task (which, with ForceReadTasksOnWrite, wakes a stuck reader) and keeps
-	// going. In non-recover mode, a stall past drainTimeout is treated as a stuck reader: dump and
-	// fail. Returns false only if ctx expired first.
+	// it spools a prober task (whose write-path read trigger wakes a stuck reader) and keeps going.
+	// In non-recover mode, a stall past drainTimeout is treated as a stuck reader: dump and fail.
+	// Returns false only if ctx expired first.
 	drainToZero := func() bool {
 		deadline := time.Now().Add(p.drainTimeout)
 		var last int64 = -1
@@ -294,7 +292,7 @@ func (s *BacklogManagerTestSuite) testBurstBacklog(p burstBacklogParams) {
 			if p.recover {
 				if time.Since(lastChange) > 2*time.Second {
 					stalls.Add(1)
-					if spoolOne() { // wake the (possibly stuck) reader; ForceReadTasksOnWrite -> read
+					if spoolOne() { // wake the (possibly stuck) reader via the write-path read trigger
 						probes.Add(1)
 					}
 					lastChange = time.Now()

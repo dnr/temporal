@@ -1007,11 +1007,12 @@ func (s *BacklogManagerTestSuite) testStandingBacklog(p standingBacklogParams) {
 	}
 }
 
-// TestBacklogDelivery_WritePathWakesStuckReader verifies the write-path recovery for stuck fair readers.
-// When the fair task reader is in state {atEnd=false, readPending=false, backoffTimer=nil},
-// a write via SpoolTask calls wroteNewTasks -> mergeTasks(mergeWrite). The fix adds a call
-// to maybeReadTasksLocked() in the write path, which triggers a DB read that picks up the
-// task and delivers it to the matcher.
+// TestBacklogDelivery_WritePathWakesStuckReader verifies the defensive write-path recovery for a
+// stuck fair reader. The {atEnd=false, loadedTasks=0, readPending=false, backoffTimer=nil} state
+// should no longer be reachable (the root cause is fixed), and mergeTasks softasserts if it sees it
+// -- but as a backstop it also calls maybeReadTasksLocked() so a write can still unblock the reader.
+// This test forces that state, so it expects the softassert, and checks that a subsequent write
+// triggers a DB read that picks up the task and delivers it to the matcher.
 func (s *BacklogManagerTestSuite) TestBacklogDelivery_WritePathWakesStuckReader() {
 	if !s.fairness {
 		s.T().Skip("only applies to fair backlog manager")
@@ -1019,8 +1020,8 @@ func (s *BacklogManagerTestSuite) TestBacklogDelivery_WritePathWakesStuckReader(
 
 	s.setupToCaptureTasks()
 
-	// Enable the write-path recovery dynamic config for this test.
-	s.cfgcli.OverrideValue(dynamicconfig.MatchingForceReadTasksOnWrite.Key(), true)
+	// We deliberately force the stuck state below, which trips the defensive softassert.
+	s.logger.Expect(testlogger.Error, "failed assertion: fair reader stuck")
 
 	// Set up initial qkey in DB so the initial read finds an empty queue.
 	qkey := s.ptqMgr.QueueKey()
@@ -1064,9 +1065,8 @@ func (s *BacklogManagerTestSuite) TestBacklogDelivery_WritePathWakesStuckReader(
 	readCountBefore := s.taskMgr.getGetTasksCount(qkey)
 	capturedBefore := s.capturedTasksLen()
 
-	// Write a task via SpoolTask. The writer calls wroteNewTasks -> mergeTasks(mergeWrite).
-	// With the fix, mergeTasks now calls maybeReadTasksLocked() for write-mode merges,
-	// which triggers a DB read to pick up the task.
+	// Write a task via SpoolTask. The writer calls wroteNewTasks -> mergeTasks(mergeWrite), whose
+	// defensive backstop calls maybeReadTasksLocked(), triggering a DB read to pick up the task.
 	s.Require().NoError(s.blm.SpoolTask(&persistencespb.TaskInfo{
 		ExpiryTime: timestamp.TimeNowPtrUtcAddSeconds(3000),
 		CreateTime: timestamp.TimeNowPtrUtc(),
