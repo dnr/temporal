@@ -386,21 +386,16 @@ func (tr *fairTaskReader) mergeTasks(tasks []*persistencespb.AllocatedTaskInfo, 
 
 	newTasks := tr.mergeTasksLocked(tasks, mode)
 
-	// Detect stuck reader: no tasks in memory, not at end, no read goroutine running, no
-	// retry pending. In this state, written tasks go only to DB (filtered above readLevel)
-	// and nothing will trigger a read. The root cause is still under investigation.
-	// TODO: remove this once the root cause is found and fixed.
-	// A write can leave the reader at atEnd=false with loadedTasks==0: while the ack level is pinned
-	// by the writer, completed tasks pile up as acked-nil entries; a write that produces an empty
-	// merged set collapses readLevel to ackLevel, and the "evict acked nils above readLevel" step
-	// then evicts those nils, flipping atEnd to false. In that state no completeTask will fire to
-	// trigger a read, and further writes land above readLevel and are skipped, so nothing ever reads
-	// the backlog from the DB -> stuck. (loadedTasks>0 is self-healing: those tasks will be
-	// completed and completeTask calls maybeReadTasksLocked.)
+	// This specific state shouldn't ever happen and indicates a bug: if we're not at the end,
+	// we should either have loaded tasks, or have a read pending to re-establish the end. If
+	// we did get into this state without triggering a read, then newly-written tasks would all
+	// be dropped due to being after read level, and there'd be no tasks to complete and
+	// trigger a read. So we should do it here.
 	//
-	// Enforce the invariant "atEnd==false with nothing loaded implies a read is scheduled" by
-	// scheduling a read here. maybeReadTasksLocked self-gates (no-op if already reading/backing off).
+	// The bug that led to this is fixed, but we'll leave this check defensively in case other
+	// bugs produce the same state.
 	if mode == mergeWrite && !tr.atEnd && tr.loadedTasks == 0 && !tr.readPending && tr.backoffTimer == nil {
+		softassert.Fail(tr.logger, "fair reader stuck")
 		metrics.FairReaderStuckDetected.With(tr.backlogMgr.metricsHandler).Record(1)
 		tr.maybeReadTasksLocked()
 	}
