@@ -457,16 +457,21 @@ func (tr *fairTaskReader) mergeTasksLocked(tasks []*persistencespb.AllocatedTask
 		// If we have any tasks at all in memory, set readLevel to the maximum of that set.
 		tr.readLevel = highestLevel
 	}
-	// If highestLevel == 0, then merged is empty, which means we have no unacked tasks in
-	// memory, only acks. Leave readLevel unchanged.
+	// If highestLevel == 0 then merged is empty: we have no unacked tasks in memory, only acks
+	// (nils). Leave readLevel unchanged.
 	//
-	// This is safe because we only have to move readLevel downwards when we wrote something
-	// below the previous readLevel. If we did do that, then it wouldn't get thrown out above
-	// and we would have a task in merged here.
+	// The only thing that would require lowering readLevel is a newly-written task at a level
+	// at-or-below readLevel that we don't already have in memory. Such a task is never filtered out
+	// above -- writes are always above ackLevel, and the ">readLevel" filter only drops tasks above
+	// readLevel -- so it would be in merged and highestLevel would be non-zero. (A below-readLevel
+	// write *can* be dropped by the "already in outstandingTasks" filter, but then we already have
+	// it, loaded or acked, so it needs no readLevel change. This is exactly the write/read race that
+	// used to trigger the bug below.) So whenever merged is empty, everything at-or-below readLevel
+	// is already accounted for and readLevel is still correct.
 	//
-	// (If we did move readLevel down to ackLevel here, then we'd evict all our acks, which
-	// would then set atEnd = false and we would have to trigger an unnecessary read to
-	// re-establish the end. And if we didn't trigger that read, then we would get stuck.)
+	// (If we instead moved readLevel down to ackLevel here, the eviction step below would evict all
+	// our acks, set atEnd = false, and force an unnecessary read to re-establish the end -- or, if
+	// that read weren't triggered, leave the reader stuck.)
 
 	// If there are remaining tasks in the merged set, they can't fit in memory. If they came
 	// from the tasks we just wrote, ignore them. If they came from matcher, remove them.
