@@ -1295,6 +1295,18 @@ var (
 		"fair_reader_stuck_detected",
 		WithDescription("Count of times the fair task reader detected a stuck state (atEnd=false, loadedTasks=0, readPending=false, backoffTimer=nil) on the write path"),
 	)
+	FairReaderEvictedTasks = NewCounterDef(
+		"fair_reader_evicted_tasks",
+		WithDescription("Count of loaded backlog tasks evicted from memory by the fair task reader (because the in-memory set exceeded the batch size); these will be re-read from persistence later"),
+	)
+	FairReaderEvictedAcks = NewCounterDef(
+		"fair_reader_evicted_acks",
+		WithDescription("Count of acked-but-not-yet-acknowledged levels evicted from memory by the fair task reader and moved to the evicted-ack cache"),
+	)
+	FairReaderReinsertedAcks = NewCounterDef(
+		"fair_reader_reinserted_acks",
+		WithDescription("Count of evicted acks that were re-read from persistence and re-inserted as pre-acked entries by the fair task reader"),
+	)
 	PartitionScaleEvents = NewCounterDef("partition_scale_events")
 	PartitionScaleRead   = NewGaugeDef("partition_scale_read")
 	PartitionScaleWrite  = NewGaugeDef("partition_scale_write")

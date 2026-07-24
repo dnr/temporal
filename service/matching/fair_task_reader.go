@@ -386,16 +386,18 @@ func (tr *fairTaskReader) mergeTasks(tasks []*persistencespb.AllocatedTaskInfo, 
 
 	newTasks := tr.mergeTasksLocked(tasks, mode)
 
-	// Detect stuck reader: no tasks in memory, not at end, no read goroutine running, no
-	// retry pending. In this state, written tasks go only to DB (filtered above readLevel)
-	// and nothing will trigger a read. The root cause is still under investigation.
-	// TODO: remove this once the root cause is found and fixed.
+	// This specific state shouldn't ever happen and indicates a bug: if we're not at the end,
+	// we should either have loaded tasks, or have a read pending to re-establish the end. If
+	// we did get into this state without triggering a read, then newly-written tasks would all
+	// be dropped due to being after read level, and there'd be no tasks to complete and
+	// trigger a read. So we should do it here.
+	//
+	// The bug that led to this is fixed, but we'll leave this check defensively in case other
+	// bugs produce the same state.
 	if mode == mergeWrite && !tr.atEnd && tr.loadedTasks == 0 && !tr.readPending && tr.backoffTimer == nil {
+		softassert.Fail(tr.logger, "fair reader stuck")
 		metrics.FairReaderStuckDetected.With(tr.backlogMgr.metricsHandler).Record(1)
-		tr.backlogMgr.throttledLogger.Warn("fair task reader stuck: atEnd=false, loadedTasks=0, no read pending")
-		if tr.backlogMgr.config.ForceReadTasksOnWrite() {
-			tr.maybeReadTasksLocked()
-		}
+		tr.maybeReadTasksLocked()
 	}
 
 	// unlock before calling addTaskToMatcher
@@ -454,14 +456,27 @@ func (tr *fairTaskReader) mergeTasksLocked(tasks []*persistencespb.AllocatedTask
 	if highestLevel.id != 0 {
 		// If we have any tasks at all in memory, set readLevel to the maximum of that set.
 		tr.readLevel = highestLevel
-	} else {
-		// Otherwise start reading at ack level next.
-		tr.readLevel = tr.ackLevel
 	}
+	// If highestLevel == 0 then merged is empty: we have no unacked tasks in memory, only acks
+	// (nils). Leave readLevel unchanged.
+	//
+	// The only thing that would require lowering readLevel is a newly-written task at a level
+	// at-or-below readLevel that we don't already have in memory. Such a task is never filtered out
+	// above -- writes are always above ackLevel, and the ">readLevel" filter only drops tasks above
+	// readLevel -- so it would be in merged and highestLevel would be non-zero. (A below-readLevel
+	// write *can* be dropped by the "already in outstandingTasks" filter, but then we already have
+	// it, loaded or acked, so it needs no readLevel change. This is exactly the write/read race that
+	// used to trigger the bug below.) So whenever merged is empty, everything at-or-below readLevel
+	// is already accounted for and readLevel is still correct.
+	//
+	// (If we instead moved readLevel down to ackLevel here, the eviction step below would evict all
+	// our acks, set atEnd = false, and force an unnecessary read to re-establish the end -- or, if
+	// that read weren't triggered, leave the reader stuck.)
 
 	// If there are remaining tasks in the merged set, they can't fit in memory. If they came
 	// from the tasks we just wrote, ignore them. If they came from matcher, remove them.
 	evictedAnyTasks := false
+	var evictedTasks int64
 	for it.Next() {
 		evictedAnyTasks = true
 		if task, ok := it.Value().(*internalTask); ok {
@@ -475,13 +490,18 @@ func (tr *fairTaskReader) mergeTasksLocked(tasks []*persistencespb.AllocatedTask
 			// but not completed yet. In that case this will be a noop. See comment at the top
 			// of completeTask. Lock order: task reader lock < matcher lock so this is okay.
 			task.setEvicted()
+			evictedTasks++
 		}
+	}
+	if evictedTasks > 0 {
+		metrics.FairReaderEvictedTasks.With(tr.backlogMgr.metricsHandler).Record(evictedTasks)
 	}
 
 	// We also have to remove any acked levels (nils) in outstandingTasks that are above our
 	// new read level (and accept reprocessing those tasks when we see them again), otherwise
 	// we may use these acks to increment our ack level across dropped ranges of tasks.
 	// Cache these evicted acks so we can skip them if we re-read them later.
+	var evictedAcks int64
 	tr.outstandingTasks.Select(func(k, v any) bool {
 		return v == nil && tr.readLevel.less(k.(fairLevel))
 	}).Each(func(k, v any) {
@@ -489,7 +509,11 @@ func (tr *fairTaskReader) mergeTasksLocked(tasks []*persistencespb.AllocatedTask
 		level := k.(fairLevel) //nolint:revive
 		tr.outstandingTasks.Remove(level)
 		tr.evictedAcks.Set(level)
+		evictedAcks++
 	})
+	if evictedAcks > 0 {
+		metrics.FairReaderEvictedAcks.With(tr.backlogMgr.metricsHandler).Record(evictedAcks)
+	}
 	// Trim the cache to max size by removing highest levels.
 	for tr.evictedAcks.Len() > evictedAcksCacheSize {
 		tr.evictedAcks.PopMax()
@@ -507,6 +531,7 @@ func (tr *fairTaskReader) mergeTasksLocked(tasks []*persistencespb.AllocatedTask
 			// re-cached then. Note its level is <= readLevel here (it made the in-memory cut), so
 			// the eviction above won't have touched it.
 			tr.outstandingTasks.Put(level, nil)
+			metrics.FairReaderReinsertedAcks.With(tr.backlogMgr.metricsHandler).Record(1)
 			continue
 		}
 		if IsTaskExpired(t) {

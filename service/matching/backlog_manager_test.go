@@ -852,12 +852,12 @@ type standingBacklogParams struct {
 
 var defaultStandingBacklogParams = standingBacklogParams{
 	lower:    20,
-	upper:    200,
+	upper:    300,
 	gap:      2,
 	period:   3 * time.Second,
 	duration: 5 * time.Second,
-	keys:     30,
-	zipfS:    3,
+	keys:     50,
+	zipfS:    2,
 	zipfV:    1,
 	cfg: map[dynamicconfig.Key]any{
 		// reduce these for better coverage
@@ -946,7 +946,7 @@ func (s *BacklogManagerTestSuite) testStandingBacklog(p standingBacklogParams) {
 	var wg sync.WaitGroup
 	var lock sync.Mutex
 	var tasks list.List // this is the in-memory buffer (mock for the matcher)
-	var target, inflight, processed, index atomic.Int64
+	var target, inflight, processed, index, duplicates atomic.Int64
 	var tracker sync.Map // tracks tasks so we can find missing ones
 	target.Store((p.lower + p.upper) / 2)
 	const testIsOver = int64(-1000000)
@@ -1003,6 +1003,9 @@ func (s *BacklogManagerTestSuite) testStandingBacklog(p standingBacklogParams) {
 		return !finished()
 	}
 
+	capture := s.metricsCap.StartCapture()
+	defer s.metricsCap.StopCapture(capture)
+
 	start := time.Now()
 	s.blm.Start()
 	defer s.blm.Stop()
@@ -1037,6 +1040,7 @@ func (s *BacklogManagerTestSuite) testStandingBacklog(p standingBacklogParams) {
 					inflight.Add(-1)
 				} else {
 					// this is a duplicate task (as if matching called RecordTaskStarted twice)
+					duplicates.Add(1)
 					log("finished task was not in tracker: %d\n", tindex)
 				}
 				log("finish %s -> %3d  %v  lag %5d\n", t.fairLevel(), inflight.Load(), t.getPriority().GetFairnessKey(), index.Load()-tindex)
@@ -1074,13 +1078,33 @@ func (s *BacklogManagerTestSuite) testStandingBacklog(p standingBacklogParams) {
 	s.T().Logf("reads %d, writes %d", s.taskMgr.getGetTasksCount(qkey), s.taskMgr.getCreateTaskBatchCount(qkey))
 	elapsed := time.Since(start)
 	s.T().Logf("processed %d tasks, %.3f/s", processed.Load(), float64(processed.Load())/elapsed.Seconds())
+
+	snap := capture.Snapshot()
+	sumMetric := func(name string) int64 {
+		var sum int64
+		for _, r := range snap[name] {
+			sum += r.Value.(int64)
+		}
+		return sum
+	}
+	evictedTasks := sumMetric(metrics.FairReaderEvictedTasks.Name())
+	evictedAcks := sumMetric(metrics.FairReaderEvictedAcks.Name())
+	s.T().Logf("evicted tasks %d, evicted acks %d, reinserted acks %d, duplicates %d",
+		evictedTasks, evictedAcks, sumMetric(metrics.FairReaderReinsertedAcks.Name()), duplicates.Load())
+	if s.fairness {
+		// With a backlog larger than the in-memory batch, the fair reader should be evicting
+		// regularly (tasks and/or acks). The reinsert-from-cache path is also exercised here, but
+		// non-deterministically; TestFairReaderReinsertsEvictedAck covers it deterministically.
+		s.Positive(evictedTasks+evictedAcks, "expected the fair task reader to evict tasks/acks")
+	}
 }
 
-// TestBacklogDelivery_WritePathWakesStuckReader verifies the write-path recovery for stuck fair readers.
-// When the fair task reader is in state {atEnd=false, readPending=false, backoffTimer=nil},
-// a write via SpoolTask calls wroteNewTasks -> mergeTasks(mergeWrite). The fix adds a call
-// to maybeReadTasksLocked() in the write path, which triggers a DB read that picks up the
-// task and delivers it to the matcher.
+// TestBacklogDelivery_WritePathWakesStuckReader verifies the defensive write-path recovery for a
+// stuck fair reader. The {atEnd=false, loadedTasks=0, readPending=false, backoffTimer=nil} state
+// should no longer be reachable (the root cause is fixed), and mergeTasks softasserts if it sees it
+// -- but as a backstop it also calls maybeReadTasksLocked() so a write can still unblock the reader.
+// This test forces that state, so it expects the softassert, and checks that a subsequent write
+// triggers a DB read that picks up the task and delivers it to the matcher.
 func (s *BacklogManagerTestSuite) TestBacklogDelivery_WritePathWakesStuckReader() {
 	if !s.fairness {
 		s.T().Skip("only applies to fair backlog manager")
@@ -1088,8 +1112,8 @@ func (s *BacklogManagerTestSuite) TestBacklogDelivery_WritePathWakesStuckReader(
 
 	s.setupToCaptureTasks()
 
-	// Enable the write-path recovery dynamic config for this test.
-	s.cfgcli.OverrideValue(dynamicconfig.MatchingForceReadTasksOnWrite.Key(), true)
+	// We deliberately force the stuck state below, which trips the defensive softassert.
+	s.logger.Expect(testlogger.Error, "failed assertion: fair reader stuck")
 
 	// Set up initial qkey in DB so the initial read finds an empty queue.
 	qkey := s.ptqMgr.QueueKey()
@@ -1133,9 +1157,8 @@ func (s *BacklogManagerTestSuite) TestBacklogDelivery_WritePathWakesStuckReader(
 	readCountBefore := s.taskMgr.getGetTasksCount(qkey)
 	capturedBefore := s.capturedTasksLen()
 
-	// Write a task via SpoolTask. The writer calls wroteNewTasks -> mergeTasks(mergeWrite).
-	// With the fix, mergeTasks now calls maybeReadTasksLocked() for write-mode merges,
-	// which triggers a DB read to pick up the task.
+	// Write a task via SpoolTask. The writer calls wroteNewTasks -> mergeTasks(mergeWrite), whose
+	// defensive backstop calls maybeReadTasksLocked(), triggering a DB read to pick up the task.
 	s.Require().NoError(s.blm.SpoolTask(&persistencespb.TaskInfo{
 		ExpiryTime: timestamp.TimeNowPtrUtcAddSeconds(3000),
 		CreateTime: timestamp.TimeNowPtrUtc(),
