@@ -41,6 +41,48 @@ exclude nil entries above `highestLevel` from eviction when the merge saw no
 new tasks. Needs thought about interaction with the write path, where
 lowering readLevel is intentional.
 
+## 3. "Fair reader stuck" softassert is reachable via expired writes (confirmed in model)
+
+Status: **model-confirmed against current code** (TLC finds it in seconds;
+`run.sh` reproduces it as the "findings regression" entry). Needs a Go unit
+test to confirm end-to-end, but the step sequence maps 1:1 to real code
+paths.
+
+The defensive check in `mergeTasks` (added in f534e74e, kept "in case other
+bugs produce the same state") is not dead code: current code can reach the
+"stuck" state it guards against, and relies on its repair read. Sequence:
+
+1. Reader is at the end: e.g. task 3 loaded, readLevel=3, atEnd=true.
+2. Writer pins the ack level and writes task 1, where task 1 is *already
+   expired* when the write lands (e.g. a very short schedule-to-start
+   timeout plus a slow write).
+3. While the write is in flight, task 3 completes: it becomes a nil entry;
+   the ack level can't advance (pinned by the write). loadedTasks=0.
+4. The write succeeds; `wroteNewTasks` merges task 1: it is expired, so it
+   becomes a nil entry (0b372d5e behavior); `highestLevel`=1, so
+   **readLevel is lowered 3 -> 1**; the nil for task 3 (above the new
+   readLevel) is **evicted**, which sets `evictedAnyTasks` and forces
+   **atEnd=false**.
+5. Post-merge state: loadedTasks=0, atEnd=false, no read pending, no
+   backoff timer -> the softassert fires (log + FairReaderStuckDetected
+   metric), and its `maybeReadTasksLocked` repair is the only thing that
+   un-sticks the reader.
+
+Notes:
+
+- The f534e74e fix covered the merged-set-empty case; here the merged set
+  is *non-empty but all-expired*, a path that fix does not cover.
+- Impact: alarm/metric noise on a "should never happen" signal, plus a
+  dependency on a "defensive" backstop for liveness. If the softassert is
+  ever demoted to a hard assert or the backstop removed, this becomes a
+  stuck reader.
+- Fix shapes: treat a merge whose kept set contains no live tasks like the
+  empty-merge case for readLevel purposes (don't lower readLevel), or
+  trigger the read deliberately (not via softassert) when expired incoming
+  tasks zero the loaded set.
+- Related: the readLevel lowering in step 4 is the same mechanism as
+  finding #1.
+
 ## 2. Spec clarifications surfaced by M4 (not bugs)
 
 Two things the model checker forced us to make precise; both match

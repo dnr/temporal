@@ -2,7 +2,7 @@
 (***************************************************************************)
 (* PlusCal model of matching's fair task queue reader/writer.              *)
 (* Source: service/matching/fair_task_{reader,writer}.go                   *)
-(* Milestones and scope decisions: see plan.md. Currently at: M4.          *)
+(* Milestones and scope decisions: see plan.md. Currently at: M5.          *)
 (*                                                                         *)
 (* Key abstractions:                                                       *)
 (*                                                                         *)
@@ -41,8 +41,19 @@
 (*   cannot depend on GC running. The delete batch size is not modeled.    *)
 (*                                                                         *)
 (* - The defensive "fair reader stuck" softassert+repair in mergeTasks is  *)
-(*   modeled as a detection flag + invariant (NoStuck), not as a repair,   *)
-(*   so TLC reports the stuck state instead of the backstop masking it.    *)
+(*   modeled as a ghost flag (stuckFlag) plus, when StuckRepair is TRUE    *)
+(*   (current code), its repair read. The stuck state is REACHABLE via     *)
+(*   writes of already-expired tasks (findings.md #3), so NoStuck is not   *)
+(*   an invariant of the current code; run.sh keeps it as a reproducible   *)
+(*   finding demo and uses StuckRepair=FALSE for historical mutations.     *)
+(*                                                                         *)
+(* - Task expiry is a nondeterministic per-merge choice (expSel): any      *)
+(*   subset of the incoming tasks may be expired by the time the merge     *)
+(*   looks at them. Consumed expired tasks become pre-acked nil entries    *)
+(*   and leave the "committed" guarantee set. This avoids a persistent     *)
+(*   expired-set variable (state-space explosion); it slightly widens      *)
+(*   behavior (a re-read task's expiry status could flip), which is sound  *)
+(*   for the properties checked here.                                      *)
 (*                                                                         *)
 (* Mutation flags "Mut...": each TRUE re-introduces a (mostly historical)  *)
 (* bug to validate that the properties catch it; all FALSE models the      *)
@@ -55,6 +66,8 @@ CONSTANTS
   BatchTarget,     \* config.GetTasksBatchSize: max tasks to keep loaded
   ReloadAt,        \* config.GetTasksReloadAt: read more when loaded <= this
   WBatchMax,       \* max tasks per write batch
+  StuckRepair,     \* model the defensive stuck check's read trigger (TRUE =
+                   \* current code; FALSE = the detector is absent)
   \* --- mutation flags ---
   MutAtEndOnMiddleRead,  \* seeded: treat every read as reaching the end
   MutAckPastLoaded,      \* seeded: ack level advance ignores loaded tasks
@@ -65,7 +78,8 @@ CONSTANTS
   MutGcReadLevel,        \* seeded: GC deletes up to readLevel instead of ackLevel
   MutNoExitRecheck,      \* 26d9a561: no maybeReadTasksLocked after clearing readPending
   MutNoReadOnWriteError, \* 8ca7b640 #5: no read trigger from unpin on write error
-  MutNoAtEndResetOnWriteError \* 8ca7b640 #5: keep atEnd on write error
+  MutNoAtEndResetOnWriteError, \* 8ca7b640 #5: keep atEnd on write error
+  MutDropExpiredEarly    \* 0b372d5e: drop expired tasks before the merge
 
 ASSUME ReloadAt < BatchTarget
 ASSUME MaxLevel >= 1
@@ -94,15 +108,17 @@ PinActive(p) == p /\ ~MutNoPin
 (* reader stuck" check (the call site must additionally rule out a         *)
 (* pending read / backoff timer).                                          *)
 (***************************************************************************)
-MergeResult(loaded0, acks0, rl0, al0, atEnd0, inc, mode, pinnedNow) ==
+MergeResult(loaded0, acks0, rl0, al0, atEnd0, inc, mode, pinnedNow, expSel) ==
   LET
     \* filter incoming: skip at-or-below ackLevel (raced with acks); on
     \* write when not atEnd, skip above readLevel (unknown range in
-    \* between); skip levels we already have
-    filtered == {l \in inc :
+    \* between); skip levels we already have. Expired tasks flow through
+    \* (0b372d5e); MutDropExpiredEarly restores the old drop-before-merge.
+    eligible == {l \in inc :
                    /\ l > al0
                    /\ ~(mode = MWrite /\ ~atEnd0 /\ l > rl0)
                    /\ l \notin (loaded0 \cup acks0)}
+    filtered == IF MutDropExpiredEarly THEN eligible \ expSel ELSE eligible
     \* loaded tasks plus incoming, keep the BatchTarget lowest
     merged == loaded0 \cup filtered
     kept   == KeepLowest(merged, BatchTarget)
@@ -118,21 +134,34 @@ MergeResult(loaded0, acks0, rl0, al0, atEnd0, inc, mode, pinnedNow) ==
     \* evictions and ignored new tasks), or any evicted ack
     evictedAny == \/ (merged \ kept) /= {}
                   \/ keptAcks /= acks0
+    \* incoming tasks that made the cut but are expired are added as
+    \* pre-acked (nil) entries: they advance readLevel (above) and the ack
+    \* level (below) and get GC'd, instead of being delivered (0b372d5e).
+    \* Note: already-loaded tasks are not re-checked for expiry here.
+    keptNewExpired == (kept \cap filtered) \cap expSel
+    newLoaded == kept \ keptNewExpired
+    newAcks   == keptAcks \cup keptNewExpired
     \* advanceAckLevelLocked: pop acked entries below the lowest loaded
     \* task, unless the ack level is pinned
     clear == IF PinActive(pinnedNow) THEN {}
-             ELSE {c \in keptAcks : MutAckPastLoaded \/ \A m \in kept : c < m}
+             ELSE {c \in newAcks : MutAckPastLoaded \/ \A m \in newLoaded : c < m}
     newAtEnd == IF MutAtEndOnMiddleRead /\ mode \in {MMiddle, MToEnd} THEN TRUE
                 ELSE IF (mode = MMiddle) \/ evictedAny THEN FALSE
                 ELSE IF mode = MToEnd THEN TRUE
                 ELSE atEnd0
   IN [
-    loaded |-> kept,
-    acks   |-> keptAcks \ clear,
-    rl     |-> newRL,
-    al     |-> IF clear = {} THEN al0 ELSE SetMax(clear),
-    atEnd  |-> newAtEnd,
-    stuck  |-> mode = MWrite /\ ~newAtEnd /\ kept = {}
+    loaded  |-> newLoaded,
+    acks    |-> newAcks \ clear,
+    rl      |-> newRL,
+    al      |-> IF clear = {} THEN al0 ELSE SetMax(clear),
+    atEnd   |-> newAtEnd,
+    stuck   |-> mode = MWrite /\ ~newAtEnd /\ newLoaded = {},
+    \* expired tasks consumed by this merge; the call site removes them
+    \* from the "committed" guarantee set (deciding a task is expired ends
+    \* its delivery obligation, whether handled as a nil entry or, under
+    \* MutDropExpiredEarly, dropped like the historical code did)
+    consumed |-> IF MutDropExpiredEarly THEN eligible \cap expSel
+                 ELSE keptNewExpired
   ]
 
 (* --algorithm FairQueue
@@ -202,10 +231,12 @@ end macro;
 \* maybeReadTasksLocked (the 26d9a561 fix; MutNoExitRecheck removes it).
 macro readerExit() begin
   if newlyWritten /= {} then
-    with r = MergeResult(loaded, ackedInMem, readLevel, ackLevel, atEnd,
-                         newlyWritten, MWrite, pinned)
+    with expSel \in SUBSET newlyWritten,
+         r = MergeResult(loaded, ackedInMem, readLevel, ackLevel, atEnd,
+                         newlyWritten, MWrite, pinned, expSel)
     do
       applyMerge(r);
+      committed    := committed \ r.consumed;
       newlyWritten := {};
       readPending  := /\ ~MutNoExitRecheck
                       /\ ~r.atEnd /\ Cardinality(r.loaded) <= ReloadAt
@@ -234,11 +265,14 @@ RResp:
       rdState := "idle";
       if rdOk then
         \* got fewer than asked for => we hit the end (mergeReadToEnd)
-        with mode = IF Cardinality(rdResult) < rdMax THEN MToEnd ELSE MMiddle,
+        with expSel \in SUBSET rdResult,
+             mode = IF Cardinality(rdResult) < rdMax THEN MToEnd ELSE MMiddle,
              r    = MergeResult(loaded, ackedInMem, readLevel, ackLevel, atEnd,
-                                rdResult, mode, pinned \/ newlyWritten /= {})
+                                rdResult, mode, pinned \/ newlyWritten /= {},
+                                expSel)
         do
           applyMerge(r);
+          committed := committed \ r.consumed;
         end with;
         goto RCheck;
       else
@@ -299,11 +333,20 @@ WResp:
         if readPending /\ ~MutNoWriteBuffering then
           newlyWritten := newlyWritten \cup wrBatch;
         else
-          with r = MergeResult(loaded, ackedInMem, readLevel, ackLevel, atEnd,
-                               wrBatch, MWrite, TRUE)
+          with expSel \in SUBSET wrBatch,
+               r = MergeResult(loaded, ackedInMem, readLevel, ackLevel, atEnd,
+                               wrBatch, MWrite, TRUE, expSel)
           do
             applyMerge(r);
+            committed := committed \ r.consumed;
+            \* the defensive "fair reader stuck" check: record that it
+            \* fired (ghost), and model its repair (maybeReadTasksLocked).
+            \* NOTE: this state IS reachable in current code via a write
+            \* of an already-expired task; see findings.md #3.
             stuckFlag := stuckFlag \/ (r.stuck /\ ~readPending /\ ~backoffTimer);
+            if StuckRepair /\ r.stuck /\ ~readPending /\ ~backoffTimer then
+              readPending := TRUE;
+            end if;
           end with;
         end if;
       end if;
@@ -535,41 +578,47 @@ RCheck == /\ pc["reader"] = "RCheck"
                      /\ rdState' = "req"
                      /\ pc' = [pc EXCEPT !["reader"] = "RResp"]
                      /\ UNCHANGED << loaded, ackedInMem, readLevel, ackLevel, 
-                                     atEnd, readPending, newlyWritten >>
+                                     atEnd, readPending, newlyWritten, 
+                                     committed >>
                 ELSE /\ IF newlyWritten /= {}
-                           THEN /\ LET r == MergeResult(loaded, ackedInMem, readLevel, ackLevel, atEnd,
-                                                        newlyWritten, MWrite, pinned) IN
-                                     /\ loaded' = r.loaded
-                                     /\ ackedInMem' = r.acks
-                                     /\ readLevel' = r.rl
-                                     /\ ackLevel' = r.al
-                                     /\ atEnd' = r.atEnd
-                                     /\ newlyWritten' = {}
-                                     /\ readPending' = (/\ ~MutNoExitRecheck
-                                                        /\ ~r.atEnd /\ Cardinality(r.loaded) <= ReloadAt
-                                                        /\ ~backoffTimer)
+                           THEN /\ \E expSel \in SUBSET newlyWritten:
+                                     LET r == MergeResult(loaded, ackedInMem, readLevel, ackLevel, atEnd,
+                                                          newlyWritten, MWrite, pinned, expSel) IN
+                                       /\ loaded' = r.loaded
+                                       /\ ackedInMem' = r.acks
+                                       /\ readLevel' = r.rl
+                                       /\ ackLevel' = r.al
+                                       /\ atEnd' = r.atEnd
+                                       /\ committed' = committed \ r.consumed
+                                       /\ newlyWritten' = {}
+                                       /\ readPending' = (/\ ~MutNoExitRecheck
+                                                          /\ ~r.atEnd /\ Cardinality(r.loaded) <= ReloadAt
+                                                          /\ ~backoffTimer)
                            ELSE /\ readPending' = (~MutNoExitRecheck /\ ShouldReadMore /\ ~backoffTimer)
                                 /\ UNCHANGED << loaded, ackedInMem, readLevel, 
-                                                ackLevel, atEnd, newlyWritten >>
+                                                ackLevel, atEnd, newlyWritten, 
+                                                committed >>
                      /\ pc' = [pc EXCEPT !["reader"] = "RWait"]
                      /\ UNCHANGED << rdState, rdFrom, rdMax >>
           /\ UNCHANGED << dbTasks, rdResult, rdOk, wrState, wrBatch, wrOk, 
                           gcState, gcFrom, pinned, backoffTimer, usedLevels, 
-                          everInDb, committed, ackedGhost, gcVictims, 
-                          stuckFlag >>
+                          everInDb, ackedGhost, gcVictims, stuckFlag >>
 
 RResp == /\ pc["reader"] = "RResp"
          /\ rdState = "resp"
          /\ rdState' = "idle"
          /\ IF rdOk
-               THEN /\ LET mode == IF Cardinality(rdResult) < rdMax THEN MToEnd ELSE MMiddle IN
-                         LET r == MergeResult(loaded, ackedInMem, readLevel, ackLevel, atEnd,
-                                              rdResult, mode, pinned \/ newlyWritten /= {}) IN
-                           /\ loaded' = r.loaded
-                           /\ ackedInMem' = r.acks
-                           /\ readLevel' = r.rl
-                           /\ ackLevel' = r.al
-                           /\ atEnd' = r.atEnd
+               THEN /\ \E expSel \in SUBSET rdResult:
+                         LET mode == IF Cardinality(rdResult) < rdMax THEN MToEnd ELSE MMiddle IN
+                           LET r == MergeResult(loaded, ackedInMem, readLevel, ackLevel, atEnd,
+                                                rdResult, mode, pinned \/ newlyWritten /= {},
+                                                expSel) IN
+                             /\ loaded' = r.loaded
+                             /\ ackedInMem' = r.acks
+                             /\ readLevel' = r.rl
+                             /\ ackLevel' = r.al
+                             /\ atEnd' = r.atEnd
+                             /\ committed' = committed \ r.consumed
                     /\ pc' = [pc EXCEPT !["reader"] = "RCheck"]
                     /\ UNCHANGED backoffTimer
                ELSE /\ IF ~backoffTimer
@@ -578,33 +627,35 @@ RResp == /\ pc["reader"] = "RResp"
                                /\ UNCHANGED backoffTimer
                     /\ pc' = [pc EXCEPT !["reader"] = "RExit"]
                     /\ UNCHANGED << loaded, ackedInMem, readLevel, ackLevel, 
-                                    atEnd >>
+                                    atEnd, committed >>
          /\ UNCHANGED << dbTasks, rdFrom, rdMax, rdResult, rdOk, wrState, 
                          wrBatch, wrOk, gcState, gcFrom, readPending, 
-                         newlyWritten, pinned, usedLevels, everInDb, committed, 
+                         newlyWritten, pinned, usedLevels, everInDb, 
                          ackedGhost, gcVictims, stuckFlag >>
 
 RExit == /\ pc["reader"] = "RExit"
          /\ IF newlyWritten /= {}
-               THEN /\ LET r == MergeResult(loaded, ackedInMem, readLevel, ackLevel, atEnd,
-                                            newlyWritten, MWrite, pinned) IN
-                         /\ loaded' = r.loaded
-                         /\ ackedInMem' = r.acks
-                         /\ readLevel' = r.rl
-                         /\ ackLevel' = r.al
-                         /\ atEnd' = r.atEnd
-                         /\ newlyWritten' = {}
-                         /\ readPending' = (/\ ~MutNoExitRecheck
-                                            /\ ~r.atEnd /\ Cardinality(r.loaded) <= ReloadAt
-                                            /\ ~backoffTimer)
+               THEN /\ \E expSel \in SUBSET newlyWritten:
+                         LET r == MergeResult(loaded, ackedInMem, readLevel, ackLevel, atEnd,
+                                              newlyWritten, MWrite, pinned, expSel) IN
+                           /\ loaded' = r.loaded
+                           /\ ackedInMem' = r.acks
+                           /\ readLevel' = r.rl
+                           /\ ackLevel' = r.al
+                           /\ atEnd' = r.atEnd
+                           /\ committed' = committed \ r.consumed
+                           /\ newlyWritten' = {}
+                           /\ readPending' = (/\ ~MutNoExitRecheck
+                                              /\ ~r.atEnd /\ Cardinality(r.loaded) <= ReloadAt
+                                              /\ ~backoffTimer)
                ELSE /\ readPending' = (~MutNoExitRecheck /\ ShouldReadMore /\ ~backoffTimer)
                     /\ UNCHANGED << loaded, ackedInMem, readLevel, ackLevel, 
-                                    atEnd, newlyWritten >>
+                                    atEnd, newlyWritten, committed >>
          /\ pc' = [pc EXCEPT !["reader"] = "RWait"]
          /\ UNCHANGED << dbTasks, rdState, rdFrom, rdMax, rdResult, rdOk, 
                          wrState, wrBatch, wrOk, gcState, gcFrom, pinned, 
-                         backoffTimer, usedLevels, everInDb, committed, 
-                         ackedGhost, gcVictims, stuckFlag >>
+                         backoffTimer, usedLevels, everInDb, ackedGhost, 
+                         gcVictims, stuckFlag >>
 
 reader == RWait \/ RCheck \/ RResp \/ RExit
 
@@ -646,24 +697,31 @@ WResp == /\ pc["writer"] = "WResp"
                THEN /\ IF readPending /\ ~MutNoWriteBuffering
                           THEN /\ newlyWritten' = (newlyWritten \cup wrBatch)
                                /\ UNCHANGED << loaded, ackedInMem, readLevel, 
-                                               ackLevel, atEnd, stuckFlag >>
-                          ELSE /\ LET r == MergeResult(loaded, ackedInMem, readLevel, ackLevel, atEnd,
-                                                       wrBatch, MWrite, TRUE) IN
-                                    /\ loaded' = r.loaded
-                                    /\ ackedInMem' = r.acks
-                                    /\ readLevel' = r.rl
-                                    /\ ackLevel' = r.al
-                                    /\ atEnd' = r.atEnd
-                                    /\ stuckFlag' = (stuckFlag \/ (r.stuck /\ ~readPending /\ ~backoffTimer))
+                                               ackLevel, atEnd, readPending, 
+                                               committed, stuckFlag >>
+                          ELSE /\ \E expSel \in SUBSET wrBatch:
+                                    LET r == MergeResult(loaded, ackedInMem, readLevel, ackLevel, atEnd,
+                                                         wrBatch, MWrite, TRUE, expSel) IN
+                                      /\ loaded' = r.loaded
+                                      /\ ackedInMem' = r.acks
+                                      /\ readLevel' = r.rl
+                                      /\ ackLevel' = r.al
+                                      /\ atEnd' = r.atEnd
+                                      /\ committed' = committed \ r.consumed
+                                      /\ stuckFlag' = (stuckFlag \/ (r.stuck /\ ~readPending /\ ~backoffTimer))
+                                      /\ IF StuckRepair /\ r.stuck /\ ~readPending /\ ~backoffTimer
+                                            THEN /\ readPending' = TRUE
+                                            ELSE /\ TRUE
+                                                 /\ UNCHANGED readPending
                                /\ UNCHANGED newlyWritten
                ELSE /\ TRUE
                     /\ UNCHANGED << loaded, ackedInMem, readLevel, ackLevel, 
-                                    atEnd, newlyWritten, stuckFlag >>
+                                    atEnd, readPending, newlyWritten, 
+                                    committed, stuckFlag >>
          /\ pc' = [pc EXCEPT !["writer"] = "WUnpin"]
          /\ UNCHANGED << dbTasks, rdState, rdFrom, rdMax, rdResult, rdOk, 
-                         wrBatch, wrOk, gcState, gcFrom, readPending, pinned, 
-                         backoffTimer, usedLevels, everInDb, committed, 
-                         ackedGhost, gcVictims >>
+                         wrBatch, wrOk, gcState, gcFrom, pinned, backoffTimer, 
+                         usedLevels, everInDb, ackedGhost, gcVictims >>
 
 WUnpin == /\ pc["writer"] = "WUnpin"
           /\ IF ~wrOk
@@ -875,8 +933,10 @@ LoadedInDb == loaded \subseteq dbTasks /\ newlyWritten \subseteq dbTasks
 LoadedBounded == Cardinality(loaded) <= BatchTarget
 
 \* Safety: the ack level never passes a committed task that was not acked.
-\* (Tasks from timed-out writes carry no guarantee: the caller re-submits.)
-NoAckSkipped == \A l \in committed : (l <= ackLevel) => (l \in ackedGhost)
+\* (Tasks from timed-out writes carry no guarantee: the caller re-submits.
+\* Tasks consumed as expired leave the committed set at merge time.)
+NoAckSkipped ==
+  \A l \in committed : (l <= ackLevel) => (l \in ackedGhost)
 
 \* While a write is in flight, the pin keeps the ack level below all levels
 \* being written (else the merge would drop them / GC could delete them).
@@ -887,11 +947,16 @@ PinProtectsWrites ==
 
 \* Safety: a committed task is never deleted from the database unless it
 \* was acked. ("Even worse than getting stuck: a restart fixes stuck, not
-\* deleted.") Orphans from timed-out writes may be GC'd unacked.
+\* deleted.") Orphans from timed-out writes and tasks consumed as expired
+\* (both out of the committed set) may be GC'd unacked.
 GCOnlyAcked == (gcVictims \cap committed) \subseteq ackedGhost
 
 \* The defensive "fair reader stuck" condition (see mergeTasks in
-\* fair_task_reader.go) is unreachable in the fixed code.
+\* fair_task_reader.go). NOT an invariant of the current code: it is
+\* reachable via a write of an already-expired task (findings.md #3), and
+\* the check's repair (a triggered read) is what rescues the reader. Not
+\* in the default cfg; run.sh uses it to (a) demonstrate finding #3 on the
+\* real model and (b) catch historical bugs with StuckRepair=FALSE.
 NoStuck == ~stuckFlag
 
 ---------------------------------------------------------------------------
@@ -899,7 +964,8 @@ NoStuck == ~stuckFlag
 
 AckLevelMonotonic == [][ackLevel' >= ackLevel]_vars
 
-\* Liveness: every committed task is eventually acked.
+\* Liveness: every committed task is eventually acked (tasks consumed as
+\* expired leave the committed set and are exempt).
 AllTasksAcked == <>(\A l \in committed : l \in ackedGhost)
 
 \* Liveness: the reader eventually learns it drained the whole queue

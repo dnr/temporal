@@ -13,23 +13,30 @@ java -cp "$JAR" pcal.trans -nocfg FairQueue.tla || exit 1
 
 fail=0
 
-# run_expect <pass|fail> <mutation-flag-or-'-'> <expected-output-regex> [nostuck]
-# "nostuck" also removes the NoStuck invariant: it models code without the
-# defensive "fair reader stuck" detector (which post-dates some of the bugs
-# and otherwise catches them before the liveness violation manifests).
+# run_expect <pass|fail> <mutation-flag-or-'-'> <expected-output-regex> [variant]
+# variants:
+#   nodetector: StuckRepair=FALSE, i.e. code without the defensive "fair
+#     reader stuck" detector (which post-dates some historical bugs and
+#     otherwise repairs/masks them).
+#   nostuckinv: like nodetector, plus the NoStuck invariant enabled, so TLC
+#     reports the stuck state as a (short-trace) invariant violation.
+#   stuckinv: current code (repair on) with the NoStuck invariant enabled.
 run_expect() {
-  local expect=$1 mut=$2 pattern=$3 nostuck=${4:-}
+  local expect=$1 mut=$2 pattern=$3 variant=${4:-}
   local cfg=FairQueue.cfg desc="real model"
-  if [[ $mut != - ]]; then
-    desc="mutation $mut${nostuck:+ (no NoStuck)}"
+  if [[ $mut != - || -n $variant ]]; then
+    desc="${mut/#-/real model}${variant:+ ($variant)}"
+    [[ $mut != - ]] && desc="mutation $desc"
     cfg=mut_tmp.cfg
     sed "s/$mut = FALSE/$mut = TRUE/" FairQueue.cfg > "$cfg"
-    if cmp -s "$cfg" FairQueue.cfg; then
+    if [[ $mut != - ]] && cmp -s "$cfg" FairQueue.cfg; then
       echo "FAIL: $desc: flag not found in FairQueue.cfg"; fail=1; return
     fi
-    if [[ -n $nostuck ]]; then
-      sed -i '/^  NoStuck$/d' "$cfg"
-    fi
+    case $variant in
+      nodetector) sed -i 's/StuckRepair = TRUE/StuckRepair = FALSE/' "$cfg" ;;
+      nostuckinv) sed -i 's/StuckRepair = TRUE/StuckRepair = FALSE/; s/^INVARIANTS$/INVARIANTS\n  NoStuck/' "$cfg" ;;
+      stuckinv)   sed -i 's/^INVARIANTS$/INVARIANTS\n  NoStuck/' "$cfg" ;;
+    esac
   fi
   local out
   out=$(TLC -config "$cfg" FairQueue.tla 2>&1)
@@ -76,8 +83,11 @@ run_expect fail MutAckPastLoaded "Invariant (MemWindow|NoAckSkipped) is violated
 # read's stale to-end result establishes atEnd above them
 run_expect fail MutNoWriteBuffering "Invariant NoAckSkipped is violated|Temporal propert(y|ies).*violated"
 # f534e74e: collapsing readLevel to ackLevel on an empty merge evicts all acks
-# and strands the reader (defensive stuck check fires)
-run_expect fail MutResetReadLevelOnEmptyMerge "Invariant NoStuck is violated|Temporal propert(y|ies).*violated"
+# and strands the reader. The detector's repair does NOT mask it: the collapse
+# also fires on read merges (no detector there), causing a never-stabilizing
+# evict/re-read churn.
+run_expect fail MutResetReadLevelOnEmptyMerge "Invariant NoStuck is violated|Temporal propert(y|ies).*violated" nostuckinv
+run_expect fail MutResetReadLevelOnEmptyMerge "Temporal propert(y|ies).*violated"
 # 8ca7b640 #4: stale acks above the new readLevel let ackLevel jump over
 # evicted (never-dispatched) tasks
 run_expect fail MutKeepEvictedAcks "Invariant (MemWindow|NoAckSkipped) is violated"
@@ -87,19 +97,29 @@ run_expect fail MutNoPin "Invariant (PinProtectsWrites|MemWindow|NoAckSkipped|GC
 # seeded bug: GC deletes up to readLevel -> deletes loaded, unacked tasks
 run_expect fail MutGcReadLevel "Invariant (GCOnlyAcked|LoadedInDb) is violated"
 # 26d9a561: backoff timer fires while readPending; without the exit re-check
-# the reader never reads again. With the modern stuck detector the state is
-# flagged as NoStuck; without it (historical code) it is a liveness bug.
-run_expect fail MutNoExitRecheck "Invariant NoStuck is violated"
-run_expect fail MutNoExitRecheck "Temporal propert(y|ies).*violated" nostuck
+# the reader never reads again. The detector's repair only fires on write
+# merges, so this is a liveness bug even with the detector (behaviors with
+# no further writes).
+run_expect fail MutNoExitRecheck "Temporal propert(y|ies).*violated"
+run_expect fail MutNoExitRecheck "Temporal propert(y|ies).*violated" nodetector
 # 8ca7b640 #5: write error with empty buffer must trigger a read from unpin.
-# Same detector note as above.
-run_expect fail MutNoReadOnWriteError "Invariant NoStuck is violated"
-run_expect fail MutNoReadOnWriteError "Temporal propert(y|ies).*violated" nostuck
+# Same note as above: no successful write merge -> no repair.
+run_expect fail MutNoReadOnWriteError "Temporal propert(y|ies).*violated"
+run_expect fail MutNoReadOnWriteError "Temporal propert(y|ies).*violated" nodetector
 # NOT a bug under the delivery contract: skipping the atEnd reset on write
 # error strands only rows landed by timed-out writes, which carry no
 # guarantee (the caller re-submits). The reset is best-effort delivery of
 # such orphans, so the model passes with it removed. See findings.md.
 run_expect pass MutNoAtEndResetOnWriteError "No error has been found"
+# 0b372d5e: dropping expired tasks before the merge leaves readLevel behind
+# an all-expired batch and the reader re-reads it forever
+run_expect fail MutDropExpiredEarly "Temporal propert(y|ies).*violated"
+
+echo "=== findings regression (expected violations on the REAL model) ==="
+# findings.md #3: the defensive "fair reader stuck" state is reachable in
+# current code via a write of an already-expired task; the detector's
+# repair is what rescues the reader (and the softassert alarm is noise).
+run_expect fail - "Invariant NoStuck is violated" stuckinv
 
 if [[ $fail -ne 0 ]]; then echo "=== FAILURES ==="; exit 1; fi
 echo "=== all checks passed ==="
