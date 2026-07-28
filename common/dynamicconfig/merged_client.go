@@ -1,15 +1,10 @@
 package dynamicconfig
 
-import "sync"
-
 type (
 	MergedClient struct {
+		NotifyingClientImpl
 		clients []Client
 		cancels []func()
-
-		subscriptionLock sync.Mutex
-		subscriptionIdx  int
-		subscriptions    map[int]ClientUpdateFunc
 	}
 )
 
@@ -19,8 +14,8 @@ type (
 // subscriptions on the sub-clients.
 func NewMergedClient(clients []Client) *MergedClient {
 	return &MergedClient{
-		clients:       clients,
-		subscriptions: make(map[int]ClientUpdateFunc),
+		NotifyingClientImpl: NewNotifyingClientImpl(),
+		clients:             clients,
 	}
 }
 
@@ -46,11 +41,7 @@ func (m *MergedClient) changed(changed map[Key][]ConstrainedValue) {
 	for k := range changed {
 		combinedChanges[k] = m.GetValue(k)
 	}
-	m.subscriptionLock.Lock()
-	for _, update := range m.subscriptions {
-		update(combinedChanges)
-	}
-	m.subscriptionLock.Unlock()
+	m.PublishUpdates(combinedChanges)
 }
 
 func (m *MergedClient) GetValue(key Key) []ConstrainedValue {
@@ -60,19 +51,4 @@ func (m *MergedClient) GetValue(key Key) []ConstrainedValue {
 		out = append(out, c.GetValue(key)...)
 	}
 	return out
-}
-
-func (m *MergedClient) Subscribe(update ClientUpdateFunc) (cancel func()) {
-	m.subscriptionLock.Lock()
-	defer m.subscriptionLock.Unlock()
-
-	m.subscriptionIdx++
-	id := m.subscriptionIdx
-	m.subscriptions[id] = update
-
-	return func() {
-		m.subscriptionLock.Lock()
-		defer m.subscriptionLock.Unlock()
-		delete(m.subscriptions, id)
-	}
 }
