@@ -6,8 +6,12 @@ real bug.
 
 ## 1. Busy re-read loop when lowest loaded task is slow to ack (candidate)
 
-Status: **unverified** — found while analyzing an M1 counterexample; revisit
-at M6 (evicted-ack cache) with a dedicated property and/or a Go test.
+Status: **model-confirmed against current code** (with the evicted-ack
+cache modeled): the `FairQueue_churn.cfg` configuration — one loaded task
+that never completes, one acked task above it — violates `ReaderQuiesce`
+(the reader never stops issuing reads). Reproduced by `run.sh` as a
+findings-regression entry. A Go unit test would still be a useful
+end-to-end confirmation.
 
 Scenario (single subqueue, current code as of 7f976f7e90):
 

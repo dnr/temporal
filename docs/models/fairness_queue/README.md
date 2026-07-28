@@ -11,8 +11,11 @@ milestones, `findings.md` for issues surfaced by the model.
 - `FairQueue.cfg` — default config: safety + liveness at MaxLevel=3.
 - `FairQueue_safety4.cfg` — safety only at MaxLevel=4 (liveness at 4 is too
   slow for routine runs; run it manually before big changes if desired).
+- `FairQueue_churn.cfg` — findings.md #1 regression: a task that never
+  completes makes the reader busy-loop instead of quiescing (expected to
+  VIOLATE ReaderQuiesce on current code).
 - `run.sh` — translate + check the real model, then check every mutation
-  and verify TLC catches it.
+  and verify TLC catches it, then reproduce the confirmed findings.
 - `Trivial.tla/.cfg` — toolchain smoke test.
 
 ## Running
@@ -63,7 +66,11 @@ Safety (invariants):
 - `NoAckSkipped`: the ack level never passes an unacked committed task.
 - `GCOnlyAcked`: GC never deletes an unacked committed task.
 - `PinProtectsWrites`: the write pin keeps ackLevel below in-flight writes.
-- `NoStuck`: the defensive "fair reader stuck" softassert never fires.
+- `CacheOnlyAcked`/`CacheBounded`: the evicted-ack cache never fabricates
+  an ack and stays within its size bound.
+- `NoStuck`: the defensive "fair reader stuck" softassert does not fire.
+  NOT an invariant of current code (findings.md #3) — used by run.sh as a
+  findings regression and for historical mutations with StuckRepair=FALSE.
 - plus type/bookkeeping invariants (`TypeInv`, `AckBelowRead`, `LoadedInDb`,
   `LoadedBounded`).
 

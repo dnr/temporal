@@ -178,6 +178,12 @@ the cache in play, including when the cache overflows and drops entries
 (redelivery is allowed; skipping is not).
 Target bugs: none historical — this milestone is insurance for newer logic.
 
+**Status (2026-07-27): M1-M6 implemented** in FairQueue.tla with all
+mutation tests passing; see README.md for how to run and findings.md for
+three findings (two model-confirmed against current code: the busy re-read
+churn loop, and the reachable "fair reader stuck" softassert; plus spec
+clarifications around timed-out writes). M7 not started.
+
 **M7 (stretch) — matcher handoff races.**
 Scope: a minimal matcher: between "added to matcher" and "completed", a task
 may be matched-and-removed concurrently with eviction (setEvicted no-op

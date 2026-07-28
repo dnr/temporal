@@ -114,12 +114,26 @@ run_expect pass MutNoAtEndResetOnWriteError "No error has been found"
 # 0b372d5e: dropping expired tasks before the merge leaves readLevel behind
 # an all-expired batch and the reader re-reads it forever
 run_expect fail MutDropExpiredEarly "Temporal propert(y|ies).*violated"
+# seeded bug: evicted unacked tasks entering the evicted-ack cache would let
+# cache hits fabricate acks and skip live tasks
+run_expect fail MutCachePoison "Invariant (CacheOnlyAcked|NoAckSkipped|MemWindow) is violated"
 
 echo "=== findings regression (expected violations on the REAL model) ==="
 # findings.md #3: the defensive "fair reader stuck" state is reachable in
 # current code via a write of an already-expired task; the detector's
 # repair is what rescues the reader (and the softassert alarm is noise).
 run_expect fail - "Invariant NoStuck is violated" stuckinv
+# findings.md #1: with a task that never completes, the reader busy-loops
+# re-reading (readLevel lowered by empty read-to-end merges evicts acks and
+# clears atEnd) instead of quiescing.
+out=$(TLC -config FairQueue_churn.cfg FairQueue.tla 2>&1)
+if [[ $? -eq 0 ]] || ! echo "$out" | grep -qE "Temporal propert(y|ies).*violated"; then
+  echo "FAIL: churn regression: expected ReaderQuiesce violation:"
+  echo "$out" | grep -E "Error:" | head -5
+  fail=1
+else
+  echo "ok: churn regression (finding #1 reproduced)"
+fi
 
 if [[ $fail -ne 0 ]]; then echo "=== FAILURES ==="; exit 1; fi
 echo "=== all checks passed ==="
