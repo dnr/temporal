@@ -82,6 +82,108 @@ we'll implement them one by one.
 
 Milestones:
 
-_fill this in_
+General approach notes (apply to all milestones):
+
+- One growing PlusCal spec (checked in per-milestone via git history), plus a
+  small `.cfg` per property set. Keep constants tiny: ~3-4 tasks total, batch
+  size 2, 2-3 distinct pass values, so TLC state space stays tractable.
+- The DB is a separate process from the start: callers place a request in a
+  network variable and block for a response, so a request can be in flight
+  while other processes act. Milestone 1 makes all calls succeed; timeouts are
+  added later as a change to network behavior only.
+- Abstract the stride counter: the writer picks each task's pass
+  nondeterministically, constrained only to be >= the pinned base pass, with
+  ids assigned sequentially. This preserves the one property the reader relies
+  on (writes may land below or above readLevel, never at-or-below ackLevel)
+  without modeling weights/fairness.
+- Ignore: subqueues, task forwarding/matcher details, rangeID/fencing,
+  explicit DB errors, throttling, backlog age/metrics.
+- Validation step for each milestone: after the properties pass, re-introduce
+  the corresponding historical bug (mutation test) and confirm TLC finds a
+  counterexample. A milestone isn't done until its target bugs are caught.
+
+**M1 — Reader + acker over a reliable async DB (static queue).**
+Scope: DB pre-populated with tasks at distinct levels; reader process with
+readLevel / ackLevel / outstandingTasks (task-or-ack entries) / loadedTasks /
+atEnd / readPending; batch reads with mergeReadMiddle vs mergeReadToEnd;
+acker process acks loaded tasks in any order; advanceAckLevel. No writer, no
+GC, no failures, no expiry.
+Properties: invariants — in-memory tasks are exactly a subset of (ackLevel,
+readLevel]; ackLevel monotonic and never passes an unacked task; loadedTasks
+matches the map. Liveness — every task is eventually acked; reader never
+wedges (if DB has tasks above ackLevel, a read eventually happens).
+Purpose: establish the skeleton and vocabulary; shake out level-ordering and
+merge scaffolding.
+
+**M2 — Concurrent writer with ack-level pinning.**
+Scope: writer process writes batches (size 1-2): getAndPinAckLevel, pick
+levels, async DB write, wroteNewTasks/mergeWrite, unpin. Includes the
+newlyWrittenTasks holding buffer (write lands while read pending), eviction
+of tasks *and* acks above the new readLevel on merge, the "ignore writes
+above readLevel when not atEnd" rule, and the "don't move readLevel when the
+merged set is empty" rule. Writes still always succeed.
+Properties: M1 properties, now with writes: every *written* task is
+eventually acked; plus "never write at-or-below ackLevel".
+Target bugs: 12e7c43a (buffer writes during pending read), 8ca7b640 bugs 1-4
+(below-ack reads, readLevel collapse, re-read of acked tasks, ack eviction),
+f534e74e (readLevel reset to ackLevel when merged set empty → stuck reader).
+Note: model the defensive "fair reader stuck" check as an invariant violation
+rather than a repair, so TLC reports it instead of papering over it.
+
+**M3 — GC.**
+Scope: GC process that deletes DB tasks <= ackLevel (triggered
+nondeterministically whenever numToGC > 0; batch limit optional). Deletes are
+idempotent.
+Properties: the big safety one — a task is never deleted from the DB before
+it is acked. This exercises the pinning protocol end-to-end (the "ack level
+movement while a write is in flight" problem in fairness.md): without
+pinning, GC between pass-selection and write completion destroys just-written
+tasks.
+Target bugs: the pre-production design flaw described in fairness.md
+"Problems" section (verify by removing pinning as the mutation).
+
+**M4 — DB timeouts and retry.**
+Scope: any DB call may now time out on the outgoing side (op not performed)
+or incoming side (op performed, caller doesn't know). Reader: failed read →
+backoff timer → retry, including the timer-fires-while-readPending
+interleaving; readPending cleared and rechecked at end of read loop. Writer:
+failed write → atEnd=false + trigger read + (modeled) caller retries the
+tasks as *new* writes with fresh ids; the timed-out-but-landed write must
+still be found and acked. GC timeouts are harmless (retried later).
+Properties: same safety; liveness now needs fairness assumptions ("the
+network eventually stops timing out" — e.g., weak fairness on the success
+branch, or a bound on consecutive timeouts). Every task that *landed in the
+DB* is eventually acked, whether or not its writer learned of success.
+Target bugs: 26d9a561 (backoff timer vs readPending race → reader stuck),
+8ca7b640 bug 5 (failed write with empty buffer → atEnd=false forever, no
+read ever triggered).
+
+**M5 — Expired tasks.**
+Scope: a task in the DB may nondeterministically become expired before it is
+read; expired tasks flow through merge as pre-acked entries (advancing
+readLevel and ackLevel) rather than being dropped.
+Properties: liveness restated — every *non-expired* task is eventually acked;
+expired tasks don't have to be dispatched but must never wedge the reader or
+stall the ack level (an all-expired batch must still make progress).
+Target bug: 0b372d5e (dropping expired tasks pre-merge → readLevel never
+advances → infinite re-read loop).
+
+**M6 — Evicted-ack cache.**
+Scope: the bounded evictedAcks cache: acks evicted above the new readLevel
+are remembered; re-reading a cached level re-inserts it as pre-acked instead
+of redelivering; cache trims highest levels when over capacity.
+Properties: the cache must never create a *new* ack (safety: ackLevel never
+passes a task that was not genuinely acked), and liveness is preserved with
+the cache in play, including when the cache overflows and drops entries
+(redelivery is allowed; skipping is not).
+Target bugs: none historical — this milestone is insurance for newer logic.
+
+**M7 (stretch) — matcher handoff races.**
+Scope: a minimal matcher: between "added to matcher" and "completed", a task
+may be matched-and-removed concurrently with eviction (setEvicted no-op
+race), and completeTask may find the task missing from outstandingTasks
+(re-read + duplicate dispatch path).
+Target bug: ad717eae. May be out of scope for a single model, per the plan;
+decide after M6 whether the state space allows it.
 
 
