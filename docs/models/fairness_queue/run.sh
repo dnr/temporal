@@ -50,9 +50,21 @@ run_expect pass - "No error has been found"
 
 echo "=== checking mutations (expect violations) ==="
 # seeded bug: middle reads marked atEnd -> reader stops early, tasks never read
-run_expect fail MutAtEndOnMiddleRead "Temporal propert(y|ies).*violated"
+run_expect fail MutAtEndOnMiddleRead "Invariant NoAckSkipped is violated|Temporal propert(y|ies).*violated"
 # seeded bug: ack level advances past loaded (unacked) tasks
 run_expect fail MutAckPastLoaded "Invariant (MemWindow|NoAckSkipped) is violated"
+# 12e7c43a: writes merged directly during a pending read get dropped when the
+# read's stale to-end result establishes atEnd above them
+run_expect fail MutNoWriteBuffering "Invariant NoAckSkipped is violated|Temporal propert(y|ies).*violated"
+# f534e74e: collapsing readLevel to ackLevel on an empty merge evicts all acks
+# and strands the reader (defensive stuck check fires)
+run_expect fail MutResetReadLevelOnEmptyMerge "Invariant NoStuck is violated|Temporal propert(y|ies).*violated"
+# 8ca7b640 #4: stale acks above the new readLevel let ackLevel jump over
+# evicted (never-dispatched) tasks
+run_expect fail MutKeepEvictedAcks "Invariant (MemWindow|NoAckSkipped) is violated"
+# fairness.md "Problems" #1: without pinning, the ack level can pass levels of
+# an in-flight write; the merge then drops the tasks as below-ack
+run_expect fail MutNoPin "Invariant (PinProtectsWrites|MemWindow|NoAckSkipped) is violated|Temporal propert(y|ies).*violated"
 
 if [[ $fail -ne 0 ]]; then echo "=== FAILURES ==="; exit 1; fi
 echo "=== all checks passed ==="
