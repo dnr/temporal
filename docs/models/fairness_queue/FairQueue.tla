@@ -2,7 +2,7 @@
 (***************************************************************************)
 (* PlusCal model of matching's fair task queue reader/writer.              *)
 (* Source: service/matching/fair_task_{reader,writer}.go                   *)
-(* Milestones and scope decisions: see plan.md. Currently at: M2.          *)
+(* Milestones and scope decisions: see plan.md. Currently at: M3.          *)
 (*                                                                         *)
 (* Key abstractions:                                                       *)
 (*                                                                         *)
@@ -27,8 +27,12 @@
 (* - A task is ackable as soon as it is merged into "loaded"; the matcher  *)
 (*   handoff is not modeled (see plan.md M7).                              *)
 (*                                                                         *)
-(* - The DB is reached via request/response channels (rdState.., wrState..)*)
-(*   modeled as separate processes. In M2 every call succeeds.             *)
+(* - The DB is reached via request/response channels (rdState.., wrState..,*)
+(*   gcState..) modeled as separate processes. All calls succeed for now.  *)
+(*                                                                         *)
+(* - GC may fire whenever the ack level is above zero (the numToGC/time    *)
+(*   trigger conditions are abstracted away); it is unfair, so liveness    *)
+(*   cannot depend on GC running. The delete batch size is not modeled.    *)
 (*                                                                         *)
 (* - The defensive "fair reader stuck" softassert+repair in mergeTasks is  *)
 (*   modeled as a detection flag + invariant (NoStuck), not as a repair,   *)
@@ -51,7 +55,8 @@ CONSTANTS
   MutNoWriteBuffering,   \* 12e7c43a: merge writes directly during a pending read
   MutResetReadLevelOnEmptyMerge, \* f534e74e: readLevel := ackLevel when merge is empty
   MutKeepEvictedAcks,    \* 8ca7b640 #4: don't evict acks above new readLevel
-  MutNoPin               \* fairness.md problem 1: no ack level pinning during writes
+  MutNoPin,              \* fairness.md problem 1: no ack level pinning during writes
+  MutGcReadLevel         \* seeded: GC deletes up to readLevel instead of ackLevel
 
 ASSUME ReloadAt < BatchTarget
 ASSUME MaxLevel >= 1
@@ -134,6 +139,9 @@ variables
   \* ---- write RPC channel: writer -> db ----
   wrState  = "idle",           \* idle -> req -> resp -> idle
   wrBatch  = {},
+  \* ---- gc RPC channel: gc -> db ----
+  gcState  = "idle",           \* idle -> req -> resp -> idle
+  gcFrom   = NoLevel,
   \* ---- reader state (fields of fairTaskReader, guarded by tr.lock) ----
   loaded       = {},           \* levels of unacked tasks in memory
   ackedInMem   = {},           \* levels of acked (nil) placeholder entries
@@ -148,6 +156,7 @@ variables
   \* ---- ghost state (not part of the implementation) ----
   everInDb   = dbTasks,        \* every level ever present in dbTasks
   ackedGhost = {},             \* every level ever acked
+  gcVictims  = {},             \* every level ever deleted by GC
   stuckFlag  = FALSE;          \* defensive "fair reader stuck" check fired
 
 define
@@ -290,6 +299,41 @@ DbWriteLoop:
   end while;
 end process;
 
+fair process dbGc = "dbGc"
+begin
+DbGcLoop:
+  while TRUE do
+    await gcState = "req";
+    \* CompleteFairTasksLessThan(gcFrom.inc()): delete tasks <= gcFrom.
+    \* The delete batch size limit is not modeled (it only splits the
+    \* delete across calls; deletes are idempotent).
+    with victims = {l \in dbTasks : l <= gcFrom} do
+      dbTasks   := dbTasks \ victims;
+      gcVictims := gcVictims \cup victims;
+    end with;
+    gcState := "resp";
+  end while;
+end process;
+
+\* GC: maybeGCLocked/doGC. Triggered nondeterministically whenever the ack
+\* level has moved (the numToGC/time trigger conditions are abstracted to
+\* "may run at any such time"). inGC (single outstanding GC) is implied by
+\* this being one sequential process. Deliberately NOT fair: liveness must
+\* not depend on GC running.
+process gc = "gc"
+begin
+GcLoop:
+  while TRUE do
+    \* doGC captures ackLevel under lock, then calls the db unlocked
+    await ackLevel > NoLevel;
+    gcFrom  := IF MutGcReadLevel THEN readLevel ELSE ackLevel;
+    gcState := "req";
+GcResp:
+    await gcState = "resp";
+    gcState := "idle";
+  end while;
+end process;
+
 \* The acker: eventually acks every loaded task, in any order.
 \* One step = completeTaskLocked: mark acked, advanceAckLevelLocked,
 \* maybeReadTasksLocked.
@@ -323,8 +367,9 @@ end algorithm; *)
 
 \* BEGIN TRANSLATION
 VARIABLES pc, dbTasks, rdState, rdFrom, rdMax, rdResult, wrState, wrBatch, 
-          loaded, ackedInMem, readLevel, ackLevel, atEnd, readPending, 
-          newlyWritten, pinned, usedLevels, everInDb, ackedGhost, stuckFlag
+          gcState, gcFrom, loaded, ackedInMem, readLevel, ackLevel, atEnd, 
+          readPending, newlyWritten, pinned, usedLevels, everInDb, ackedGhost, 
+          gcVictims, stuckFlag
 
 (* define statement *)
 Outstanding    == loaded \cup ackedInMem
@@ -338,11 +383,11 @@ WriteBatches    == {B \in SUBSET AvailableLevels :
 
 
 vars == << pc, dbTasks, rdState, rdFrom, rdMax, rdResult, wrState, wrBatch, 
-           loaded, ackedInMem, readLevel, ackLevel, atEnd, readPending, 
-           newlyWritten, pinned, usedLevels, everInDb, ackedGhost, stuckFlag
-        >>
+           gcState, gcFrom, loaded, ackedInMem, readLevel, ackLevel, atEnd, 
+           readPending, newlyWritten, pinned, usedLevels, everInDb, 
+           ackedGhost, gcVictims, stuckFlag >>
 
-ProcSet == {"reader"} \cup {"writer"} \cup {"dbRead"} \cup {"dbWrite"} \cup {"acker"}
+ProcSet == {"reader"} \cup {"writer"} \cup {"dbRead"} \cup {"dbWrite"} \cup {"dbGc"} \cup {"gc"} \cup {"acker"}
 
 Init == (* Global variables *)
         /\ dbTasks \in SUBSET Levels
@@ -352,6 +397,8 @@ Init == (* Global variables *)
         /\ rdResult = {}
         /\ wrState = "idle"
         /\ wrBatch = {}
+        /\ gcState = "idle"
+        /\ gcFrom = NoLevel
         /\ loaded = {}
         /\ ackedInMem = {}
         /\ readLevel = NoLevel
@@ -363,20 +410,24 @@ Init == (* Global variables *)
         /\ usedLevels = dbTasks
         /\ everInDb = dbTasks
         /\ ackedGhost = {}
+        /\ gcVictims = {}
         /\ stuckFlag = FALSE
         /\ pc = [self \in ProcSet |-> CASE self = "reader" -> "RWait"
                                         [] self = "writer" -> "WLoop"
                                         [] self = "dbRead" -> "DbReadLoop"
                                         [] self = "dbWrite" -> "DbWriteLoop"
+                                        [] self = "dbGc" -> "DbGcLoop"
+                                        [] self = "gc" -> "GcLoop"
                                         [] self = "acker" -> "AckLoop"]
 
 RWait == /\ pc["reader"] = "RWait"
          /\ readPending
          /\ pc' = [pc EXCEPT !["reader"] = "RCheck"]
          /\ UNCHANGED << dbTasks, rdState, rdFrom, rdMax, rdResult, wrState, 
-                         wrBatch, loaded, ackedInMem, readLevel, ackLevel, 
-                         atEnd, readPending, newlyWritten, pinned, usedLevels, 
-                         everInDb, ackedGhost, stuckFlag >>
+                         wrBatch, gcState, gcFrom, loaded, ackedInMem, 
+                         readLevel, ackLevel, atEnd, readPending, newlyWritten, 
+                         pinned, usedLevels, everInDb, ackedGhost, gcVictims, 
+                         stuckFlag >>
 
 RCheck == /\ pc["reader"] = "RCheck"
           /\ IF ShouldReadMore
@@ -401,8 +452,9 @@ RCheck == /\ pc["reader"] = "RCheck"
                                                 ackLevel, atEnd, newlyWritten >>
                      /\ pc' = [pc EXCEPT !["reader"] = "RWait"]
                      /\ UNCHANGED << rdState, rdFrom, rdMax >>
-          /\ UNCHANGED << dbTasks, rdResult, wrState, wrBatch, pinned, 
-                          usedLevels, everInDb, ackedGhost, stuckFlag >>
+          /\ UNCHANGED << dbTasks, rdResult, wrState, wrBatch, gcState, gcFrom, 
+                          pinned, usedLevels, everInDb, ackedGhost, gcVictims, 
+                          stuckFlag >>
 
 RResp == /\ pc["reader"] = "RResp"
          /\ rdState = "resp"
@@ -417,8 +469,9 @@ RResp == /\ pc["reader"] = "RResp"
                 /\ atEnd' = r.atEnd
          /\ pc' = [pc EXCEPT !["reader"] = "RCheck"]
          /\ UNCHANGED << dbTasks, rdFrom, rdMax, rdResult, wrState, wrBatch, 
-                         readPending, newlyWritten, pinned, usedLevels, 
-                         everInDb, ackedGhost, stuckFlag >>
+                         gcState, gcFrom, readPending, newlyWritten, pinned, 
+                         usedLevels, everInDb, ackedGhost, gcVictims, 
+                         stuckFlag >>
 
 reader == RWait \/ RCheck \/ RResp
 
@@ -431,9 +484,10 @@ WLoop == /\ pc["writer"] = "WLoop"
                /\ pc' = [pc EXCEPT !["writer"] = "WResp"]
             \/ /\ pc' = [pc EXCEPT !["writer"] = "WDone"]
                /\ UNCHANGED <<wrState, wrBatch, pinned, usedLevels>>
-         /\ UNCHANGED << dbTasks, rdState, rdFrom, rdMax, rdResult, loaded, 
-                         ackedInMem, readLevel, ackLevel, atEnd, readPending, 
-                         newlyWritten, everInDb, ackedGhost, stuckFlag >>
+         /\ UNCHANGED << dbTasks, rdState, rdFrom, rdMax, rdResult, gcState, 
+                         gcFrom, loaded, ackedInMem, readLevel, ackLevel, 
+                         atEnd, readPending, newlyWritten, everInDb, 
+                         ackedGhost, gcVictims, stuckFlag >>
 
 WResp == /\ pc["writer"] = "WResp"
          /\ wrState = "resp"
@@ -453,7 +507,8 @@ WResp == /\ pc["writer"] = "WResp"
                     /\ UNCHANGED newlyWritten
          /\ pc' = [pc EXCEPT !["writer"] = "WUnpin"]
          /\ UNCHANGED << dbTasks, rdState, rdFrom, rdMax, rdResult, wrBatch, 
-                         readPending, pinned, usedLevels, everInDb, ackedGhost >>
+                         gcState, gcFrom, readPending, pinned, usedLevels, 
+                         everInDb, ackedGhost, gcVictims >>
 
 WUnpin == /\ pc["writer"] = "WUnpin"
           /\ pinned' = FALSE
@@ -467,17 +522,18 @@ WUnpin == /\ pc["writer"] = "WUnpin"
                           /\ UNCHANGED ackLevel
           /\ pc' = [pc EXCEPT !["writer"] = "WLoop"]
           /\ UNCHANGED << dbTasks, rdState, rdFrom, rdMax, rdResult, wrState, 
-                          wrBatch, loaded, readLevel, atEnd, readPending, 
-                          newlyWritten, usedLevels, everInDb, ackedGhost, 
-                          stuckFlag >>
+                          wrBatch, gcState, gcFrom, loaded, readLevel, atEnd, 
+                          readPending, newlyWritten, usedLevels, everInDb, 
+                          ackedGhost, gcVictims, stuckFlag >>
 
 WDone == /\ pc["writer"] = "WDone"
          /\ TRUE
          /\ pc' = [pc EXCEPT !["writer"] = "Done"]
          /\ UNCHANGED << dbTasks, rdState, rdFrom, rdMax, rdResult, wrState, 
-                         wrBatch, loaded, ackedInMem, readLevel, ackLevel, 
-                         atEnd, readPending, newlyWritten, pinned, usedLevels, 
-                         everInDb, ackedGhost, stuckFlag >>
+                         wrBatch, gcState, gcFrom, loaded, ackedInMem, 
+                         readLevel, ackLevel, atEnd, readPending, newlyWritten, 
+                         pinned, usedLevels, everInDb, ackedGhost, gcVictims, 
+                         stuckFlag >>
 
 writer == WLoop \/ WResp \/ WUnpin \/ WDone
 
@@ -486,10 +542,11 @@ DbReadLoop == /\ pc["dbRead"] = "DbReadLoop"
               /\ rdResult' = KeepLowest({l \in dbTasks : l >= rdFrom}, rdMax)
               /\ rdState' = "resp"
               /\ pc' = [pc EXCEPT !["dbRead"] = "DbReadLoop"]
-              /\ UNCHANGED << dbTasks, rdFrom, rdMax, wrState, wrBatch, loaded, 
-                              ackedInMem, readLevel, ackLevel, atEnd, 
-                              readPending, newlyWritten, pinned, usedLevels, 
-                              everInDb, ackedGhost, stuckFlag >>
+              /\ UNCHANGED << dbTasks, rdFrom, rdMax, wrState, wrBatch, 
+                              gcState, gcFrom, loaded, ackedInMem, readLevel, 
+                              ackLevel, atEnd, readPending, newlyWritten, 
+                              pinned, usedLevels, everInDb, ackedGhost, 
+                              gcVictims, stuckFlag >>
 
 dbRead == DbReadLoop
 
@@ -500,11 +557,48 @@ DbWriteLoop == /\ pc["dbWrite"] = "DbWriteLoop"
                /\ wrState' = "resp"
                /\ pc' = [pc EXCEPT !["dbWrite"] = "DbWriteLoop"]
                /\ UNCHANGED << rdState, rdFrom, rdMax, rdResult, wrBatch, 
-                               loaded, ackedInMem, readLevel, ackLevel, atEnd, 
-                               readPending, newlyWritten, pinned, usedLevels, 
-                               ackedGhost, stuckFlag >>
+                               gcState, gcFrom, loaded, ackedInMem, readLevel, 
+                               ackLevel, atEnd, readPending, newlyWritten, 
+                               pinned, usedLevels, ackedGhost, gcVictims, 
+                               stuckFlag >>
 
 dbWrite == DbWriteLoop
+
+DbGcLoop == /\ pc["dbGc"] = "DbGcLoop"
+            /\ gcState = "req"
+            /\ LET victims == {l \in dbTasks : l <= gcFrom} IN
+                 /\ dbTasks' = dbTasks \ victims
+                 /\ gcVictims' = (gcVictims \cup victims)
+            /\ gcState' = "resp"
+            /\ pc' = [pc EXCEPT !["dbGc"] = "DbGcLoop"]
+            /\ UNCHANGED << rdState, rdFrom, rdMax, rdResult, wrState, wrBatch, 
+                            gcFrom, loaded, ackedInMem, readLevel, ackLevel, 
+                            atEnd, readPending, newlyWritten, pinned, 
+                            usedLevels, everInDb, ackedGhost, stuckFlag >>
+
+dbGc == DbGcLoop
+
+GcLoop == /\ pc["gc"] = "GcLoop"
+          /\ ackLevel > NoLevel
+          /\ gcFrom' = IF MutGcReadLevel THEN readLevel ELSE ackLevel
+          /\ gcState' = "req"
+          /\ pc' = [pc EXCEPT !["gc"] = "GcResp"]
+          /\ UNCHANGED << dbTasks, rdState, rdFrom, rdMax, rdResult, wrState, 
+                          wrBatch, loaded, ackedInMem, readLevel, ackLevel, 
+                          atEnd, readPending, newlyWritten, pinned, usedLevels, 
+                          everInDb, ackedGhost, gcVictims, stuckFlag >>
+
+GcResp == /\ pc["gc"] = "GcResp"
+          /\ gcState = "resp"
+          /\ gcState' = "idle"
+          /\ pc' = [pc EXCEPT !["gc"] = "GcLoop"]
+          /\ UNCHANGED << dbTasks, rdState, rdFrom, rdMax, rdResult, wrState, 
+                          wrBatch, gcFrom, loaded, ackedInMem, readLevel, 
+                          ackLevel, atEnd, readPending, newlyWritten, pinned, 
+                          usedLevels, everInDb, ackedGhost, gcVictims, 
+                          stuckFlag >>
+
+gc == GcLoop \/ GcResp
 
 AckLoop == /\ pc["acker"] = "AckLoop"
            /\ loaded /= {}
@@ -526,18 +620,20 @@ AckLoop == /\ pc["acker"] = "AckLoop"
                                  /\ UNCHANGED readPending
            /\ pc' = [pc EXCEPT !["acker"] = "AckLoop"]
            /\ UNCHANGED << dbTasks, rdState, rdFrom, rdMax, rdResult, wrState, 
-                           wrBatch, readLevel, atEnd, newlyWritten, pinned, 
-                           usedLevels, everInDb, stuckFlag >>
+                           wrBatch, gcState, gcFrom, readLevel, atEnd, 
+                           newlyWritten, pinned, usedLevels, everInDb, 
+                           gcVictims, stuckFlag >>
 
 acker == AckLoop
 
-Next == reader \/ writer \/ dbRead \/ dbWrite \/ acker
+Next == reader \/ writer \/ dbRead \/ dbWrite \/ dbGc \/ gc \/ acker
 
 Spec == /\ Init /\ [][Next]_vars
         /\ WF_vars(reader)
         /\ WF_vars(writer)
         /\ WF_vars(dbRead)
         /\ WF_vars(dbWrite)
+        /\ WF_vars(dbGc)
         /\ WF_vars(acker)
 
 \* END TRANSLATION
@@ -585,7 +681,14 @@ NoAckSkipped == \A l \in everInDb : (l <= ackLevel) => (l \in ackedGhost)
 
 \* While a write is in flight, the pin keeps the ack level below all levels
 \* being written (else the merge would drop them / GC could delete them).
-PinProtectsWrites == pinned => \A l \in wrBatch : l > ackLevel
+\* Ditto for written tasks held in newlyWrittenTasks during a read.
+PinProtectsWrites ==
+  /\ pinned => \A l \in wrBatch : l > ackLevel
+  /\ \A l \in newlyWritten : l > ackLevel
+
+\* Safety: a task is never deleted from the database unless it was acked.
+\* ("Even worse than getting stuck: a restart fixes stuck, not deleted.")
+GCOnlyAcked == gcVictims \subseteq ackedGhost
 
 \* The defensive "fair reader stuck" condition (see mergeTasks in
 \* fair_task_reader.go) is unreachable in the fixed code.

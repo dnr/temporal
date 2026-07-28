@@ -64,7 +64,9 @@ run_expect fail MutResetReadLevelOnEmptyMerge "Invariant NoStuck is violated|Tem
 run_expect fail MutKeepEvictedAcks "Invariant (MemWindow|NoAckSkipped) is violated"
 # fairness.md "Problems" #1: without pinning, the ack level can pass levels of
 # an in-flight write; the merge then drops the tasks as below-ack
-run_expect fail MutNoPin "Invariant (PinProtectsWrites|MemWindow|NoAckSkipped) is violated|Temporal propert(y|ies).*violated"
+run_expect fail MutNoPin "Invariant (PinProtectsWrites|MemWindow|NoAckSkipped|GCOnlyAcked) is violated|Temporal propert(y|ies).*violated"
+# seeded bug: GC deletes up to readLevel -> deletes loaded, unacked tasks
+run_expect fail MutGcReadLevel "Invariant (GCOnlyAcked|LoadedInDb) is violated"
 
 if [[ $fail -ne 0 ]]; then echo "=== FAILURES ==="; exit 1; fi
 echo "=== all checks passed ==="
