@@ -192,4 +192,13 @@ race), and completeTask may find the task missing from outstandingTasks
 Target bug: ad717eae. May be out of scope for a single model, per the plan;
 decide after M6 whether the state space allows it.
 
+M7 feasibility assessment (post-M6): modeling the matcher handoff means
+per-loaded-task state (pending-add / in-matcher / matched-completion-in-
+flight) instead of a set of levels, roughly a 3^loaded multiplier on an
+already ~4M-state model (~14 min liveness at MaxLevel=3). Expect it to
+need MaxLevel=2 and/or safety-only checking, plus reworking every merge
+call site. Doable as a follow-up if the ad717eae class of races is worth
+it, but suggest reviewing findings.md first -- the current model already
+surfaced two confirmed issues without it.
+
 
