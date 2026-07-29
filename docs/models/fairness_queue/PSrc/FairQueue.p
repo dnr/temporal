@@ -1,14 +1,21 @@
 // P model of service/matching/fair_task_{reader,writer}.go
 //
-// Milestone M1: happy path.
+// Milestone M2: out-of-order writes and the full merge.
 //  - Database, Writer, Reader, Acker as separate machines (all DB calls succeed).
-//  - Writer writes tasks one at a time with increasing integer levels.
-//  - Reader keeps a bounded buffer, tracks readLevel/ackLevel/atEnd, and holds
-//    tasks written during a pending read (newlyWrittenTasks).
-//  - Acker acks loaded tasks in nondeterministic order.
+//  - Writer picks nondeterministic unique levels above the pinned ack level,
+//    possibly below the reader's readLevel, in batches of 1-2.
+//  - Ack level pinning during writes (getAndPinAckLevel / unpinAckLevel).
+//  - Full mergeTasksLocked semantics: merged set of loaded + incoming tasks,
+//    keep first batchSize, eviction of loaded tasks and of acks above the new
+//    readLevel, readLevel left alone when the merged set is empty (f534e74e),
+//    newlyWrittenTasks held while a read is pending (12e7c43a).
+//  - Acker stands in for matcher + pollers; eviction can race an in-flight
+//    completion, so completions for missing/already-acked tasks are no-ops.
 //
 // Levels are single unique integers (abstracting the <pass, id> fair level).
 // Level 0 is the initial ack/read level; real tasks have level >= 1.
+
+enum tMergeMode { MERGE_READ_MIDDLE, MERGE_READ_TO_END, MERGE_WRITE }
 
 // ---- events ----
 
@@ -19,12 +26,22 @@ event eWriteTasksResp: seq[int];
 // Reader <-> Database (GetFairTasks): return up to `count` tasks with level > gtLevel
 event eGetTasksReq: (reader: machine, gtLevel: int, count: int);
 event eGetTasksResp: seq[int];
+// Database internal: a computed read result that hasn't been delivered yet.
+// Models the window in Go between the db computing a read result and the
+// reader merging it (the reader lock is not held during the db call): without
+// this hop, P's atomic send + FIFO queues would deliver read results to the
+// reader before any eWroteTasks from later db operations, hiding real races.
+event eReadServed: (reader: machine, tasks: seq[int]);
 
-// Writer -> Reader (wroteNewTasks)
+// Writer <-> Reader: getAndPinAckLevel / wroteNewTasks / unpinAckLevel
+event eGetPinReq: machine;
+event ePinResp: int;
 event eWroteTasks: seq[int];
+event eUnpin;
 
-// Reader -> Acker (addTaskToMatcher) and Acker -> Reader (completeTask)
+// Reader -> Acker (addTaskToMatcher / setEvicted) and Acker -> Reader (completeTask)
 event eTaskLoaded: int;
+event eTaskEvicted: int;
 event eAckTask: int;
 event eAckKick;
 
@@ -61,7 +78,11 @@ machine Database {
         }
         i = i + 1;
       }
-      send req.reader, eGetTasksResp, res;
+      send this, eReadServed, (reader = req.reader, tasks = res);
+    }
+
+    on eReadServed do (r: (reader: machine, tasks: seq[int])) {
+      send r.reader, eGetTasksResp, r.tasks;
     }
   }
 
@@ -92,6 +113,7 @@ machine FairReader {
   var readPending: bool;           // a read is in flight
   var lastReqCount: int;           // batch size of the in-flight read
   var newlyWritten: seq[int];      // tasks written while readPending
+  var pinnedByWriter: bool;        // ackLevelPinnedByWriter
 
   start state Init {
     entry (cfg: (db: machine, batchSize: int, reloadAt: int, initLevel: int)) {
@@ -105,8 +127,9 @@ machine FairReader {
       acker = a;
       goto Running;
     }
-    // the writer may start writing before we're bound
+    // the writer may start before we're bound
     defer eWroteTasks;
+    defer eGetPinReq;
   }
 
   state Running {
@@ -116,15 +139,23 @@ machine FairReader {
 
     // one batch of readTasksImpl's loop
     on eGetTasksResp do (batch: seq[int]) {
-      mergeRead(batch, sizeof(batch) < lastReqCount);
+      var reachedEnd: bool;
+      reachedEnd = sizeof(batch) < lastReqCount;
+      if (reachedEnd) {
+        mergeTasks(batch, MERGE_READ_TO_END);
+      } else {
+        mergeTasks(batch, MERGE_READ_MIDDLE);
+      }
       if (shouldReadMore()) {
         sendRead(); // loop again; readPending stays true
       } else {
         readPending = false;
-        // process tasks that were written while the read was pending
+        // process tasks that were written while the read was pending; note
+        // sizeof(newlyWritten) > 0 keeps the ack level pinned during the merge
         if (sizeof(newlyWritten) > 0) {
-          mergeWrite(newlyWritten);
+          mergeTasks(newlyWritten, MERGE_WRITE);
           newlyWritten = default(seq[int]);
+          advanceAckLevel();
         }
         // re-check before finishing (the 26d9a561 fix; trivial until we model
         // the backoff timer, but keep the structure)
@@ -143,13 +174,39 @@ machine FairReader {
         }
         return;
       }
-      mergeWrite(batch);
+      mergeTasks(batch, MERGE_WRITE);
+      // Go's "fair reader stuck" softassert state; modeled as a hard assertion
+      // (we deliberately do not model the defensive repair read)
+      assert !(loaded == 0 && !atEnd && !readPending), "fair reader stuck";
     }
 
-    // completeTask (happy path only in M1)
+    // getAndPinAckLevel
+    on eGetPinReq do (w: machine) {
+      assert !pinnedByWriter, "ack level already pinned";
+      pinnedByWriter = true;
+      send w, ePinResp, ackLevel;
+    }
+
+    // unpinAckLevel (no write errors yet in M2)
+    on eUnpin do {
+      assert pinnedByWriter, "ack level wasn't pinned";
+      pinnedByWriter = false;
+      advanceAckLevel();
+    }
+
+    // completeTask
     on eAckTask do (lvl: int) {
-      assert lvl in outstanding, "completed task missing from outstanding";
-      assert outstanding[lvl] == false, "completed task was already acked";
+      if (!(lvl in outstanding)) {
+        // the task was evicted while this completion was in flight; it will be
+        // re-read and re-dispatched later (Go: TaskCompletedMissing)
+        return;
+      }
+      if (outstanding[lvl]) {
+        // completion for a task that was already completed: an eviction /
+        // re-read / re-dispatch race (Go softasserts "completed task was
+        // already acked" here and returns)
+        return;
+      }
       outstanding[lvl] = true;
       loaded = loaded - 1;
       assert loaded >= 0, "loadedTasks went negative";
@@ -160,74 +217,134 @@ machine FairReader {
     }
   }
 
-  // merge a batch that came from a db read. M1 simplification of
-  // mergeTasksLocked: reads never overflow the buffer (we only ask for
-  // batchSize - loaded), so no eviction; readLevel only moves up.
-  fun mergeRead(batch: seq[int], reachedEnd: bool) {
+  // mergeTasksLocked
+  fun mergeTasks(incoming: seq[int], mode: tMergeMode) {
+    var merged: seq[int]; // sorted: unacked loaded levels + accepted new levels
+    var isNew: set[int];  // subset of merged not yet in outstanding
+    var ks: seq[int];
     var i: int;
     var lvl: int;
+    var kept: int; // how many of merged we keep in memory
+    var evictedAny: bool;
+
+    // (1) currently loaded (unacked) tasks
+    ks = keys(outstanding);
     i = 0;
-    while (i < sizeof(batch)) {
-      lvl = batch[i];
+    while (i < sizeof(ks)) {
+      if (!outstanding[ks[i]]) {
+        merged = insertSorted(merged, ks[i]);
+      }
+      i = i + 1;
+    }
+
+    // (2) the tasks we just read/wrote
+    i = 0;
+    while (i < sizeof(incoming)) {
+      lvl = incoming[i];
       if (lvl <= ackLevel) {
-        // raced with ack level movement; ignore
+        // reads may race with acks; ignore tasks already acked
+      } else if (mode == MERGE_WRITE && !atEnd && lvl > readLevel) {
+        // writing while not at the end: we don't know what's between
+        // readLevel and lvl, so ignore tasks above readLevel
       } else if (lvl in outstanding) {
         // already have it (loaded or acked); ignore
       } else {
-        takeTask(lvl);
+        assert !(lvl in isNew), "duplicate level in merge batch";
+        merged = insertSorted(merged, lvl);
+        isNew += (lvl);
       }
       i = i + 1;
     }
-    atEnd = reachedEnd;
-    checkInvariants();
-  }
 
-  // merge a batch that came from a write. M1 simplification: writes are
-  // always above readLevel (monotone levels), so a written task is either
-  // taken at the top of the buffer or ignored.
-  fun mergeWrite(batch: seq[int]) {
-    var i: int;
-    var lvl: int;
+    // keep the first batchSize of the merged set
+    kept = sizeof(merged);
+    if (kept > batchSize) {
+      kept = batchSize;
+    }
+    if (kept > 0) {
+      // if we have any tasks at all in memory, readLevel is the max of that set
+      readLevel = merged[kept - 1];
+    }
+    // else: merged is empty (only acks in memory); leave readLevel unchanged
+    // (f534e74e: collapsing it to ackLevel would evict all acks and strand the
+    // reader)
+
+    // evict whatever doesn't fit: loaded tasks are removed from memory and the
+    // matcher; new tasks are simply not taken (they stay in the db)
+    evictedAny = false;
+    i = kept;
+    while (i < sizeof(merged)) {
+      lvl = merged[i];
+      evictedAny = true;
+      if (!(lvl in isNew)) {
+        outstanding -= (lvl);
+        loaded = loaded - 1;
+        send acker, eTaskEvicted, lvl;
+      }
+      i = i + 1;
+    }
+
+    // also evict acked (nil) entries above the new readLevel, otherwise we'd
+    // use them to jump the ack level across ranges we just dropped
+    ks = keys(outstanding);
     i = 0;
-    while (i < sizeof(batch)) {
-      lvl = batch[i];
-      assert lvl > readLevel || lvl in outstanding || lvl <= ackLevel,
-        "M1 expects monotone writes";
-      if (lvl <= ackLevel) {
-        // ignore
-      } else if (lvl in outstanding) {
-        // ignore
-      } else if (!atEnd && lvl > readLevel) {
-        // not at the end: there may be tasks between readLevel and lvl, so we
-        // can't take it; a read will pick it up
-      } else if (loaded < batchSize) {
-        // at the end with room: take it directly (bypass optimization)
-        takeTask(lvl);
-      } else {
-        // at the end but no room: the task stays in the db beyond our buffer,
-        // so we're no longer at the end
-        atEnd = false;
+    while (i < sizeof(ks)) {
+      if (outstanding[ks[i]] && ks[i] > readLevel) {
+        outstanding -= (ks[i]);
+        evictedAny = true;
+        // M6 will cache these (evictedAcks)
       }
       i = i + 1;
     }
-    // Go's "fair reader stuck" softassert state; modeled as a hard assertion
-    // (we deliberately do not model the defensive repair read)
-    assert !(loaded == 0 && !atEnd && !readPending), "fair reader stuck";
+
+    // take the new tasks that made the cut
+    i = 0;
+    while (i < kept) {
+      lvl = merged[i];
+      if (lvl in isNew) {
+        outstanding[lvl] = false;
+        loaded = loaded + 1;
+        send acker, eTaskLoaded, lvl;
+      }
+      i = i + 1;
+    }
+
+    // pre-acked entries may now be at the bottom (no-op until M5/M6; also
+    // normally pinned during writes)
+    advanceAckLevel();
+
+    // update atEnd
+    if (mode == MERGE_READ_MIDDLE || evictedAny) {
+      atEnd = false;
+    } else if (mode == MERGE_READ_TO_END) {
+      atEnd = true;
+    }
+    // on write: leave unchanged
+
     checkInvariants();
   }
 
-  fun takeTask(lvl: int) {
-    outstanding[lvl] = false;
-    loaded = loaded + 1;
-    if (lvl > readLevel) {
-      readLevel = lvl;
+  fun insertSorted(s: seq[int], v: int): seq[int] {
+    var i: int;
+    i = 0;
+    while (i < sizeof(s) && s[i] < v) {
+      i = i + 1;
     }
-    send acker, eTaskLoaded, lvl;
+    assert i == sizeof(s) || s[i] != v, "insertSorted: duplicate";
+    s += (i, v);
+    return s;
+  }
+
+  fun ackLevelPinned(): bool {
+    return pinnedByWriter || sizeof(newlyWritten) > 0;
   }
 
   fun advanceAckLevel() {
     var mn: int;
     var moving: bool;
+    if (ackLevelPinned()) {
+      return;
+    }
     moving = true;
     while (moving && sizeof(outstanding) > 0) {
       mn = minKey();
@@ -300,23 +417,63 @@ machine FairReader {
   }
 }
 
-// ---- writer (fairTaskWriter, heavily simplified for M1) ----
+// ---- writer (fairTaskWriter) ----
 
 machine FairWriter {
   var db: machine;
   var reader: machine;
-  var numTasks: int;
-  var nextLevel: int;
+  var numTasks: int; // total tasks to write
+  var maxLevel: int; // level universe is 1..maxLevel
+  var used: set[int]; // levels ever allocated (task ids are never reused)
   var written: int;
 
   start state Writing {
-    entry (cfg: (db: machine, reader: machine, numTasks: int, startLevel: int)) {
+    entry (cfg: (db: machine, reader: machine, numTasks: int, maxLevel: int)) {
       db = cfg.db;
       reader = cfg.reader;
       numTasks = cfg.numTasks;
-      nextLevel = cfg.startLevel;
-      writeNext();
+      maxLevel = cfg.maxLevel;
+      startWrite();
     }
+
+    // writeBatch: pin ack level, pick levels above it, write
+    on ePinResp do (pinnedAck: int) {
+      var candidates: seq[int];
+      var batch: seq[int];
+      var target: int;
+      var lvl: int;
+      var i: int;
+
+      candidates = default(seq[int]);
+      lvl = pinnedAck + 1;
+      while (lvl <= maxLevel) {
+        if (!(lvl in used)) {
+          candidates += (sizeof(candidates), lvl);
+        }
+        lvl = lvl + 1;
+      }
+
+      target = 1 + choose(2); // batch of 1 or 2 (getWriteBatch)
+      if (target > numTasks - written) {
+        target = numTasks - written;
+      }
+      while (sizeof(batch) < target && sizeof(candidates) > 0) {
+        i = choose(sizeof(candidates));
+        lvl = candidates[i];
+        candidates -= (i);
+        used += (lvl);
+        batch += (sizeof(batch), lvl);
+      }
+
+      if (sizeof(batch) == 0) {
+        // no usable levels left (level universe exhausted): stop writing
+        send reader, eUnpin;
+        return;
+      }
+      written = written + sizeof(batch);
+      send db, eWriteTasksReq, (writer = this, tasks = batch);
+    }
+
     on eWriteTasksResp do (batch: seq[int]) {
       var i: int;
       i = 0;
@@ -324,23 +481,18 @@ machine FairWriter {
         announce eTaskConfirmed, batch[i];
         i = i + 1;
       }
+      // wroteNewTasks must be called before unpin
       send reader, eWroteTasks, batch;
-      writeNext();
+      send reader, eUnpin;
+      startWrite();
     }
   }
 
-  fun writeNext() {
-    var lvl: int;
-    var batch: seq[int];
+  fun startWrite() {
     if (written >= numTasks) {
       return;
     }
-    // monotonically increasing levels, nondeterministically with a gap
-    lvl = nextLevel + choose(2);
-    nextLevel = lvl + 1;
-    batch += (0, lvl);
-    written = written + 1;
-    send db, eWriteTasksReq, (writer = this, tasks = batch);
+    send reader, eGetPinReq, this;
   }
 }
 
@@ -358,10 +510,17 @@ machine Acker {
       pending += (lvl);
       send this, eAckKick; // one kick per task: everything acks eventually
     }
+    on eTaskEvicted do (lvl: int) {
+      // removed from the matcher before matching; if it's not in pending, the
+      // completion is already in flight and the reader will ignore it
+      if (lvl in pending) {
+        pending -= (lvl);
+      }
+    }
     on eAckKick do {
       var lvl: int;
       if (sizeof(pending) == 0) {
-        return;
+        return; // its task was evicted or acked by an earlier kick
       }
       lvl = choose(pending);
       pending -= (lvl);

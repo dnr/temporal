@@ -7,10 +7,11 @@
 //
 // A task can be completed before the writer sees the write confirmation (a
 // concurrent read can load it while the write response is still in flight),
-// so track early acks separately.
+// and eviction/re-read races can complete the same level more than once, so
+// track ever-completed levels.
 spec GuaranteedDelivery observes eTaskConfirmed, eTaskCompleted {
-  var pending: set[int];    // confirmed but not yet completed
-  var ackedEarly: set[int]; // completed before we saw the confirmation
+  var pending: set[int];   // confirmed but not yet completed
+  var completed: set[int]; // ever completed
 
   start cold state AllCompleted {
     on eTaskConfirmed do (lvl: int) {
@@ -37,18 +38,15 @@ spec GuaranteedDelivery observes eTaskConfirmed, eTaskCompleted {
   }
 
   fun handleConfirmed(lvl: int) {
-    if (lvl in ackedEarly) {
-      ackedEarly -= (lvl);
-    } else {
+    if (!(lvl in completed)) {
       pending += (lvl);
     }
   }
 
   fun handleCompleted(lvl: int) {
+    completed += (lvl);
     if (lvl in pending) {
       pending -= (lvl);
-    } else {
-      ackedEarly += (lvl);
     }
   }
 }
