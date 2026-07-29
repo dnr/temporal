@@ -1,6 +1,6 @@
 // P model of service/matching/fair_task_{reader,writer}.go
+// (full model: milestones M1-M8, see plan.md)
 //
-// Milestone M4: timeouts and retries.
 //  - Database, Writer, Reader, Acker as separate machines.
 //  - Writer picks nondeterministic unique levels above the pinned ack level,
 //    possibly below the reader's readLevel, in batches of 1-2.

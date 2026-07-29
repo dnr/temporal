@@ -69,7 +69,7 @@ which is why M2c no longer needs feedbackpct):
 
 | id  | mutation | target | result |
 |-----|----------|--------|--------|
-| M8a | remove the setEvicted tombstone: a matcher add that lost the race to an eviction proceeds anyway | ad717eae | EXPECTED NOT CAUGHT — the phantom instance is completed and ignored by the reader (missing/already-acked no-ops), then the level is re-read and re-dispatched, so no modeled property breaks. The real-world harm (matcher bookkeeping / phantom entries) is outside this abstraction. Excluded from mutate.sh's default set for that reason; run manually with `./mutate.sh M8a` to confirm. |
+| M8a | remove the setEvicted tombstone: a matcher add that lost the race to an eviction proceeds anyway | ad717eae | confirmed NOT CAUGHT (as expected) — the phantom instance is completed and ignored by the reader (missing/already-acked no-ops), then the level is re-read and re-dispatched, so no modeled property breaks. The real-world harm (matcher bookkeeping / phantom entries) is outside this abstraction. Excluded from mutate.sh's default set for that reason; run manually with `./mutate.sh M8a` to confirm. |
 
 ## M6
 
