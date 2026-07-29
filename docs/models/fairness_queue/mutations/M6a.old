@@ -1,0 +1,5 @@
+      if (!(lvl in isNew)) {
+        outstanding -= (lvl);
+        loaded = loaded - 1;
+        send acker, eTaskEvicted, lvl;
+      }

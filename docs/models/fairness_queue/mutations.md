@@ -1,5 +1,9 @@
 # Mutation testing log
 
+All mutations are automated: `./mutate.sh` applies each `mutations/<id>.old ->
+<id>.new` replacement, compiles, runs the checker (random, then feedbackpct),
+expects a bug, and restores the source. `./mutate.sh M2c` runs one.
+
 Each mutation reintroduces a historical bug (or breaks newly-added logic) to
 verify the model can detect it. "Caught by" lists what actually failed.
 Detection strategy portfolio: `--sch-random`, `--sch-pct 10`,
@@ -36,6 +40,30 @@ Also in M5: the base model itself found finding #1 (reachable "fair reader
 stuck" softassert via expired writes) — see findings.md. The model now
 implements Go's repair read, plus an assertion that the stuck state is only
 reachable when expired tasks are involved.
+
+## M7
+
+| id  | mutation | target | result |
+|-----|----------|--------|--------|
+| M7a | eviction no longer clears atEnd | merge rule: evicted ranges must force a re-read | caught: liveness |
+
+M1b (don't clear atEnd when a written task doesn't fit) no longer maps to the
+current merge structure; M7a covers the same rule in its current form.
+
+Full harness run on the M6 model (all caught by --sch-random at 20k, ~11 min
+total; the layered asserts catch stuck states much earlier than quiescence,
+which is why M2c no longer needs feedbackpct):
+
+    M1a: caught -- liveness
+    M2a: caught -- liveness
+    M2b: caught -- invariant: outstanding level > readLevel
+    M2c: caught -- assert: fair reader stuck without expired tasks
+    M3a: caught -- liveness
+    M4a: caught -- assert: fair reader stuck without expired tasks
+    M4b: caught -- assert: fair reader stuck without expired tasks
+    M5a: caught -- potential liveness (infinite re-read loop)
+    M6a: caught -- NoLostTask: task deleted before completion
+    M7a: caught -- liveness
 
 ## M6
 

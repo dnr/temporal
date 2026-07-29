@@ -1,0 +1,6 @@
+      if (!(lvl in isNew)) {
+        outstanding -= (lvl);
+        loaded = loaded - 1;
+        send acker, eTaskEvicted, lvl;
+        evictedAcks += (lvl); // M6a: cache evicted unacked tasks as if acked
+      }
