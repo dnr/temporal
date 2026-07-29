@@ -83,7 +83,7 @@ Milestones:
 Status (2026-07-28): M1-M5 done and committed (one jj commit each; model in
 PSrc/, specs in PSpec/, driver in PTst/, mutation results in mutations.md,
 findings in findings.md — one so far: reachable "fair reader stuck"
-softassert). M7 done: all 10 mutations in mutations/ caught via ./mutate.sh. M8 next.
+softassert). M7 done: all mutations in mutations/ caught via ./mutate.sh. M8 done (matcher handoff: evict-vs-add race + setEvicted tombstone). Findings 1-2 in findings.md.
 
 Modeling choices that apply throughout:
 

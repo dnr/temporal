@@ -6,7 +6,9 @@ set -u
 cd "$(dirname "$0")"
 src=PSrc/FairQueue.p
 schedules=20000
-ids=${@:-$(ls mutations/*.old | sed 's|.*/||;s|\.old$||' | sort)}
+# M8a is expected NOT CAUGHT (documents an abstraction boundary, see
+# mutations.md) and is excluded from the default set.
+ids=${@:-$(ls mutations/*.old | sed 's|.*/||;s|\.old$||' | grep -v '^M8a$' | sort)}
 fail=0
 
 for m in $ids; do

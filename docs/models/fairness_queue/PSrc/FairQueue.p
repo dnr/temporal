@@ -47,9 +47,15 @@ event ePinResp: int;
 event eWroteTasks: seq[int];
 event eUnpin: bool; // payload: did the write fail?
 
-// Reader -> Acker (addTaskToMatcher / setEvicted) and Acker -> Reader (completeTask)
-event eTaskLoaded: int;
-event eTaskEvicted: int;
+// Reader -> Acker (addTaskToMatcher / setEvicted) and Acker -> Reader (completeTask).
+// Loads carry a per-delivery instance id and are routed through the Hop
+// machine, because Go adds tasks to the matcher OUTSIDE the reader lock: an
+// eviction (setEvicted, under the lock) can happen before the matcher add
+// runs (ad717eae). Evictions go direct. Completions are by level, matching
+// completeTask's lookup.
+event eHopTaskLoaded: (target: machine, lvl: int, id: int);
+event eTaskLoaded: (lvl: int, id: int);
+event eTaskEvicted: (lvl: int, id: int);
 event eAckTask: int;
 event eAckKick;
 
@@ -207,6 +213,10 @@ machine FairReader {
   // acked levels that were evicted from outstanding before they could advance
   // ackLevel; consulted on re-read to avoid re-dispatching completed tasks
   var evictedAcks: set[int];
+
+  // per-delivery instance ids (an evicted + re-read task is a new instance)
+  var deliverySeq: int;
+  var deliveryId: map[int, int]; // level -> id of currently tracked instance
 
   start state Init {
     entry (cfg: (db: machine, timer: machine, hop: machine, batchSize: int, reloadAt: int, cacheSize: int, initLevel: int)) {
@@ -431,7 +441,9 @@ machine FairReader {
       if (!(lvl in isNew)) {
         outstanding -= (lvl);
         loaded = loaded - 1;
-        send acker, eTaskEvicted, lvl;
+        // setEvicted: direct (under the reader lock), so it can beat the
+        // matcher add for the same instance, which goes through the hop
+        send acker, eTaskEvicted, (lvl = lvl, id = deliveryId[lvl]);
       }
       i = i + 1;
     }
@@ -475,7 +487,10 @@ machine FairReader {
         } else {
           outstanding[lvl] = false;
           loaded = loaded + 1;
-          send acker, eTaskLoaded, lvl;
+          deliverySeq = deliverySeq + 1;
+          deliveryId[lvl] = deliverySeq;
+          // addTaskToMatcher happens outside the reader lock: route via hop
+          send hop, eHopTaskLoaded, (target = acker, lvl = lvl, id = deliverySeq);
         }
       }
       i = i + 1;
@@ -730,12 +745,16 @@ machine BackoffTimer {
   }
 }
 
-// Bounces the read-error loop tail back to the reader, modeling the goroutine
-// scheduling delay between retryReadAfter and the end of readTasksImpl.
+// Bounces events that Go performs outside the reader lock, modeling goroutine
+// scheduling delay: the read-error loop tail, and matcher adds (which can
+// therefore lose a race against an eviction of the same instance, ad717eae).
 machine Hop {
   start state Idle {
     on eHopLoopDone do (target: machine) {
       send target, eReadLoopDone;
+    }
+    on eHopTaskLoaded do (t: (target: machine, lvl: int, id: int)) {
+      send t.target, eTaskLoaded, (lvl = t.lvl, id = t.id);
     }
   }
 }
@@ -744,31 +763,43 @@ machine Hop {
 
 machine Acker {
   var reader: machine;
-  var pending: set[int];
+  var pending: set[(lvl: int, id: int)];
+  // instances evicted before their matcher add arrived (the setEvicted flag,
+  // ad717eae): the late add must be a no-op
+  var evictedEarly: set[(lvl: int, id: int)];
 
   start state Acking {
     entry (r: machine) {
       reader = r;
     }
-    on eTaskLoaded do (lvl: int) {
-      pending += (lvl);
+    on eTaskLoaded do (t: (lvl: int, id: int)) {
+      if (t in evictedEarly) {
+        // this instance was evicted before it reached the matcher
+        evictedEarly -= (t);
+        return;
+      }
+      pending += (t);
       send this, eAckKick; // one kick per task: everything acks eventually
     }
-    on eTaskEvicted do (lvl: int) {
-      // removed from the matcher before matching; if it's not in pending, the
-      // completion is already in flight and the reader will ignore it
-      if (lvl in pending) {
-        pending -= (lvl);
+    on eTaskEvicted do (t: (lvl: int, id: int)) {
+      if (t in pending) {
+        pending -= (t);
+      } else {
+        // either the matcher add hasn't arrived yet (tombstone it), or this
+        // instance already matched and its completion is in flight (the
+        // reader will treat that completion as missing/already-acked); a
+        // stale tombstone is harmless since instance ids are never reused
+        evictedEarly += (t);
       }
     }
     on eAckKick do {
-      var lvl: int;
+      var t: (lvl: int, id: int);
       if (sizeof(pending) == 0) {
         return; // its task was evicted or acked by an earlier kick
       }
-      lvl = choose(pending);
-      pending -= (lvl);
-      send reader, eAckTask, lvl;
+      t = choose(pending);
+      pending -= (t);
+      send reader, eAckTask, t.lvl;
     }
   }
 }
