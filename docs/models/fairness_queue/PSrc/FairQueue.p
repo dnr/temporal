@@ -45,12 +45,17 @@ event eTaskEvicted: int;
 event eAckTask: int;
 event eAckKick;
 
+// Reader <-> Database (CompleteFairTasksLessThan): delete tasks <= upTo
+event eGcReq: (reader: machine, upTo: int);
+event eGcResp;
+
 // Driver -> Reader (to close the Reader <-> Acker reference cycle)
 event eBindAcker: machine;
 
 // announcements for spec monitors
 event eTaskConfirmed: int; // writer observed a successful write of this level
 event eTaskCompleted: int; // reader marked this level acked (completeTask)
+event eTaskDeleted: int;   // db deleted this level (GC)
 
 // ---- database ----
 
@@ -84,6 +89,16 @@ machine Database {
     on eReadServed do (r: (reader: machine, tasks: seq[int])) {
       send r.reader, eGetTasksResp, r.tasks;
     }
+
+    // GC: delete everything <= upTo (Cassandra range-delete semantics; the
+    // SQL batch-limited variant only deletes less, which is strictly safer)
+    on eGcReq do (req: (reader: machine, upTo: int)) {
+      while (sizeof(tasks) > 0 && tasks[0] <= req.upTo) {
+        announce eTaskDeleted, tasks[0];
+        tasks -= (0);
+      }
+      send req.reader, eGcResp;
+    }
   }
 
   fun insertTask(lvl: int) {
@@ -114,6 +129,10 @@ machine FairReader {
   var lastReqCount: int;           // batch size of the in-flight read
   var newlyWritten: seq[int];      // tasks written while readPending
   var pinnedByWriter: bool;        // ackLevelPinnedByWriter
+
+  // gc state
+  var inGC: bool;
+  var numToGC: int;
 
   start state Init {
     entry (cfg: (db: machine, batchSize: int, reloadAt: int, initLevel: int)) {
@@ -192,6 +211,12 @@ machine FairReader {
       assert pinnedByWriter, "ack level wasn't pinned";
       pinnedByWriter = false;
       advanceAckLevel();
+    }
+
+    // doGC completed (Cassandra: everything <= upTo is gone)
+    on eGcResp do {
+      inGC = false;
+      numToGC = 0;
     }
 
     // completeTask
@@ -342,6 +367,7 @@ machine FairReader {
   fun advanceAckLevel() {
     var mn: int;
     var moving: bool;
+    var numAcked: int;
     if (ackLevelPinned()) {
       return;
     }
@@ -351,9 +377,26 @@ machine FairReader {
       if (outstanding[mn]) {
         ackLevel = mn;
         outstanding -= (mn);
+        numAcked = numAcked + 1;
       } else {
         moving = false;
       }
+    }
+    if (numAcked > 0) {
+      numToGC = numToGC + numAcked;
+      maybeGC();
+    }
+  }
+
+  // maybeGCLocked: Go triggers on a count threshold or elapsed time; both are
+  // abstracted into a nondeterministic choice
+  fun maybeGC() {
+    if (inGC || numToGC == 0) {
+      return;
+    }
+    if (choose()) {
+      inGC = true;
+      send db, eGcReq, (reader = this, upTo = ackLevel);
     }
   }
 

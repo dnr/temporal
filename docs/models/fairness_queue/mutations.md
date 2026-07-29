@@ -20,6 +20,12 @@ Detection strategy portfolio: `--sch-random`, `--sch-pct 10`,
 | M2b | keep acks above new readLevel instead of evicting | 8ca7b640 #4 | caught: invariant `outstanding <= readLevel`, 100% of schedules; with that invariant disabled: `ackLevel <= readLevel`; with both disabled: liveness (lost task). Three independent detection layers. |
 | M2c | collapse readLevel to ackLevel when merged set is empty | f534e74e | caught: "fair reader stuck" assert — but only by `--sch-feedbackpct 20` (12.6s, 0.06% of schedules). Random and plain feedback missed it at 20-30k schedules. |
 
+## M3
+
+| id  | mutation | target | result |
+|-----|----------|--------|--------|
+| M3a | disable ack level pinning | fairness.md "ack level movement while a write is in flight" | caught: 100% of schedules. Liveness (write filtered below runaway ackLevel) on most seeds; NoLostTask "task deleted before completion" (GC deletes an in-flight write) on 3/8 seeds. |
+
 ### Modeling lessons
 
 - **In-flight read responses are load-bearing.** P's `send` enqueues atomically

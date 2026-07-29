@@ -1,5 +1,22 @@
 // Specs for the fair queue model.
 
+// NoLostTask (safety): the database never deletes a task that hasn't been
+// completed. GC only deletes <= ackLevel, and ackLevel is only supposed to
+// cover completed tasks (ack level pinning protects in-flight writes); this
+// checks that end to end.
+spec NoLostTask observes eTaskCompleted, eTaskDeleted {
+  var completed: set[int];
+
+  start state Monitoring {
+    on eTaskCompleted do (lvl: int) {
+      completed += (lvl);
+    }
+    on eTaskDeleted do (lvl: int) {
+      assert lvl in completed, format("task {0} deleted before completion", lvl);
+    }
+  }
+}
+
 // GuaranteedDelivery (liveness): every task whose write was confirmed to the
 // writer is eventually completed (acked) by the reader. Hot while any
 // confirmed task is un-acked; a schedule that ends hot is a liveness bug

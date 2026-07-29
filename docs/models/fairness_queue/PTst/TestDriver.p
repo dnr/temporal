@@ -20,4 +20,4 @@ machine TestDriver {
 }
 
 test tcFairQueue [main = TestDriver]:
-  assert GuaranteedDelivery in { TestDriver, Database, FairReader, FairWriter, Acker };
+  assert GuaranteedDelivery, NoLostTask in { TestDriver, Database, FairReader, FairWriter, Acker };
