@@ -26,8 +26,19 @@ Detection strategy portfolio: `--sch-random`, `--sch-pct 10`,
 |-----|----------|--------|--------|
 | M3a | disable ack level pinning | fairness.md "ack level movement while a write is in flight" | caught: 100% of schedules. Liveness (write filtered below runaway ackLevel) on most seeds; NoLostTask "task deleted before completion" (GC deletes an in-flight write) on 3/8 seeds. |
 
+## M4
+
+| id  | mutation | target | result |
+|-----|----------|--------|--------|
+| M4a | no final maybeRead() at the end of the failed-read loop tail | 26d9a561 | caught: liveness, first schedule explored |
+| M4b | failed-write unpin clears atEnd but doesn't kick a read | 8ca7b640 #5 | caught: "fair reader stuck" assert, first schedule explored |
+
 ### Modeling lessons
 
+- **The backoff-timer race needs a hop machine.** The tail of the read loop
+  after an error (eReadLoopDone) is bounced through a Hop machine instead of a
+  direct self-send: a self-send is one hop and would always beat the timer's
+  two-hop firing path, making the 26d9a561 race unexplorable.
 - **In-flight read responses are load-bearing.** P's `send` enqueues atomically
   into a FIFO queue, so a DB read response would always beat any eWroteTasks
   triggered by a later DB op, hiding the 12e7c43a race entirely. The Database

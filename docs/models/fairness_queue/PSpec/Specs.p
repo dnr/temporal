@@ -1,18 +1,32 @@
 // Specs for the fair queue model.
 
-// NoLostTask (safety): the database never deletes a task that hasn't been
-// completed. GC only deletes <= ackLevel, and ackLevel is only supposed to
-// cover completed tasks (ack level pinning protects in-flight writes); this
-// checks that end to end.
-spec NoLostTask observes eTaskCompleted, eTaskDeleted {
+// NoLostTask (safety): the database never deletes a CONFIRMED task that
+// hasn't been completed. GC only deletes <= ackLevel, and ackLevel is only
+// supposed to cover completed tasks (ack level pinning protects in-flight
+// writes); this checks that end to end.
+//
+// Tasks from timed-out writes carry no delivery guarantee (the caller sees an
+// error and retries), so an unconfirmed task may be deleted uncompleted. A
+// confirmation arriving after such a deletion would still be a real loss, so
+// check both directions.
+spec NoLostTask observes eTaskConfirmed, eTaskCompleted, eTaskDeleted {
+  var confirmed: set[int];
   var completed: set[int];
+  var deleted: set[int];
 
   start state Monitoring {
+    on eTaskConfirmed do (lvl: int) {
+      confirmed += (lvl);
+      assert !(lvl in deleted) || lvl in completed,
+        format("task {0} confirmed after uncompleted deletion", lvl);
+    }
     on eTaskCompleted do (lvl: int) {
       completed += (lvl);
     }
     on eTaskDeleted do (lvl: int) {
-      assert lvl in completed, format("task {0} deleted before completion", lvl);
+      deleted += (lvl);
+      assert !(lvl in confirmed) || lvl in completed,
+        format("task {0} deleted before completion", lvl);
     }
   }
 }

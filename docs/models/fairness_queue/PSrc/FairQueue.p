@@ -1,7 +1,7 @@
 // P model of service/matching/fair_task_{reader,writer}.go
 //
-// Milestone M2: out-of-order writes and the full merge.
-//  - Database, Writer, Reader, Acker as separate machines (all DB calls succeed).
+// Milestone M4: timeouts and retries.
+//  - Database, Writer, Reader, Acker as separate machines.
 //  - Writer picks nondeterministic unique levels above the pinned ack level,
 //    possibly below the reader's readLevel, in batches of 1-2.
 //  - Ack level pinning during writes (getAndPinAckLevel / unpinAckLevel).
@@ -11,6 +11,12 @@
 //    newlyWrittenTasks held while a read is pending (12e7c43a).
 //  - Acker stands in for matcher + pollers; eviction can race an in-flight
 //    completion, so completions for missing/already-acked tasks are no-ops.
+//  - GC deletes <= ackLevel, triggered nondeterministically after acks.
+//  - DB ops can time out (bounded budget), on the outgoing side (op not
+//    performed) or incoming side (op performed, response lost). Reads retry
+//    via a backoff timer whose firing races the read loop tail (26d9a561);
+//    failed writes surface to the caller, which retries with fresh levels,
+//    and clear atEnd + kick a read on unpin (8ca7b640 #5).
 //
 // Levels are single unique integers (abstracting the <pass, id> fair level).
 // Level 0 is the initial ack/read level; real tasks have level >= 1.
@@ -22,6 +28,7 @@ enum tMergeMode { MERGE_READ_MIDDLE, MERGE_READ_TO_END, MERGE_WRITE }
 // Writer <-> Database (CreateFairTasks)
 event eWriteTasksReq: (writer: machine, tasks: seq[int]);
 event eWriteTasksResp: seq[int];
+event eWriteTasksErr: seq[int]; // timed out: applied or not, writer can't tell
 
 // Reader <-> Database (GetFairTasks): return up to `count` tasks with level > gtLevel
 event eGetTasksReq: (reader: machine, gtLevel: int, count: int);
@@ -32,12 +39,13 @@ event eGetTasksResp: seq[int];
 // this hop, P's atomic send + FIFO queues would deliver read results to the
 // reader before any eWroteTasks from later db operations, hiding real races.
 event eReadServed: (reader: machine, tasks: seq[int]);
+event eGetTasksErr; // read timed out (reads are idempotent, no applied/not distinction)
 
 // Writer <-> Reader: getAndPinAckLevel / wroteNewTasks / unpinAckLevel
 event eGetPinReq: machine;
 event ePinResp: int;
 event eWroteTasks: seq[int];
-event eUnpin;
+event eUnpin: bool; // payload: did the write fail?
 
 // Reader -> Acker (addTaskToMatcher / setEvicted) and Acker -> Reader (completeTask)
 event eTaskLoaded: int;
@@ -48,6 +56,19 @@ event eAckKick;
 // Reader <-> Database (CompleteFairTasksLessThan): delete tasks <= upTo
 event eGcReq: (reader: machine, upTo: int);
 event eGcResp;
+event eGcErr; // timed out: applied or not
+
+// Backoff timer for read retries (retryReadAfter). A separate machine so its
+// firing races other events.
+event eStartBackoff: machine;
+event eBackoffFired;
+
+// The tail of readTasksImpl after a read error (readPending=false, process
+// newlyWritten, final maybeRead). Bounced through the Hop machine so the
+// backoff timer can fire before it, like a goroutine losing the race for the
+// lock (26d9a561); a direct self-send would always beat the timer.
+event eHopLoopDone: machine;
+event eReadLoopDone;
 
 // Driver -> Reader (to close the Reader <-> Acker reference cycle)
 event eBindAcker: machine;
@@ -60,22 +81,40 @@ event eTaskDeleted: int;   // db deleted this level (GC)
 // ---- database ----
 
 machine Database {
-  var tasks: seq[int]; // sorted ascending
+  var tasks: seq[int];   // sorted ascending
+  var failuresLeft: int; // budget of injected timeouts (bounds retry loops)
 
   start state Serving {
+    entry (maxFailures: int) {
+      failuresLeft = maxFailures;
+    }
+
     on eWriteTasksReq do (req: (writer: machine, tasks: seq[int])) {
       var i: int;
-      i = 0;
-      while (i < sizeof(req.tasks)) {
-        insertTask(req.tasks[i]);
-        i = i + 1;
+      var outcome: int;
+      outcome = pickOutcome();
+      if (outcome != 1) {
+        // applied (success or incoming timeout)
+        i = 0;
+        while (i < sizeof(req.tasks)) {
+          insertTask(req.tasks[i]);
+          i = i + 1;
+        }
       }
-      send req.writer, eWriteTasksResp, req.tasks;
+      if (outcome == 0) {
+        send req.writer, eWriteTasksResp, req.tasks;
+      } else {
+        send req.writer, eWriteTasksErr, req.tasks;
+      }
     }
 
     on eGetTasksReq do (req: (reader: machine, gtLevel: int, count: int)) {
       var res: seq[int];
       var i: int;
+      if (pickOutcome() != 0) {
+        send req.reader, eGetTasksErr;
+        return;
+      }
       i = 0;
       while (i < sizeof(tasks) && sizeof(res) < req.count) {
         if (tasks[i] > req.gtLevel) {
@@ -93,12 +132,34 @@ machine Database {
     // GC: delete everything <= upTo (Cassandra range-delete semantics; the
     // SQL batch-limited variant only deletes less, which is strictly safer)
     on eGcReq do (req: (reader: machine, upTo: int)) {
-      while (sizeof(tasks) > 0 && tasks[0] <= req.upTo) {
-        announce eTaskDeleted, tasks[0];
-        tasks -= (0);
+      var outcome: int;
+      outcome = pickOutcome();
+      if (outcome != 1) {
+        while (sizeof(tasks) > 0 && tasks[0] <= req.upTo) {
+          announce eTaskDeleted, tasks[0];
+          tasks -= (0);
+        }
       }
-      send req.reader, eGcResp;
+      if (outcome == 0) {
+        send req.reader, eGcResp;
+      } else {
+        send req.reader, eGcErr;
+      }
     }
+  }
+
+  // 0 = success; 1 = outgoing timeout (op not performed); 2 = incoming
+  // timeout (op performed, response lost). The caller sees 1 and 2
+  // identically.
+  fun pickOutcome(): int {
+    if (failuresLeft > 0 && choose()) {
+      failuresLeft = failuresLeft - 1;
+      if (choose()) {
+        return 1;
+      }
+      return 2;
+    }
+    return 0;
   }
 
   fun insertTask(lvl: int) {
@@ -117,6 +178,8 @@ machine Database {
 machine FairReader {
   var db: machine;
   var acker: machine;
+  var timer: machine; // backoff timer for read retries
+  var hop: machine;   // scheduling-delay hop for the read-error loop tail
   var batchSize: int; // GetTasksBatchSize
   var reloadAt: int;  // GetTasksReloadAt: read more when loaded <= reloadAt
 
@@ -129,14 +192,17 @@ machine FairReader {
   var lastReqCount: int;           // batch size of the in-flight read
   var newlyWritten: seq[int];      // tasks written while readPending
   var pinnedByWriter: bool;        // ackLevelPinnedByWriter
+  var backoffTimer: bool;          // a read-retry backoff timer is armed
 
   // gc state
   var inGC: bool;
   var numToGC: int;
 
   start state Init {
-    entry (cfg: (db: machine, batchSize: int, reloadAt: int, initLevel: int)) {
+    entry (cfg: (db: machine, timer: machine, hop: machine, batchSize: int, reloadAt: int, initLevel: int)) {
       db = cfg.db;
+      timer = cfg.timer;
+      hop = cfg.hop;
       batchSize = cfg.batchSize;
       reloadAt = cfg.reloadAt;
       readLevel = cfg.initLevel;
@@ -182,6 +248,34 @@ machine FairReader {
       }
     }
 
+    // read timed out: retryReadAfter, then the rest of readTasksImpl runs as
+    // a separately-scheduled step (eReadLoopDone via the hop)
+    on eGetTasksErr do {
+      if (!backoffTimer) {
+        backoffTimer = true;
+        send timer, eStartBackoff, this;
+      }
+      send hop, eHopLoopDone, this;
+    }
+
+    // the tail of readTasksImpl after a failed read
+    on eReadLoopDone do {
+      readPending = false;
+      if (sizeof(newlyWritten) > 0) {
+        mergeTasks(newlyWritten, MERGE_WRITE);
+        newlyWritten = default(seq[int]);
+        advanceAckLevel();
+      }
+      // re-check before finishing, in case the backoff timer already fired
+      // while readPending was still true (the 26d9a561 fix)
+      maybeRead();
+    }
+
+    on eBackoffFired do {
+      backoffTimer = false;
+      maybeRead();
+    }
+
     // wroteNewTasks -> mergeTasks(mergeWrite)
     on eWroteTasks do (batch: seq[int]) {
       var i: int;
@@ -196,7 +290,8 @@ machine FairReader {
       mergeTasks(batch, MERGE_WRITE);
       // Go's "fair reader stuck" softassert state; modeled as a hard assertion
       // (we deliberately do not model the defensive repair read)
-      assert !(loaded == 0 && !atEnd && !readPending), "fair reader stuck";
+      assert !(loaded == 0 && !atEnd && !readPending && !backoffTimer),
+        "fair reader stuck";
     }
 
     // getAndPinAckLevel
@@ -206,8 +301,15 @@ machine FairReader {
       send w, ePinResp, ackLevel;
     }
 
-    // unpinAckLevel (no write errors yet in M2)
-    on eUnpin do {
+    // unpinAckLevel
+    on eUnpin do (hadErr: bool) {
+      if (hadErr) {
+        // the write may have taken effect anyway: we can't assume we know
+        // where the end is anymore, and must initiate a read to find it
+        // (8ca7b640 #5)
+        atEnd = false;
+        maybeRead();
+      }
       assert pinnedByWriter, "ack level wasn't pinned";
       pinnedByWriter = false;
       advanceAckLevel();
@@ -217,6 +319,11 @@ machine FairReader {
     on eGcResp do {
       inGC = false;
       numToGC = 0;
+    }
+
+    // doGC failed; keep numToGC so a later trigger retries
+    on eGcErr do {
+      inGC = false;
     }
 
     // completeTask
@@ -427,7 +534,7 @@ machine FairReader {
   }
 
   fun maybeRead() {
-    if (readPending || !shouldReadMore()) {
+    if (readPending || backoffTimer || !shouldReadMore()) {
       return;
     }
     readPending = true;
@@ -510,7 +617,7 @@ machine FairWriter {
 
       if (sizeof(batch) == 0) {
         // no usable levels left (level universe exhausted): stop writing
-        send reader, eUnpin;
+        send reader, eUnpin, false;
         return;
       }
       written = written + sizeof(batch);
@@ -526,7 +633,15 @@ machine FairWriter {
       }
       // wroteNewTasks must be called before unpin
       send reader, eWroteTasks, batch;
-      send reader, eUnpin;
+      send reader, eUnpin, false;
+      startWrite();
+    }
+
+    // write timed out: the error propagates to the caller, which retries
+    // AddTask from scratch; the retry allocates fresh task ids (levels)
+    on eWriteTasksErr do (batch: seq[int]) {
+      written = written - sizeof(batch);
+      send reader, eUnpin, true;
       startWrite();
     }
   }
@@ -536,6 +651,28 @@ machine FairWriter {
       return;
     }
     send reader, eGetPinReq, this;
+  }
+}
+
+// ---- helper machines: backoff timer and scheduling-delay hop ----
+
+// Backoff timer for read retries. Firing takes two hops (reader -> timer ->
+// reader), so it races the read-error loop tail, which also takes two hops.
+machine BackoffTimer {
+  start state Idle {
+    on eStartBackoff do (target: machine) {
+      send target, eBackoffFired;
+    }
+  }
+}
+
+// Bounces the read-error loop tail back to the reader, modeling the goroutine
+// scheduling delay between retryReadAfter and the end of readTasksImpl.
+machine Hop {
+  start state Idle {
+    on eHopLoopDone do (target: machine) {
+      send target, eReadLoopDone;
+    }
   }
 }
 
