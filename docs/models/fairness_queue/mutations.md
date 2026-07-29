@@ -104,6 +104,14 @@ which the spec permits.
   window. Mutation M2a is invisible without this.
 - **Search strategy matters.** M2c is only found by feedbackpct. Every clean
   claim should run the full portfolio.
+- **Cycle-shaped bugs need systematic search.** The churn loop (finding #3)
+  was invisible to 100k+ sampled schedules across every strategy — random
+  scheduling breaks the cycle probabilistically — but PEx DFS (`p compile
+  --mode pex`, `p check --mode pex --sch-pex dfs`; needs maven + jdk21, e.g.
+  `nix-shell -p openjdk21 maven`) sustained it immediately. Converting the
+  liveness-flavored churn into a bounded safety property (BoundedRedispatch)
+  is what made it checkable at all. PEx also dedups states (TLC-like) and
+  reports distinct-state counts.
 - 8ca7b640 #1 (ignore read tasks <= ackLevel): analysis says this filter is
   unreachable in the current code structure (single sequential read loop;
   response tasks are always > readLevel-at-send >= any reachable ackLevel, as

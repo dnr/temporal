@@ -9,6 +9,25 @@
 // error and retries), so an unconfirmed task may be deleted uncompleted. A
 // confirmation arriving after such a deletion would still be a real loss, so
 // check both directions.
+// BoundedRedispatch (safety proxy for churn): re-dispatch of the same level
+// is legitimate a few times (evict + re-read), but an unbounded loop of
+// dispatch/ack/evict/re-read is the "busy churn" failure mode. K = 10 is far
+// above anything a legitimate schedule needs at these instance sizes.
+spec BoundedRedispatch observes eTaskDispatched {
+  var count: map[int, int];
+
+  start state Monitoring {
+    on eTaskDispatched do (lvl: int) {
+      if (!(lvl in count)) {
+        count[lvl] = 0;
+      }
+      count[lvl] = count[lvl] + 1;
+      assert count[lvl] <= 10,
+        format("task {0} dispatched {1} times: churn loop", lvl, count[lvl]);
+    }
+  }
+}
+
 // An expired task is treated as completed by both specs: expiry discharges
 // the delivery obligation.
 spec NoLostTask observes eTaskConfirmed, eTaskCompleted, eTaskDeleted, eTaskExpired {

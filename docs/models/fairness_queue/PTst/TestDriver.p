@@ -95,6 +95,13 @@ test tcFairQueue [main = TestDriver]:
   assert GuaranteedDelivery, NoLostTask in
     { TestDriver, Database, FairReader, FairWriter, Acker, BackoffTimer, Hop };
 
+// Churn check, kept separate from the green regression suite: this FAILS on
+// the current code (finding #3 in findings.md, the busy re-read loop).
+// Only PEx reaches it: p check -tc tcChurn --mode pex --sch-pex dfs
+test tcChurn [main = TestDriver]:
+  assert BoundedRedispatch in
+    { TestDriver, Database, FairReader, FairWriter, Acker, BackoffTimer, Hop };
+
 test tcBig [main = TestDriverBig]:
   assert GuaranteedDelivery, NoLostTask in
     { TestDriverBig, Database, FairReader, FairWriter, Acker, BackoffTimer, Hop };

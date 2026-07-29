@@ -76,3 +76,44 @@ overflow from below-readLevel writes) combined with in-flight completions —
 i.e. exactly under heavy fairness-weighted load. The no-op behavior itself is
 correct; only the softassert's "this indicates a bug" assumption is wrong.
 Suggested change: treat it like the missing case (metric, no softassert).
+
+## 3. Busy re-read churn while the lowest loaded task is unmatched
+
+**Status: model-confirmed (PEx counterexample, 189 steps, found in 3s);
+mechanism traced through the Go code by hand. Corroborates the TLA+ model's
+independent finding of the same loop.**
+
+Setup: the lowest loaded task L never completes (realistic: a backlogged
+fairness key with no pollers), while tasks above it (levels m, n) have
+completed but their acks can't advance ackLevel past L. Then this cycle runs
+forever inside a single readTasksImpl loop, with no completions driving it:
+
+1. Read > readLevel returns m, n; both hit the evictedAcks cache and are
+   re-inserted as pre-acked entries; readLevel = n.
+2. The next batch returns empty (read-to-end). merged = {L} only (acks are
+   not part of the merged set), so readLevel regresses to L, and the acks at
+   m and n are evicted as "above the new readLevel" (re-cached), setting
+   evictedAnyTasks and therefore atEnd = false — even though this read just
+   proved we're at the end.
+3. shouldReadMoreLocked: !atEnd && loadedTasks (=1) <= reloadAt → read again
+   from L. Same responses. Loop.
+
+Each lap does 2 db reads. Nothing bounds it: not time, not completions. The
+reader hammers the db until L completes or the partition unloads.
+
+Model specifics: BoundedRedispatch (PSpec) converts the churn into a bounded
+safety property (no level dispatched > 10 times). With the model's tiny
+evictedAcks cache (cacheSize 1), the cycle also re-DISPATCHES the task whose
+ack got trimmed, every lap — Go's 256-entry cache bounds the re-dispatch
+variant in practice until the cache overflows, but not the read churn.
+
+Notably: only PEx (systematic DFS) finds this; 70k+ sampled schedules per
+config never sustained the cycle (all terminated <= 174 steps). Cycle-shaped
+bugs are the sampling checker's blind spot.
+
+Suggested fix direction: in mergeTasksLocked, a mergeReadToEnd that adds no
+new tasks should not regress readLevel below already-read acks (the same
+spirit as the f534e74e fix, which handled the merged-set-empty case; this is
+the merged-set-nonempty-but-lower case). Alternatively, don't treat evicted
+*acks* as "evictedAnyTasks" for the purpose of clearing atEnd on a
+read-to-end: the acks being evicted were all within the range just read.

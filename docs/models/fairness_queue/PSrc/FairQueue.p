@@ -84,6 +84,7 @@ event eTaskConfirmed: int; // writer observed a successful write of this level
 event eTaskCompleted: int; // reader marked this level acked (completeTask)
 event eTaskDeleted: int;   // db deleted this level (GC)
 event eTaskExpired: int;   // reader saw this level expired at merge time
+event eTaskDispatched: int; // reader handed this level to the matcher
 
 // ---- database ----
 
@@ -489,6 +490,7 @@ machine FairReader {
           loaded = loaded + 1;
           deliverySeq = deliverySeq + 1;
           deliveryId[lvl] = deliverySeq;
+          announce eTaskDispatched, lvl;
           // addTaskToMatcher happens outside the reader lock: route via hop
           send hop, eHopTaskLoaded, (target = acker, lvl = lvl, id = deliverySeq);
         }
