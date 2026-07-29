@@ -80,6 +80,11 @@ we'll implement them one by one.
 
 Milestones:
 
+Status (2026-07-28): M1-M5 done and committed (one jj commit each; model in
+PSrc/, specs in PSpec/, driver in PTst/, mutation results in mutations.md,
+findings in findings.md — one so far: reachable "fair reader stuck"
+softassert). M6 done; M7 (systematic mutation pass) next.
+
 Modeling choices that apply throughout:
 
 - Machines: `Writer`, `Reader`, `Database`, `Acker`, and (from M3) `GC`, plus

@@ -183,6 +183,7 @@ machine FairReader {
   var hop: machine;   // scheduling-delay hop for the read-error loop tail
   var batchSize: int; // GetTasksBatchSize
   var reloadAt: int;  // GetTasksReloadAt: read more when loaded <= reloadAt
+  var cacheSize: int; // evictedAcksCacheSize
 
   var outstanding: map[int, bool]; // level -> acked? (false = loaded, true = acked/nil)
   var loaded: int;                 // number of unacked entries in outstanding
@@ -203,13 +204,18 @@ machine FairReader {
   // once a task's expiry has passed, every later check also sees it expired)
   var knownExpired: set[int];
 
+  // acked levels that were evicted from outstanding before they could advance
+  // ackLevel; consulted on re-read to avoid re-dispatching completed tasks
+  var evictedAcks: set[int];
+
   start state Init {
-    entry (cfg: (db: machine, timer: machine, hop: machine, batchSize: int, reloadAt: int, initLevel: int)) {
+    entry (cfg: (db: machine, timer: machine, hop: machine, batchSize: int, reloadAt: int, cacheSize: int, initLevel: int)) {
       db = cfg.db;
       timer = cfg.timer;
       hop = cfg.hop;
       batchSize = cfg.batchSize;
       reloadAt = cfg.reloadAt;
+      cacheSize = cfg.cacheSize;
       readLevel = cfg.initLevel;
       ackLevel = cfg.initLevel;
     }
@@ -429,16 +435,20 @@ machine FairReader {
     }
 
     // also evict acked (nil) entries above the new readLevel, otherwise we'd
-    // use them to jump the ack level across ranges we just dropped
+    // use them to jump the ack level across ranges we just dropped; cache
+    // them so a re-read can skip re-dispatching (trim highest levels first)
     ks = keys(outstanding);
     i = 0;
     while (i < sizeof(ks)) {
       if (outstanding[ks[i]] && ks[i] > readLevel) {
         outstanding -= (ks[i]);
+        evictedAcks += (ks[i]);
         evictedAny = true;
-        // M6 will cache these (evictedAcks)
       }
       i = i + 1;
+    }
+    while (sizeof(evictedAcks) > cacheSize) {
+      evictedAcks -= (maxOf(evictedAcks));
     }
 
     // take the new tasks that made the cut
@@ -446,7 +456,15 @@ machine FairReader {
     while (i < kept) {
       lvl = merged[i];
       if (lvl in isNew) {
-        if (isExpired(lvl)) {
+        if (lvl in evictedAcks) {
+          // already completed, but the ack was evicted before it could
+          // advance ackLevel and we re-read the task: re-insert it as a
+          // pre-acked entry instead of re-dispatching. Remove from the cache
+          // since it's tracked in outstanding again. (Its level made the
+          // in-memory cut, so the ack eviction above can't have touched it.)
+          evictedAcks -= (lvl);
+          outstanding[lvl] = true;
+        } else if (isExpired(lvl)) {
           // expired: add as pre-acked (nil) so it advances readLevel (it
           // already participated in the cut above) and ackLevel + GC below,
           // instead of being dispatched (0b372d5e)
@@ -537,6 +555,18 @@ machine FairReader {
       inGC = true;
       send db, eGcReq, (reader = this, upTo = ackLevel);
     }
+  }
+
+  fun maxOf(s: set[int]): int {
+    var v: int;
+    var mx: int;
+    mx = -1;
+    foreach (v in s) {
+      if (v > mx) {
+        mx = v;
+      }
+    }
+    return mx;
   }
 
   fun minKey(): int {

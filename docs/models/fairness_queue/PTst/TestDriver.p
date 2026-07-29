@@ -16,7 +16,8 @@ machine TestDriver {
       hop = new Hop();
       // batchSize 2, reload when <= 1 loaded: forces multiple read batches,
       // full-buffer merges, and evictions with few tasks
-      reader = new FairReader((db = db, timer = timer, hop = hop, batchSize = 2, reloadAt = 1, initLevel = 0));
+      // cacheSize 1: tiny evicted-acks cache so trimming is exercised
+      reader = new FairReader((db = db, timer = timer, hop = hop, batchSize = 2, reloadAt = 1, cacheSize = 1, initLevel = 0));
       acker = new Acker(reader);
       writer = new FairWriter((db = db, reader = reader, numTasks = 4, maxLevel = 10));
       send reader, eBindAcker, acker;

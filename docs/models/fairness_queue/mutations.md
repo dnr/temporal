@@ -37,6 +37,18 @@ stuck" softassert via expired writes) — see findings.md. The model now
 implements Go's repair read, plus an assertion that the stuck state is only
 reachable when expired tasks are involved.
 
+## M6
+
+| id  | mutation | target | result |
+|-----|----------|--------|--------|
+| M6a | also cache evicted UNACKED tasks in evictedAcks (cache poisoning) | evictedAcks correctness rationale | caught: liveness (undelivered task treated as completed on re-read), 1.4s |
+
+Note: the cache itself is a pure optimization — removing it entirely is the
+M2-M5 model, which was verified clean — so the meaningful check is that only
+genuinely-acked levels can enter it. Trim direction (highest-first) is an
+efficiency choice, not a correctness one: trimming just causes re-dispatch,
+which the spec permits.
+
 ## M4
 
 | id  | mutation | target | result |
