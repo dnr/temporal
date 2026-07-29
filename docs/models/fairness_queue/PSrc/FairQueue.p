@@ -352,9 +352,11 @@ machine FairReader {
         return;
       }
       if (outstanding[lvl]) {
-        // completion for a task that was already completed: an eviction /
-        // re-read / re-dispatch race (Go softasserts "completed task was
-        // already acked" here and returns)
+        // Completion for a task that is already marked acked. Go softasserts
+        // "completed task was already acked" here, but this is reachable with
+        // no bug (finding #2, see findings.md): an in-flight completion can
+        // land after the same level was evicted and re-read as expired (or
+        // re-dispatched and completed). Modeled as the no-op Go performs.
         return;
       }
       outstanding[lvl] = true;
