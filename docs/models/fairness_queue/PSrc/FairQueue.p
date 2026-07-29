@@ -77,6 +77,7 @@ event eBindAcker: machine;
 event eTaskConfirmed: int; // writer observed a successful write of this level
 event eTaskCompleted: int; // reader marked this level acked (completeTask)
 event eTaskDeleted: int;   // db deleted this level (GC)
+event eTaskExpired: int;   // reader saw this level expired at merge time
 
 // ---- database ----
 
@@ -198,6 +199,10 @@ machine FairReader {
   var inGC: bool;
   var numToGC: int;
 
+  // levels this reader has observed as expired (IsTaskExpired is monotone:
+  // once a task's expiry has passed, every later check also sees it expired)
+  var knownExpired: set[int];
+
   start state Init {
     entry (cfg: (db: machine, timer: machine, hop: machine, batchSize: int, reloadAt: int, initLevel: int)) {
       db = cfg.db;
@@ -288,10 +293,17 @@ machine FairReader {
         return;
       }
       mergeTasks(batch, MERGE_WRITE);
-      // Go's "fair reader stuck" softassert state; modeled as a hard assertion
-      // (we deliberately do not model the defensive repair read)
-      assert !(loaded == 0 && !atEnd && !readPending && !backoffTimer),
-        "fair reader stuck";
+      if (loaded == 0 && !atEnd && !readPending && !backoffTimer) {
+        // Go's "fair reader stuck" detector: softassert + repair read.
+        // FINDING (see findings.md): this state is reachable -- a write of an
+        // already-expired task below readLevel while the buffer holds only
+        // acks -- so the softassert fires spuriously and the "defensive" read
+        // is actually load-bearing. It should NOT be reachable any other way,
+        // which this assertion checks (and which keeps mutation sensitivity
+        // for non-expiry bugs like f534e74e).
+        assert sizeof(knownExpired) > 0, "fair reader stuck without expired tasks";
+        maybeRead();
+      }
     }
 
     // getAndPinAckLevel
@@ -434,9 +446,17 @@ machine FairReader {
     while (i < kept) {
       lvl = merged[i];
       if (lvl in isNew) {
-        outstanding[lvl] = false;
-        loaded = loaded + 1;
-        send acker, eTaskLoaded, lvl;
+        if (isExpired(lvl)) {
+          // expired: add as pre-acked (nil) so it advances readLevel (it
+          // already participated in the cut above) and ackLevel + GC below,
+          // instead of being dispatched (0b372d5e)
+          outstanding[lvl] = true;
+          announce eTaskExpired, lvl;
+        } else {
+          outstanding[lvl] = false;
+          loaded = loaded + 1;
+          send acker, eTaskLoaded, lvl;
+        }
       }
       i = i + 1;
     }
@@ -454,6 +474,18 @@ machine FairReader {
     // on write: leave unchanged
 
     checkInvariants();
+  }
+
+  // IsTaskExpired at merge time: nondeterministic, but monotone per level
+  fun isExpired(lvl: int): bool {
+    if (lvl in knownExpired) {
+      return true;
+    }
+    if (choose()) {
+      knownExpired += (lvl);
+      return true;
+    }
+    return false;
   }
 
   fun insertSorted(s: seq[int], v: int): seq[int] {

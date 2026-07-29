@@ -26,6 +26,17 @@ Detection strategy portfolio: `--sch-random`, `--sch-pct 10`,
 |-----|----------|--------|--------|
 | M3a | disable ack level pinning | fairness.md "ack level movement while a write is in flight" | caught: 100% of schedules. Liveness (write filtered below runaway ackLevel) on most seeds; NoLostTask "task deleted before completion" (GC deletes an in-flight write) on 3/8 seeds. |
 
+## M5
+
+| id  | mutation | target | result |
+|-----|----------|--------|--------|
+| M5a | drop expired tasks at merge intake instead of pre-acking them | 0b372d5e | caught: potential-liveness (hot monitor through max-steps: infinite re-read loop starves a confirmed task), 4s. NOTE: a first, unfaithful version of this mutation (dropping expired tasks after the merged-set cut, where they still advance readLevel) was NOT caught — mutation placement must match where the old code actually differed. |
+
+Also in M5: the base model itself found finding #1 (reachable "fair reader
+stuck" softassert via expired writes) — see findings.md. The model now
+implements Go's repair read, plus an assertion that the stuck state is only
+reachable when expired tasks are involved.
+
 ## M4
 
 | id  | mutation | target | result |

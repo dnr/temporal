@@ -9,7 +9,9 @@
 // error and retries), so an unconfirmed task may be deleted uncompleted. A
 // confirmation arriving after such a deletion would still be a real loss, so
 // check both directions.
-spec NoLostTask observes eTaskConfirmed, eTaskCompleted, eTaskDeleted {
+// An expired task is treated as completed by both specs: expiry discharges
+// the delivery obligation.
+spec NoLostTask observes eTaskConfirmed, eTaskCompleted, eTaskDeleted, eTaskExpired {
   var confirmed: set[int];
   var completed: set[int];
   var deleted: set[int];
@@ -21,6 +23,9 @@ spec NoLostTask observes eTaskConfirmed, eTaskCompleted, eTaskDeleted {
         format("task {0} confirmed after uncompleted deletion", lvl);
     }
     on eTaskCompleted do (lvl: int) {
+      completed += (lvl);
+    }
+    on eTaskExpired do (lvl: int) {
       completed += (lvl);
     }
     on eTaskDeleted do (lvl: int) {
@@ -40,7 +45,7 @@ spec NoLostTask observes eTaskConfirmed, eTaskCompleted, eTaskDeleted {
 // concurrent read can load it while the write response is still in flight),
 // and eviction/re-read races can complete the same level more than once, so
 // track ever-completed levels.
-spec GuaranteedDelivery observes eTaskConfirmed, eTaskCompleted {
+spec GuaranteedDelivery observes eTaskConfirmed, eTaskCompleted, eTaskExpired {
   var pending: set[int];   // confirmed but not yet completed
   var completed: set[int]; // ever completed
 
@@ -54,6 +59,9 @@ spec GuaranteedDelivery observes eTaskConfirmed, eTaskCompleted {
     on eTaskCompleted do (lvl: int) {
       handleCompleted(lvl);
     }
+    on eTaskExpired do (lvl: int) {
+      handleCompleted(lvl);
+    }
   }
 
   hot state PendingCompletion {
@@ -61,6 +69,12 @@ spec GuaranteedDelivery observes eTaskConfirmed, eTaskCompleted {
       handleConfirmed(lvl);
     }
     on eTaskCompleted do (lvl: int) {
+      handleCompleted(lvl);
+      if (sizeof(pending) == 0) {
+        goto AllCompleted;
+      }
+    }
+    on eTaskExpired do (lvl: int) {
       handleCompleted(lvl);
       if (sizeof(pending) == 0) {
         goto AllCompleted;
