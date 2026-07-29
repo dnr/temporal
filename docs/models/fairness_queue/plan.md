@@ -80,6 +80,74 @@ we'll implement them one by one.
 
 Milestones:
 
-_fill this in_
+Modeling choices that apply throughout:
+
+- Machines: `Writer`, `Reader`, `Database`, `Acker`, and (from M3) `GC`, plus
+  spec monitors observing `announce` events. The database is its own machine,
+  so every operation is a request/response message pair — in-flight windows
+  exist even before we model timeouts.
+- Task levels are single unique integers, chosen nondeterministically by the
+  writer (abstracting stride scheduling), always above the current ack level.
+- Small bounded instances: ~4-6 tasks total, batch size 2-3, reload threshold
+  1. Liveness checking needs full schedule exploration, so keep instances tiny
+  and only grow them for safety-only checks.
+- Each milestone ends with a quick mutation check of the logic just added
+  (break it on purpose, confirm the checker complains), in addition to the
+  systematic mutation pass in M7.
+
+**M1: Happy path.** Writer writes tasks with increasing levels; all DB calls
+succeed. Reader: read loop with readLevel/ackLevel, bounded in-memory buffer,
+shouldReadMore gating, atEnd. Acker acks loaded tasks in any order; ack level
+advances to the lowest unacked task. Specs: liveness monitor "every
+write-confirmed task is eventually acked" (hot until drained); invariant that
+the buffer is exactly the unacked tasks in (ackLevel, readLevel]. The real goal
+is scaffolding: project layout, test driver, and a working
+counterexample-trace workflow before any concurrency trickiness.
+
+**M2: Out-of-order writes and the merge.** Writer levels may now land below
+readLevel. Model wroteNewTasks and the full mergeTasksLocked semantics: bypass
+merge, atEnd updates, dropping above-readLevel writes when not atEnd, eviction
+of loaded tasks and of acks above the new readLevel, leaving readLevel alone
+when the merged set is empty, newlyWrittenTasks buffered while a read is
+pending, and ack-level pinning during a write. Bugs this milestone should be
+able to catch: 12e7c43a, 8ca7b640 items 1-4, f534e74e.
+
+**M3: GC.** A GC process deletes tasks <= ackLevel (as a DB request, so it
+interleaves with everything else). New safety spec: never delete a task that
+was confirmed written but not acked. This is the property ack-level pinning
+exists for (see "Ack level movement while a write is in flight" in
+fairness.md) — check that pinning is actually sufficient.
+
+**M4: Timeouts and retries.** DB requests (read, write, GC) may
+nondeterministically time out on the outgoing side (op not performed) or the
+incoming side (op performed, response lost); bound the number of failures (or
+use fairness) so a run can't fail forever. Adds the read-retry backoff timer
+as a concurrent event, and failed-write handling in unpin (atEnd = false, kick
+a read). The delivery property now conditions on confirmed writes only: a
+timed-out write may or may not be durable. Bugs targeted: 26d9a561 (backoff
+timer firing while readPending), 8ca7b640 item 5.
+
+**M5: Expired tasks.** Tasks may be expired by the time they're read
+(nondeterministic at merge time); expired tasks flow through the merge as
+pre-acked entries so read/ack levels advance past them. Bug targeted: 0b372d5e
+(reader stuck re-reading an all-expired batch forever). The delivery guarantee
+exempts expired tasks; the no-stuck-reader property must still hold.
+
+**M6: Evicted ack cache.** Model evictedAcks: acks evicted above readLevel go
+into a bounded cache (trimmed from the highest level); re-reading a cached
+level turns it back into a pre-acked entry instead of re-delivering. Check
+that the cache preserves all specs under trimming — re-delivery after a trim
+is allowed (at-least-once), lost tasks and stuck readers are not.
+
+**M7: Systematic mutation testing.** Re-introduce each historical bug into the
+model (one mutation each for 12e7c43a, the five 8ca7b640 items, 26d9a561,
+f534e74e, 0b372d5e) and confirm the checker reports a violation. Record which
+spec catches which mutation and at what bounds. This calibrates whether the
+model is detailed enough to trust as a regression net.
+
+**M8 (stretch): Matcher handoff.** A minimal matcher machine so that a task
+can be matched-and-removed concurrently with eviction (ad717eae: completeTask
+arriving for a task no longer in outstandingTasks). Possibly out of scope per
+the notes above; decide after M7.
 
 
