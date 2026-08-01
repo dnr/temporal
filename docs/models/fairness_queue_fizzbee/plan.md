@@ -96,6 +96,15 @@ Milestones:
 > defensive backstop read is load-bearing on that path — models now include
 > the backstop, matching the code. M6 is folded into per-milestone mutation
 > files plus README documentation; M7 (restart) not started.
+>
+> Review decisions (post-M5): the GC process is no longer modeled — GC only
+> deletes at-or-below an observed ack level, so AckLevelOnlyPassesAcked
+> subsumes "never GC an unacked task" (the M1/M4 GC bullets below are
+> superseded). Likewise the writer reuses levels of traceless failed writes
+> instead of tracking `used_levels`. Both cut the state space dramatically
+> (m1: 6x). m2-m5 re-runs + the mutation suite are queued for a bigger
+> machine; run everything through `check.sh` (32G memory cap, one at a
+> time).
 
 ## Modeling conventions (all milestones)
 

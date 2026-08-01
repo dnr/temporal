@@ -50,8 +50,6 @@ action Init:
     read_level = 0         # readLevel
     ack_level = 0          # ackLevel
     at_end = False         # atEnd
-    num_to_gc = 0          # numToGC
-    in_gc = False          # inGC
     newly_written = []     # newlyWrittenTasks
     pinned_by_writer = False   # ackLevelPinnedByWriter
 
@@ -62,10 +60,8 @@ action Init:
     # --- "network" between reader/writer/GC and DB ---
     read_req = None        # (readFrom-exclusive, batchSize) or None
     read_resp = None       # (levels list, hitEnd bool) or None
-    gc_req = None          # captured ack level for pending delete, or None
 
     # --- ghost variables (assertions only) ---
-    used_levels = set()    # levels ever allocated by the writer (ids unique)
     confirmed = set()      # tasks whose write was confirmed to the writer
     ever_acked = set()     # tasks that were acked at least once
     expired = set()        # tasks that have expired (monotonic)
@@ -110,7 +106,6 @@ atomic func advance_ack():
     pinned = ack_pinned()
     if pinned:
         return
-    num_acked = 0
     for _ in range(MAX_LEVEL + 1):
         if len(outstanding) == 0:
             break
@@ -119,10 +114,6 @@ atomic func advance_ack():
             break
         ack_level = m
         outstanding.pop(m)
-        num_acked = num_acked + 1
-    if num_acked > 0:
-        num_to_gc = num_to_gc + num_acked
-        # maybeGCLocked: modeled by the GcStart action (over-approximated)
 
 atomic func merge_tasks(tasks, mode):
     # mergeTasksLocked. tasks: list of levels just read or written.
@@ -232,11 +223,15 @@ atomic action WriterWrite:
     # taskWriterLoop got an AddTask request: getAndPinAckLevels, pickPasses
     # (level above the pinned ack level, any unused level), CreateFairTasks.
     require writer_state == WS.IDLE
-    avail = [l + 1 for l in range(MAX_LEVEL) if l + 1 not in used_levels and l + 1 > ack_level]
+    # A level is available iff not already in the DB (db_tasks is monotone
+    # with GC unmodeled, so this equals "never successfully written"). Real
+    # ids are never reused, but a timed-out-unapplied write leaves no trace,
+    # so reusing its level explores an isomorphic behavior while keeping the
+    # level universe small (and dedups the retry states).
+    avail = [l + 1 for l in range(MAX_LEVEL) if l + 1 not in db_tasks and l + 1 > ack_level]
     require len(avail) > 0
     t = oneof avail
     pinned_by_writer = True   # getAndPinAckLevel (softassert: wasn't pinned)
-    used_levels.add(t)
     write_req = [t]
     writer_state = WS.REQ
 
@@ -311,26 +306,11 @@ atomic fair action AckTask:
     advance_ack()
     maybe_read()
 
-###############################################################################
-# GC process
-###############################################################################
-
-atomic fair action GcStart:
-    # maybeGCLocked + doGC(ackLevel): capture the ack level for the delete
-    require not in_gc
-    require num_to_gc > 0
-    require gc_req == None
-    in_gc = True
-    gc_req = ack_level
-
-atomic fair action DbGcComplete:
-    # DB executes CompleteFairTasksLessThan(gc_req+1) and the response
-    # returns (doGC tail: inGC = false, numToGC reset — cassandra semantics)
-    require gc_req != None
-    db_tasks = set([t for t in db_tasks if t > gc_req])
-    gc_req = None
-    in_gc = False
-    num_to_gc = 0
+# NOTE: the GC process is deliberately NOT modeled (review decision): GC only
+# issues "delete where level <= ackLevel", which is safe by construction as
+# long as AckLevelOnlyPassesAcked holds — that property IS the "never GC an
+# unacked task" property. Failure/retry of the delete is idempotent and
+# carries no obligations, so modeling it only multiplied the state space.
 
 ###############################################################################
 # database process: executes reads
@@ -371,17 +351,12 @@ always assertion WindowComplete:
     return True
 
 always assertion AckLevelOnlyPassesAcked:
+    # (This also covers "never GC an unacked task": GC only deletes rows at
+    # or below a previously observed ackLevel, and ackLevel is monotonic.)
     # if the ack level moved past a confirmed task, it must have been
     # acked or expired
     for t in confirmed:
         if t <= ack_level and t not in ever_acked and t not in expired:
-            return False
-    return True
-
-always assertion NoUnackedTaskDeleted:
-    # a confirmed task can only leave the DB (GC) after being acked/expiring
-    for t in confirmed:
-        if t not in db_tasks and t not in ever_acked and t not in expired:
             return False
     return True
 
@@ -412,9 +387,6 @@ exists assertion EvictionHappens:
 
 exists assertion WriteBufferedDuringRead:
     return len(newly_written) > 0
-
-exists assertion GcDeletedSomething:
-    return len([t for t in used_levels if t not in db_tasks and t in ever_acked]) > 0
 
 exists assertion ReachesEnd:
     return at_end

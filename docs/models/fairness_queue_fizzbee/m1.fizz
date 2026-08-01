@@ -1,10 +1,12 @@
 ---
-# Milestone 1: sequential core — reader + acker + GC over a reliable DB.
+# Milestone 1: sequential core — reader + acker over a reliable DB.
 # No writer yet: the DB is pre-populated with NUM_TASKS tasks.
 # Models fair_task_reader.go: readTasksImpl loop, mergeTasksLocked (read modes
-# only), advanceAckLevelLocked, GC. Every atomic action here corresponds to a
+# only), advanceAckLevelLocked. Every atomic action here corresponds to a
 # region executed under tr.lock (or inside the DB); interleaving between
-# actions models concurrency between the reader goroutines, acker, GC and DB.
+# actions models concurrency between the reader goroutines, the acker and
+# the DB. (GC is deliberately not modeled — see the note above the database
+# process section.)
 options:
   max_actions: 100
   max_concurrent_actions: 2
@@ -42,13 +44,10 @@ action Init:
     read_level = 0       # readLevel
     ack_level = 0        # ackLevel
     at_end = False       # atEnd
-    num_to_gc = 0        # numToGC
-    in_gc = False        # inGC
 
     # --- "network" between reader and DB ---
     read_req = None      # (readFrom-exclusive, batchSize) or None
     read_resp = None     # (levels list, hitEnd bool) or None
-    gc_req = None        # captured ack level for pending delete, or None
 
     # --- ghost variables (assertions only, not real state) ---
     confirmed = set(db_tasks)   # tasks confirmed durable (M1: the initial set)
@@ -85,7 +84,6 @@ atomic func maybe_read():
 
 atomic func advance_ack():
     # advanceAckLevelLocked (no pinning until M2)
-    num_acked = 0
     for _ in range(NUM_TASKS + 1):
         if len(outstanding) == 0:
             break
@@ -94,11 +92,6 @@ atomic func advance_ack():
             break
         ack_level = m
         outstanding.pop(m)
-        num_acked = num_acked + 1
-    if num_acked > 0:
-        num_to_gc = num_to_gc + num_acked
-        # maybeGCLocked: modeled by the GcStart action, which may fire
-        # whenever num_to_gc > 0 (over-approximates threshold/interval)
 
 atomic func merge_tasks(tasks, mode):
     # mergeTasksLocked. tasks: list of levels just read (or written, M2+).
@@ -204,26 +197,11 @@ atomic fair action AckTask:
     advance_ack()
     maybe_read()
 
-###############################################################################
-# GC process
-###############################################################################
-
-atomic fair action GcStart:
-    # maybeGCLocked + doGC(ackLevel): capture the ack level for the delete
-    require not in_gc
-    require num_to_gc > 0
-    require gc_req == None
-    in_gc = True
-    gc_req = ack_level
-
-atomic fair action DbGcComplete:
-    # DB executes CompleteFairTasksLessThan(gc_req+1) and the response
-    # returns (doGC tail: inGC = false, numToGC reset — cassandra semantics)
-    require gc_req != None
-    db_tasks = set([t for t in db_tasks if t > gc_req])
-    gc_req = None
-    in_gc = False
-    num_to_gc = 0
+# NOTE: the GC process is deliberately NOT modeled (review decision): GC only
+# issues "delete where level <= ackLevel", which is safe by construction as
+# long as AckLevelOnlyPassesAcked holds — that property IS the "never GC an
+# unacked task" property. Failure/retry of the delete is idempotent and
+# carries no obligations, so modeling it only multiplied the state space.
 
 ###############################################################################
 # database process: executes reads
@@ -253,16 +231,11 @@ always assertion MemoryInWindow:
     return True
 
 always assertion AckLevelOnlyPassesAcked:
+    # (This also covers "never GC an unacked task": GC only deletes rows at
+    # or below a previously observed ackLevel, and ackLevel is monotonic.)
     # if the ack level moved past a confirmed task, it must have been acked
     for t in confirmed:
         if t <= ack_level and t not in ever_acked:
-            return False
-    return True
-
-always assertion NoUnackedTaskDeleted:
-    # a confirmed task can only leave the DB (GC) after having been acked
-    for t in confirmed:
-        if t not in db_tasks and t not in ever_acked:
             return False
     return True
 
@@ -279,9 +252,6 @@ eventually always assertion AllConfirmedTasksAcked:
 # sanity: interesting states are actually reachable
 exists assertion BufferFills:
     return len([l for l in outstanding if outstanding[l] == LOADED]) == BATCH_SIZE
-
-exists assertion GcDeletedSomething:
-    return len(db_tasks) < NUM_TASKS
 
 exists assertion ReachesEnd:
     return at_end

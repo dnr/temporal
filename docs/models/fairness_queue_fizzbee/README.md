@@ -51,14 +51,23 @@ Go code, with interleaving only between regions):
 - Acker: `AckTask` acks any loaded task, with per-element fairness
   (`fair any`) — the model-level statement that every dispatched task
   eventually completes.
-- GC: fires whenever `numToGC > 0` (over-approximates the count/interval
-  schedule), deletes `<= ackLevel` captured at trigger time.
-- Levels: single small integers (the `<pass, id>` pair collapsed), each
-  written at most once; the writer picks any unused level above the pinned
-  ack level — levels are deliberately NOT monotonic across writes.
+- GC: NOT modeled (review decision). GC only issues "delete where
+  level <= ackLevel", which is safe by construction whenever
+  `AckLevelOnlyPassesAcked` holds — that assertion IS the "never GC an
+  unacked task" property. The delete is idempotent and carries no
+  obligations, so modeling its scheduling/timeouts only multiplied states.
+  A consequence used elsewhere: `db_tasks` is monotone.
+- Levels: single small integers (the `<pass, id>` pair collapsed); the
+  writer picks any level above the pinned ack level that is not in the DB —
+  levels are deliberately NOT monotonic across writes. Real task ids are
+  never reused, but a timed-out-unapplied write leaves no observable trace,
+  so reusing its level explores an isomorphic behavior; this both shrinks
+  the level universe needed and dedups failed-write retry states (and
+  removes the `used_levels` ghost).
 - Ghost state for assertions only: `confirmed` (write acknowledged to the
-  caller), `ever_acked`, `expired`, `used_levels`, `stuck_detected`, and
-  reachability flags.
+  caller), `ever_acked`, `expired`, plus a couple of reachability flags in
+  the smaller models (each boolean ghost roughly doubles distinct states,
+  so m4/m5 carry almost none).
 
 ## Properties
 
@@ -69,9 +78,8 @@ Safety (`always` / `transition`):
   (ackLevel, readLevel] is tracked in `outstandingTasks` or held in
   `newlyWrittenTasks` (nothing at-or-below readLevel can be forgotten).
 - `AckLevelOnlyPassesAcked` — the ack level never passes a confirmed task
-  that wasn't acked (or expired).
-- `NoUnackedTaskDeleted` — GC never deletes a confirmed task that wasn't
-  acked (or expired).
+  that wasn't acked (or expired). Since GC deletes only at-or-below a
+  previously observed ack level, this subsumes "never GC an unacked task".
 - `AckLevelMonotonic`.
 - M5: `CacheOnlyHoldsAcked` — the evicted-ack cache only ever contains
   genuinely acked/expired levels.
@@ -110,19 +118,48 @@ rows, cache hits/trims).
 
 ## Results / state space (as of last run)
 
+NOTE: after review, GC was removed from all models and the `used_levels`
+ghost replaced by level reuse; every result below except m1 predates that
+refactor and needs a re-run (expected to be much smaller now — m1 went
+803 -> 131 unique states).
+
 | Model | Nodes | Unique states | Time | Result |
 |---|---|---|---|---|
-| m1 (4 tasks) | 1,228 | 803 | ~2s | PASSED |
-| m2 (4 levels) | ~169k | ~99k | ~4min | PASSED (incl. backstop-read version) |
-| m3 (3 levels) | ~195k | ~109k | ~5min | PASSED (at 4 levels exceeds 32G) |
-| m4 (3 levels) | — | — | — | PENDING: exceeds 32G even with bounded expiry + `--experimental_processed_queue`; needs a bigger machine (`MEMMAX=... ./check.sh m4.fizz`) or further reduction |
-| m5 (3 levels) | — | — | — | PENDING: same as m4 |
+| m1 (4 tasks) | 228 | 131 | ~2s | PASSED (post-refactor) |
+| m2 (4 levels) | ~169k | ~99k | ~4min | PASSED pre-refactor; re-run pending |
+| m3 (3 levels) | ~195k | ~109k | ~5min | PASSED pre-refactor; re-run pending (4 levels exceeded 32G pre-refactor — retry at 4 after the refactor) |
+| m4 (3 levels) | — | — | — | never completed pre-refactor (>32G); re-run post-refactor |
+| m5 (3 levels) | — | — | — | same as m4 |
 
 Memory notes: the checker holds the full state graph + BFS queue in RAM,
-roughly 30G per ~1M states on these specs. m4 was killed at ~360k nodes
-with the queue still growing. Options for the big-VM run: just give it
-more memory (probably 64-128G suffices); or cut further (drop expiry from
-m4, `BATCH_SIZE = 1` for m5, or `max_actions: 60`).
+roughly 30G per ~1M states on these specs; `check.sh` caps it (default 32G,
+`MEMMAX=96G` to raise on a big machine) and `--experimental_processed_queue`
+(now default in check.sh) dedups the queue.
+
+## Optimization notes (model-level)
+
+Applied, in rough order of impact:
+1. GC abstracted away entirely (see above) — removes two actions, a 3-way
+   failure branch, and three state variables.
+2. Level reuse instead of a `used_levels` ghost — failed-write retries
+   collapse back into visited states instead of minting fresh ones.
+3. Ghost booleans trimmed from m4/m5 (each roughly doubles states).
+4. `numToGC` was already reduced to nothing by (1); before that it was a
+   dirty bit rather than a counter.
+5. `newlyWrittenTasks` kept sorted (its order is semantically irrelevant;
+   permutations were distinct states).
+6. Expiry bounded to one task total in m4/m5 (m3 checks full expiry).
+
+Further ideas if still too big, roughly in order of preference:
+- `--experimental_no_graph` for safety-only runs (refuses liveness specs):
+  split each model's check into a big safety run + a smaller liveness run.
+- Collapse the DB-response-in-flight step (merge `DbRead` into
+  `ReaderMergeRead`): removes the RESP state and the `read_resp` lists.
+  Trade-off: loses ack/expiry interleavings between the DB executing the
+  query and the reader merging it (mostly guards the below-ack merge
+  filter, which appears unreachable anyway — see m6_no_ack_filter).
+- `BATCH_SIZE = 1` for m4/m5 (eviction and the cache still exercised).
+- `max_actions: 60` — explicit depth bound; documents bounded checking.
 
 ## Mutation results
 
@@ -146,7 +183,8 @@ expected counterexample; `mutations/run.sh [name...]` re-checks them
 | m6_no_advance_after_buffered | (synthetic) | blocked on m5 |
 | m6_atend_survives_eviction | (synthetic) | blocked on m5 |
 
-Note: the m2 mutation results above predate the backstop-read change; the
-NeverDetectsStuck-caught ones should be re-verified against the current
-m2.fizz (the assertion and the expected traces are unchanged, the backstop
-only adds a recovery read after the assertion has already fired).
+Note: all "CAUGHT" results above predate the backstop-read change and the
+GC-removal/level-reuse refactor. The expected verdicts are unchanged (none
+of those mutations touch GC, and the m2_no_pin harm is caught at the
+ack-level property rather than via GC deletion), but the whole suite needs
+one re-run on the big machine to confirm.
