@@ -8,13 +8,19 @@ scope decisions (what's modeled, what's deliberately not).
 
 | File | Contents |
 |---|---|
-| `m1.fizz` | Reader + acker + GC over a reliable, pre-populated DB |
+| `m1.fizz` | Reader + acker over a reliable, pre-populated DB |
 | `m2.fizz` | M1 + concurrent writer: pinning, mergeWrite, buffering, eviction |
 | `m3.fizz` | M2 + expired tasks (pre-acked merge handling, 0b372d5e) |
 | `m4.fizz` | M3 + DB timeouts (both sides), read retry/backoff, unpin(err) |
 | `m5.fizz` | M4 + the bounded evicted-ack cache |
+| `mbt/queue_mbt.fizz` | MBT variant (collapsed to test-controllable actions); see the MBT section |
 | `mutations/` | Re-runnable mutations: each reintroduces a historical or synthetic bug and must make the checker FAIL |
 | `probes/` | Tiny specs verifying FizzBee semantics the model relies on |
+
+The MBT adapter itself lives in
+`service/matching/fizz_mbt_{gen,adapter}_test.go` (it needs package-private
+access), and adds a test-only `go.mod` dependency on
+`github.com/fizzbee-io/fizzbee/mbt/lib/go`.
 
 Run a model: `./check.sh mN.fizz` — this wraps `fizz` in a systemd scope
 with a 32G memory cap (the checker keeps the whole state graph plus its BFS
@@ -160,6 +166,60 @@ Further ideas if still too big, roughly in order of preference:
   filter, which appears unreachable anyway — see m6_no_ack_filter).
 - `BATCH_SIZE = 1` for m4/m5 (eviction and the cache still exercised).
 - `max_actions: 60` — explicit depth bound; documents bounded checking.
+
+## Model-based testing (MBT) — spec vs. the real code
+
+`mbt/queue_mbt.fizz` is an MBT variant of the model (collapsed to the points
+where a test can actually pause the real code), and
+`service/matching/fizz_mbt_{gen,adapter}_test.go` hook it to the real
+`fairBacklogManagerImpl` (real `fairTaskReader`/`fairTaskWriter`/
+`taskQueueDB` over `testTaskManager`). Run:
+
+    cd docs/models/fairness_queue_fizzbee/mbt && fizz queue_mbt.fizz   # regenerate states (13k states, ~30s)
+    go test ./service/matching/ -run TestFizzQueueMbt -v               # needs fizzbee-mbt-server/-runner on PATH
+
+The fizzbee-mbt runner replays generated action sequences against the SUT
+and compares the full observable state after every action (read directly
+from the reader's internals — the adapter lives in package matching):
+readLevel/ackLevel (pass component), outstandingTasks, atEnd,
+newlyWrittenTasks, evictedAcks, pinning, parked requests, and the fake
+store's rows.
+
+Control points: a gating TaskManager parks GetTasks until the trace
+releases it; the injected `counter.Counter` parks the writer in pickPasses
+and returns the trace-chosen level as the pass; CreateTasks outcomes
+(ok / timeout applied / timeout not-applied) are pre-armed one-shot
+decisions; the "acker" finishes captured spooled tasks; expiry rewrites the
+stored task's ExpiryTime. Between actions the SUT quiesces (all goroutines
+parked or idle), making comparison deterministic.
+
+Findings and caveats:
+
+1. **Write parking must happen in pickPasses, not in the store.**
+   `taskQueueDB.CreateFairTasks` holds the taskQueueDB mutex across the
+   store call, and a completing read's merge takes that mutex (via
+   `setKnownFairBacklogCount`/`updateFairAckLevel`) while holding the
+   reader lock — so a slow store write delays read merges *and task
+   completions*. For the harness this was a deadlock; for production it's
+   a latency coupling worth knowing about.
+2. **Sensitivity scales with trace volume.** The runner generates uniform
+   random action sequences (fizzbee-mbt 0.2.0), so narrow multi-step races
+   need volume: re-introducing the 0b372d5e bug (drop expired tasks
+   instead of pre-acking) into fair_task_reader.go passes 200 traces (3s)
+   but is caught within a 20k-trace budget (~8s to failure) with the exact
+   historical signature (ack level stops advancing past an expired task).
+   Default is 2000 traces (~25s); crank `max-seq-runs` for a nightly run.
+3. **Collapsed actions exclude in-flight-write races by construction**:
+   the spec applies the store write inside WriterWriteOk, so races that
+   depend on "write applied at the store but not yet merged" (f534e74e)
+   are out of MBT scope — they remain covered by the m-series model
+   checking. Same for backoff-timer races (real wall-clock timer).
+4. fizzbee-mbt 0.2.0 gotchas, encoded in the test files: the plugin must
+   call `mbt.ParseFlags()` (otherwise its option-override flags default to
+   0 and silently force zero runs); the registry needs a no-op `"end"`
+   pseudo-action for graphs with terminal states; role dict keys are
+   compared as strings; top-level (non-role) state is not compared — put
+   all state in a role.
 
 ## Mutation results
 

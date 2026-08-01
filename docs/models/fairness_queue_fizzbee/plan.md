@@ -105,6 +105,12 @@ Milestones:
 > (m1: 6x). m2-m5 re-runs + the mutation suite are queued for a bigger
 > machine; run everything through `check.sh` (32G memory cap, one at a
 > time).
+>
+> MBT (post-review): `mbt/queue_mbt.fizz` + a Go adapter in
+> `service/matching/fizz_mbt_*_test.go` run generated traces against the
+> REAL fairTaskReader/fairTaskWriter with full-state comparison after every
+> action; 2000 traces in ~25s, green. Reverting 0b372d5e in the real code
+> is caught by a 20k-trace budget. Details + caveats in README.md.
 
 ## Modeling conventions (all milestones)
 
