@@ -1,13 +1,12 @@
 ---
-# Milestone 2: M1 + concurrent writer (reliable DB).
-# Adds: fairTaskWriter.writeBatch (pin ack levels -> pick levels -> write ->
-# merge -> unpin), mergeWrite mode with the bypass/eviction logic,
-# newlyWrittenTasks buffering when a write races a pending read, and the
-# ack-level pinning rules in ackLevelPinnedLocked/advanceAckLevelLocked.
-#
-# The DB starts empty; every task is created by the writer, at any unused
-# level above the current (pinned) ack level — levels are NOT monotonic
-# across writes, that's the point of the fair queue.
+# Milestone 3: M2 + expired tasks.
+# A task sitting in the DB may expire at any time (nondeterministic,
+# monotonic — no clock is modeled). Expired tasks read from the DB are passed
+# through mergeTasksLocked and added as pre-acked (nil) entries so they
+# advance readLevel/ackLevel and get GC'd (fix 0b372d5e). A task that expires
+# while already loaded is simply completed by the acker (in the real system
+# the matcher drops it at dispatch time and completeTask runs), so it needs
+# no extra handling here.
 options:
   max_actions: 100
   max_concurrent_actions: 2
@@ -16,7 +15,10 @@ deadlock_detection: false   # "all written tasks acked" is a valid final state
 liveness: strict
 ---
 
-MAX_LEVEL = 4    # universe of task levels: 1..MAX_LEVEL, each used at most once
+MAX_LEVEL = 3    # universe of task levels: 1..MAX_LEVEL, each used at most once
+                 # (4 exceeds a 32G memory budget once expiry is added; the
+                 # expiry scenarios need exactly 3: a full batch of expired
+                 # tasks plus one live task beyond it)
 BATCH_SIZE = 2   # config.GetTasksBatchSize()
 RELOAD_AT = 1    # config.GetTasksReloadAt(): read more iff loaded <= RELOAD_AT
 
@@ -66,6 +68,8 @@ action Init:
     used_levels = set()    # levels ever allocated by the writer (ids unique)
     confirmed = set()      # tasks whose write was confirmed to the writer
     ever_acked = set()     # tasks that were acked at least once
+    expired = set()        # tasks that have expired (monotonic)
+    ever_preacked = False  # an expired task was merged as pre-acked (sanity)
     stuck_detected = False # the "fair reader stuck" softassert fired
     ever_evicted = False   # a loaded task was evicted (sanity/exists)
 
@@ -163,10 +167,16 @@ atomic func merge_tasks(tasks, mode):
         outstanding.pop(t)
         evicted_any = True
 
-    # add the kept incoming tasks to memory
+    # add the kept incoming tasks to memory; expired tasks are added as
+    # pre-acked (nil) entries so they advance readLevel/ackLevel and get
+    # GC'd instead of being delivered to the matcher (fix 0b372d5e)
     for t in keep:
         if t not in outstanding:
-            outstanding[t] = LOADED
+            if t in expired:
+                outstanding[t] = ACKED
+                ever_preacked = True
+            else:
+                outstanding[t] = LOADED
 
     # advance ack level (matters for expired/pre-acked entries, M3+)
     advance_ack()
@@ -249,11 +259,17 @@ atomic fair action WriterMergeWrite:
     else:
         merge_tasks(write_req, MODE_WRITE)
         # "fair reader stuck" softassert (fair_task_reader.go mergeTasks),
-        # plus the defensive backstop read the real code performs. In M2
-        # (no failures, no expired tasks) this state is unreachable — see
-        # the NeverDetectsStuck assertion. In M3+ it IS reachable (via
-        # expired tasks merged from a write while the ack level is pinned)
-        # and the backstop read is what rescues liveness.
+        # plus the defensive backstop read the real code performs.
+        #
+        # FINDING (M3): unlike M2, this state IS reachable once tasks can
+        # expire: with only pre-acked entries in memory (loaded == 0), a
+        # write whose task expired in flight merges as pre-acked while the
+        # ack level is pinned; readLevel regresses, the older acks get
+        # evicted, atEnd goes false, and nothing is loaded. The softassert
+        # fires in the real code, and the backstop read is load-bearing:
+        # without it the reader never reads again and later writes above
+        # readLevel are dropped from memory forever (liveness violation).
+        # See StuckStateReachable below.
         lc = loaded_count()
         if not at_end and lc == 0:
             stuck_detected = True
@@ -267,6 +283,17 @@ atomic fair action WriterUnpin:
     pinned_by_writer = False   # softassert: was pinned
     advance_ack()
     writer_state = WS.IDLE
+
+###############################################################################
+# expiry: any task still sitting in the DB may expire at any time
+###############################################################################
+
+atomic action ExpireTask:
+    # unfair: expiry may or may not happen
+    candidates = [t for t in db_tasks if t not in expired and t not in ever_acked]
+    require len(candidates) > 0
+    t = oneof candidates
+    expired.add(t)
 
 ###############################################################################
 # acker process: eventually acks every loaded task
@@ -344,30 +371,35 @@ always assertion WindowComplete:
     return True
 
 always assertion AckLevelOnlyPassesAcked:
-    # if the ack level moved past a confirmed task, it must have been acked
+    # if the ack level moved past a confirmed task, it must have been
+    # acked or expired
     for t in confirmed:
-        if t <= ack_level and t not in ever_acked:
+        if t <= ack_level and t not in ever_acked and t not in expired:
             return False
     return True
 
 always assertion NoUnackedTaskDeleted:
-    # a confirmed task can only leave the DB (GC) after having been acked
+    # a confirmed task can only leave the DB (GC) after being acked/expiring
     for t in confirmed:
-        if t not in db_tasks and t not in ever_acked:
+        if t not in db_tasks and t not in ever_acked and t not in expired:
             return False
     return True
 
-always assertion NeverDetectsStuck:
-    # the "fair reader stuck" defensive softassert never fires
-    return not stuck_detected
+# In M2 this was `always NeverDetectsStuck`. With expired tasks the stuck
+# state is genuinely reachable (the softassert fires in production code);
+# document that as a reachability check instead. Liveness still must hold,
+# proving the defensive backstop read recovers from it.
+exists assertion StuckStateReachable:
+    return stuck_detected
 
 transition assertion AckLevelMonotonic(before, after):
     return after.ack_level >= before.ack_level
 
-# main liveness property: every confirmed task is eventually acked and the
-# ack level eventually passes every confirmed task (reader never gets stuck)
+# main liveness property: every confirmed task is eventually acked-or-expired
+# and the ack level eventually passes every confirmed task (reader never gets
+# stuck — in particular not on a batch of entirely expired tasks)
 eventually always assertion AllConfirmedTasksAcked:
-    remaining = len([t for t in confirmed if t not in ever_acked])
+    remaining = len([t for t in confirmed if t not in ever_acked and t not in expired])
     behind = len([t for t in confirmed if t > ack_level])
     return remaining == 0 and behind == 0
 
@@ -386,3 +418,6 @@ exists assertion GcDeletedSomething:
 
 exists assertion ReachesEnd:
     return at_end
+
+exists assertion ExpiredTaskPreAcked:
+    return ever_preacked

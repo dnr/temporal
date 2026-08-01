@@ -89,6 +89,14 @@ we'll implement them one by one.
 
 Milestones:
 
+> Status: M1-M5 implemented (`m1.fizz`..`m5.fizz`), mutation suite in
+> `mutations/` (run with `mutations/run.sh`), notes and results in
+> `README.md`. M2 originally asserted the "fair reader stuck" softassert
+> state unreachable; M3 (expiry) proved it reachable and that the code's
+> defensive backstop read is load-bearing on that path — models now include
+> the backstop, matching the code. M6 is folded into per-milestone mutation
+> files plus README documentation; M7 (restart) not started.
+
 ## Modeling conventions (all milestones)
 
 - Levels are single small integers (no <pass, id> pair). The DB sorts by level.
