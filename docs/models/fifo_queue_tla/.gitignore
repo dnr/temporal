@@ -1,0 +1,5 @@
+*.old
+states/
+mut_tmp.cfg
+PriQueue_TTrace_*.tla
+PriQueue_TTrace_*.bin
