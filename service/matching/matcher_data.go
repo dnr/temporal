@@ -235,7 +235,14 @@ type matcherData struct {
 
 // newMatcherData creates a new matcherData. onRateLimited is called each time a dispatch
 // is blocked by the rate limiter (whole-queue or per-key).
-func newMatcherData(config *taskQueueConfig, logger log.Logger, timeSource clock.TimeSource, canForward bool, rateLimitManager *rateLimitManager, onRateLimited func()) matcherData {
+func newMatcherData(
+	config *taskQueueConfig,
+	logger log.Logger,
+	timeSource clock.TimeSource,
+	canForward bool,
+	rateLimitManager *rateLimitManager,
+	onRateLimited func(),
+) matcherData {
 	return matcherData{
 		config:           config,
 		logger:           logger,
