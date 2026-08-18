@@ -103,6 +103,8 @@ type (
 
 		// rateLimitManager is used to manage the rate limit for task queues.
 		rateLimitManager *rateLimitManager
+		// flow control manager
+		fcManager *fcManager
 
 		scaleManager *scaleManager
 
@@ -139,7 +141,12 @@ func newTaskQueuePartitionManager(
 	rateLimitManager := newRateLimitManager(
 		userDataManager,
 		tqConfig,
-		partition.TaskQueue().TaskType())
+		partition.TaskQueue().TaskType(),
+	)
+	fcManager := newFlowControlManager(
+		userDataManager,
+		partition.TaskQueue().TaskType(),
+	)
 
 	var taskHooks []hooks.TaskHook
 	for _, hookFactory := range e.taskHookFactories {
@@ -190,6 +197,7 @@ func newTaskQueuePartitionManager(
 		versionedQueues:       make(map[PhysicalTaskQueueVersion]physicalTaskQueueManager),
 		userDataManager:       userDataManager,
 		rateLimitManager:      rateLimitManager,
+		fcManager:             fcManager,
 		scaleManager:          scaleManager,
 		defaultQueueFuture:    future.NewFuture[physicalTaskQueueManager](),
 		autoEnableRateLimiter: quotas.NewRateLimiter(1.0/60, 1),
