@@ -79,6 +79,8 @@ type (
 		// max(taskDirectiveRevisionNumber, routingConfigRevisionNumber) for the task.
 		taskDispatchRevisionNumber    int64
 		targetWorkerDeploymentVersion *deploymentspb.WorkerDeploymentVersion
+		// flow control limiters:
+		limiters *fcLimiters
 
 		// The following fields are for use by priMatcher/matcherData:
 		waitableMatchResult
