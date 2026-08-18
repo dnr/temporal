@@ -3627,6 +3627,21 @@ func buildRateLimitConfig(update *workflowservice.UpdateTaskQueueConfigRequest_R
 	}
 }
 
+func buildConcurrencyLimitConfig(update *workflowservice.UpdateTaskQueueConfigRequest_ConcurrencyLimitUpdate, updateTime *timestamppb.Timestamp, updateIdentity string) *taskqueuepb.ConcurrencyLimitConfig {
+	var concurrencyLimit *taskqueuepb.ConcurrencyLimit
+	if limit := update.GetConcurrencyLimit(); limit != nil {
+		concurrencyLimit = &taskqueuepb.ConcurrencyLimit{ConcurrentTasks: limit.ConcurrentTasks}
+	}
+	return &taskqueuepb.ConcurrencyLimitConfig{
+		ConcurrencyLimit: concurrencyLimit,
+		Metadata: &taskqueuepb.ConfigMetadata{
+			Reason:         update.GetReason(),
+			UpdateTime:     updateTime,
+			UpdateIdentity: updateIdentity,
+		},
+	}
+}
+
 func prepareTaskQueueUserData(
 	tqud *persistencespb.TaskQueueUserData,
 	taskQueueType enumspb.TaskQueueType,
@@ -3744,6 +3759,11 @@ func (e *matchingEngineImpl) UpdateTaskQueueConfig(
 			// Fairness Queue Rate Limit
 			if fkrl := updateTaskQueueConfig.GetUpdateFairnessKeyRateLimitDefault(); fkrl != nil {
 				cfg.FairnessKeysRateLimitDefault = buildRateLimitConfig(fkrl, protoTs, updateIdentity)
+			}
+
+			// Queue Concurrency Limit
+			if qcl := updateTaskQueueConfig.GetUpdateQueueConcurrencyLimit(); qcl != nil {
+				cfg.QueueConcurrencyLimit = buildConcurrencyLimitConfig(qcl, protoTs, updateIdentity)
 			}
 
 			// Fairness Weight Overrides
