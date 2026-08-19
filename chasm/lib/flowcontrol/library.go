@@ -2,14 +2,20 @@ package flowcontrol
 
 import (
 	"go.temporal.io/server/chasm"
+	fcpb "go.temporal.io/server/chasm/lib/flowcontrol/gen/flowcontrolpb/v1"
+	"google.golang.org/grpc"
 )
 
 type library struct {
 	chasm.UnimplementedLibrary
+
+	concurrencyHandler *concurrencyHandler
 }
 
-func newLibrary() *library {
-	return &library{}
+func newLibrary(handler *concurrencyHandler) *library {
+	return &library{
+		concurrencyHandler: handler,
+	}
 }
 
 func (l *library) Name() string {
@@ -25,11 +31,11 @@ func (l *library) Components() []*chasm.RegistrableComponent {
 	}
 }
 
-// TODO: do we need any tasks?
+// TODO(fc): add tasks for notification backoff
 // func (l *library) Tasks() []*chasm.RegistrableTask {
 // 	return nil
 // }
 
-// TODO: add grpc handlers
-// func (l *library) RegisterServices(s *grpc.Server) {
-// }
+func (l *library) RegisterServices(s *grpc.Server) {
+	s.RegisterService(&fcpb.ConcurrencyService_ServiceDesc, l.concurrencyHandler)
+}

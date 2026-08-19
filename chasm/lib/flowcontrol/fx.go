@@ -5,23 +5,13 @@ import (
 	"go.uber.org/fx"
 )
 
-var HistoryModule = fx.Module(
-	"flowcontrol-history",
+var Module = fx.Module(
+	"flowcontrol",
 	fx.Provide(
-		// TODO: newHandler,
+		newConcurrencyHandler,
 		newLibrary,
 	),
 	fx.Invoke(func(l *library, registry *chasm.Registry) error {
 		return registry.Register(l)
 	}),
 )
-
-// TODO: add rpcs
-// var FrontendModule = fx.Module(
-// 	"flowcontrol-frontend",
-// 	fx.Provide(newHandler),
-// 	fx.Provide(newLibrary),
-// 	fx.Invoke(func(l *library, registry *chasm.Registry) error {
-// 		return registry.Register(l)
-// 	}),
-// )

@@ -3,19 +3,76 @@ syntax = "proto3";
 package temporal.server.chasm.lib.flowcontrol.proto.v1;
 
 import "google/protobuf/timestamp.proto";
+import "temporal/server/api/common/v1/api_category.proto";
+import "temporal/server/api/routing/v1/extension.proto";
 
 option go_package = "go.temporal.io/server/chasm/lib/flowcontrol/gen/fcpb;fcpb";
 
 message ConcurrencyState {
   int32 limit = 1;
-  repeated Slot slots = 2;
+  repeated ConcurrencySlot slots = 2;
 }
 
-message Slot {
+message ConcurrencySlot {
   // Task UUID of task.
   string task_uuid = 1;
   // Whether slot is committed or only reserved. Reserved slots must have an expiry time.
   bool committed = 2;
   // Expiry time for reserved slot.
   google.protobuf.Timestamp expires = 3;
+}
+
+message ConcurrencyReserveRequest {
+  string namespace_id = 1;
+  string key = 2;
+  string task_uuid = 3;
+}
+
+message ConcurrencyReserveResponse {
+}
+
+message ConcurrencyCancelReservationRequest {
+  string namespace_id = 1;
+  string key = 2;
+  string task_uuid = 3;
+}
+
+message ConcurrencyCancelReservationResponse {
+}
+
+message ConcurrencyCommitRequest {
+  string namespace_id = 1;
+  string key = 2;
+  string task_uuid = 3;
+}
+
+message ConcurrencyCommitResponse {
+}
+
+message ConcurrencyReleaseRequest {
+  string namespace_id = 1;
+  string key = 2;
+  string task_uuid = 3;
+}
+
+message ConcurrencyReleaseResponse {
+}
+
+service ConcurrencyService {
+  rpc Reserve(ConcurrencyReserveRequest) returns (ConcurrencyReserveResponse) {
+    option (temporal.server.api.routing.v1.routing).business_id = "key";
+    option (temporal.server.api.common.v1.api_category).category = API_CATEGORY_STANDARD;
+  };
+  rpc CancelReservation(ConcurrencyCancelReservationRequest) returns (ConcurrencyCancelReservationResponse) {
+    option (temporal.server.api.routing.v1.routing).business_id = "key";
+    option (temporal.server.api.common.v1.api_category).category = API_CATEGORY_STANDARD;
+  };
+  rpc Commit(ConcurrencyCommitRequest) returns (ConcurrencyCommitResponse) {
+    option (temporal.server.api.routing.v1.routing).business_id = "key";
+    option (temporal.server.api.common.v1.api_category).category = API_CATEGORY_STANDARD;
+  };
+  rpc Release(ConcurrencyReleaseRequest) returns (ConcurrencyReleaseResponse) {
+    option (temporal.server.api.routing.v1.routing).business_id = "key";
+    option (temporal.server.api.common.v1.api_category).category = API_CATEGORY_STANDARD;
+  };
 }
