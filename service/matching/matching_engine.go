@@ -29,6 +29,7 @@ import (
 	replicationspb "go.temporal.io/server/api/replication/v1"
 	taskqueuespb "go.temporal.io/server/api/taskqueue/v1"
 	tokenspb "go.temporal.io/server/api/token/v1"
+	fcpb "go.temporal.io/server/chasm/lib/flowcontrol/gen/flowcontrolpb/v1"
 	"go.temporal.io/server/client/matching"
 	"go.temporal.io/server/common"
 	"go.temporal.io/server/common/backoff"
@@ -286,6 +287,7 @@ func NewEngine(
 	historySerializer serialization.Serializer,
 	taskHookFactories []hooks.TaskHookFactory,
 	partitionScalerFactory PartitionScalerFactory,
+	concurrencyServiceClient fcpb.ConcurrencyServiceClient,
 ) Engine {
 	scopedMetricsHandler := metricsHandler.WithTags(metrics.OperationTag(metrics.MatchingEngineScope))
 	e := &matchingEngineImpl{
@@ -331,7 +333,9 @@ func NewEngine(
 		rateLimiter:               rateLimiter,
 		taskHookFactories:         taskHookFactories,
 		partitionScalerFactory:    partitionScalerFactory,
-		fcReadiness:               newFcReadiness(),
+		fcReadiness: newFcReadiness(
+			concurrencyServiceClient,
+		),
 	}
 	e.nexusEndpointsOwnershipLostCh.Store(make(chan struct{}))
 	e.reachabilityCache = newReachabilityCache(
@@ -777,7 +781,7 @@ pollLoop:
 
 		// The task returned by pollTask is likely to be allowed by flow control.
 		// We need to run the flow control commit protocol.
-		fctx, err := e.fcReadiness.NewTx(task)
+		fctx, err := e.fcReadiness.NewTx(ctx, task)
 		if err != nil {
 			e.nonRetryableErrorsDropTask(task, taskQueueName, err)
 			// drop the task as otherwise task would be stuck in a retry-loop
@@ -1028,7 +1032,7 @@ pollLoop:
 
 		// The task returned by pollTask is likely to be allowed by flow control.
 		// We need to run the flow control commit protocol.
-		fctx, err := e.fcReadiness.NewTx(task)
+		fctx, err := e.fcReadiness.NewTx(ctx, task)
 		if err != nil {
 			e.nonRetryableErrorsDropTask(task, taskQueueName, err)
 			// drop the task as otherwise task would be stuck in a retry-loop

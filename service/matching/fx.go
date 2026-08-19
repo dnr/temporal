@@ -2,6 +2,7 @@ package matching
 
 import (
 	"go.temporal.io/server/chasm"
+	"go.temporal.io/server/chasm/lib/flowcontrol"
 	"go.temporal.io/server/common"
 	"go.temporal.io/server/common/cluster"
 	"go.temporal.io/server/common/config"
@@ -31,6 +32,7 @@ import (
 var Module = fx.Options(
 	resource.Module,
 	workerdeployment.Module,
+	flowcontrol.MatchingModule,
 	fx.Provide(ConfigProvider),
 	fx.Provide(PersistenceRateLimitingParamsProvider),
 	service.PersistenceLazyLoadedServiceResolverModule,

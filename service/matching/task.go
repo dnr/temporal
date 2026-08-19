@@ -1,10 +1,13 @@
 package matching
 
 import (
+	"bytes"
 	"context"
+	"encoding/binary"
 	"sync/atomic"
 	"time"
 
+	"github.com/google/uuid"
 	commonpb "go.temporal.io/api/common/v1"
 	taskqueuepb "go.temporal.io/api/taskqueue/v1"
 	deploymentspb "go.temporal.io/server/api/deployment/v1"
@@ -290,6 +293,26 @@ func (task *internalTask) workflowExecution() *commonpb.WorkflowExecution {
 		return task.started.activityTaskInfo.WorkflowExecution
 	}
 	return &commonpb.WorkflowExecution{}
+}
+
+// Returns a UUID for the task that's the same whether it came from history or backlog.
+// The UUID is specific to the attempt.
+// FIXME: need to move this to common for release
+// FIXME: need to improve this or generate uuid
+func (task *internalTask) taskUUID() string {
+	if task.event == nil {
+		return "" // FIXME: not sure what to do here
+	}
+	data := task.event.Data
+	join := bytes.Join([][]byte{
+		[]byte(data.GetWorkflowId()),
+		[]byte(data.GetRunId()),
+		binary.LittleEndian.AppendUint64(nil, uint64(data.GetScheduledEventId())),
+		data.GetComponentRef(),
+		binary.LittleEndian.AppendUint32(nil, uint32(data.GetStamp())),
+	}, []byte{0})
+	return uuid.NewSHA1(uuid.NameSpaceURL, join).String()
+
 }
 
 // pollWorkflowTaskQueueResponse returns the poll response for a workflow task that is

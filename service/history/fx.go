@@ -127,7 +127,7 @@ var Module = fx.Options(
 	chasmnexus.Module,
 	chasmworkflow.Module,
 	chasmworkflow.HistoryHandlerModule,
-	flowcontrol.Module,
+	flowcontrol.HistoryModule,
 )
 
 func ServerProvider(grpcServerOptions []grpc.ServerOption) *grpc.Server {

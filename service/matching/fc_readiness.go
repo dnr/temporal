@@ -1,10 +1,12 @@
 package matching
 
 import (
+	"context"
 	"errors"
 
 	enumsspb "go.temporal.io/server/api/enums/v1"
 	taskqueuespb "go.temporal.io/server/api/taskqueue/v1"
+	fcpb "go.temporal.io/server/chasm/lib/flowcontrol/gen/flowcontrolpb/v1"
 )
 
 type fcTxState int8
@@ -18,6 +20,7 @@ const (
 )
 
 type fcReadiness struct {
+	concurrencyServiceClient fcpb.ConcurrencyServiceClient
 }
 
 type fcTx struct {
@@ -27,11 +30,15 @@ type fcTx struct {
 	state      [maxLimiters]fcTxState
 }
 
-func newFcReadiness() *fcReadiness {
-	return &fcReadiness{}
+func newFcReadiness(
+	concurrencyServiceClient fcpb.ConcurrencyServiceClient,
+) *fcReadiness {
+	return &fcReadiness{
+		concurrencyServiceClient: concurrencyServiceClient,
+	}
 }
 
-func (r *fcReadiness) NewTx(task *internalTask) (*fcTx, error) {
+func (r *fcReadiness) NewTx(ctx context.Context, task *internalTask) (*fcTx, error) {
 	lims := canonicalLimiters(task)
 	if len(lims) == 0 {
 		return nil, nil
@@ -43,8 +50,10 @@ func (r *fcReadiness) NewTx(task *internalTask) (*fcTx, error) {
 		switch lim.tp {
 		case enumsspb.LIMITER_TYPE_CONCURRENCY:
 			committers[i] = &fcConcurrencyCommitter{
-				task: task,
-				key:  lim.key,
+				client: r.concurrencyServiceClient,
+				ctx:    ctx,
+				task:   task,
+				key:    lim.key,
 			}
 			refs[i] = &taskqueuespb.LimiterRef{
 				LimiterType: lim.tp,
