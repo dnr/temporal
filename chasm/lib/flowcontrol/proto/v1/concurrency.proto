@@ -1,0 +1,21 @@
+syntax = "proto3";
+
+package temporal.server.chasm.lib.flowcontrol.proto.v1;
+
+import "google/protobuf/timestamp.proto";
+
+option go_package = "go.temporal.io/server/chasm/lib/flowcontrol/gen/fcpb;fcpb";
+
+message ConcurrencyState {
+  int32 limit = 1;
+  repeated Slot slots = 2;
+}
+
+message Slot {
+  // Task UUID of task.
+  string task_uuid = 1;
+  // Whether slot is committed or only reserved. Reserved slots must have an expiry time.
+  bool committed = 2;
+  // Expiry time for reserved slot.
+  google.protobuf.Timestamp expires = 3;
+}
