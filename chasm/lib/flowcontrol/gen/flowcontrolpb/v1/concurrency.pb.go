@@ -140,18 +140,65 @@ func (x *ConcurrencySlot) GetExpires() *timestamppb.Timestamp {
 	return nil
 }
 
-type ConcurrencyReserveRequest struct {
+type ConcurrencyLimitUpdate struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	NamespaceId   string                 `protobuf:"bytes,1,opt,name=namespace_id,json=namespaceId,proto3" json:"namespace_id,omitempty"`
-	Key           string                 `protobuf:"bytes,2,opt,name=key,proto3" json:"key,omitempty"`
-	TaskUuid      string                 `protobuf:"bytes,3,opt,name=task_uuid,json=taskUuid,proto3" json:"task_uuid,omitempty"`
+	Limit         int32                  `protobuf:"varint,1,opt,name=limit,proto3" json:"limit,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ConcurrencyLimitUpdate) Reset() {
+	*x = ConcurrencyLimitUpdate{}
+	mi := &file_temporal_server_chasm_lib_flowcontrol_proto_v1_concurrency_proto_msgTypes[2]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ConcurrencyLimitUpdate) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ConcurrencyLimitUpdate) ProtoMessage() {}
+
+func (x *ConcurrencyLimitUpdate) ProtoReflect() protoreflect.Message {
+	mi := &file_temporal_server_chasm_lib_flowcontrol_proto_v1_concurrency_proto_msgTypes[2]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ConcurrencyLimitUpdate.ProtoReflect.Descriptor instead.
+func (*ConcurrencyLimitUpdate) Descriptor() ([]byte, []int) {
+	return file_temporal_server_chasm_lib_flowcontrol_proto_v1_concurrency_proto_rawDescGZIP(), []int{2}
+}
+
+func (x *ConcurrencyLimitUpdate) GetLimit() int32 {
+	if x != nil {
+		return x.Limit
+	}
+	return 0
+}
+
+type ConcurrencyReserveRequest struct {
+	state       protoimpl.MessageState `protogen:"open.v1"`
+	NamespaceId string                 `protobuf:"bytes,1,opt,name=namespace_id,json=namespaceId,proto3" json:"namespace_id,omitempty"`
+	Key         string                 `protobuf:"bytes,2,opt,name=key,proto3" json:"key,omitempty"`
+	TaskUuid    string                 `protobuf:"bytes,3,opt,name=task_uuid,json=taskUuid,proto3" json:"task_uuid,omitempty"`
+	// For whole-task-queue limits, the initial limit and updates to the limit come through task
+	// queue config, so we need to pass them to the chasm object. We just do it on every Reserve.
+	LimitUpdate   *ConcurrencyLimitUpdate `protobuf:"bytes,4,opt,name=limit_update,json=limitUpdate,proto3" json:"limit_update,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *ConcurrencyReserveRequest) Reset() {
 	*x = ConcurrencyReserveRequest{}
-	mi := &file_temporal_server_chasm_lib_flowcontrol_proto_v1_concurrency_proto_msgTypes[2]
+	mi := &file_temporal_server_chasm_lib_flowcontrol_proto_v1_concurrency_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -163,7 +210,7 @@ func (x *ConcurrencyReserveRequest) String() string {
 func (*ConcurrencyReserveRequest) ProtoMessage() {}
 
 func (x *ConcurrencyReserveRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_temporal_server_chasm_lib_flowcontrol_proto_v1_concurrency_proto_msgTypes[2]
+	mi := &file_temporal_server_chasm_lib_flowcontrol_proto_v1_concurrency_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -176,7 +223,7 @@ func (x *ConcurrencyReserveRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ConcurrencyReserveRequest.ProtoReflect.Descriptor instead.
 func (*ConcurrencyReserveRequest) Descriptor() ([]byte, []int) {
-	return file_temporal_server_chasm_lib_flowcontrol_proto_v1_concurrency_proto_rawDescGZIP(), []int{2}
+	return file_temporal_server_chasm_lib_flowcontrol_proto_v1_concurrency_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *ConcurrencyReserveRequest) GetNamespaceId() string {
@@ -200,6 +247,13 @@ func (x *ConcurrencyReserveRequest) GetTaskUuid() string {
 	return ""
 }
 
+func (x *ConcurrencyReserveRequest) GetLimitUpdate() *ConcurrencyLimitUpdate {
+	if x != nil {
+		return x.LimitUpdate
+	}
+	return nil
+}
+
 type ConcurrencyReserveResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields
@@ -208,7 +262,7 @@ type ConcurrencyReserveResponse struct {
 
 func (x *ConcurrencyReserveResponse) Reset() {
 	*x = ConcurrencyReserveResponse{}
-	mi := &file_temporal_server_chasm_lib_flowcontrol_proto_v1_concurrency_proto_msgTypes[3]
+	mi := &file_temporal_server_chasm_lib_flowcontrol_proto_v1_concurrency_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -220,7 +274,7 @@ func (x *ConcurrencyReserveResponse) String() string {
 func (*ConcurrencyReserveResponse) ProtoMessage() {}
 
 func (x *ConcurrencyReserveResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_temporal_server_chasm_lib_flowcontrol_proto_v1_concurrency_proto_msgTypes[3]
+	mi := &file_temporal_server_chasm_lib_flowcontrol_proto_v1_concurrency_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -233,7 +287,7 @@ func (x *ConcurrencyReserveResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ConcurrencyReserveResponse.ProtoReflect.Descriptor instead.
 func (*ConcurrencyReserveResponse) Descriptor() ([]byte, []int) {
-	return file_temporal_server_chasm_lib_flowcontrol_proto_v1_concurrency_proto_rawDescGZIP(), []int{3}
+	return file_temporal_server_chasm_lib_flowcontrol_proto_v1_concurrency_proto_rawDescGZIP(), []int{4}
 }
 
 type ConcurrencyCancelReservationRequest struct {
@@ -247,7 +301,7 @@ type ConcurrencyCancelReservationRequest struct {
 
 func (x *ConcurrencyCancelReservationRequest) Reset() {
 	*x = ConcurrencyCancelReservationRequest{}
-	mi := &file_temporal_server_chasm_lib_flowcontrol_proto_v1_concurrency_proto_msgTypes[4]
+	mi := &file_temporal_server_chasm_lib_flowcontrol_proto_v1_concurrency_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -259,7 +313,7 @@ func (x *ConcurrencyCancelReservationRequest) String() string {
 func (*ConcurrencyCancelReservationRequest) ProtoMessage() {}
 
 func (x *ConcurrencyCancelReservationRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_temporal_server_chasm_lib_flowcontrol_proto_v1_concurrency_proto_msgTypes[4]
+	mi := &file_temporal_server_chasm_lib_flowcontrol_proto_v1_concurrency_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -272,7 +326,7 @@ func (x *ConcurrencyCancelReservationRequest) ProtoReflect() protoreflect.Messag
 
 // Deprecated: Use ConcurrencyCancelReservationRequest.ProtoReflect.Descriptor instead.
 func (*ConcurrencyCancelReservationRequest) Descriptor() ([]byte, []int) {
-	return file_temporal_server_chasm_lib_flowcontrol_proto_v1_concurrency_proto_rawDescGZIP(), []int{4}
+	return file_temporal_server_chasm_lib_flowcontrol_proto_v1_concurrency_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *ConcurrencyCancelReservationRequest) GetNamespaceId() string {
@@ -304,7 +358,7 @@ type ConcurrencyCancelReservationResponse struct {
 
 func (x *ConcurrencyCancelReservationResponse) Reset() {
 	*x = ConcurrencyCancelReservationResponse{}
-	mi := &file_temporal_server_chasm_lib_flowcontrol_proto_v1_concurrency_proto_msgTypes[5]
+	mi := &file_temporal_server_chasm_lib_flowcontrol_proto_v1_concurrency_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -316,7 +370,7 @@ func (x *ConcurrencyCancelReservationResponse) String() string {
 func (*ConcurrencyCancelReservationResponse) ProtoMessage() {}
 
 func (x *ConcurrencyCancelReservationResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_temporal_server_chasm_lib_flowcontrol_proto_v1_concurrency_proto_msgTypes[5]
+	mi := &file_temporal_server_chasm_lib_flowcontrol_proto_v1_concurrency_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -329,7 +383,7 @@ func (x *ConcurrencyCancelReservationResponse) ProtoReflect() protoreflect.Messa
 
 // Deprecated: Use ConcurrencyCancelReservationResponse.ProtoReflect.Descriptor instead.
 func (*ConcurrencyCancelReservationResponse) Descriptor() ([]byte, []int) {
-	return file_temporal_server_chasm_lib_flowcontrol_proto_v1_concurrency_proto_rawDescGZIP(), []int{5}
+	return file_temporal_server_chasm_lib_flowcontrol_proto_v1_concurrency_proto_rawDescGZIP(), []int{6}
 }
 
 type ConcurrencyCommitRequest struct {
@@ -343,7 +397,7 @@ type ConcurrencyCommitRequest struct {
 
 func (x *ConcurrencyCommitRequest) Reset() {
 	*x = ConcurrencyCommitRequest{}
-	mi := &file_temporal_server_chasm_lib_flowcontrol_proto_v1_concurrency_proto_msgTypes[6]
+	mi := &file_temporal_server_chasm_lib_flowcontrol_proto_v1_concurrency_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -355,7 +409,7 @@ func (x *ConcurrencyCommitRequest) String() string {
 func (*ConcurrencyCommitRequest) ProtoMessage() {}
 
 func (x *ConcurrencyCommitRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_temporal_server_chasm_lib_flowcontrol_proto_v1_concurrency_proto_msgTypes[6]
+	mi := &file_temporal_server_chasm_lib_flowcontrol_proto_v1_concurrency_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -368,7 +422,7 @@ func (x *ConcurrencyCommitRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ConcurrencyCommitRequest.ProtoReflect.Descriptor instead.
 func (*ConcurrencyCommitRequest) Descriptor() ([]byte, []int) {
-	return file_temporal_server_chasm_lib_flowcontrol_proto_v1_concurrency_proto_rawDescGZIP(), []int{6}
+	return file_temporal_server_chasm_lib_flowcontrol_proto_v1_concurrency_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *ConcurrencyCommitRequest) GetNamespaceId() string {
@@ -400,7 +454,7 @@ type ConcurrencyCommitResponse struct {
 
 func (x *ConcurrencyCommitResponse) Reset() {
 	*x = ConcurrencyCommitResponse{}
-	mi := &file_temporal_server_chasm_lib_flowcontrol_proto_v1_concurrency_proto_msgTypes[7]
+	mi := &file_temporal_server_chasm_lib_flowcontrol_proto_v1_concurrency_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -412,7 +466,7 @@ func (x *ConcurrencyCommitResponse) String() string {
 func (*ConcurrencyCommitResponse) ProtoMessage() {}
 
 func (x *ConcurrencyCommitResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_temporal_server_chasm_lib_flowcontrol_proto_v1_concurrency_proto_msgTypes[7]
+	mi := &file_temporal_server_chasm_lib_flowcontrol_proto_v1_concurrency_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -425,7 +479,7 @@ func (x *ConcurrencyCommitResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ConcurrencyCommitResponse.ProtoReflect.Descriptor instead.
 func (*ConcurrencyCommitResponse) Descriptor() ([]byte, []int) {
-	return file_temporal_server_chasm_lib_flowcontrol_proto_v1_concurrency_proto_rawDescGZIP(), []int{7}
+	return file_temporal_server_chasm_lib_flowcontrol_proto_v1_concurrency_proto_rawDescGZIP(), []int{8}
 }
 
 type ConcurrencyReleaseRequest struct {
@@ -439,7 +493,7 @@ type ConcurrencyReleaseRequest struct {
 
 func (x *ConcurrencyReleaseRequest) Reset() {
 	*x = ConcurrencyReleaseRequest{}
-	mi := &file_temporal_server_chasm_lib_flowcontrol_proto_v1_concurrency_proto_msgTypes[8]
+	mi := &file_temporal_server_chasm_lib_flowcontrol_proto_v1_concurrency_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -451,7 +505,7 @@ func (x *ConcurrencyReleaseRequest) String() string {
 func (*ConcurrencyReleaseRequest) ProtoMessage() {}
 
 func (x *ConcurrencyReleaseRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_temporal_server_chasm_lib_flowcontrol_proto_v1_concurrency_proto_msgTypes[8]
+	mi := &file_temporal_server_chasm_lib_flowcontrol_proto_v1_concurrency_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -464,7 +518,7 @@ func (x *ConcurrencyReleaseRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ConcurrencyReleaseRequest.ProtoReflect.Descriptor instead.
 func (*ConcurrencyReleaseRequest) Descriptor() ([]byte, []int) {
-	return file_temporal_server_chasm_lib_flowcontrol_proto_v1_concurrency_proto_rawDescGZIP(), []int{8}
+	return file_temporal_server_chasm_lib_flowcontrol_proto_v1_concurrency_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *ConcurrencyReleaseRequest) GetNamespaceId() string {
@@ -496,7 +550,7 @@ type ConcurrencyReleaseResponse struct {
 
 func (x *ConcurrencyReleaseResponse) Reset() {
 	*x = ConcurrencyReleaseResponse{}
-	mi := &file_temporal_server_chasm_lib_flowcontrol_proto_v1_concurrency_proto_msgTypes[9]
+	mi := &file_temporal_server_chasm_lib_flowcontrol_proto_v1_concurrency_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -508,7 +562,7 @@ func (x *ConcurrencyReleaseResponse) String() string {
 func (*ConcurrencyReleaseResponse) ProtoMessage() {}
 
 func (x *ConcurrencyReleaseResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_temporal_server_chasm_lib_flowcontrol_proto_v1_concurrency_proto_msgTypes[9]
+	mi := &file_temporal_server_chasm_lib_flowcontrol_proto_v1_concurrency_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -521,7 +575,7 @@ func (x *ConcurrencyReleaseResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ConcurrencyReleaseResponse.ProtoReflect.Descriptor instead.
 func (*ConcurrencyReleaseResponse) Descriptor() ([]byte, []int) {
-	return file_temporal_server_chasm_lib_flowcontrol_proto_v1_concurrency_proto_rawDescGZIP(), []int{9}
+	return file_temporal_server_chasm_lib_flowcontrol_proto_v1_concurrency_proto_rawDescGZIP(), []int{10}
 }
 
 var File_temporal_server_chasm_lib_flowcontrol_proto_v1_concurrency_proto protoreflect.FileDescriptor
@@ -535,11 +589,14 @@ const file_temporal_server_chasm_lib_flowcontrol_proto_v1_concurrency_proto_rawD
 	"\x0fConcurrencySlot\x12\x1b\n" +
 	"\ttask_uuid\x18\x01 \x01(\tR\btaskUuid\x12\x1c\n" +
 	"\tcommitted\x18\x02 \x01(\bR\tcommitted\x124\n" +
-	"\aexpires\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampR\aexpires\"m\n" +
+	"\aexpires\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampR\aexpires\".\n" +
+	"\x16ConcurrencyLimitUpdate\x12\x14\n" +
+	"\x05limit\x18\x01 \x01(\x05R\x05limit\"\xd8\x01\n" +
 	"\x19ConcurrencyReserveRequest\x12!\n" +
 	"\fnamespace_id\x18\x01 \x01(\tR\vnamespaceId\x12\x10\n" +
 	"\x03key\x18\x02 \x01(\tR\x03key\x12\x1b\n" +
-	"\ttask_uuid\x18\x03 \x01(\tR\btaskUuid\"\x1c\n" +
+	"\ttask_uuid\x18\x03 \x01(\tR\btaskUuid\x12i\n" +
+	"\flimit_update\x18\x04 \x01(\v2F.temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyLimitUpdateR\vlimitUpdate\"\x1c\n" +
 	"\x1aConcurrencyReserveResponse\"w\n" +
 	"#ConcurrencyCancelReservationRequest\x12!\n" +
 	"\fnamespace_id\x18\x01 \x01(\tR\vnamespaceId\x12\x10\n" +
@@ -574,36 +631,38 @@ func file_temporal_server_chasm_lib_flowcontrol_proto_v1_concurrency_proto_rawDe
 	return file_temporal_server_chasm_lib_flowcontrol_proto_v1_concurrency_proto_rawDescData
 }
 
-var file_temporal_server_chasm_lib_flowcontrol_proto_v1_concurrency_proto_msgTypes = make([]protoimpl.MessageInfo, 10)
+var file_temporal_server_chasm_lib_flowcontrol_proto_v1_concurrency_proto_msgTypes = make([]protoimpl.MessageInfo, 11)
 var file_temporal_server_chasm_lib_flowcontrol_proto_v1_concurrency_proto_goTypes = []any{
 	(*ConcurrencyState)(nil),                     // 0: temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyState
 	(*ConcurrencySlot)(nil),                      // 1: temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencySlot
-	(*ConcurrencyReserveRequest)(nil),            // 2: temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyReserveRequest
-	(*ConcurrencyReserveResponse)(nil),           // 3: temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyReserveResponse
-	(*ConcurrencyCancelReservationRequest)(nil),  // 4: temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyCancelReservationRequest
-	(*ConcurrencyCancelReservationResponse)(nil), // 5: temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyCancelReservationResponse
-	(*ConcurrencyCommitRequest)(nil),             // 6: temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyCommitRequest
-	(*ConcurrencyCommitResponse)(nil),            // 7: temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyCommitResponse
-	(*ConcurrencyReleaseRequest)(nil),            // 8: temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyReleaseRequest
-	(*ConcurrencyReleaseResponse)(nil),           // 9: temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyReleaseResponse
-	(*timestamppb.Timestamp)(nil),                // 10: google.protobuf.Timestamp
+	(*ConcurrencyLimitUpdate)(nil),               // 2: temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyLimitUpdate
+	(*ConcurrencyReserveRequest)(nil),            // 3: temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyReserveRequest
+	(*ConcurrencyReserveResponse)(nil),           // 4: temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyReserveResponse
+	(*ConcurrencyCancelReservationRequest)(nil),  // 5: temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyCancelReservationRequest
+	(*ConcurrencyCancelReservationResponse)(nil), // 6: temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyCancelReservationResponse
+	(*ConcurrencyCommitRequest)(nil),             // 7: temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyCommitRequest
+	(*ConcurrencyCommitResponse)(nil),            // 8: temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyCommitResponse
+	(*ConcurrencyReleaseRequest)(nil),            // 9: temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyReleaseRequest
+	(*ConcurrencyReleaseResponse)(nil),           // 10: temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyReleaseResponse
+	(*timestamppb.Timestamp)(nil),                // 11: google.protobuf.Timestamp
 }
 var file_temporal_server_chasm_lib_flowcontrol_proto_v1_concurrency_proto_depIdxs = []int32{
 	1,  // 0: temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyState.slots:type_name -> temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencySlot
-	10, // 1: temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencySlot.expires:type_name -> google.protobuf.Timestamp
-	2,  // 2: temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyService.Reserve:input_type -> temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyReserveRequest
-	4,  // 3: temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyService.CancelReservation:input_type -> temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyCancelReservationRequest
-	6,  // 4: temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyService.Commit:input_type -> temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyCommitRequest
-	8,  // 5: temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyService.Release:input_type -> temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyReleaseRequest
-	3,  // 6: temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyService.Reserve:output_type -> temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyReserveResponse
-	5,  // 7: temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyService.CancelReservation:output_type -> temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyCancelReservationResponse
-	7,  // 8: temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyService.Commit:output_type -> temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyCommitResponse
-	9,  // 9: temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyService.Release:output_type -> temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyReleaseResponse
-	6,  // [6:10] is the sub-list for method output_type
-	2,  // [2:6] is the sub-list for method input_type
-	2,  // [2:2] is the sub-list for extension type_name
-	2,  // [2:2] is the sub-list for extension extendee
-	0,  // [0:2] is the sub-list for field type_name
+	11, // 1: temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencySlot.expires:type_name -> google.protobuf.Timestamp
+	2,  // 2: temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyReserveRequest.limit_update:type_name -> temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyLimitUpdate
+	3,  // 3: temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyService.Reserve:input_type -> temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyReserveRequest
+	5,  // 4: temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyService.CancelReservation:input_type -> temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyCancelReservationRequest
+	7,  // 5: temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyService.Commit:input_type -> temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyCommitRequest
+	9,  // 6: temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyService.Release:input_type -> temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyReleaseRequest
+	4,  // 7: temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyService.Reserve:output_type -> temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyReserveResponse
+	6,  // 8: temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyService.CancelReservation:output_type -> temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyCancelReservationResponse
+	8,  // 9: temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyService.Commit:output_type -> temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyCommitResponse
+	10, // 10: temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyService.Release:output_type -> temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyReleaseResponse
+	7,  // [7:11] is the sub-list for method output_type
+	3,  // [3:7] is the sub-list for method input_type
+	3,  // [3:3] is the sub-list for extension type_name
+	3,  // [3:3] is the sub-list for extension extendee
+	0,  // [0:3] is the sub-list for field type_name
 }
 
 func init() { file_temporal_server_chasm_lib_flowcontrol_proto_v1_concurrency_proto_init() }
@@ -617,7 +676,7 @@ func file_temporal_server_chasm_lib_flowcontrol_proto_v1_concurrency_proto_init(
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_temporal_server_chasm_lib_flowcontrol_proto_v1_concurrency_proto_rawDesc), len(file_temporal_server_chasm_lib_flowcontrol_proto_v1_concurrency_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   10,
+			NumMessages:   11,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

@@ -6,8 +6,6 @@ import (
 	"go.temporal.io/server/chasm"
 	fcpb "go.temporal.io/server/chasm/lib/flowcontrol/gen/flowcontrolpb/v1"
 	"go.temporal.io/server/common/log"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 )
 
 type concurrencyHandler struct {
@@ -36,12 +34,12 @@ func (h *concurrencyHandler) Reserve(ctx context.Context, req *fcpb.ConcurrencyR
 		func(_ chasm.MutableContext, req *fcpb.ConcurrencyReserveRequest) (*concurrency, error) {
 			return &concurrency{
 				ConcurrencyState: &fcpb.ConcurrencyState{
-					Limit: 10, // FIXME: initial limit???
+					Limit: req.GetLimitUpdate().GetLimit(),
 				},
 			}, nil
 		},
 		func(c *concurrency, _ chasm.MutableContext, req *fcpb.ConcurrencyReserveRequest) (*fcpb.ConcurrencyReserveResponse, error) {
-			err := c.reserve(req.TaskUuid())
+			err := c.reserve(req.TaskUuid)
 			if err != nil {
 				return nil, err
 			}
@@ -52,23 +50,71 @@ func (h *concurrencyHandler) Reserve(ctx context.Context, req *fcpb.ConcurrencyR
 			chasm.BusinessIDReusePolicyAllowDuplicate,
 			chasm.BusinessIDConflictPolicyUseExisting,
 		),
-		// TODO(fc): chasm.WithRequestID(???),
 		chasm.WithSpeculative(), // TODO: does this work yet?
 	)
 	return res.UpdateOutput, err
 }
 
-func (h *concurrencyHandler) CancelReservation(ctx context.Context, req *fcpb.ConcurrencyCancelReservationRequest) (*fcpb.ConcurrencyCancelReservationResponse, error) {
-	// defer log.CapturePanic(h.logger, &err)
-	return nil, status.Errorf(codes.Unimplemented, "method CancelReservation not implemented")
+func (h *concurrencyHandler) CancelReservation(ctx context.Context, req *fcpb.ConcurrencyCancelReservationRequest) (retRes *fcpb.ConcurrencyCancelReservationResponse, retErr error) {
+	defer log.CapturePanic(h.logger, &retErr)
+
+	res, _, err := chasm.UpdateComponent(
+		ctx,
+		chasm.NewComponentRef[*concurrency](chasm.ExecutionKey{
+			NamespaceID: req.NamespaceId,
+			BusinessID:  req.Key,
+		}),
+		func(c *concurrency, _ chasm.MutableContext, req *fcpb.ConcurrencyCancelReservationRequest) (*fcpb.ConcurrencyCancelReservationResponse, error) {
+			err := c.cancelReservation(req.TaskUuid)
+			if err != nil {
+				return nil, err
+			}
+			return &fcpb.ConcurrencyCancelReservationResponse{}, nil
+		},
+		req,
+		chasm.WithSpeculative(), // TODO: does this work yet?
+	)
+	return res, err
 }
 
-func (h *concurrencyHandler) Commit(ctx context.Context, req *fcpb.ConcurrencyCommitRequest) (*fcpb.ConcurrencyCommitResponse, error) {
-	// defer log.CapturePanic(h.logger, &err)
-	return nil, status.Errorf(codes.Unimplemented, "method Commit not implemented")
+func (h *concurrencyHandler) Commit(ctx context.Context, req *fcpb.ConcurrencyCommitRequest) (retRes *fcpb.ConcurrencyCommitResponse, retErr error) {
+	defer log.CapturePanic(h.logger, &retErr)
+
+	res, _, err := chasm.UpdateComponent(
+		ctx,
+		chasm.NewComponentRef[*concurrency](chasm.ExecutionKey{
+			NamespaceID: req.NamespaceId,
+			BusinessID:  req.Key,
+		}),
+		func(c *concurrency, _ chasm.MutableContext, req *fcpb.ConcurrencyCommitRequest) (*fcpb.ConcurrencyCommitResponse, error) {
+			err := c.commit(req.TaskUuid)
+			if err != nil {
+				return nil, err
+			}
+			return &fcpb.ConcurrencyCommitResponse{}, nil
+		},
+		req,
+	)
+	return res, err
 }
 
-func (h *concurrencyHandler) Release(ctx context.Context, req *fcpb.ConcurrencyReleaseRequest) (*fcpb.ConcurrencyReleaseResponse, error) {
-	// defer log.CapturePanic(h.logger, &err)
-	return nil, status.Errorf(codes.Unimplemented, "method Release not implemented")
+func (h *concurrencyHandler) Release(ctx context.Context, req *fcpb.ConcurrencyReleaseRequest) (retRes *fcpb.ConcurrencyReleaseResponse, retErr error) {
+	defer log.CapturePanic(h.logger, &retErr)
+
+	res, _, err := chasm.UpdateComponent(
+		ctx,
+		chasm.NewComponentRef[*concurrency](chasm.ExecutionKey{
+			NamespaceID: req.NamespaceId,
+			BusinessID:  req.Key,
+		}),
+		func(c *concurrency, _ chasm.MutableContext, req *fcpb.ConcurrencyReleaseRequest) (*fcpb.ConcurrencyReleaseResponse, error) {
+			err := c.release(req.TaskUuid)
+			if err != nil {
+				return nil, err
+			}
+			return &fcpb.ConcurrencyReleaseResponse{}, nil
+		},
+		req,
+	)
+	return res, err
 }

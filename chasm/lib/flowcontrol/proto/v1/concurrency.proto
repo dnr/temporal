@@ -22,10 +22,18 @@ message ConcurrencySlot {
   google.protobuf.Timestamp expires = 3;
 }
 
+message ConcurrencyLimitUpdate {
+  int32 limit = 1;
+}
+
 message ConcurrencyReserveRequest {
   string namespace_id = 1;
   string key = 2;
   string task_uuid = 3;
+
+  // For whole-task-queue limits, the initial limit and updates to the limit come through task
+  // queue config, so we need to pass them to the chasm object. We just do it on every Reserve.
+  ConcurrencyLimitUpdate limit_update = 4;
 }
 
 message ConcurrencyReserveResponse {

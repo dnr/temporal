@@ -26,13 +26,17 @@ func (c *concurrency) ContextMetadata(_ chasm.Context) map[string]string {
 }
 
 func (c *concurrency) reserve(taskUUID string) error {
+	panic("unimpl")
 }
 
 func (c *concurrency) cancelReservation(taskUUID string) error {
+	panic("unimpl")
 }
 
 func (c *concurrency) commit(taskUUID string) error {
+	panic("unimpl")
 }
 
 func (c *concurrency) release(taskUUID string) error {
+	panic("unimpl")
 }
