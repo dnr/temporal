@@ -1,6 +1,11 @@
 package matching
 
-import enumspb "go.temporal.io/api/enums/v1"
+import (
+	"errors"
+	"slices"
+
+	"go.temporal.io/server/common/tqid"
+)
 
 // Maximum total limiters that can apply to any task. (Currently this includes the whole-queue
 // limiter, in the future we may allow the whole-queue limiter to be separate from this limit.)
@@ -9,41 +14,85 @@ const maxLimiters = 3
 type limiterSource int32
 
 const (
-	// Limiter came from task queue config
-	limiterSourceTQConfig limiterSource = iota
-	// Limiter came from task itself
+	// not valid limiter
+	limiterSourceInvalid limiterSource = iota
+	// limiter came from task queue config, applies to the whole queue
+	limiterSourceConfig_WholeQueue
+	// limiter came from task itself
 	limiterSourceTask
-	// Future: namespace policy, etc.
+	// future: namespace policy, etc.
 )
 
 type fcLimiter struct {
-	key    string
+	key    string // FIXME: consider interning? or intern whole fcLimiter?
 	source limiterSource
-	// isWholeQueue bool // FIXME: do we need this?
+}
+
+func (lim fcLimiter) valid() bool {
+	return lim.source != limiterSourceInvalid
 }
 
 type fcLimiters struct {
-	limiters [maxLimiters]*fcLimiter
+	limiters [maxLimiters]fcLimiter
 }
 
 type fcManager struct {
+	partition       tqid.Partition
 	userDataManager userDataManager
-	tqType          enumspb.TaskQueueType
 	// FIXME: need client for external limiters
 	// FIXME: need some way to call back into matcher when readiness changes
 }
 
 func newFlowControlManager(
+	partition tqid.Partition,
 	userDataManager userDataManager,
-	tqType enumspb.TaskQueueType,
 ) *fcManager {
 	return &fcManager{
+		partition:       partition,
 		userDataManager: userDataManager,
-		tqType:          tqType,
 	}
 }
 
 func (fc *fcManager) WholeQueueLikely() bool {
 	// FIXME
 	return true
+}
+
+func (fc *fcManager) UpdateLimitersFromConfig(
+	task *internalTask,
+) error {
+	userData, _, err := fc.userDataManager.GetUserData()
+	if err != nil {
+		return err
+	}
+	tqName := fc.partition.TaskQueue().Name()
+	tqType := fc.partition.TaskType()
+	limit := userData.GetData().GetPerType()[int32(tqType)].GetConfig().GetQueueConcurrencyLimit().GetConcurrencyLimit()
+	if limit == nil {
+		// there is no limit. clear if it was set already.
+		if task.limiters != nil {
+			_ = slices.DeleteFunc(task.limiters.limiters[:], func(lim fcLimiter) bool {
+				return lim.source == limiterSourceConfig_WholeQueue
+			})
+		}
+		return nil
+	}
+	// need to add limiter
+	if task.limiters == nil {
+		task.limiters = &fcLimiters{}
+	}
+	for i, lim := range task.limiters.limiters[:] {
+		if !lim.valid() {
+			// add it in empty slot
+			task.limiters.limiters[i] = fcLimiter{
+				key:    wholeQueueLimiterName(tqName, tqType),
+				source: limiterSourceConfig_WholeQueue,
+			}
+			return nil
+		} else if lim.source == limiterSourceConfig_WholeQueue {
+			// we found one we previously set
+			return nil
+		}
+	}
+	return errors.New("too many limiters") // FIXME: proper type
 }

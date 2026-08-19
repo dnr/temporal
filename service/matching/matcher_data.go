@@ -276,6 +276,9 @@ func (d *matcherData) EnqueueTaskNoWait(task *internalTask) error {
 	}
 
 	task.initMatch(d)
+	if err := d.fcManager.UpdateLimitersFromConfig(task); err != nil {
+		return err
+	}
 	d.tasks.Add(task)
 	d.findAndWakeMatches()
 	return nil
@@ -296,6 +299,11 @@ func (d *matcherData) EnqueueTaskAndWait(ctxs []context.Context, task *internalT
 
 	// add and look for match
 	task.initMatch(d)
+	if err := d.fcManager.UpdateLimitersFromConfig(task); err != nil {
+		// FIXME: this is kind of wrong, it's not a context error. not clear what to do if a
+		// task has three limiters and we add a whole-tq one...
+		return &matchResult{ctxErr: err}
+	}
 	d.tasks.Add(task)
 	d.findAndWakeMatches()
 
@@ -384,6 +392,9 @@ func (d *matcherData) MatchTaskImmediately(task *internalTask) syncMatchOutcome 
 	}
 
 	task.initMatch(d)
+	if err := d.fcManager.UpdateLimitersFromConfig(task); err != nil {
+		return syncMatchConcurrencyLimited // FIXME: kinda wrong, see comment in EnqueueTaskAndWait
+	}
 	d.tasks.Add(task)
 	outcome := d.findAndWakeMatches()
 	// don't wait, check if match() picked this one already
@@ -412,6 +423,14 @@ func (d *matcherData) MatchPollerImmediately(poller *waitingPoller) *matchResult
 func (d *matcherData) ReprocessTasks(pred func(*internalTask) bool) []*internalTask {
 	d.lock.Lock()
 	defer d.lock.Unlock()
+
+	// This is called when userdata changes, which includes the whole-queue concurrency limit
+	// in task queue config. We should update limiters on all tasks that we have already.
+	d.tasks.ForEachTask(func(task *internalTask) bool {
+		_ = d.fcManager.UpdateLimitersFromConfig(task)
+		// FIXME: handle errors: only possible error here is "too many limiters"
+		return false
+	}, nil)
 
 	reprocess := make([]*internalTask, 0, d.tasks.Len())
 	d.tasks.ForEachTask(

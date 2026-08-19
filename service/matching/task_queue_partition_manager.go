@@ -144,8 +144,8 @@ func newTaskQueuePartitionManager(
 		partition.TaskQueue().TaskType(),
 	)
 	fcManager := newFlowControlManager(
+		partition,
 		userDataManager,
-		partition.TaskQueue().TaskType(),
 	)
 
 	var taskHooks []hooks.TaskHook

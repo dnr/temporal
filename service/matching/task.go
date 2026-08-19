@@ -79,7 +79,9 @@ type (
 		// max(taskDirectiveRevisionNumber, routingConfigRevisionNumber) for the task.
 		taskDispatchRevisionNumber    int64
 		targetWorkerDeploymentVersion *deploymentspb.WorkerDeploymentVersion
-		// flow control limiters:
+
+		// Flow control fields:
+		// After construction, limiters should only be accessed under matcherData lock.
 		limiters *fcLimiters
 
 		// The following fields are for use by priMatcher/matcherData:
