@@ -4,22 +4,13 @@ import (
 	"errors"
 	"slices"
 
+	enumsspb "go.temporal.io/server/api/enums/v1"
 	"go.temporal.io/server/common/tqid"
 )
 
 // Maximum total limiters that can apply to any task. (Currently this includes the whole-queue
 // limiter, in the future we may allow the whole-queue limiter to be separate from this limit.)
 const maxLimiters = 3
-
-type limiterType int32
-
-const (
-	// not valid limiter
-	limiterTypeInvalid limiterType = iota
-	// concurrency limiter
-	limiterTypeConcurrency
-	// future: rate limit, circuit breaker, etc.
-)
 
 type limiterSource int32
 
@@ -35,12 +26,12 @@ const (
 
 type fcLimiter struct {
 	key    string // TODO(fc): consider interning? or intern whole fcLimiter?
-	tp     limiterType
+	tp     enumsspb.LimiterType
 	source limiterSource
 }
 
 func (lim fcLimiter) valid() bool {
-	return lim.tp != limiterTypeInvalid && lim.source != limiterSourceInvalid
+	return lim.tp != enumsspb.LIMITER_TYPE_UNSPECIFIED && lim.source != limiterSourceInvalid
 }
 
 type fcLimiters struct {
@@ -97,7 +88,7 @@ func (fc *fcManager) UpdateLimitersFromConfig(
 			// add it in empty slot
 			task.limiters.limiters[i] = fcLimiter{
 				key:    wholeQueueLimiterName(tqName, tqType),
-				tp:     limiterTypeConcurrency,
+				tp:     enumsspb.LIMITER_TYPE_CONCURRENCY,
 				source: limiterSourceConfig_WholeQueue,
 			}
 			return nil

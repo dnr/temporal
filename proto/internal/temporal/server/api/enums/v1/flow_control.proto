@@ -1,0 +1,10 @@
+syntax = "proto3";
+
+package temporal.server.api.enums.v1;
+
+option go_package = "go.temporal.io/server/api/enums/v1;enums";
+
+enum LimiterType {
+  LIMITER_TYPE_UNSPECIFIED = 0;
+  LIMITER_TYPE_CONCURRENCY = 1;
+}

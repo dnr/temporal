@@ -1,6 +1,10 @@
 package matching
 
-import "errors"
+import (
+	"errors"
+
+	enumsspb "go.temporal.io/server/api/enums/v1"
+)
 
 type fcTxState int8
 
@@ -34,7 +38,7 @@ func (r *fcReadiness) NewTx(task *internalTask) (*fcTx, error) {
 	committers := make([]fcCommitter, len(lims))
 	for i, lim := range lims {
 		switch lim.tp {
-		case limiterTypeConcurrency:
+		case enumsspb.LIMITER_TYPE_CONCURRENCY:
 			committers[i] = &fcConcurrencyCommitter{
 				task: task,
 				key:  lim.key,
