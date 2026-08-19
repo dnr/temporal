@@ -7,6 +7,7 @@ import (
 	enumsspb "go.temporal.io/server/api/enums/v1"
 	taskqueuespb "go.temporal.io/server/api/taskqueue/v1"
 	fcpb "go.temporal.io/server/chasm/lib/flowcontrol/gen/flowcontrolpb/v1"
+	"go.temporal.io/server/common/namespace"
 )
 
 type fcTxState int8
@@ -38,7 +39,7 @@ func newFcReadiness(
 	}
 }
 
-func (r *fcReadiness) NewTx(ctx context.Context, task *internalTask) (*fcTx, error) {
+func (r *fcReadiness) NewTx(ctx context.Context, nsID namespace.ID, task *internalTask) (*fcTx, error) {
 	lims := canonicalLimiters(task)
 	if len(lims) == 0 {
 		return nil, nil
@@ -49,16 +50,8 @@ func (r *fcReadiness) NewTx(ctx context.Context, task *internalTask) (*fcTx, err
 	for i, lim := range lims {
 		switch lim.tp {
 		case enumsspb.LIMITER_TYPE_CONCURRENCY:
-			committers[i] = &fcConcurrencyCommitter{
-				client: r.concurrencyServiceClient,
-				ctx:    ctx,
-				task:   task,
-				key:    lim.key,
-			}
-			refs[i] = &taskqueuespb.LimiterRef{
-				LimiterType: lim.tp,
-				Key:         lim.key,
-			}
+			committers[i] = newFcConcurrencyCommitter(ctx, r.concurrencyServiceClient, nsID, task, lim.key)
+			refs[i] = &taskqueuespb.LimiterRef{LimiterType: lim.tp, Key: lim.key}
 		default:
 			return nil, errors.New("invalid limiter type")
 		}

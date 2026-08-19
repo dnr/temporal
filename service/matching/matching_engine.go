@@ -781,7 +781,7 @@ pollLoop:
 
 		// The task returned by pollTask is likely to be allowed by flow control.
 		// We need to run the flow control commit protocol.
-		fctx, err := e.fcReadiness.NewTx(ctx, task)
+		fctx, err := e.fcReadiness.NewTx(ctx, namespaceID, task)
 		if err != nil {
 			e.nonRetryableErrorsDropTask(task, taskQueueName, err)
 			// drop the task as otherwise task would be stuck in a retry-loop
@@ -1032,7 +1032,7 @@ pollLoop:
 
 		// The task returned by pollTask is likely to be allowed by flow control.
 		// We need to run the flow control commit protocol.
-		fctx, err := e.fcReadiness.NewTx(ctx, task)
+		fctx, err := e.fcReadiness.NewTx(ctx, namespace.ID(req.NamespaceId), task)
 		if err != nil {
 			e.nonRetryableErrorsDropTask(task, taskQueueName, err)
 			// drop the task as otherwise task would be stuck in a retry-loop
