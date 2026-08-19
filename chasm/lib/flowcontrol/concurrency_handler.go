@@ -38,8 +38,8 @@ func (h *concurrencyHandler) Reserve(ctx context.Context, req *fcpb.ConcurrencyR
 				},
 			}, nil
 		},
-		func(c *concurrency, _ chasm.MutableContext, req *fcpb.ConcurrencyReserveRequest) (*fcpb.ConcurrencyReserveResponse, error) {
-			err := c.reserve(req.TaskUuid)
+		func(c *concurrency, cctx chasm.MutableContext, req *fcpb.ConcurrencyReserveRequest) (*fcpb.ConcurrencyReserveResponse, error) {
+			err := c.reserve(req.TaskUuid, cctx.Now(c))
 			if err != nil {
 				return nil, err
 			}
@@ -64,8 +64,8 @@ func (h *concurrencyHandler) CancelReservation(ctx context.Context, req *fcpb.Co
 			NamespaceID: req.NamespaceId,
 			BusinessID:  req.Key,
 		}),
-		func(c *concurrency, _ chasm.MutableContext, req *fcpb.ConcurrencyCancelReservationRequest) (*fcpb.ConcurrencyCancelReservationResponse, error) {
-			err := c.cancelReservation(req.TaskUuid)
+		func(c *concurrency, cctx chasm.MutableContext, req *fcpb.ConcurrencyCancelReservationRequest) (*fcpb.ConcurrencyCancelReservationResponse, error) {
+			err := c.cancelReservation(req.TaskUuid, cctx.Now(c))
 			if err != nil {
 				return nil, err
 			}
@@ -86,8 +86,8 @@ func (h *concurrencyHandler) Commit(ctx context.Context, req *fcpb.ConcurrencyCo
 			NamespaceID: req.NamespaceId,
 			BusinessID:  req.Key,
 		}),
-		func(c *concurrency, _ chasm.MutableContext, req *fcpb.ConcurrencyCommitRequest) (*fcpb.ConcurrencyCommitResponse, error) {
-			err := c.commit(req.TaskUuid)
+		func(c *concurrency, cctx chasm.MutableContext, req *fcpb.ConcurrencyCommitRequest) (*fcpb.ConcurrencyCommitResponse, error) {
+			err := c.commit(req.TaskUuid, cctx.Now(c))
 			if err != nil {
 				return nil, err
 			}
@@ -107,8 +107,8 @@ func (h *concurrencyHandler) Release(ctx context.Context, req *fcpb.ConcurrencyR
 			NamespaceID: req.NamespaceId,
 			BusinessID:  req.Key,
 		}),
-		func(c *concurrency, _ chasm.MutableContext, req *fcpb.ConcurrencyReleaseRequest) (*fcpb.ConcurrencyReleaseResponse, error) {
-			err := c.release(req.TaskUuid)
+		func(c *concurrency, cctx chasm.MutableContext, req *fcpb.ConcurrencyReleaseRequest) (*fcpb.ConcurrencyReleaseResponse, error) {
+			err := c.release(req.TaskUuid, cctx.Now(c))
 			if err != nil {
 				return nil, err
 			}
