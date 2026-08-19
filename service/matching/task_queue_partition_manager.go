@@ -143,7 +143,7 @@ func newTaskQueuePartitionManager(
 		tqConfig,
 		partition.TaskQueue().TaskType(),
 	)
-	fcManager := newFlowControlManager(
+	fcManager := newFCManager(
 		partition,
 		userDataManager,
 	)

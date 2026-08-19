@@ -11,6 +11,16 @@ import (
 // limiter, in the future we may allow the whole-queue limiter to be separate from this limit.)
 const maxLimiters = 3
 
+type limiterType int32
+
+const (
+	// not valid limiter
+	limiterTypeInvalid limiterType = iota
+	// concurrency limiter
+	limiterTypeConcurrency
+	// future: rate limit, circuit breaker, etc.
+)
+
 type limiterSource int32
 
 const (
@@ -24,12 +34,13 @@ const (
 )
 
 type fcLimiter struct {
-	key    string // FIXME: consider interning? or intern whole fcLimiter?
+	key    string // TODO(fc): consider interning? or intern whole fcLimiter?
+	tp     limiterType
 	source limiterSource
 }
 
 func (lim fcLimiter) valid() bool {
-	return lim.source != limiterSourceInvalid
+	return lim.tp != limiterTypeInvalid && lim.source != limiterSourceInvalid
 }
 
 type fcLimiters struct {
@@ -43,7 +54,7 @@ type fcManager struct {
 	// FIXME: need some way to call back into matcher when readiness changes
 }
 
-func newFlowControlManager(
+func newFCManager(
 	partition tqid.Partition,
 	userDataManager userDataManager,
 ) *fcManager {
@@ -86,6 +97,7 @@ func (fc *fcManager) UpdateLimitersFromConfig(
 			// add it in empty slot
 			task.limiters.limiters[i] = fcLimiter{
 				key:    wholeQueueLimiterName(tqName, tqType),
+				tp:     limiterTypeConcurrency,
 				source: limiterSourceConfig_WholeQueue,
 			}
 			return nil

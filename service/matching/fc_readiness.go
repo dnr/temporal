@@ -1,0 +1,96 @@
+package matching
+
+import "errors"
+
+type fcTxState int8
+
+const (
+	fcTxStateInit fcTxState = iota
+	fcTxStateReserved
+	fcTxStateCommitted
+	fcTxStateCommitFailed
+	fcTxStateCanceled
+)
+
+type fcReadiness struct {
+}
+
+type fcTx struct {
+	readiness  *fcReadiness
+	committers []fcCommitter
+	state      [maxLimiters]fcTxState
+}
+
+func newFcReadiness() *fcReadiness {
+	return &fcReadiness{}
+}
+
+func (r *fcReadiness) NewTx(task *internalTask) (*fcTx, error) {
+	lims := canonicalLimiters(task)
+	if len(lims) == 0 {
+		return nil, nil
+	}
+
+	committers := make([]fcCommitter, len(lims))
+	for i, lim := range lims {
+		switch lim.tp {
+		case limiterTypeConcurrency:
+			committers[i] = &fcConcurrencyCommitter{
+				task: task,
+				key:  lim.key,
+			}
+		default:
+			return nil, errors.New("invalid limiter type")
+		}
+	}
+
+	return &fcTx{
+		readiness:  r,
+		committers: committers,
+	}, nil
+}
+
+func (tx *fcTx) Reserve() error {
+	if tx == nil {
+		return nil // no limiters
+	}
+	// reserve must be sequential
+	for i, com := range tx.committers {
+		if err := com.Reserve(); err != nil {
+			return err
+		}
+		tx.state[i] = fcTxStateReserved
+	}
+	return nil
+}
+
+func (tx *fcTx) CancelReservations() {
+	// this is best-effort, reservations have timeouts so it's okay if we fail to cancel
+	if tx == nil {
+		return // no limiters
+	}
+	for i, com := range tx.committers {
+		if tx.state[i] == fcTxStateReserved {
+			com.CancelReservations()
+			tx.state[i] = fcTxStateCanceled
+		}
+	}
+}
+
+func (tx *fcTx) Commit() error {
+	if tx == nil {
+		return nil // no limiters
+	}
+	// TODO(fc): we can call Commit concurrently on all limiters
+	// note: rate limiters don't have to be Committed
+	var errs []error
+	for i, com := range tx.committers {
+		if err := com.Commit(); err != nil {
+			errs = append(errs, err)
+			tx.state[i] = fcTxStateCommitFailed
+		} else {
+			tx.state[i] = fcTxStateCommitted
+		}
+	}
+	return errors.Join(errs...)
+}

@@ -201,6 +201,8 @@ type (
 		reachabilityCache reachabilityCache
 		// Rate limiter to limit the task dispatch
 		rateLimiter TaskDispatchRateLimiter
+		// Flow control readiness client
+		fcReadiness *fcReadiness
 
 		taskHookFactories []hooks.TaskHookFactory
 	}
@@ -329,6 +331,7 @@ func NewEngine(
 		rateLimiter:               rateLimiter,
 		taskHookFactories:         taskHookFactories,
 		partitionScalerFactory:    partitionScalerFactory,
+		fcReadiness:               newFcReadiness(),
 	}
 	e.nexusEndpointsOwnershipLostCh.Store(make(chan struct{}))
 	e.reachabilityCache = newReachabilityCache(
@@ -772,6 +775,21 @@ pollLoop:
 			return e.createPollWorkflowTaskQueueResponse(task, resp, opMetrics), nil
 		}
 
+		// The task returned by pollTask is likely to be allowed by flow control.
+		// We need to run the flow control commit protocol.
+		fctx, err := e.fcReadiness.NewTx(task)
+		if err != nil {
+			e.nonRetryableErrorsDropTask(task, taskQueueName, err)
+			// drop the task as otherwise task would be stuck in a retry-loop
+			task.finish(taskFinishResult{dropReason: dropReasonInternalError})
+			continue pollLoop
+		}
+		defer fctx.CancelReservations()
+		if err = fctx.Reserve(); err != nil {
+			task.finish(taskFinishResult{err: err})
+			continue pollLoop
+		}
+
 		requestClone := request
 		if versionSetUsed {
 			// We remove build ID from workerVersionCapabilities so History can differentiate between
@@ -854,6 +872,14 @@ pollLoop:
 				}
 			}
 
+			continue pollLoop
+		}
+
+		if err = fctx.Commit(); err != nil {
+			e.logger.Error("flow control commit failed", tag.Error(err)) // FIXME: more tags
+			// FIXME: metric
+			// we must drop the task here!
+			task.finish(taskFinishResult{dropReason: dropReasonFlowControlCommitFailed})
 			continue pollLoop
 		}
 
@@ -999,6 +1025,22 @@ pollLoop:
 			// tasks received from remote are already started. So, simply forward the response
 			return task.pollActivityTaskQueueResponse(), nil
 		}
+
+		// The task returned by pollTask is likely to be allowed by flow control.
+		// We need to run the flow control commit protocol.
+		fctx, err := e.fcReadiness.NewTx(task)
+		if err != nil {
+			e.nonRetryableErrorsDropTask(task, taskQueueName, err)
+			// drop the task as otherwise task would be stuck in a retry-loop
+			task.finish(taskFinishResult{dropReason: dropReasonInternalError})
+			continue pollLoop
+		}
+		defer fctx.CancelReservations()
+		if err = fctx.Reserve(); err != nil {
+			task.finish(taskFinishResult{err: err})
+			continue pollLoop
+		}
+
 		requestClone := request
 		if versionSetUsed {
 			// We remove build ID from workerVersionCapabilities so History can differentiate between
@@ -1100,6 +1142,15 @@ pollLoop:
 
 			continue pollLoop
 		}
+
+		if err = fctx.Commit(); err != nil {
+			e.logger.Error("flow control commit failed", tag.Error(err)) // FIXME: more tags
+			// FIXME: metric
+			// we must drop the task here!
+			task.finish(taskFinishResult{dropReason: dropReasonFlowControlCommitFailed})
+			continue pollLoop
+		}
+
 		task.finish(taskFinishResult{consumedToken: true})
 		e.emitTaskDispatchLatency(task, partition, req.GetNamespaceId(), request.Namespace, pollMetadata)
 		return e.createPollActivityTaskQueueResponse(task, resp, opMetrics), nil
@@ -3447,6 +3498,7 @@ func (e *matchingEngineImpl) recordWorkflowTaskStarted(
 	pollReq *workflowservice.PollWorkflowTaskQueueRequest,
 	task *internalTask,
 ) (*historyservice.RecordWorkflowTaskStartedResponse, error) {
+	// FIXME: report limiters
 
 	metrics.OperationCounter.With(e.metricsHandler).Record(
 		1,
@@ -3528,6 +3580,7 @@ func (e *matchingEngineImpl) recordActivityTaskStarted(
 	pollReq *workflowservice.PollActivityTaskQueueRequest,
 	task *internalTask,
 ) (*historyservice.RecordActivityTaskStartedResponse, error) {
+	// FIXME: report limiters
 
 	metrics.OperationCounter.With(e.metricsHandler).Record(
 		1,
