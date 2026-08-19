@@ -4,6 +4,7 @@ import (
 	"errors"
 
 	enumsspb "go.temporal.io/server/api/enums/v1"
+	taskqueuespb "go.temporal.io/server/api/taskqueue/v1"
 )
 
 type fcTxState int8
@@ -22,6 +23,7 @@ type fcReadiness struct {
 type fcTx struct {
 	readiness  *fcReadiness
 	committers []fcCommitter
+	refs       []*taskqueuespb.LimiterRef
 	state      [maxLimiters]fcTxState
 }
 
@@ -36,12 +38,17 @@ func (r *fcReadiness) NewTx(task *internalTask) (*fcTx, error) {
 	}
 
 	committers := make([]fcCommitter, len(lims))
+	refs := make([]*taskqueuespb.LimiterRef, len(lims))
 	for i, lim := range lims {
 		switch lim.tp {
 		case enumsspb.LIMITER_TYPE_CONCURRENCY:
 			committers[i] = &fcConcurrencyCommitter{
 				task: task,
 				key:  lim.key,
+			}
+			refs[i] = &taskqueuespb.LimiterRef{
+				LimiterType: lim.tp,
+				Key:         lim.key,
 			}
 		default:
 			return nil, errors.New("invalid limiter type")
@@ -51,7 +58,12 @@ func (r *fcReadiness) NewTx(task *internalTask) (*fcTx, error) {
 	return &fcTx{
 		readiness:  r,
 		committers: committers,
+		refs:       refs,
 	}, nil
+}
+
+func (tx *fcTx) LimiterRefs() []*taskqueuespb.LimiterRef {
+	return tx.refs
 }
 
 func (tx *fcTx) Reserve() error {

@@ -798,7 +798,7 @@ pollLoop:
 			requestClone = common.CloneProto(request)
 			requestClone.WorkerVersionCapabilities.BuildId = ""
 		}
-		resp, err := e.recordWorkflowTaskStarted(ctx, requestClone, task)
+		resp, err := e.recordWorkflowTaskStarted(ctx, requestClone, task, fctx.LimiterRefs())
 		if err != nil {
 			switch err := err.(type) {
 			case *serviceerror.Internal:
@@ -1049,7 +1049,7 @@ pollLoop:
 			requestClone = common.CloneProto(request)
 			requestClone.WorkerVersionCapabilities.BuildId = ""
 		}
-		resp, err := e.recordActivityTaskStarted(ctx, requestClone, task)
+		resp, err := e.recordActivityTaskStarted(ctx, requestClone, task, fctx.LimiterRefs())
 		if err != nil {
 			switch err := err.(type) {
 			case *serviceerror.Internal:
@@ -3497,9 +3497,8 @@ func (e *matchingEngineImpl) recordWorkflowTaskStarted(
 	ctx context.Context,
 	pollReq *workflowservice.PollWorkflowTaskQueueRequest,
 	task *internalTask,
+	limiters []*taskqueuespb.LimiterRef,
 ) (*historyservice.RecordWorkflowTaskStartedResponse, error) {
-	// FIXME: report limiters
-
 	metrics.OperationCounter.With(e.metricsHandler).Record(
 		1,
 		metrics.OperationTag("RecordWorkflowTaskStarted"),
@@ -3537,6 +3536,7 @@ func (e *matchingEngineImpl) recordWorkflowTaskStarted(
 		Stamp:                      task.event.Data.GetStamp(),
 		TaskDispatchRevisionNumber: task.taskDispatchRevisionNumber,
 		TargetDeploymentVersion:    sentTargetVersion,
+		Limiters:                   limiters,
 	}
 
 	resp, err := e.historyClient.RecordWorkflowTaskStarted(ctx, recordStartedRequest)
@@ -3579,9 +3579,8 @@ func (e *matchingEngineImpl) recordActivityTaskStarted(
 	ctx context.Context,
 	pollReq *workflowservice.PollActivityTaskQueueRequest,
 	task *internalTask,
+	limiters []*taskqueuespb.LimiterRef,
 ) (*historyservice.RecordActivityTaskStartedResponse, error) {
-	// FIXME: report limiters
-
 	metrics.OperationCounter.With(e.metricsHandler).Record(
 		1,
 		metrics.OperationTag("RecordActivityTaskStarted"),
@@ -3617,6 +3616,7 @@ func (e *matchingEngineImpl) recordActivityTaskStarted(
 		VersionDirective:           task.event.Data.VersionDirective,
 		TaskDispatchRevisionNumber: task.taskDispatchRevisionNumber,
 		ComponentRef:               task.event.Data.GetComponentRef(),
+		Limiters:                   limiters,
 	}
 
 	return e.historyClient.RecordActivityTaskStarted(ctx, recordStartedRequest)
