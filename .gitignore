@@ -48,3 +48,9 @@
 
 # Ignoring AI agent files
 .agents/
+
+# default sqlite db
+/default
+/default-shm
+/default-wal
+
