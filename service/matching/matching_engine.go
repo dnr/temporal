@@ -788,9 +788,9 @@ pollLoop:
 			task.finish(taskFinishResult{dropReason: dropReasonInternalError})
 			continue pollLoop
 		}
-		// FIXME: ugh, can't use defer in a loop
-		defer fctx.CancelReservations()
+		// After this point, we must `fctx.CancelReservations()` before any `continue pollLoop`.
 		if err = fctx.Reserve(); err != nil {
+			fctx.CancelReservations()
 			task.finish(taskFinishResult{err: err})
 			continue pollLoop
 		}
@@ -805,6 +805,7 @@ pollLoop:
 		}
 		resp, err := e.recordWorkflowTaskStarted(ctx, requestClone, task, fctx.LimiterRefs())
 		if err != nil {
+			fctx.CancelReservations()
 			switch err := err.(type) {
 			case *serviceerror.Internal:
 				e.nonRetryableErrorsDropTask(task, taskQueueName, err)
@@ -883,6 +884,7 @@ pollLoop:
 		if err = fctx.Commit(); err != nil {
 			e.logger.Error("flow control commit failed", tag.Error(err)) // FIXME: more tags
 			// FIXME: metric
+			fctx.CancelReservations()
 			// we must drop the task here!
 			task.finish(taskFinishResult{dropReason: dropReasonFlowControlCommitFailed})
 			continue pollLoop
@@ -1040,9 +1042,9 @@ pollLoop:
 			task.finish(taskFinishResult{dropReason: dropReasonInternalError})
 			continue pollLoop
 		}
-		// FIXME: ugh, can't use defer in a loop
-		defer fctx.CancelReservations()
+		// After this point, we must `fctx.CancelReservations()` before any `continue pollLoop`.
 		if err = fctx.Reserve(); err != nil {
+			fctx.CancelReservations()
 			task.finish(taskFinishResult{err: err})
 			continue pollLoop
 		}
@@ -1057,6 +1059,7 @@ pollLoop:
 		}
 		resp, err := e.recordActivityTaskStarted(ctx, requestClone, task, fctx.LimiterRefs())
 		if err != nil {
+			fctx.CancelReservations()
 			switch err := err.(type) {
 			case *serviceerror.Internal:
 				e.nonRetryableErrorsDropTask(task, taskQueueName, err)
@@ -1152,6 +1155,7 @@ pollLoop:
 		if err = fctx.Commit(); err != nil {
 			e.logger.Error("flow control commit failed", tag.Error(err)) // FIXME: more tags
 			// FIXME: metric
+			fctx.CancelReservations()
 			// we must drop the task here!
 			task.finish(taskFinishResult{dropReason: dropReasonFlowControlCommitFailed})
 			continue pollLoop
