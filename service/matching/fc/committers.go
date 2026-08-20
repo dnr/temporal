@@ -3,6 +3,7 @@ package fc
 import (
 	"context"
 
+	taskqueuepb "go.temporal.io/api/taskqueue/v1"
 	enumsspb "go.temporal.io/server/api/enums/v1"
 	fcpb "go.temporal.io/server/chasm/lib/flowcontrol/gen/flowcontrolpb/v1"
 	"go.temporal.io/server/common/namespace"
@@ -26,6 +27,7 @@ type concurrencyCommitter struct {
 	nsID   namespace.ID
 	task   fcTask
 	key    string
+	config any
 	// TODO(fc): we could maybe have this component do some opportunistic batching
 }
 
@@ -36,6 +38,7 @@ func newConcurrencyCommitter(
 	nsID namespace.ID,
 	task fcTask,
 	key string,
+	config any,
 ) *concurrencyCommitter {
 	return &concurrencyCommitter{
 		ctx:    ctx,
@@ -44,15 +47,24 @@ func newConcurrencyCommitter(
 		nsID:   nsID,
 		task:   task,
 		key:    key,
+		config: config,
 	}
 }
 
 func (c *concurrencyCommitter) reserve() error {
+	// TODO(fc): can we remove this type conversion?
+	var limitUpdate *fcpb.ConcurrencyLimitUpdate
+	if lim, ok := c.config.(*taskqueuepb.ConcurrencyLimit); ok {
+		limitUpdate = &fcpb.ConcurrencyLimitUpdate{
+			Limit: lim.ConcurrentTasks,
+		}
+	}
+
 	res, err := c.client.Reserve(c.ctx, &fcpb.ConcurrencyReserveRequest{
 		NamespaceId: c.nsID.String(),
 		Key:         c.key,
 		TaskUuid:    c.task.TaskUUID(),
-		// FIXME: LimitUpdate: get update in here
+		LimitUpdate: limitUpdate,
 	})
 	if err != nil {
 		return err // don't update cache on rpc error

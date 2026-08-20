@@ -13,6 +13,8 @@ type limiter struct {
 	key    string // TODO(fc): consider interning? or intern whole limiter?
 	tp     enumsspb.LimiterType
 	source limiterSource
+	// for limiters set from config, we need to pass through to Reserve
+	config any
 }
 
 func (lim limiter) valid() bool {
@@ -84,10 +86,12 @@ func (m *Manager) UpdateLimitersFromConfig(limiters *Limiters) (*Limiters, error
 				key:    m.wholeQueueLimiter,
 				tp:     enumsspb.LIMITER_TYPE_CONCURRENCY,
 				source: limiterSourceConfig_WholeQueue,
+				config: limit,
 			}
 			return limiters, nil
 		} else if lim.source == limiterSourceConfig_WholeQueue {
-			// we found one we previously set
+			// we found one we previously set, update config
+			lim.config = limit
 			return limiters, nil
 		}
 	}
