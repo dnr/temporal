@@ -66,21 +66,47 @@ message ConcurrencyReleaseRequest {
 message ConcurrencyReleaseResponse {
 }
 
+message ConcurrencyWaitRequest {
+  string namespace_id = 1;
+  string key = 2;
+  // FIXME: add generation here
+  // FIXME: add something to identify waiters so we can do selective wakeup
+}
+
+message ConcurrencyWaitResponse {
+  int32 slots_free = 1;
+}
+
 service ConcurrencyService {
+  // Reserve reserves a slot for a limited time. Succeeds if the slot is newly reserved or
+  // already reserved _or already committed_ for the task, i.e. idempotent. May not be durable:
+  // a successful Reserve followed by a Commit may not succeed even within the timeout. Callers
+  // must handle that situation correctly.
   rpc Reserve(ConcurrencyReserveRequest) returns (ConcurrencyReserveResponse) {
     option (temporal.server.api.routing.v1.routing).business_id = "key";
     option (temporal.server.api.common.v1.api_category).category = API_CATEGORY_STANDARD;
   };
+  // CancelReservation cancels a reservation early. Note that committed slots cannot be
+  // canceled, they must be Released. Idempotent. May not be durable.
   rpc CancelReservation(ConcurrencyCancelReservationRequest) returns (ConcurrencyCancelReservationResponse) {
     option (temporal.server.api.routing.v1.routing).business_id = "key";
     option (temporal.server.api.common.v1.api_category).category = API_CATEGORY_STANDARD;
   };
+  // Commit promotes a reservation to a committed slot. Succeeds if the reservation was
+  // promoted, or was already committed, i.e. idempotent. Durable.
   rpc Commit(ConcurrencyCommitRequest) returns (ConcurrencyCommitResponse) {
     option (temporal.server.api.routing.v1.routing).business_id = "key";
     option (temporal.server.api.common.v1.api_category).category = API_CATEGORY_STANDARD;
   };
+  // Release frees a comitted slot. Succeeds if the committed slot was released or if there was
+  // no committed slot, i.e. idempotent. Durable.
   rpc Release(ConcurrencyReleaseRequest) returns (ConcurrencyReleaseResponse) {
     option (temporal.server.api.routing.v1.routing).business_id = "key";
     option (temporal.server.api.common.v1.api_category).category = API_CATEGORY_STANDARD;
+  };
+  // Wait is a long-poll RPC that returns when at least one slot is free.
+  rpc Wait(ConcurrencyWaitRequest) returns (ConcurrencyWaitResponse) {
+    option (temporal.server.api.routing.v1.routing).business_id = "key";
+    option (temporal.server.api.common.v1.api_category).category = API_CATEGORY_LONG_POLL;
   };
 }

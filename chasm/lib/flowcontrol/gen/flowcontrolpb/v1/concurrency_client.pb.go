@@ -237,3 +237,46 @@ func (c *ConcurrencyServiceLayeredClient) Release(
 	}
 	return backoff.ThrottleRetryContextWithReturn(ctx, call, c.retryPolicy, common.IsServiceClientTransientError)
 }
+func (c *ConcurrencyServiceLayeredClient) callWaitNoRetry(
+	ctx context.Context,
+	request *ConcurrencyWaitRequest,
+	opts ...grpc.CallOption,
+) (*ConcurrencyWaitResponse, error) {
+	var response *ConcurrencyWaitResponse
+	var err error
+	startTime := time.Now().UTC()
+	// the caller is a namespace, hence the tag below.
+	caller := headers.GetCallerInfo(ctx).CallerName
+	metricsHandler := c.metricsHandler.WithTags(
+		metrics.OperationTag("ConcurrencyService.Wait"),
+		metrics.NamespaceTag(caller),
+		metrics.ServiceRoleTag(metrics.HistoryRoleTagValue),
+	)
+	metrics.ClientRequests.With(metricsHandler).Record(1)
+	defer func() {
+		if err != nil {
+			metrics.ClientFailures.With(metricsHandler).Record(1, metrics.ServiceErrorTypeTag(err))
+		}
+		metrics.ClientLatency.With(metricsHandler).Record(time.Since(startTime))
+	}()
+	shardID := common.WorkflowIDToHistoryShard(request.GetNamespaceId(), request.GetKey(), c.numShards)
+	op := func(ctx context.Context, client ConcurrencyServiceClient) error {
+		var err error
+		ctx, cancel := context.WithTimeout(ctx, history.DefaultTimeout)
+		defer cancel()
+		response, err = client.Wait(ctx, request, opts...)
+		return err
+	}
+	err = c.redirector.Execute(ctx, shardID, op)
+	return response, err
+}
+func (c *ConcurrencyServiceLayeredClient) Wait(
+	ctx context.Context,
+	request *ConcurrencyWaitRequest,
+	opts ...grpc.CallOption,
+) (*ConcurrencyWaitResponse, error) {
+	call := func(ctx context.Context) (*ConcurrencyWaitResponse, error) {
+		return c.callWaitNoRetry(ctx, request, opts...)
+	}
+	return backoff.ThrottleRetryContextWithReturn(ctx, call, c.retryPolicy, common.IsServiceClientTransientError)
+}

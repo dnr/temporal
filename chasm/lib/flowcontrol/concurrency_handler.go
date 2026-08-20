@@ -112,9 +112,34 @@ func (h *concurrencyHandler) Release(ctx context.Context, req *fcpb.ConcurrencyR
 			if err != nil {
 				return nil, err
 			}
+			// FIXME: add tasks to control slow release of notifications
 			return &fcpb.ConcurrencyReleaseResponse{}, nil
 		},
 		req,
 	)
+	return res, err
+}
+
+func (h *concurrencyHandler) Wait(ctx context.Context, req *fcpb.ConcurrencyWaitRequest) (retRes *fcpb.ConcurrencyWaitResponse, retErr error) {
+	defer log.CapturePanic(h.logger, &retErr)
+
+	res, _, err := chasm.PollComponent(
+		ctx,
+		chasm.NewComponentRef[*concurrency](chasm.ExecutionKey{
+			NamespaceID: req.NamespaceId,
+			BusinessID:  req.Key,
+		}),
+		func(c *concurrency, cctx chasm.Context, req *fcpb.ConcurrencyWaitRequest) (*fcpb.ConcurrencyWaitResponse, bool, error) {
+			slots := c.slotsFree(cctx.Now(c))
+			if slots == 0 {
+				return nil, false, nil
+			}
+			return &fcpb.ConcurrencyWaitResponse{SlotsFree: slots}, true, nil
+		},
+		req,
+	)
+	if err == nil && res == nil {
+		return &fcpb.ConcurrencyWaitResponse{}, nil
+	}
 	return res, err
 }

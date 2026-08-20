@@ -96,6 +96,11 @@ func (c *concurrency) release(taskUUID string, now time.Time) error {
 	c.Slots = slices.DeleteFunc(c.Slots, func(slot *fcpb.ConcurrencySlot) bool {
 		return slot.Committed && slot.TaskUuid == taskUUID
 	})
-	// FIXME: wake subscribers
 	return nil
+}
+
+func (c *concurrency) slotsFree(now time.Time) int32 {
+	c.expire(now)
+
+	return max(0, c.Limit-int32(len(c.Slots)))
 }

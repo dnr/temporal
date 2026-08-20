@@ -24,16 +24,29 @@ const (
 	ConcurrencyService_CancelReservation_FullMethodName = "/temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyService/CancelReservation"
 	ConcurrencyService_Commit_FullMethodName            = "/temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyService/Commit"
 	ConcurrencyService_Release_FullMethodName           = "/temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyService/Release"
+	ConcurrencyService_Wait_FullMethodName              = "/temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyService/Wait"
 )
 
 // ConcurrencyServiceClient is the client API for ConcurrencyService service.
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type ConcurrencyServiceClient interface {
+	// Reserve reserves a slot for a limited time. Succeeds if the slot is newly reserved or
+	// already reserved _or already committed_ for the task, i.e. idempotent. May not be durable:
+	// a successful Reserve followed by a Commit may not succeed even within the timeout. Callers
+	// must handle that situation correctly.
 	Reserve(ctx context.Context, in *ConcurrencyReserveRequest, opts ...grpc.CallOption) (*ConcurrencyReserveResponse, error)
+	// CancelReservation cancels a reservation early. Note that committed slots cannot be
+	// canceled, they must be Released. Idempotent. May not be durable.
 	CancelReservation(ctx context.Context, in *ConcurrencyCancelReservationRequest, opts ...grpc.CallOption) (*ConcurrencyCancelReservationResponse, error)
+	// Commit promotes a reservation to a committed slot. Succeeds if the reservation was
+	// promoted, or was already committed, i.e. idempotent. Durable.
 	Commit(ctx context.Context, in *ConcurrencyCommitRequest, opts ...grpc.CallOption) (*ConcurrencyCommitResponse, error)
+	// Release frees a comitted slot. Succeeds if the committed slot was released or if there was
+	// no committed slot, i.e. idempotent. Durable.
 	Release(ctx context.Context, in *ConcurrencyReleaseRequest, opts ...grpc.CallOption) (*ConcurrencyReleaseResponse, error)
+	// Wait is a long-poll RPC that returns when at least one slot is free.
+	Wait(ctx context.Context, in *ConcurrencyWaitRequest, opts ...grpc.CallOption) (*ConcurrencyWaitResponse, error)
 }
 
 type concurrencyServiceClient struct {
@@ -80,14 +93,35 @@ func (c *concurrencyServiceClient) Release(ctx context.Context, in *ConcurrencyR
 	return out, nil
 }
 
+func (c *concurrencyServiceClient) Wait(ctx context.Context, in *ConcurrencyWaitRequest, opts ...grpc.CallOption) (*ConcurrencyWaitResponse, error) {
+	out := new(ConcurrencyWaitResponse)
+	err := c.cc.Invoke(ctx, ConcurrencyService_Wait_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // ConcurrencyServiceServer is the server API for ConcurrencyService service.
 // All implementations must embed UnimplementedConcurrencyServiceServer
 // for forward compatibility
 type ConcurrencyServiceServer interface {
+	// Reserve reserves a slot for a limited time. Succeeds if the slot is newly reserved or
+	// already reserved _or already committed_ for the task, i.e. idempotent. May not be durable:
+	// a successful Reserve followed by a Commit may not succeed even within the timeout. Callers
+	// must handle that situation correctly.
 	Reserve(context.Context, *ConcurrencyReserveRequest) (*ConcurrencyReserveResponse, error)
+	// CancelReservation cancels a reservation early. Note that committed slots cannot be
+	// canceled, they must be Released. Idempotent. May not be durable.
 	CancelReservation(context.Context, *ConcurrencyCancelReservationRequest) (*ConcurrencyCancelReservationResponse, error)
+	// Commit promotes a reservation to a committed slot. Succeeds if the reservation was
+	// promoted, or was already committed, i.e. idempotent. Durable.
 	Commit(context.Context, *ConcurrencyCommitRequest) (*ConcurrencyCommitResponse, error)
+	// Release frees a comitted slot. Succeeds if the committed slot was released or if there was
+	// no committed slot, i.e. idempotent. Durable.
 	Release(context.Context, *ConcurrencyReleaseRequest) (*ConcurrencyReleaseResponse, error)
+	// Wait is a long-poll RPC that returns when at least one slot is free.
+	Wait(context.Context, *ConcurrencyWaitRequest) (*ConcurrencyWaitResponse, error)
 	mustEmbedUnimplementedConcurrencyServiceServer()
 }
 
@@ -106,6 +140,9 @@ func (UnimplementedConcurrencyServiceServer) Commit(context.Context, *Concurrenc
 }
 func (UnimplementedConcurrencyServiceServer) Release(context.Context, *ConcurrencyReleaseRequest) (*ConcurrencyReleaseResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Release not implemented")
+}
+func (UnimplementedConcurrencyServiceServer) Wait(context.Context, *ConcurrencyWaitRequest) (*ConcurrencyWaitResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method Wait not implemented")
 }
 func (UnimplementedConcurrencyServiceServer) mustEmbedUnimplementedConcurrencyServiceServer() {}
 
@@ -192,6 +229,24 @@ func _ConcurrencyService_Release_Handler(srv interface{}, ctx context.Context, d
 	return interceptor(ctx, in, info, handler)
 }
 
+func _ConcurrencyService_Wait_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ConcurrencyWaitRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ConcurrencyServiceServer).Wait(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ConcurrencyService_Wait_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ConcurrencyServiceServer).Wait(ctx, req.(*ConcurrencyWaitRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // ConcurrencyService_ServiceDesc is the grpc.ServiceDesc for ConcurrencyService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -214,6 +269,10 @@ var ConcurrencyService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "Release",
 			Handler:    _ConcurrencyService_Release_Handler,
+		},
+		{
+			MethodName: "Wait",
+			Handler:    _ConcurrencyService_Wait_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

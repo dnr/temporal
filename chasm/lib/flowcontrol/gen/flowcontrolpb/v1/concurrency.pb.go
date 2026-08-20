@@ -578,6 +578,102 @@ func (*ConcurrencyReleaseResponse) Descriptor() ([]byte, []int) {
 	return file_temporal_server_chasm_lib_flowcontrol_proto_v1_concurrency_proto_rawDescGZIP(), []int{10}
 }
 
+type ConcurrencyWaitRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	NamespaceId   string                 `protobuf:"bytes,1,opt,name=namespace_id,json=namespaceId,proto3" json:"namespace_id,omitempty"`
+	Key           string                 `protobuf:"bytes,2,opt,name=key,proto3" json:"key,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ConcurrencyWaitRequest) Reset() {
+	*x = ConcurrencyWaitRequest{}
+	mi := &file_temporal_server_chasm_lib_flowcontrol_proto_v1_concurrency_proto_msgTypes[11]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ConcurrencyWaitRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ConcurrencyWaitRequest) ProtoMessage() {}
+
+func (x *ConcurrencyWaitRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_temporal_server_chasm_lib_flowcontrol_proto_v1_concurrency_proto_msgTypes[11]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ConcurrencyWaitRequest.ProtoReflect.Descriptor instead.
+func (*ConcurrencyWaitRequest) Descriptor() ([]byte, []int) {
+	return file_temporal_server_chasm_lib_flowcontrol_proto_v1_concurrency_proto_rawDescGZIP(), []int{11}
+}
+
+func (x *ConcurrencyWaitRequest) GetNamespaceId() string {
+	if x != nil {
+		return x.NamespaceId
+	}
+	return ""
+}
+
+func (x *ConcurrencyWaitRequest) GetKey() string {
+	if x != nil {
+		return x.Key
+	}
+	return ""
+}
+
+type ConcurrencyWaitResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	SlotsFree     int32                  `protobuf:"varint,1,opt,name=slots_free,json=slotsFree,proto3" json:"slots_free,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ConcurrencyWaitResponse) Reset() {
+	*x = ConcurrencyWaitResponse{}
+	mi := &file_temporal_server_chasm_lib_flowcontrol_proto_v1_concurrency_proto_msgTypes[12]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ConcurrencyWaitResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ConcurrencyWaitResponse) ProtoMessage() {}
+
+func (x *ConcurrencyWaitResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_temporal_server_chasm_lib_flowcontrol_proto_v1_concurrency_proto_msgTypes[12]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ConcurrencyWaitResponse.ProtoReflect.Descriptor instead.
+func (*ConcurrencyWaitResponse) Descriptor() ([]byte, []int) {
+	return file_temporal_server_chasm_lib_flowcontrol_proto_v1_concurrency_proto_rawDescGZIP(), []int{12}
+}
+
+func (x *ConcurrencyWaitResponse) GetSlotsFree() int32 {
+	if x != nil {
+		return x.SlotsFree
+	}
+	return 0
+}
+
 var File_temporal_server_chasm_lib_flowcontrol_proto_v1_concurrency_proto protoreflect.FileDescriptor
 
 const file_temporal_server_chasm_lib_flowcontrol_proto_v1_concurrency_proto_rawDesc = "" +
@@ -612,12 +708,19 @@ const file_temporal_server_chasm_lib_flowcontrol_proto_v1_concurrency_proto_rawD
 	"\fnamespace_id\x18\x01 \x01(\tR\vnamespaceId\x12\x10\n" +
 	"\x03key\x18\x02 \x01(\tR\x03key\x12\x1b\n" +
 	"\ttask_uuid\x18\x03 \x01(\tR\btaskUuid\"\x1c\n" +
-	"\x1aConcurrencyReleaseResponse2\xff\x05\n" +
+	"\x1aConcurrencyReleaseResponse\"M\n" +
+	"\x16ConcurrencyWaitRequest\x12!\n" +
+	"\fnamespace_id\x18\x01 \x01(\tR\vnamespaceId\x12\x10\n" +
+	"\x03key\x18\x02 \x01(\tR\x03key\"8\n" +
+	"\x17ConcurrencyWaitResponse\x12\x1d\n" +
+	"\n" +
+	"slots_free\x18\x01 \x01(\x05R\tslotsFree2\xaa\a\n" +
 	"\x12ConcurrencyService\x12\xb1\x01\n" +
 	"\aReserve\x12I.temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyReserveRequest\x1aJ.temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyReserveResponse\"\x0f\x8a\xb5\x18\x02\b\x01\xd2\xc3\x18\x05\x1a\x03key\x12\xcf\x01\n" +
 	"\x11CancelReservation\x12S.temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyCancelReservationRequest\x1aT.temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyCancelReservationResponse\"\x0f\x8a\xb5\x18\x02\b\x01\xd2\xc3\x18\x05\x1a\x03key\x12\xae\x01\n" +
 	"\x06Commit\x12H.temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyCommitRequest\x1aI.temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyCommitResponse\"\x0f\x8a\xb5\x18\x02\b\x01\xd2\xc3\x18\x05\x1a\x03key\x12\xb1\x01\n" +
-	"\aRelease\x12I.temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyReleaseRequest\x1aJ.temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyReleaseResponse\"\x0f\x8a\xb5\x18\x02\b\x01\xd2\xc3\x18\x05\x1a\x03keyB;Z9go.temporal.io/server/chasm/lib/flowcontrol/gen/fcpb;fcpbb\x06proto3"
+	"\aRelease\x12I.temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyReleaseRequest\x1aJ.temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyReleaseResponse\"\x0f\x8a\xb5\x18\x02\b\x01\xd2\xc3\x18\x05\x1a\x03key\x12\xa8\x01\n" +
+	"\x04Wait\x12F.temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyWaitRequest\x1aG.temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyWaitResponse\"\x0f\x8a\xb5\x18\x02\b\x02\xd2\xc3\x18\x05\x1a\x03keyB;Z9go.temporal.io/server/chasm/lib/flowcontrol/gen/fcpb;fcpbb\x06proto3"
 
 var (
 	file_temporal_server_chasm_lib_flowcontrol_proto_v1_concurrency_proto_rawDescOnce sync.Once
@@ -631,7 +734,7 @@ func file_temporal_server_chasm_lib_flowcontrol_proto_v1_concurrency_proto_rawDe
 	return file_temporal_server_chasm_lib_flowcontrol_proto_v1_concurrency_proto_rawDescData
 }
 
-var file_temporal_server_chasm_lib_flowcontrol_proto_v1_concurrency_proto_msgTypes = make([]protoimpl.MessageInfo, 11)
+var file_temporal_server_chasm_lib_flowcontrol_proto_v1_concurrency_proto_msgTypes = make([]protoimpl.MessageInfo, 13)
 var file_temporal_server_chasm_lib_flowcontrol_proto_v1_concurrency_proto_goTypes = []any{
 	(*ConcurrencyState)(nil),                     // 0: temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyState
 	(*ConcurrencySlot)(nil),                      // 1: temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencySlot
@@ -644,22 +747,26 @@ var file_temporal_server_chasm_lib_flowcontrol_proto_v1_concurrency_proto_goType
 	(*ConcurrencyCommitResponse)(nil),            // 8: temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyCommitResponse
 	(*ConcurrencyReleaseRequest)(nil),            // 9: temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyReleaseRequest
 	(*ConcurrencyReleaseResponse)(nil),           // 10: temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyReleaseResponse
-	(*timestamppb.Timestamp)(nil),                // 11: google.protobuf.Timestamp
+	(*ConcurrencyWaitRequest)(nil),               // 11: temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyWaitRequest
+	(*ConcurrencyWaitResponse)(nil),              // 12: temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyWaitResponse
+	(*timestamppb.Timestamp)(nil),                // 13: google.protobuf.Timestamp
 }
 var file_temporal_server_chasm_lib_flowcontrol_proto_v1_concurrency_proto_depIdxs = []int32{
 	1,  // 0: temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyState.slots:type_name -> temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencySlot
-	11, // 1: temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencySlot.expires:type_name -> google.protobuf.Timestamp
+	13, // 1: temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencySlot.expires:type_name -> google.protobuf.Timestamp
 	2,  // 2: temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyReserveRequest.limit_update:type_name -> temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyLimitUpdate
 	3,  // 3: temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyService.Reserve:input_type -> temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyReserveRequest
 	5,  // 4: temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyService.CancelReservation:input_type -> temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyCancelReservationRequest
 	7,  // 5: temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyService.Commit:input_type -> temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyCommitRequest
 	9,  // 6: temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyService.Release:input_type -> temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyReleaseRequest
-	4,  // 7: temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyService.Reserve:output_type -> temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyReserveResponse
-	6,  // 8: temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyService.CancelReservation:output_type -> temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyCancelReservationResponse
-	8,  // 9: temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyService.Commit:output_type -> temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyCommitResponse
-	10, // 10: temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyService.Release:output_type -> temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyReleaseResponse
-	7,  // [7:11] is the sub-list for method output_type
-	3,  // [3:7] is the sub-list for method input_type
+	11, // 7: temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyService.Wait:input_type -> temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyWaitRequest
+	4,  // 8: temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyService.Reserve:output_type -> temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyReserveResponse
+	6,  // 9: temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyService.CancelReservation:output_type -> temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyCancelReservationResponse
+	8,  // 10: temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyService.Commit:output_type -> temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyCommitResponse
+	10, // 11: temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyService.Release:output_type -> temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyReleaseResponse
+	12, // 12: temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyService.Wait:output_type -> temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyWaitResponse
+	8,  // [8:13] is the sub-list for method output_type
+	3,  // [3:8] is the sub-list for method input_type
 	3,  // [3:3] is the sub-list for extension type_name
 	3,  // [3:3] is the sub-list for extension extendee
 	0,  // [0:3] is the sub-list for field type_name
@@ -676,7 +783,7 @@ func file_temporal_server_chasm_lib_flowcontrol_proto_v1_concurrency_proto_init(
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_temporal_server_chasm_lib_flowcontrol_proto_v1_concurrency_proto_rawDesc), len(file_temporal_server_chasm_lib_flowcontrol_proto_v1_concurrency_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   11,
+			NumMessages:   13,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
