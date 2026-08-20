@@ -4,13 +4,18 @@ import (
 	"context"
 	"errors"
 	"sync"
+	"time"
 
 	enumsspb "go.temporal.io/server/api/enums/v1"
 	taskqueuespb "go.temporal.io/server/api/taskqueue/v1"
 	fcpb "go.temporal.io/server/chasm/lib/flowcontrol/gen/flowcontrolpb/v1"
+	"go.temporal.io/server/common/backoff"
 	"go.temporal.io/server/common/cache"
+	"go.temporal.io/server/common/clock"
 	"go.temporal.io/server/common/goro"
+	"go.temporal.io/server/common/headers"
 	"go.temporal.io/server/common/namespace"
+	"go.temporal.io/server/common/util"
 )
 
 type fcReadinessState int32
@@ -23,6 +28,7 @@ const (
 
 type fcReadinessCacheKey struct {
 	nsID namespace.ID
+	tp   enumsspb.LimiterType
 	key  string
 }
 
@@ -48,17 +54,26 @@ type fcReadiness struct {
 func newFcReadiness(
 	concurrencyServiceClient fcpb.ConcurrencyServiceClient,
 ) *fcReadiness {
+	baseCtx, cancel := context.WithCancel(context.Background())
 	return &fcReadiness{
 		concurrencyServiceClient: concurrencyServiceClient,
 		// FIXME: size from dc
 		// FIXME: eviction handler
 		// FIXME: metrics
-		cache: cache.New(10000, &cache.Options{}),
+		cache:       cache.New(10000, &cache.Options{}),
+		waiters:     make(map[fcReadinessCacheKey]struct{}),
+		goros:       goro.NewKeyedSet[fcReadinessCacheKey](baseCtx),
+		cancelGoros: cancel,
 	}
 }
 
-func (r *fcReadiness) ReadyState(nsID namespace.ID, key string) fcReadinessState {
-	v := r.cache.Get(fcReadinessCacheKey{nsID: nsID, key: key})
+func (r *fcReadiness) Stop() {
+	r.cancelGoros()
+	r.cache.Stop()
+}
+
+func (r *fcReadiness) ReadyState(nsID namespace.ID, key string, tp enumsspb.LimiterType) fcReadinessState {
+	v := r.cache.Get(fcReadinessCacheKey{nsID: nsID, tp: tp, key: key})
 	if v == nil {
 		return fcReadinessUnknown
 	}
@@ -66,25 +81,93 @@ func (r *fcReadiness) ReadyState(nsID namespace.ID, key string) fcReadinessState
 	return readiness.state
 }
 
-func (r *fcReadiness) ReportReady(nsID namespace.ID, key string, gen int64) {
+func (r *fcReadiness) ReportReady(nsID namespace.ID, tp enumsspb.LimiterType, key string, gen int64) {
+	cacheKey := fcReadinessCacheKey{nsID: nsID, tp: tp, key: key}
 	r.cache.Put(
-		fcReadinessCacheKey{nsID: nsID, key: key},
+		cacheKey,
 		fcReadinessCacheValue{
 			generation: gen,
 			state:      fcReadinessReady,
 		},
 	)
+	// TODO(fc): should probably do this async instead of right here
+	r.stopWaiter(cacheKey)
+	// FIXME: somehow call back into matcher...
 }
 
-func (r *fcReadiness) ReportBlocked(nsID namespace.ID, key string, gen int64) {
+func (r *fcReadiness) ReportBlocked(nsID namespace.ID, tp enumsspb.LimiterType, key string, gen int64) {
+	cacheKey := fcReadinessCacheKey{nsID: nsID, tp: tp, key: key}
 	r.cache.Put(
-		fcReadinessCacheKey{nsID: nsID, key: key},
+		cacheKey,
 		fcReadinessCacheValue{
 			generation: gen,
 			state:      fcReadinessBlocked,
 		},
 	)
-	// FIXME: start subscription here! if we don't have one
+	// TODO(fc): should probably do this async instead of right here
+	r.startWaiter(cacheKey)
+}
+
+func (r *fcReadiness) startWaiter(ckey fcReadinessCacheKey) {
+	r.waitersLock.Lock()
+	defer r.waitersLock.Unlock()
+	// TODO(fc): put some limit on these, maybe two-stage lru
+	r.waiters[ckey] = struct{}{}
+	r.goros.Sync(r.waiters, r.waiter)
+}
+
+func (r *fcReadiness) stopWaiter(ckey fcReadinessCacheKey) {
+	r.waitersLock.Lock()
+	defer r.waitersLock.Unlock()
+	delete(r.waiters, ckey)
+	r.goros.Sync(r.waiters, r.waiter)
+}
+
+func (r *fcReadiness) waiter(ctx context.Context, ckey fcReadinessCacheKey) {
+	ctx = headers.SetCallerInfo(ctx, headers.NewCallerInfo(
+		ckey.nsID.String(), // TODO(fc): use namespace name instead of id
+		headers.CallerTypeBackgroundHigh,
+		"",
+	))
+
+	policy := backoff.NewExponentialRetryPolicy(time.Second).
+		WithExpirationInterval(backoff.NoInterval).
+		WithMaximumInterval(time.Minute)
+	retrier := backoff.NewRetrier(policy, clock.NewRealTimeSource())
+
+	for ctx.Err() == nil {
+		// get current generation
+		var gen int64
+		v := r.cache.Get(ckey)
+		if v != nil {
+			readiness := v.(fcReadinessCacheValue) // nolint:revive
+			gen = readiness.generation
+		}
+
+		switch ckey.tp {
+		case enumsspb.LIMITER_TYPE_CONCURRENCY:
+			res, err := r.concurrencyServiceClient.Wait(ctx, &fcpb.ConcurrencyWaitRequest{
+				NamespaceId: ckey.nsID.String(),
+				Key:         ckey.key,
+				Generation:  gen,
+			})
+			if err != nil {
+				util.InterruptibleSleep(ctx, retrier.NextBackOff(err))
+				continue
+			}
+			retrier.Reset()
+
+			if res.WakeCount > 0 {
+				r.ReportReady(ckey.nsID, ckey.tp, ckey.key, res.Generation)
+			} else {
+				r.ReportBlocked(ckey.nsID, ckey.tp, ckey.key, res.Generation)
+			}
+
+		default:
+			// unknown type, block forever
+			util.InterruptibleSleep(ctx, 365*24*time.Hour)
+		}
+	}
 }
 
 func (r *fcReadiness) NewTx(ctx context.Context, nsID namespace.ID, task *internalTask) (*fcTx, error) {

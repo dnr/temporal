@@ -3,6 +3,7 @@ package matching
 import (
 	"context"
 
+	enumsspb "go.temporal.io/server/api/enums/v1"
 	fcpb "go.temporal.io/server/chasm/lib/flowcontrol/gen/flowcontrolpb/v1"
 	"go.temporal.io/server/common/namespace"
 )
@@ -14,8 +15,8 @@ type fcCommitter interface {
 }
 
 type fcReadinessCacheInterface interface {
-	ReportReady(namespace.ID, string, int64)
-	ReportBlocked(namespace.ID, string, int64)
+	ReportReady(namespace.ID, enumsspb.LimiterType, string, int64)
+	ReportBlocked(namespace.ID, enumsspb.LimiterType, string, int64)
 }
 
 type fcConcurrencyCommitter struct {
@@ -56,10 +57,10 @@ func (c *fcConcurrencyCommitter) Reserve() error {
 		return err // don't update cache on rpc error
 	}
 	if res.SlotsReserved == 0 {
-		c.cache.ReportBlocked(c.nsID, c.key, res.Generation)
+		c.cache.ReportBlocked(c.nsID, enumsspb.LIMITER_TYPE_CONCURRENCY, c.key, res.Generation)
 		return errFCLimiterBlocked
 	}
-	c.cache.ReportReady(c.nsID, c.key, res.Generation)
+	c.cache.ReportReady(c.nsID, enumsspb.LIMITER_TYPE_CONCURRENCY, c.key, res.Generation)
 	return nil
 }
 

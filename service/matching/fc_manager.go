@@ -48,7 +48,7 @@ func newFCManager(
 
 func (fc *fcManager) WholeQueueLikely() bool {
 	nsID := namespace.ID(fc.partition.NamespaceId())
-	state := fc.readiness.ReadyState(nsID, fc.wholeQueueLimiter)
+	state := fc.readiness.ReadyState(nsID, fc.wholeQueueLimiter, enumsspb.LIMITER_TYPE_CONCURRENCY)
 	return state == fcReadinessUnknown || state == fcReadinessReady
 }
 
