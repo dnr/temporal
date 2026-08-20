@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"go.temporal.io/api/serviceerror"
+	taskqueuepb "go.temporal.io/api/taskqueue/v1"
 	"go.temporal.io/server/chasm"
 	fcpb "go.temporal.io/server/chasm/lib/flowcontrol/gen/flowcontrolpb/v1"
 	"google.golang.org/protobuf/types/known/timestamppb"
@@ -12,6 +13,8 @@ import (
 
 // FIXME: move to dynamic config
 const reserveTimeout = 30 * time.Second
+
+const initialConcurrencyLimit = int32(1_000_000)
 
 type concurrency struct {
 	chasm.UnimplementedComponent
@@ -51,7 +54,7 @@ func (c *concurrency) find(taskUUID string) int {
 }
 
 func (c *concurrency) availableSlots() int32 {
-	return max(0, c.Limit-int32(len(c.Slots)))
+	return max(0, c.Config.ConcurrentTasks-int32(len(c.Slots)))
 }
 
 func (c *concurrency) maintainGeneration() func() {
@@ -66,8 +69,10 @@ func (c *concurrency) maintainGeneration() func() {
 	}
 }
 
-func (c *concurrency) setLimit(limit int32) {
-	c.Limit = limit
+func (c *concurrency) updateConfig(config *taskqueuepb.ConcurrencyLimit, version int64) {
+	if config != nil && version > c.ConfigVersion {
+		c.Config = config
+	}
 }
 
 func (c *concurrency) reserve(taskUUID string, now time.Time) int32 {
@@ -77,7 +82,7 @@ func (c *concurrency) reserve(taskUUID string, now time.Time) int32 {
 	if c.find(taskUUID) >= 0 {
 		return 1 // already reserved or committed, accept
 	}
-	if int32(len(c.Slots)) >= c.Limit {
+	if int32(len(c.Slots)) >= c.Config.ConcurrentTasks {
 		return 0
 	}
 	c.Slots = append(c.Slots, &fcpb.ConcurrencySlot{
@@ -133,5 +138,5 @@ func (c *concurrency) notifyWaiters(now time.Time) int32 {
 		}
 	}
 	// FIXME: do slow release of notifications
-	return max(0, c.Limit-usedSlots)
+	return max(0, c.Config.ConcurrentTasks-usedSlots)
 }

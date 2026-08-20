@@ -21,13 +21,12 @@ type readinessCacheInterface interface {
 }
 
 type concurrencyCommitter struct {
-	ctx    context.Context
-	client fcpb.ConcurrencyServiceClient
-	cache  readinessCacheInterface
-	nsID   namespace.ID
-	task   fcTask
-	key    string
-	config any
+	ctx      context.Context
+	client   fcpb.ConcurrencyServiceClient
+	cache    readinessCacheInterface
+	nsID     namespace.ID
+	taskUUID string
+	lim      limiter
 	// TODO(fc): we could maybe have this component do some opportunistic batching
 }
 
@@ -36,47 +35,46 @@ func newConcurrencyCommitter(
 	client fcpb.ConcurrencyServiceClient,
 	cache readinessCacheInterface,
 	nsID namespace.ID,
-	task fcTask,
-	key string,
-	config any,
+	taskUUID string,
+	lim limiter,
 ) *concurrencyCommitter {
 	return &concurrencyCommitter{
-		ctx:    ctx,
-		client: client,
-		cache:  cache,
-		nsID:   nsID,
-		task:   task,
-		key:    key,
-		config: config,
+		ctx:      ctx,
+		client:   client,
+		cache:    cache,
+		nsID:     nsID,
+		taskUUID: taskUUID,
+		lim:      lim,
 	}
 }
 
 func (c *concurrencyCommitter) reserve() error {
 	// if config is missing or wrong type, just leave it out
-	limitUpdate, _ := c.config.(*taskqueuepb.ConcurrencyLimit)
+	configUpdate, _ := c.lim.config.(*taskqueuepb.ConcurrencyLimit)
 
 	res, err := c.client.Reserve(c.ctx, &fcpb.ConcurrencyReserveRequest{
-		NamespaceId: c.nsID.String(),
-		Key:         c.key,
-		TaskUuid:    c.task.TaskUUID(),
-		LimitUpdate: limitUpdate,
+		NamespaceId:         c.nsID.String(),
+		Key:                 c.lim.key,
+		TaskUuid:            c.taskUUID,
+		ConfigUpdate:        configUpdate,
+		ConfigUpdateVersion: c.lim.configVersion,
 	})
 	if err != nil {
 		return err // don't update cache on rpc error
 	}
 	if res.SlotsReserved == 0 {
-		c.cache.reportBlocked(c.nsID, enumsspb.LIMITER_TYPE_CONCURRENCY, c.key, res.Generation)
+		c.cache.reportBlocked(c.nsID, c.lim.tp, c.lim.key, res.Generation)
 		return errFCLimiterBlocked
 	}
-	c.cache.reportReady(c.nsID, enumsspb.LIMITER_TYPE_CONCURRENCY, c.key, res.Generation)
+	c.cache.reportReady(c.nsID, c.lim.tp, c.lim.key, res.Generation)
 	return nil
 }
 
 func (c *concurrencyCommitter) commit() error {
 	_, err := c.client.Commit(c.ctx, &fcpb.ConcurrencyCommitRequest{
 		NamespaceId: c.nsID.String(),
-		Key:         c.key,
-		TaskUuid:    c.task.TaskUUID(),
+		Key:         c.lim.key,
+		TaskUuid:    c.taskUUID,
 	})
 	return err
 }
@@ -84,7 +82,7 @@ func (c *concurrencyCommitter) commit() error {
 func (c *concurrencyCommitter) cancelReservations() {
 	_, _ = c.client.CancelReservation(c.ctx, &fcpb.ConcurrencyCancelReservationRequest{
 		NamespaceId: c.nsID.String(),
-		Key:         c.key,
-		TaskUuid:    c.task.TaskUUID(),
+		Key:         c.lim.key,
+		TaskUuid:    c.taskUUID,
 	})
 }

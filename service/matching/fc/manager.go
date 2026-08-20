@@ -14,7 +14,8 @@ type limiter struct {
 	tp     enumsspb.LimiterType
 	source limiterSource
 	// for limiters set from config, we need to pass through to Reserve
-	config any
+	config        any
+	configVersion int64
 }
 
 func (lim limiter) valid() bool {
@@ -83,15 +84,17 @@ func (m *Manager) UpdateLimitersFromConfig(limiters *Limiters) (*Limiters, error
 		if !lim.valid() {
 			// add it in empty slot
 			limiters.limiters[i] = limiter{
-				key:    m.wholeQueueLimiter,
-				tp:     enumsspb.LIMITER_TYPE_CONCURRENCY,
-				source: limiterSourceConfig_WholeQueue,
-				config: limit,
+				key:           m.wholeQueueLimiter,
+				tp:            enumsspb.LIMITER_TYPE_CONCURRENCY,
+				source:        limiterSourceConfig_WholeQueue,
+				config:        limit,
+				configVersion: userData.GetVersion(),
 			}
 			return limiters, nil
 		} else if lim.source == limiterSourceConfig_WholeQueue {
 			// we found one we previously set, update config
 			lim.config = limit
+			lim.configVersion = userData.GetVersion()
 			return limiters, nil
 		}
 	}

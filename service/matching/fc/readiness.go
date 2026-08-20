@@ -263,7 +263,7 @@ func (r *Readiness) NewTx(ctx context.Context, nsID namespace.ID, task fcTask) (
 	for i, lim := range lims {
 		switch lim.tp {
 		case enumsspb.LIMITER_TYPE_CONCURRENCY:
-			committers[i] = newConcurrencyCommitter(ctx, r.concurrencyServiceClient, r, nsID, task, lim.key, lim.config)
+			committers[i] = newConcurrencyCommitter(ctx, r.concurrencyServiceClient, r, nsID, task.TaskUUID(), lim)
 			refs[i] = &taskqueuespb.LimiterRef{LimiterType: lim.tp, Key: lim.key}
 		default:
 			return nil, errors.New("invalid limiter type")

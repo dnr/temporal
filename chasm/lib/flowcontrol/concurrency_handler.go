@@ -3,12 +3,11 @@ package flowcontrol
 import (
 	"context"
 
+	taskqueuepb "go.temporal.io/api/taskqueue/v1"
 	"go.temporal.io/server/chasm"
 	fcpb "go.temporal.io/server/chasm/lib/flowcontrol/gen/flowcontrolpb/v1"
 	"go.temporal.io/server/common/log"
 )
-
-const initialConcurrencyLimit = int32(1_000_000)
 
 type concurrencyHandler struct {
 	fcpb.UnimplementedConcurrencyServiceServer
@@ -34,23 +33,21 @@ func (h *concurrencyHandler) Reserve(ctx context.Context, req *fcpb.ConcurrencyR
 			BusinessID:  req.Key,
 		},
 		func(_ chasm.MutableContext, req *fcpb.ConcurrencyReserveRequest) (*concurrency, error) {
-			// For now (whole-queue limits), we should always have an initial limit here. For
-			// per-task limits, this may be missing and set via api later. Assume a very high
-			// limit initially.
-			limit := initialConcurrencyLimit
-			if update := req.GetLimitUpdate(); update != nil {
-				limit = update.ConcurrentTasks
+			// For now (whole-queue limits), we should always have an initial config here. For
+			// per-task limits, this may be missing and set via api later.
+			config := req.GetConfigUpdate()
+			if config == nil {
+				config = &taskqueuepb.ConcurrencyLimit{ConcurrentTasks: initialConcurrencyLimit}
 			}
 			return &concurrency{
 				ConcurrencyState: &fcpb.ConcurrencyState{
-					Limit: limit,
+					Config:        config,
+					ConfigVersion: req.GetConfigUpdateVersion(),
 				},
 			}, nil
 		},
 		func(c *concurrency, cctx chasm.MutableContext, req *fcpb.ConcurrencyReserveRequest) (*fcpb.ConcurrencyReserveResponse, error) {
-			if update := req.GetLimitUpdate(); update != nil {
-				c.setLimit(update.ConcurrentTasks)
-			}
+			c.updateConfig(req.GetConfigUpdate(), req.GetConfigUpdateVersion())
 			slotsReserved := c.reserve(req.TaskUuid, cctx.Now(c))
 			return &fcpb.ConcurrencyReserveResponse{
 				Generation:    c.Generation,

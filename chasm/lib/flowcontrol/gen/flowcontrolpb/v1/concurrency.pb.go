@@ -28,12 +28,17 @@ const (
 
 type ConcurrencyState struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// Limit of concurrent slots; maximum length of slots.
-	Limit int32 `protobuf:"varint,1,opt,name=limit,proto3" json:"limit,omitempty"`
-	// Slots reserved or committed. Entries should be unique by task_uuid.
-	Slots []*ConcurrencySlot `protobuf:"bytes,2,rep,name=slots,proto3" json:"slots,omitempty"`
+	// Limit for concurrent slots.
+	Config *v1.ConcurrencyLimit `protobuf:"bytes,1,opt,name=config,proto3" json:"config,omitempty"`
+	// Incrementing version for config, to avoid flipping to an older config. For limits set from
+	// task queue config, this is the user data version. For limits set from API, this is its own
+	// independent version.
+	ConfigVersion int64 `protobuf:"varint,2,opt,name=config_version,json=configVersion,proto3" json:"config_version,omitempty"`
+	// Slots reserved or committed. Entries should be unique by task_uuid. Length is bounded by
+	// config.ConcurrentTasks.
+	Slots []*ConcurrencySlot `protobuf:"bytes,3,rep,name=slots,proto3" json:"slots,omitempty"`
 	// Generation is used to ensure Wait is monotonic. See comment in Wait for details.
-	Generation    int64 `protobuf:"varint,3,opt,name=generation,proto3" json:"generation,omitempty"`
+	Generation    int64 `protobuf:"varint,4,opt,name=generation,proto3" json:"generation,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -68,9 +73,16 @@ func (*ConcurrencyState) Descriptor() ([]byte, []int) {
 	return file_temporal_server_chasm_lib_flowcontrol_proto_v1_concurrency_proto_rawDescGZIP(), []int{0}
 }
 
-func (x *ConcurrencyState) GetLimit() int32 {
+func (x *ConcurrencyState) GetConfig() *v1.ConcurrencyLimit {
 	if x != nil {
-		return x.Limit
+		return x.Config
+	}
+	return nil
+}
+
+func (x *ConcurrencyState) GetConfigVersion() int64 {
+	if x != nil {
+		return x.ConfigVersion
 	}
 	return 0
 }
@@ -160,9 +172,10 @@ type ConcurrencyReserveRequest struct {
 	TaskUuid    string                 `protobuf:"bytes,3,opt,name=task_uuid,json=taskUuid,proto3" json:"task_uuid,omitempty"`
 	// For whole-task-queue limits, the initial limit and updates to the limit come through task
 	// queue config, so we need to pass them to the chasm object. We just do it on every Reserve.
-	LimitUpdate   *v1.ConcurrencyLimit `protobuf:"bytes,4,opt,name=limit_update,json=limitUpdate,proto3" json:"limit_update,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	ConfigUpdate        *v1.ConcurrencyLimit `protobuf:"bytes,4,opt,name=config_update,json=configUpdate,proto3" json:"config_update,omitempty"`
+	ConfigUpdateVersion int64                `protobuf:"varint,5,opt,name=config_update_version,json=configUpdateVersion,proto3" json:"config_update_version,omitempty"`
+	unknownFields       protoimpl.UnknownFields
+	sizeCache           protoimpl.SizeCache
 }
 
 func (x *ConcurrencyReserveRequest) Reset() {
@@ -216,11 +229,18 @@ func (x *ConcurrencyReserveRequest) GetTaskUuid() string {
 	return ""
 }
 
-func (x *ConcurrencyReserveRequest) GetLimitUpdate() *v1.ConcurrencyLimit {
+func (x *ConcurrencyReserveRequest) GetConfigUpdate() *v1.ConcurrencyLimit {
 	if x != nil {
-		return x.LimitUpdate
+		return x.ConfigUpdate
 	}
 	return nil
+}
+
+func (x *ConcurrencyReserveRequest) GetConfigUpdateVersion() int64 {
+	if x != nil {
+		return x.ConfigUpdateVersion
+	}
+	return 0
 }
 
 type ConcurrencyReserveResponse struct {
@@ -687,22 +707,24 @@ var File_temporal_server_chasm_lib_flowcontrol_proto_v1_concurrency_proto protor
 
 const file_temporal_server_chasm_lib_flowcontrol_proto_v1_concurrency_proto_rawDesc = "" +
 	"\n" +
-	"@temporal/server/chasm/lib/flowcontrol/proto/v1/concurrency.proto\x12.temporal.server.chasm.lib.flowcontrol.proto.v1\x1a\x1fgoogle/protobuf/timestamp.proto\x1a'temporal/api/taskqueue/v1/message.proto\x1a0temporal/server/api/common/v1/api_category.proto\x1a.temporal/server/api/routing/v1/extension.proto\"\x9f\x01\n" +
-	"\x10ConcurrencyState\x12\x14\n" +
-	"\x05limit\x18\x01 \x01(\x05R\x05limit\x12U\n" +
-	"\x05slots\x18\x02 \x03(\v2?.temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencySlotR\x05slots\x12\x1e\n" +
+	"@temporal/server/chasm/lib/flowcontrol/proto/v1/concurrency.proto\x12.temporal.server.chasm.lib.flowcontrol.proto.v1\x1a\x1fgoogle/protobuf/timestamp.proto\x1a'temporal/api/taskqueue/v1/message.proto\x1a0temporal/server/api/common/v1/api_category.proto\x1a.temporal/server/api/routing/v1/extension.proto\"\xf5\x01\n" +
+	"\x10ConcurrencyState\x12C\n" +
+	"\x06config\x18\x01 \x01(\v2+.temporal.api.taskqueue.v1.ConcurrencyLimitR\x06config\x12%\n" +
+	"\x0econfig_version\x18\x02 \x01(\x03R\rconfigVersion\x12U\n" +
+	"\x05slots\x18\x03 \x03(\v2?.temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencySlotR\x05slots\x12\x1e\n" +
 	"\n" +
-	"generation\x18\x03 \x01(\x03R\n" +
+	"generation\x18\x04 \x01(\x03R\n" +
 	"generation\"\x82\x01\n" +
 	"\x0fConcurrencySlot\x12\x1b\n" +
 	"\ttask_uuid\x18\x01 \x01(\tR\btaskUuid\x12\x1c\n" +
 	"\tcommitted\x18\x02 \x01(\bR\tcommitted\x124\n" +
-	"\aexpires\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampR\aexpires\"\xbd\x01\n" +
+	"\aexpires\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampR\aexpires\"\xf3\x01\n" +
 	"\x19ConcurrencyReserveRequest\x12!\n" +
 	"\fnamespace_id\x18\x01 \x01(\tR\vnamespaceId\x12\x10\n" +
 	"\x03key\x18\x02 \x01(\tR\x03key\x12\x1b\n" +
-	"\ttask_uuid\x18\x03 \x01(\tR\btaskUuid\x12N\n" +
-	"\flimit_update\x18\x04 \x01(\v2+.temporal.api.taskqueue.v1.ConcurrencyLimitR\vlimitUpdate\"c\n" +
+	"\ttask_uuid\x18\x03 \x01(\tR\btaskUuid\x12P\n" +
+	"\rconfig_update\x18\x04 \x01(\v2+.temporal.api.taskqueue.v1.ConcurrencyLimitR\fconfigUpdate\x122\n" +
+	"\x15config_update_version\x18\x05 \x01(\x03R\x13configUpdateVersion\"c\n" +
 	"\x1aConcurrencyReserveResponse\x12\x1e\n" +
 	"\n" +
 	"generation\x18\x01 \x01(\x03R\n" +
@@ -768,28 +790,29 @@ var file_temporal_server_chasm_lib_flowcontrol_proto_v1_concurrency_proto_goType
 	(*ConcurrencyReleaseResponse)(nil),           // 9: temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyReleaseResponse
 	(*ConcurrencyWaitRequest)(nil),               // 10: temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyWaitRequest
 	(*ConcurrencyWaitResponse)(nil),              // 11: temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyWaitResponse
-	(*timestamppb.Timestamp)(nil),                // 12: google.protobuf.Timestamp
-	(*v1.ConcurrencyLimit)(nil),                  // 13: temporal.api.taskqueue.v1.ConcurrencyLimit
+	(*v1.ConcurrencyLimit)(nil),                  // 12: temporal.api.taskqueue.v1.ConcurrencyLimit
+	(*timestamppb.Timestamp)(nil),                // 13: google.protobuf.Timestamp
 }
 var file_temporal_server_chasm_lib_flowcontrol_proto_v1_concurrency_proto_depIdxs = []int32{
-	1,  // 0: temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyState.slots:type_name -> temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencySlot
-	12, // 1: temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencySlot.expires:type_name -> google.protobuf.Timestamp
-	13, // 2: temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyReserveRequest.limit_update:type_name -> temporal.api.taskqueue.v1.ConcurrencyLimit
-	2,  // 3: temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyService.Reserve:input_type -> temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyReserveRequest
-	4,  // 4: temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyService.CancelReservation:input_type -> temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyCancelReservationRequest
-	6,  // 5: temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyService.Commit:input_type -> temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyCommitRequest
-	8,  // 6: temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyService.Release:input_type -> temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyReleaseRequest
-	10, // 7: temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyService.Wait:input_type -> temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyWaitRequest
-	3,  // 8: temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyService.Reserve:output_type -> temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyReserveResponse
-	5,  // 9: temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyService.CancelReservation:output_type -> temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyCancelReservationResponse
-	7,  // 10: temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyService.Commit:output_type -> temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyCommitResponse
-	9,  // 11: temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyService.Release:output_type -> temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyReleaseResponse
-	11, // 12: temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyService.Wait:output_type -> temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyWaitResponse
-	8,  // [8:13] is the sub-list for method output_type
-	3,  // [3:8] is the sub-list for method input_type
-	3,  // [3:3] is the sub-list for extension type_name
-	3,  // [3:3] is the sub-list for extension extendee
-	0,  // [0:3] is the sub-list for field type_name
+	12, // 0: temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyState.config:type_name -> temporal.api.taskqueue.v1.ConcurrencyLimit
+	1,  // 1: temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyState.slots:type_name -> temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencySlot
+	13, // 2: temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencySlot.expires:type_name -> google.protobuf.Timestamp
+	12, // 3: temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyReserveRequest.config_update:type_name -> temporal.api.taskqueue.v1.ConcurrencyLimit
+	2,  // 4: temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyService.Reserve:input_type -> temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyReserveRequest
+	4,  // 5: temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyService.CancelReservation:input_type -> temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyCancelReservationRequest
+	6,  // 6: temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyService.Commit:input_type -> temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyCommitRequest
+	8,  // 7: temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyService.Release:input_type -> temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyReleaseRequest
+	10, // 8: temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyService.Wait:input_type -> temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyWaitRequest
+	3,  // 9: temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyService.Reserve:output_type -> temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyReserveResponse
+	5,  // 10: temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyService.CancelReservation:output_type -> temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyCancelReservationResponse
+	7,  // 11: temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyService.Commit:output_type -> temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyCommitResponse
+	9,  // 12: temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyService.Release:output_type -> temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyReleaseResponse
+	11, // 13: temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyService.Wait:output_type -> temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyWaitResponse
+	9,  // [9:14] is the sub-list for method output_type
+	4,  // [4:9] is the sub-list for method input_type
+	4,  // [4:4] is the sub-list for extension type_name
+	4,  // [4:4] is the sub-list for extension extendee
+	0,  // [0:4] is the sub-list for field type_name
 }
 
 func init() { file_temporal_server_chasm_lib_flowcontrol_proto_v1_concurrency_proto_init() }
