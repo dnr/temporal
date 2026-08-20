@@ -95,6 +95,7 @@ func (h *concurrencyHandler) Commit(ctx context.Context, req *fcpb.ConcurrencyCo
 	return res, err
 }
 
+// FIXME: have to get history to call Release
 func (h *concurrencyHandler) Release(ctx context.Context, req *fcpb.ConcurrencyReleaseRequest) (retRes *fcpb.ConcurrencyReleaseResponse, retErr error) {
 	defer log.CapturePanic(h.logger, &retErr)
 
@@ -126,8 +127,6 @@ func (h *concurrencyHandler) Wait(ctx context.Context, req *fcpb.ConcurrencyWait
 	// generation counter. We return it on every Reserve and Wait, so callers should have the
 	// current value. If their value is out of date then we return immediately (true), if it's
 	// too new than we wait for it to catch up (false).
-
-	// FIXME: confirm if we can mutate c within PollComponent even if we don't want it persisted
 	res, _, err := chasm.PollComponent(
 		ctx,
 		chasm.NewComponentRef[*concurrency](chasm.ExecutionKey{

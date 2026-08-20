@@ -158,7 +158,7 @@ func (r *Readiness) reportReady(nsID namespace.ID, tp enumsspb.LimiterType, key 
 	r.getNS(nsID).reportReady(rcKey{tp: tp, key: key}, gen)
 }
 
-// ReportReady is called when a Reserve or Wait call succeeds.
+// reportReady is called when a Reserve or Wait call succeeds.
 func (rn *readinessNS) reportReady(rkey rcKey, gen int64) {
 	rn.lock.Lock()
 
@@ -304,7 +304,7 @@ func (tx *tx) Reserve() error {
 	}
 	// reserve must be sequential
 	for i, com := range tx.committers {
-		if err := com.Reserve(); err != nil {
+		if err := com.reserve(); err != nil {
 			return err
 		}
 		tx.state[i] = txStateReserved
@@ -320,7 +320,7 @@ func (tx *tx) Commit() error {
 	// note: rate limiters don't have to be Committed
 	var errs []error
 	for i, com := range tx.committers {
-		if err := com.Commit(); err != nil {
+		if err := com.commit(); err != nil {
 			errs = append(errs, err)
 			tx.state[i] = txStateCommitFailed
 		} else {
@@ -338,7 +338,7 @@ func (tx *tx) CancelReservations() {
 	for i, com := range tx.committers {
 		if tx.state[i] == txStateReserved {
 			// call in new goroutine, don't block here, we don't care about the result
-			go com.CancelReservations()
+			go com.cancelReservations()
 			tx.state[i] = txStateCanceled
 		}
 	}

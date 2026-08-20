@@ -9,9 +9,9 @@ import (
 )
 
 type committer interface {
-	Reserve() error
-	Commit() error
-	CancelReservations()
+	reserve() error
+	commit() error
+	cancelReservations()
 }
 
 type readinessCacheInterface interface {
@@ -26,6 +26,7 @@ type concurrencyCommitter struct {
 	nsID   namespace.ID
 	task   fcTask
 	key    string
+	// TODO(fc): we could maybe have this component do some opportunistic batching
 }
 
 func newConcurrencyCommitter(
@@ -46,7 +47,7 @@ func newConcurrencyCommitter(
 	}
 }
 
-func (c *concurrencyCommitter) Reserve() error {
+func (c *concurrencyCommitter) reserve() error {
 	res, err := c.client.Reserve(c.ctx, &fcpb.ConcurrencyReserveRequest{
 		NamespaceId: c.nsID.String(),
 		Key:         c.key,
@@ -64,7 +65,7 @@ func (c *concurrencyCommitter) Reserve() error {
 	return nil
 }
 
-func (c *concurrencyCommitter) Commit() error {
+func (c *concurrencyCommitter) commit() error {
 	_, err := c.client.Commit(c.ctx, &fcpb.ConcurrencyCommitRequest{
 		NamespaceId: c.nsID.String(),
 		Key:         c.key,
@@ -73,7 +74,7 @@ func (c *concurrencyCommitter) Commit() error {
 	return err
 }
 
-func (c *concurrencyCommitter) CancelReservations() {
+func (c *concurrencyCommitter) cancelReservations() {
 	_, _ = c.client.CancelReservation(c.ctx, &fcpb.ConcurrencyCancelReservationRequest{
 		NamespaceId: c.nsID.String(),
 		Key:         c.key,

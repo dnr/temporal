@@ -33,10 +33,14 @@ func (c *concurrency) ContextMetadata(_ chasm.Context) map[string]string {
 	return nil
 }
 
+func expiredReservation(slot *fcpb.ConcurrencySlot, nowSec int64) bool {
+	return !slot.Committed && slot.Expires != nil && slot.Expires.Seconds < nowSec
+}
+
 func (c *concurrency) expire(now time.Time) {
 	nowSec := now.Unix() + 1
 	c.Slots = slices.DeleteFunc(c.Slots, func(slot *fcpb.ConcurrencySlot) bool {
-		return !slot.Committed && slot.Expires != nil && slot.Expires.Seconds < nowSec
+		return expiredReservation(slot, nowSec)
 	})
 }
 
@@ -114,10 +118,16 @@ func (c *concurrency) release(taskUUID string, now time.Time) {
 	})
 }
 
+// notifyWaiters is called from PollComponent and should not modify the state.
 func (c *concurrency) notifyWaiters(now time.Time) int32 {
-	defer c.maintainGeneration()()
-	c.expire(now)
-
+	// We can't call c.expire so just count:
+	nowSec := now.Unix() + 1
+	usedSlots := int32(0)
+	for _, slot := range c.Slots {
+		if !expiredReservation(slot, nowSec) {
+			usedSlots++
+		}
+	}
 	// FIXME: do slow release of notifications
-	return c.availableSlots()
+	return max(0, c.Limit-usedSlots)
 }
