@@ -26,10 +26,13 @@ const (
 )
 
 type ConcurrencyState struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Limit         int32                  `protobuf:"varint,1,opt,name=limit,proto3" json:"limit,omitempty"`
-	Slots         []*ConcurrencySlot     `protobuf:"bytes,2,rep,name=slots,proto3" json:"slots,omitempty"`
-	Generation    int64                  `protobuf:"varint,3,opt,name=generation,proto3" json:"generation,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Limit of concurrent slots; maximum length of slots.
+	Limit int32 `protobuf:"varint,1,opt,name=limit,proto3" json:"limit,omitempty"`
+	// Slots reserved or committed. Entries should be unique by task_uuid.
+	Slots []*ConcurrencySlot `protobuf:"bytes,2,rep,name=slots,proto3" json:"slots,omitempty"`
+	// Generation is used to ensure Wait is monotonic. See comment in Wait for details.
+	Generation    int64 `protobuf:"varint,3,opt,name=generation,proto3" json:"generation,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -90,6 +93,7 @@ type ConcurrencySlot struct {
 	// Task UUID of task.
 	TaskUuid string `protobuf:"bytes,1,opt,name=task_uuid,json=taskUuid,proto3" json:"task_uuid,omitempty"`
 	// Whether slot is committed or only reserved. Reserved slots must have an expiry time.
+	// Committed slots don't expire, they must be Released.
 	Committed bool `protobuf:"varint,2,opt,name=committed,proto3" json:"committed,omitempty"`
 	// Expiry time for reserved slot.
 	Expires       *timestamppb.Timestamp `protobuf:"bytes,3,opt,name=expires,proto3" json:"expires,omitempty"`

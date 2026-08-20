@@ -9,8 +9,11 @@ import "temporal/server/api/routing/v1/extension.proto";
 option go_package = "go.temporal.io/server/chasm/lib/flowcontrol/gen/fcpb;fcpb";
 
 message ConcurrencyState {
+  // Limit of concurrent slots; maximum length of slots.
   int32 limit = 1;
+  // Slots reserved or committed. Entries should be unique by task_uuid.
   repeated ConcurrencySlot slots = 2;
+  // Generation is used to ensure Wait is monotonic. See comment in Wait for details.
   int64 generation = 3;
 }
 
@@ -18,6 +21,7 @@ message ConcurrencySlot {
   // Task UUID of task.
   string task_uuid = 1;
   // Whether slot is committed or only reserved. Reserved slots must have an expiry time.
+  // Committed slots don't expire, they must be Released.
   bool committed = 2;
   // Expiry time for reserved slot.
   google.protobuf.Timestamp expires = 3;

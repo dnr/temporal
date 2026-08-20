@@ -46,17 +46,30 @@ func (c *concurrency) find(taskUUID string) int {
 	})
 }
 
-func (c *concurrency) full() bool {
-	return len(c.Slots) >= int(c.Limit)
+func (c *concurrency) availableSlots() int32 {
+	return max(0, c.Limit-int32(len(c.Slots)))
+}
+
+func (c *concurrency) maintainGeneration() func() {
+	oldPred := c.availableSlots() > 0
+	return func() {
+		newPred := c.availableSlots() > 0
+		if oldPred && !newPred {
+			// Increment Generation on any transition where Wait would have returned
+			// immediately before but would not now.
+			c.Generation++
+		}
+	}
 }
 
 func (c *concurrency) reserve(taskUUID string, now time.Time) int32 {
+	defer c.maintainGeneration()()
 	c.expire(now)
 
 	if c.find(taskUUID) >= 0 {
 		return 1 // already reserved or committed, accept
 	}
-	if c.full() {
+	if int32(len(c.Slots)) >= c.Limit {
 		return 0
 	}
 	c.Slots = append(c.Slots, &fcpb.ConcurrencySlot{
@@ -65,30 +78,26 @@ func (c *concurrency) reserve(taskUUID string, now time.Time) int32 {
 		// Truncate is okay because expire adds a second anyway.
 		Expires: timestamppb.New(now.Add(reserveTimeout).Truncate(time.Second)),
 	})
-	c.Generation++
 	return 1
 }
 
 func (c *concurrency) cancelReservation(taskUUID string, now time.Time) {
+	defer c.maintainGeneration()()
 	c.expire(now)
 
-	prevLen := len(c.Slots)
 	c.Slots = slices.DeleteFunc(c.Slots, func(slot *fcpb.ConcurrencySlot) bool {
 		return !slot.Committed && slot.TaskUuid == taskUUID
 	})
-	if len(c.Slots) != prevLen {
-		c.Generation++
-	}
 }
 
 func (c *concurrency) commit(taskUUID string, now time.Time) error {
+	defer c.maintainGeneration()()
 	c.expire(now)
 
 	if idx := c.find(taskUUID); idx >= 0 {
 		// note this works even if it was already committed
 		c.Slots[idx].Committed = true
 		c.Slots[idx].Expires = nil
-		c.Generation++
 		return nil
 	}
 
@@ -97,19 +106,18 @@ func (c *concurrency) commit(taskUUID string, now time.Time) error {
 }
 
 func (c *concurrency) release(taskUUID string, now time.Time) {
+	defer c.maintainGeneration()()
 	c.expire(now)
 
-	prevLen := len(c.Slots)
 	c.Slots = slices.DeleteFunc(c.Slots, func(slot *fcpb.ConcurrencySlot) bool {
 		return slot.Committed && slot.TaskUuid == taskUUID
 	})
-	if len(c.Slots) != prevLen {
-		c.Generation++
-	}
 }
 
-func (c *concurrency) slotsFree(now time.Time) int32 {
+func (c *concurrency) notifyWaiters(now time.Time) int32 {
+	defer c.maintainGeneration()()
 	c.expire(now)
 
-	return max(0, c.Limit-int32(len(c.Slots)))
+	// FIXME: do slow release of notifications
+	return c.availableSlots()
 }

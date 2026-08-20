@@ -117,6 +117,16 @@ func (h *concurrencyHandler) Release(ctx context.Context, req *fcpb.ConcurrencyR
 func (h *concurrencyHandler) Wait(ctx context.Context, req *fcpb.ConcurrencyWaitRequest) (retRes *fcpb.ConcurrencyWaitResponse, retErr error) {
 	defer log.CapturePanic(h.logger, &retErr)
 
+	// CHASM requires that PollComponent be monotonic: if it returns true at some state, then
+	// it should return true at future states. Our predicate is essentially "is there any free
+	// slot?" This can switch from false to true on a Release or CancelReservation or
+	// reservation expiry, which is monotonic. The problem is the other way, on Reserve, it
+	// could switch from true to false, which isn't allowed. To fix this, we add a
+	// "generation": whenever there was a free slot but isn't anymore, we increment a
+	// generation counter. We return it on every Reserve and Wait, so callers should have the
+	// current value. If their value is out of date then we return immediately (true), if it's
+	// too new than we wait for it to catch up (false).
+
 	// FIXME: confirm if we can mutate c within PollComponent even if we don't want it persisted
 	res, _, err := chasm.PollComponent(
 		ctx,
@@ -125,14 +135,21 @@ func (h *concurrencyHandler) Wait(ctx context.Context, req *fcpb.ConcurrencyWait
 			BusinessID:  req.Key,
 		}),
 		func(c *concurrency, cctx chasm.Context, req *fcpb.ConcurrencyWaitRequest) (*fcpb.ConcurrencyWaitResponse, bool, error) {
-			slots := c.slotsFree(cctx.Now(c))
+			notify := c.notifyWaiters(cctx.Now(c))
+
 			if req.Generation < c.Generation {
-				return &fcpb.ConcurrencyWaitResponse{Generation: c.Generation, WakeCount: slots}, true, nil
-			}
-			if slots == 0 {
+				// TODO(fc): don't always notify all free slots on stale generation?
+				return &fcpb.ConcurrencyWaitResponse{Generation: c.Generation, WakeCount: notify}, true, nil
+			} else if req.Generation > c.Generation {
+				// Generation is too new. We have to return false until we get there.
 				return nil, false, nil
 			}
-			return &fcpb.ConcurrencyWaitResponse{WakeCount: slots}, true, nil
+			if notify == 0 {
+				// No free slots, wait for another transition.
+				return nil, false, nil
+			}
+			// Notify caller with some slots.
+			return &fcpb.ConcurrencyWaitResponse{Generation: c.Generation, WakeCount: notify}, true, nil
 		},
 		req,
 	)
