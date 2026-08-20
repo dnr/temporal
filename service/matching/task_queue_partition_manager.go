@@ -146,6 +146,7 @@ func newTaskQueuePartitionManager(
 	fcManager := newFCManager(
 		partition,
 		userDataManager,
+		e.fcReadiness,
 	)
 
 	var taskHooks []hooks.TaskHook

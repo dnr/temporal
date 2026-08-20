@@ -5,23 +5,8 @@ import (
 	"slices"
 
 	enumsspb "go.temporal.io/server/api/enums/v1"
+	"go.temporal.io/server/common/namespace"
 	"go.temporal.io/server/common/tqid"
-)
-
-// Maximum total limiters that can apply to any task. (Currently this includes the whole-queue
-// limiter, in the future we may allow the whole-queue limiter to be separate from this limit.)
-const maxLimiters = 3
-
-type limiterSource int32
-
-const (
-	// not valid limiter
-	limiterSourceInvalid limiterSource = iota
-	// limiter came from task queue config, applies to the whole queue
-	limiterSourceConfig_WholeQueue
-	// limiter came from task itself
-	limiterSourceTask
-	// future: namespace policy, etc.
 )
 
 type fcLimiter struct {
@@ -39,25 +24,32 @@ type fcLimiters struct {
 }
 
 type fcManager struct {
-	partition       tqid.Partition
-	userDataManager userDataManager
-	// FIXME: need client for external limiters
+	partition         tqid.Partition
+	userDataManager   userDataManager
+	readiness         *fcReadiness
+	wholeQueueLimiter string
 	// FIXME: need some way to call back into matcher when readiness changes
 }
 
 func newFCManager(
 	partition tqid.Partition,
 	userDataManager userDataManager,
+	readiness *fcReadiness,
 ) *fcManager {
+	tqName := partition.TaskQueue().Name()
+	tqType := partition.TaskType()
 	return &fcManager{
-		partition:       partition,
-		userDataManager: userDataManager,
+		partition:         partition,
+		userDataManager:   userDataManager,
+		readiness:         readiness,
+		wholeQueueLimiter: wholeQueueLimiterName(tqName, tqType),
 	}
 }
 
 func (fc *fcManager) WholeQueueLikely() bool {
-	// FIXME
-	return true
+	nsID := namespace.ID(fc.partition.NamespaceId())
+	state := fc.readiness.ReadyState(nsID, fc.wholeQueueLimiter)
+	return state == fcReadinessUnknown || state == fcReadinessReady
 }
 
 func (fc *fcManager) UpdateLimitersFromConfig(
@@ -67,7 +59,6 @@ func (fc *fcManager) UpdateLimitersFromConfig(
 	if err != nil {
 		return err
 	}
-	tqName := fc.partition.TaskQueue().Name()
 	tqType := fc.partition.TaskType()
 	limit := userData.GetData().GetPerType()[int32(tqType)].GetConfig().GetQueueConcurrencyLimit().GetConcurrencyLimit()
 	if limit == nil {
@@ -87,7 +78,7 @@ func (fc *fcManager) UpdateLimitersFromConfig(
 		if !lim.valid() {
 			// add it in empty slot
 			task.limiters.limiters[i] = fcLimiter{
-				key:    wholeQueueLimiterName(tqName, tqType),
+				key:    fc.wholeQueueLimiter,
 				tp:     enumsspb.LIMITER_TYPE_CONCURRENCY,
 				source: limiterSourceConfig_WholeQueue,
 			}

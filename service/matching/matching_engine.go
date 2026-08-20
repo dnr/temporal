@@ -788,6 +788,7 @@ pollLoop:
 			task.finish(taskFinishResult{dropReason: dropReasonInternalError})
 			continue pollLoop
 		}
+		// FIXME: ugh, can't use defer in a loop
 		defer fctx.CancelReservations()
 		if err = fctx.Reserve(); err != nil {
 			task.finish(taskFinishResult{err: err})
@@ -1039,6 +1040,7 @@ pollLoop:
 			task.finish(taskFinishResult{dropReason: dropReasonInternalError})
 			continue pollLoop
 		}
+		// FIXME: ugh, can't use defer in a loop
 		defer fctx.CancelReservations()
 		if err = fctx.Reserve(); err != nil {
 			task.finish(taskFinishResult{err: err})
