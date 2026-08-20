@@ -39,11 +39,11 @@ func (h *concurrencyHandler) Reserve(ctx context.Context, req *fcpb.ConcurrencyR
 			}, nil
 		},
 		func(c *concurrency, cctx chasm.MutableContext, req *fcpb.ConcurrencyReserveRequest) (*fcpb.ConcurrencyReserveResponse, error) {
-			err := c.reserve(req.TaskUuid, cctx.Now(c))
-			if err != nil {
-				return nil, err
-			}
-			return &fcpb.ConcurrencyReserveResponse{}, nil
+			slotsReserved := c.reserve(req.TaskUuid, cctx.Now(c))
+			return &fcpb.ConcurrencyReserveResponse{
+				Generation:    c.Generation,
+				SlotsReserved: slotsReserved,
+			}, nil
 		},
 		req,
 		chasm.WithBusinessIDPolicy(
@@ -65,10 +65,7 @@ func (h *concurrencyHandler) CancelReservation(ctx context.Context, req *fcpb.Co
 			BusinessID:  req.Key,
 		}),
 		func(c *concurrency, cctx chasm.MutableContext, req *fcpb.ConcurrencyCancelReservationRequest) (*fcpb.ConcurrencyCancelReservationResponse, error) {
-			err := c.cancelReservation(req.TaskUuid, cctx.Now(c))
-			if err != nil {
-				return nil, err
-			}
+			c.cancelReservation(req.TaskUuid, cctx.Now(c))
 			return &fcpb.ConcurrencyCancelReservationResponse{}, nil
 		},
 		req,
@@ -108,10 +105,7 @@ func (h *concurrencyHandler) Release(ctx context.Context, req *fcpb.ConcurrencyR
 			BusinessID:  req.Key,
 		}),
 		func(c *concurrency, cctx chasm.MutableContext, req *fcpb.ConcurrencyReleaseRequest) (*fcpb.ConcurrencyReleaseResponse, error) {
-			err := c.release(req.TaskUuid, cctx.Now(c))
-			if err != nil {
-				return nil, err
-			}
+			c.release(req.TaskUuid, cctx.Now(c))
 			// FIXME: add tasks to control slow release of notifications
 			return &fcpb.ConcurrencyReleaseResponse{}, nil
 		},
@@ -123,6 +117,7 @@ func (h *concurrencyHandler) Release(ctx context.Context, req *fcpb.ConcurrencyR
 func (h *concurrencyHandler) Wait(ctx context.Context, req *fcpb.ConcurrencyWaitRequest) (retRes *fcpb.ConcurrencyWaitResponse, retErr error) {
 	defer log.CapturePanic(h.logger, &retErr)
 
+	// FIXME: confirm if we can mutate c within PollComponent even if we don't want it persisted
 	res, _, err := chasm.PollComponent(
 		ctx,
 		chasm.NewComponentRef[*concurrency](chasm.ExecutionKey{
@@ -131,10 +126,13 @@ func (h *concurrencyHandler) Wait(ctx context.Context, req *fcpb.ConcurrencyWait
 		}),
 		func(c *concurrency, cctx chasm.Context, req *fcpb.ConcurrencyWaitRequest) (*fcpb.ConcurrencyWaitResponse, bool, error) {
 			slots := c.slotsFree(cctx.Now(c))
+			if req.Generation < c.Generation {
+				return &fcpb.ConcurrencyWaitResponse{Generation: c.Generation, WakeCount: slots}, true, nil
+			}
 			if slots == 0 {
 				return nil, false, nil
 			}
-			return &fcpb.ConcurrencyWaitResponse{SlotsFree: slots}, true, nil
+			return &fcpb.ConcurrencyWaitResponse{WakeCount: slots}, true, nil
 		},
 		req,
 	)

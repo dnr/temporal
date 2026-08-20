@@ -50,30 +50,35 @@ func (c *concurrency) full() bool {
 	return len(c.Slots) >= int(c.Limit)
 }
 
-func (c *concurrency) reserve(taskUUID string, now time.Time) error {
+func (c *concurrency) reserve(taskUUID string, now time.Time) int32 {
 	c.expire(now)
 
 	if c.find(taskUUID) >= 0 {
-		return nil // already reserved or committed, accept
+		return 1 // already reserved or committed, accept
 	}
 	if c.full() {
-		return serviceerror.NewFailedPreconditionf("limit of %d slots reached", c.Limit)
+		return 0
 	}
 	c.Slots = append(c.Slots, &fcpb.ConcurrencySlot{
 		TaskUuid:  taskUUID,
 		Committed: false,
-		Expires:   timestamppb.New(now.Add(reserveTimeout)),
+		// Truncate is okay because expire adds a second anyway.
+		Expires: timestamppb.New(now.Add(reserveTimeout).Truncate(time.Second)),
 	})
-	return nil
+	c.Generation++
+	return 1
 }
 
-func (c *concurrency) cancelReservation(taskUUID string, now time.Time) error {
+func (c *concurrency) cancelReservation(taskUUID string, now time.Time) {
 	c.expire(now)
 
+	prevLen := len(c.Slots)
 	c.Slots = slices.DeleteFunc(c.Slots, func(slot *fcpb.ConcurrencySlot) bool {
 		return !slot.Committed && slot.TaskUuid == taskUUID
 	})
-	return nil
+	if len(c.Slots) != prevLen {
+		c.Generation++
+	}
 }
 
 func (c *concurrency) commit(taskUUID string, now time.Time) error {
@@ -83,6 +88,7 @@ func (c *concurrency) commit(taskUUID string, now time.Time) error {
 		// note this works even if it was already committed
 		c.Slots[idx].Committed = true
 		c.Slots[idx].Expires = nil
+		c.Generation++
 		return nil
 	}
 
@@ -90,13 +96,16 @@ func (c *concurrency) commit(taskUUID string, now time.Time) error {
 	return serviceerror.NewFailedPrecondition("no reservation found")
 }
 
-func (c *concurrency) release(taskUUID string, now time.Time) error {
+func (c *concurrency) release(taskUUID string, now time.Time) {
 	c.expire(now)
 
+	prevLen := len(c.Slots)
 	c.Slots = slices.DeleteFunc(c.Slots, func(slot *fcpb.ConcurrencySlot) bool {
 		return slot.Committed && slot.TaskUuid == taskUUID
 	})
-	return nil
+	if len(c.Slots) != prevLen {
+		c.Generation++
+	}
 }
 
 func (c *concurrency) slotsFree(now time.Time) int32 {

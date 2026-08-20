@@ -45,7 +45,8 @@ type ConcurrencyServiceClient interface {
 	// Release frees a comitted slot. Succeeds if the committed slot was released or if there was
 	// no committed slot, i.e. idempotent. Durable.
 	Release(ctx context.Context, in *ConcurrencyReleaseRequest, opts ...grpc.CallOption) (*ConcurrencyReleaseResponse, error)
-	// Wait is a long-poll RPC that returns when at least one slot is free.
+	// Wait is a long-poll RPC that returns when at least one slot is free, or the caller's
+	// generation is too old.
 	Wait(ctx context.Context, in *ConcurrencyWaitRequest, opts ...grpc.CallOption) (*ConcurrencyWaitResponse, error)
 }
 
@@ -120,7 +121,8 @@ type ConcurrencyServiceServer interface {
 	// Release frees a comitted slot. Succeeds if the committed slot was released or if there was
 	// no committed slot, i.e. idempotent. Durable.
 	Release(context.Context, *ConcurrencyReleaseRequest) (*ConcurrencyReleaseResponse, error)
-	// Wait is a long-poll RPC that returns when at least one slot is free.
+	// Wait is a long-poll RPC that returns when at least one slot is free, or the caller's
+	// generation is too old.
 	Wait(context.Context, *ConcurrencyWaitRequest) (*ConcurrencyWaitResponse, error)
 	mustEmbedUnimplementedConcurrencyServiceServer()
 }

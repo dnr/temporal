@@ -29,6 +29,7 @@ type ConcurrencyState struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Limit         int32                  `protobuf:"varint,1,opt,name=limit,proto3" json:"limit,omitempty"`
 	Slots         []*ConcurrencySlot     `protobuf:"bytes,2,rep,name=slots,proto3" json:"slots,omitempty"`
+	Generation    int64                  `protobuf:"varint,3,opt,name=generation,proto3" json:"generation,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -75,6 +76,13 @@ func (x *ConcurrencyState) GetSlots() []*ConcurrencySlot {
 		return x.Slots
 	}
 	return nil
+}
+
+func (x *ConcurrencyState) GetGeneration() int64 {
+	if x != nil {
+		return x.Generation
+	}
+	return 0
 }
 
 type ConcurrencySlot struct {
@@ -255,7 +263,12 @@ func (x *ConcurrencyReserveRequest) GetLimitUpdate() *ConcurrencyLimitUpdate {
 }
 
 type ConcurrencyReserveResponse struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Generation of limiter state.
+	Generation int64 `protobuf:"varint,1,opt,name=generation,proto3" json:"generation,omitempty"`
+	// Number of slots reserved, 0 or 1. On insufficient slots, Reserve returns zero
+	// slots_reserved, not an error. This makes it easy to also include the generation.
+	SlotsReserved int32 `protobuf:"varint,2,opt,name=slots_reserved,json=slotsReserved,proto3" json:"slots_reserved,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -288,6 +301,20 @@ func (x *ConcurrencyReserveResponse) ProtoReflect() protoreflect.Message {
 // Deprecated: Use ConcurrencyReserveResponse.ProtoReflect.Descriptor instead.
 func (*ConcurrencyReserveResponse) Descriptor() ([]byte, []int) {
 	return file_temporal_server_chasm_lib_flowcontrol_proto_v1_concurrency_proto_rawDescGZIP(), []int{4}
+}
+
+func (x *ConcurrencyReserveResponse) GetGeneration() int64 {
+	if x != nil {
+		return x.Generation
+	}
+	return 0
+}
+
+func (x *ConcurrencyReserveResponse) GetSlotsReserved() int32 {
+	if x != nil {
+		return x.SlotsReserved
+	}
+	return 0
 }
 
 type ConcurrencyCancelReservationRequest struct {
@@ -579,9 +606,11 @@ func (*ConcurrencyReleaseResponse) Descriptor() ([]byte, []int) {
 }
 
 type ConcurrencyWaitRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	NamespaceId   string                 `protobuf:"bytes,1,opt,name=namespace_id,json=namespaceId,proto3" json:"namespace_id,omitempty"`
-	Key           string                 `protobuf:"bytes,2,opt,name=key,proto3" json:"key,omitempty"`
+	state       protoimpl.MessageState `protogen:"open.v1"`
+	NamespaceId string                 `protobuf:"bytes,1,opt,name=namespace_id,json=namespaceId,proto3" json:"namespace_id,omitempty"`
+	Key         string                 `protobuf:"bytes,2,opt,name=key,proto3" json:"key,omitempty"`
+	// If generation is out of date, returns immediately with new generation.
+	Generation    int64 `protobuf:"varint,3,opt,name=generation,proto3" json:"generation,omitempty"` // FIXME: add something to identify waiters so we can do selective wakeup
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -630,9 +659,21 @@ func (x *ConcurrencyWaitRequest) GetKey() string {
 	return ""
 }
 
+func (x *ConcurrencyWaitRequest) GetGeneration() int64 {
+	if x != nil {
+		return x.Generation
+	}
+	return 0
+}
+
 type ConcurrencyWaitResponse struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	SlotsFree     int32                  `protobuf:"varint,1,opt,name=slots_free,json=slotsFree,proto3" json:"slots_free,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Generation of limiter state.
+	Generation int64 `protobuf:"varint,1,opt,name=generation,proto3" json:"generation,omitempty"`
+	// Number of slots that the client should consider available. This may be less than the
+	// number of free slots, if the limiter wants to divide available slots among multiple
+	// waiters.
+	WakeCount     int32 `protobuf:"varint,2,opt,name=wake_count,json=wakeCount,proto3" json:"wake_count,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -667,9 +708,16 @@ func (*ConcurrencyWaitResponse) Descriptor() ([]byte, []int) {
 	return file_temporal_server_chasm_lib_flowcontrol_proto_v1_concurrency_proto_rawDescGZIP(), []int{12}
 }
 
-func (x *ConcurrencyWaitResponse) GetSlotsFree() int32 {
+func (x *ConcurrencyWaitResponse) GetGeneration() int64 {
 	if x != nil {
-		return x.SlotsFree
+		return x.Generation
+	}
+	return 0
+}
+
+func (x *ConcurrencyWaitResponse) GetWakeCount() int32 {
+	if x != nil {
+		return x.WakeCount
 	}
 	return 0
 }
@@ -678,10 +726,13 @@ var File_temporal_server_chasm_lib_flowcontrol_proto_v1_concurrency_proto protor
 
 const file_temporal_server_chasm_lib_flowcontrol_proto_v1_concurrency_proto_rawDesc = "" +
 	"\n" +
-	"@temporal/server/chasm/lib/flowcontrol/proto/v1/concurrency.proto\x12.temporal.server.chasm.lib.flowcontrol.proto.v1\x1a\x1fgoogle/protobuf/timestamp.proto\x1a0temporal/server/api/common/v1/api_category.proto\x1a.temporal/server/api/routing/v1/extension.proto\"\x7f\n" +
+	"@temporal/server/chasm/lib/flowcontrol/proto/v1/concurrency.proto\x12.temporal.server.chasm.lib.flowcontrol.proto.v1\x1a\x1fgoogle/protobuf/timestamp.proto\x1a0temporal/server/api/common/v1/api_category.proto\x1a.temporal/server/api/routing/v1/extension.proto\"\x9f\x01\n" +
 	"\x10ConcurrencyState\x12\x14\n" +
 	"\x05limit\x18\x01 \x01(\x05R\x05limit\x12U\n" +
-	"\x05slots\x18\x02 \x03(\v2?.temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencySlotR\x05slots\"\x82\x01\n" +
+	"\x05slots\x18\x02 \x03(\v2?.temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencySlotR\x05slots\x12\x1e\n" +
+	"\n" +
+	"generation\x18\x03 \x01(\x03R\n" +
+	"generation\"\x82\x01\n" +
 	"\x0fConcurrencySlot\x12\x1b\n" +
 	"\ttask_uuid\x18\x01 \x01(\tR\btaskUuid\x12\x1c\n" +
 	"\tcommitted\x18\x02 \x01(\bR\tcommitted\x124\n" +
@@ -692,8 +743,12 @@ const file_temporal_server_chasm_lib_flowcontrol_proto_v1_concurrency_proto_rawD
 	"\fnamespace_id\x18\x01 \x01(\tR\vnamespaceId\x12\x10\n" +
 	"\x03key\x18\x02 \x01(\tR\x03key\x12\x1b\n" +
 	"\ttask_uuid\x18\x03 \x01(\tR\btaskUuid\x12i\n" +
-	"\flimit_update\x18\x04 \x01(\v2F.temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyLimitUpdateR\vlimitUpdate\"\x1c\n" +
-	"\x1aConcurrencyReserveResponse\"w\n" +
+	"\flimit_update\x18\x04 \x01(\v2F.temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyLimitUpdateR\vlimitUpdate\"c\n" +
+	"\x1aConcurrencyReserveResponse\x12\x1e\n" +
+	"\n" +
+	"generation\x18\x01 \x01(\x03R\n" +
+	"generation\x12%\n" +
+	"\x0eslots_reserved\x18\x02 \x01(\x05R\rslotsReserved\"w\n" +
 	"#ConcurrencyCancelReservationRequest\x12!\n" +
 	"\fnamespace_id\x18\x01 \x01(\tR\vnamespaceId\x12\x10\n" +
 	"\x03key\x18\x02 \x01(\tR\x03key\x12\x1b\n" +
@@ -708,13 +763,19 @@ const file_temporal_server_chasm_lib_flowcontrol_proto_v1_concurrency_proto_rawD
 	"\fnamespace_id\x18\x01 \x01(\tR\vnamespaceId\x12\x10\n" +
 	"\x03key\x18\x02 \x01(\tR\x03key\x12\x1b\n" +
 	"\ttask_uuid\x18\x03 \x01(\tR\btaskUuid\"\x1c\n" +
-	"\x1aConcurrencyReleaseResponse\"M\n" +
+	"\x1aConcurrencyReleaseResponse\"m\n" +
 	"\x16ConcurrencyWaitRequest\x12!\n" +
 	"\fnamespace_id\x18\x01 \x01(\tR\vnamespaceId\x12\x10\n" +
-	"\x03key\x18\x02 \x01(\tR\x03key\"8\n" +
-	"\x17ConcurrencyWaitResponse\x12\x1d\n" +
+	"\x03key\x18\x02 \x01(\tR\x03key\x12\x1e\n" +
 	"\n" +
-	"slots_free\x18\x01 \x01(\x05R\tslotsFree2\xaa\a\n" +
+	"generation\x18\x03 \x01(\x03R\n" +
+	"generation\"X\n" +
+	"\x17ConcurrencyWaitResponse\x12\x1e\n" +
+	"\n" +
+	"generation\x18\x01 \x01(\x03R\n" +
+	"generation\x12\x1d\n" +
+	"\n" +
+	"wake_count\x18\x02 \x01(\x05R\twakeCount2\xaa\a\n" +
 	"\x12ConcurrencyService\x12\xb1\x01\n" +
 	"\aReserve\x12I.temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyReserveRequest\x1aJ.temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyReserveResponse\"\x0f\x8a\xb5\x18\x02\b\x01\xd2\xc3\x18\x05\x1a\x03key\x12\xcf\x01\n" +
 	"\x11CancelReservation\x12S.temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyCancelReservationRequest\x1aT.temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyCancelReservationResponse\"\x0f\x8a\xb5\x18\x02\b\x01\xd2\xc3\x18\x05\x1a\x03key\x12\xae\x01\n" +

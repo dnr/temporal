@@ -11,6 +11,7 @@ option go_package = "go.temporal.io/server/chasm/lib/flowcontrol/gen/fcpb;fcpb";
 message ConcurrencyState {
   int32 limit = 1;
   repeated ConcurrencySlot slots = 2;
+  int64 generation = 3;
 }
 
 message ConcurrencySlot {
@@ -37,6 +38,11 @@ message ConcurrencyReserveRequest {
 }
 
 message ConcurrencyReserveResponse {
+  // Generation of limiter state.
+  int64 generation = 1;
+  // Number of slots reserved, 0 or 1. On insufficient slots, Reserve returns zero
+  // slots_reserved, not an error. This makes it easy to also include the generation.
+  int32 slots_reserved = 2;
 }
 
 message ConcurrencyCancelReservationRequest {
@@ -69,12 +75,18 @@ message ConcurrencyReleaseResponse {
 message ConcurrencyWaitRequest {
   string namespace_id = 1;
   string key = 2;
-  // FIXME: add generation here
+  // If generation is out of date, returns immediately with new generation.
+  int64 generation = 3;
   // FIXME: add something to identify waiters so we can do selective wakeup
 }
 
 message ConcurrencyWaitResponse {
-  int32 slots_free = 1;
+  // Generation of limiter state.
+  int64 generation = 1;
+  // Number of slots that the client should consider available. This may be less than the
+  // number of free slots, if the limiter wants to divide available slots among multiple
+  // waiters.
+  int32 wake_count = 2;
 }
 
 service ConcurrencyService {
@@ -104,7 +116,8 @@ service ConcurrencyService {
     option (temporal.server.api.routing.v1.routing).business_id = "key";
     option (temporal.server.api.common.v1.api_category).category = API_CATEGORY_STANDARD;
   };
-  // Wait is a long-poll RPC that returns when at least one slot is free.
+  // Wait is a long-poll RPC that returns when at least one slot is free, or the caller's
+  // generation is too old.
   rpc Wait(ConcurrencyWaitRequest) returns (ConcurrencyWaitResponse) {
     option (temporal.server.api.routing.v1.routing).business_id = "key";
     option (temporal.server.api.common.v1.api_category).category = API_CATEGORY_LONG_POLL;
