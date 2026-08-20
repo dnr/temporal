@@ -36,8 +36,10 @@ type fcReadinessKey struct {
 type fcReadinessValue struct {
 	generation int64
 	state      fcReadinessState
+	// invariant: len(waiters) > 0 == Wait goroutine is running == goroCancel != nil
+	// (for now, until we add eviction)
 	waiters    map[fcReadinessCallback]struct{}
-	goroCancel context.CancelFunc // nil if Wait goro is not running
+	goroCancel context.CancelFunc
 	// TODO(fc): cache some limiter-specific state?
 }
 
@@ -57,28 +59,31 @@ type fcReadiness struct {
 	concurrencyServiceClient fcpb.ConcurrencyServiceClient
 
 	caches sync.Map // namespaceID -> *fcReadinessNS
-
-	baseCtx    context.Context
-	baseCancel context.CancelFunc
 }
 
 func newFcReadiness(
 	concurrencyServiceClient fcpb.ConcurrencyServiceClient,
 ) *fcReadiness {
-	baseCtx, baseCancel := context.WithCancel(context.Background())
 	return &fcReadiness{
 		concurrencyServiceClient: concurrencyServiceClient,
-		baseCtx:                  baseCtx,
-		baseCancel:               baseCancel,
 	}
 }
 
 func (r *fcReadiness) Stop() {
-	// r.caches.Range(func(k, v any) bool {
-	// 	v.(*fcReadinessNS).Stop() // nolint:revive
-	// 	return true
-	// })
-	r.baseCancel()
+	r.caches.Range(func(k, v any) bool {
+		v.(*fcReadinessNS).Stop() // nolint:revive
+		return true
+	})
+}
+
+func (rn *fcReadinessNS) Stop() {
+	rn.lock.Lock()
+	defer rn.lock.Unlock()
+
+	for rkey, v := range rn.cache {
+		v.waiters = nil
+		v.syncGoroLocked(rn, rkey)
+	}
 }
 
 func (r *fcReadiness) getNS(nsID namespace.ID) *fcReadinessNS {
@@ -87,20 +92,11 @@ func (r *fcReadiness) getNS(nsID namespace.ID) *fcReadinessNS {
 		return v.(*fcReadinessNS) // nolint:revive
 	}
 	newFcrn := &fcReadinessNS{
-		// // FIXME: size from dc
-		// // FIXME: eviction handler
-		// // FIXME: metrics
-		// cache:   cache.New(1000, nil),
-		// waiters: make(map[fcReadinessKey]struct{}),
-		// goros:   goro.NewKeyedSet[fcReadinessKey](r.baseCtx),
 		r:     r,
 		nsID:  nsID,
 		cache: make(map[fcReadinessKey]*fcReadinessValue),
 	}
-	fcrn, loaded := r.caches.LoadOrStore(nsID, newFcrn)
-	if !loaded {
-		// FIXME: start fcrn stuff
-	}
+	fcrn, _ := r.caches.LoadOrStore(nsID, newFcrn)
 	return fcrn.(*fcReadinessNS) // nolint:revive
 }
 
@@ -115,15 +111,17 @@ func (rn *fcReadinessNS) getValueLocked(rkey fcReadinessKey) *fcReadinessValue {
 	return v
 }
 
-// ReadyState gets the readiness state of a limiter. If it's blocked and cb is not nil,
-// cb.OnReady will be called when the state transitions to ready. If we have too many
-// subscriptions, we may drop some. In that case, we'll set a timer to call cb.OnReady with
-// some backoff.
-func (r *fcReadiness) ReadyState(nsID namespace.ID, tp enumsspb.LimiterType, key string, cb fcReadinessCallback) fcReadinessState {
-	return r.getNS(nsID).ReadyState(fcReadinessKey{tp: tp, key: key}, cb)
+// ReadinessState gets the readiness state of a limiter. If it's blocked and cb is not nil,
+// cb.OnReady will be called once when the state of the limiter transitions to ready. If it is
+// ready, the callback will be removed from the limiter
+//
+// If we have too many subscriptions, we may drop some. In that case, we'll set a timer to call
+// cb.OnReady with some backoff.
+func (r *fcReadiness) ReadinessState(nsID namespace.ID, tp enumsspb.LimiterType, key string, cb fcReadinessCallback) fcReadinessState {
+	return r.getNS(nsID).ReadinessState(fcReadinessKey{tp: tp, key: key}, cb)
 }
 
-func (rn *fcReadinessNS) ReadyState(rkey fcReadinessKey, cb fcReadinessCallback) fcReadinessState {
+func (rn *fcReadinessNS) ReadinessState(rkey fcReadinessKey, cb fcReadinessCallback) fcReadinessState {
 	rn.lock.Lock()
 	defer rn.lock.Unlock()
 
@@ -136,12 +134,10 @@ func (rn *fcReadinessNS) ReadyState(rkey fcReadinessKey, cb fcReadinessCallback)
 		// add callback if blocked, remove if unblocked
 		if v.state.Likely() {
 			delete(v.waiters, cb)
-			if len(v.waiters) == 0 {
-				v.stopWaiterLocked() // FIXME: do we really want to do this here?
-			}
 		} else {
 			v.waiters[cb] = struct{}{}
 		}
+		v.syncGoroLocked(rn, rkey)
 	}
 
 	return v.state
@@ -158,9 +154,7 @@ func (rn *fcReadinessNS) CancelCallback(rkey fcReadinessKey, cb fcReadinessCallb
 
 	if v, ok := rn.cache[rkey]; ok {
 		delete(v.waiters, cb)
-		if len(v.waiters) == 0 {
-			v.stopWaiterLocked()
-		}
+		v.syncGoroLocked(rn, rkey)
 	}
 }
 
@@ -175,11 +169,11 @@ func (rn *fcReadinessNS) ReportReady(rkey fcReadinessKey, gen int64) {
 	v := rn.getValueLocked(rkey)
 	v.generation = gen
 	v.state = fcReadinessReady
-	v.stopWaiterLocked()
 
 	// TODO(fc): do staged wakeup similar to the distributed case
 	waiters := v.waiters
 	v.waiters = make(map[fcReadinessCallback]struct{})
+	v.syncGoroLocked(rn, rkey)
 
 	rn.lock.Unlock()
 
@@ -200,12 +194,17 @@ func (rn *fcReadinessNS) ReportBlocked(rkey fcReadinessKey, gen int64) {
 	v := rn.getValueLocked(rkey)
 	v.generation = gen
 	v.state = fcReadinessBlocked
-
-	v.startWaiterLocked(rn, rkey)
 }
 
-func (v *fcReadinessValue) startWaiterLocked(rn *fcReadinessNS, rkey fcReadinessKey) {
-	if v.goroCancel != nil {
+func (v *fcReadinessValue) syncGoroLocked(rn *fcReadinessNS, rkey fcReadinessKey) {
+	haveWaiters := len(v.waiters) > 0
+	if (v.goroCancel != nil) == haveWaiters {
+		return
+	}
+
+	if !haveWaiters {
+		v.goroCancel()
+		v.goroCancel = nil
 		return
 	}
 
@@ -220,14 +219,6 @@ func (v *fcReadinessValue) startWaiterLocked(rn *fcReadinessNS, rkey fcReadiness
 	go rn.r.callWait(ctx, rn, rkey, v)
 }
 
-func (v *fcReadinessValue) stopWaiterLocked() {
-	if v.goroCancel == nil {
-		return
-	}
-	v.goroCancel()
-	v.goroCancel = nil
-}
-
 func (r *fcReadiness) callWait(ctx context.Context, rn *fcReadinessNS, rkey fcReadinessKey, v *fcReadinessValue) {
 	policy := backoff.NewExponentialRetryPolicy(time.Second).
 		WithExpirationInterval(backoff.NoInterval).
@@ -235,12 +226,12 @@ func (r *fcReadiness) callWait(ctx context.Context, rn *fcReadinessNS, rkey fcRe
 	retrier := backoff.NewRetrier(policy, clock.NewRealTimeSource())
 
 	for ctx.Err() == nil {
-		rn.lock.Lock()
-		gen := v.generation
-		rn.lock.Unlock()
-
 		switch rkey.tp {
 		case enumsspb.LIMITER_TYPE_CONCURRENCY:
+			rn.lock.Lock()
+			gen := v.generation
+			rn.lock.Unlock()
+
 			res, err := r.concurrencyServiceClient.Wait(ctx, &fcpb.ConcurrencyWaitRequest{
 				NamespaceId: rn.nsID.String(),
 				Key:         rkey.key,

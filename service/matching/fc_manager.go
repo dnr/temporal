@@ -28,7 +28,6 @@ type fcManager struct {
 	userDataManager   userDataManager
 	readiness         *fcReadiness
 	wholeQueueLimiter string
-	// FIXME: need some way to call back into matcher when readiness changes
 }
 
 func newFCManager(
@@ -48,7 +47,7 @@ func newFCManager(
 
 func (fc *fcManager) WholeQueueLikely(cb fcReadinessCallback) bool {
 	nsID := namespace.ID(fc.partition.NamespaceId())
-	state := fc.readiness.ReadyState(nsID, enumsspb.LIMITER_TYPE_CONCURRENCY, fc.wholeQueueLimiter, cb)
+	state := fc.readiness.ReadinessState(nsID, enumsspb.LIMITER_TYPE_CONCURRENCY, fc.wholeQueueLimiter, cb)
 	return state.Likely()
 }
 
