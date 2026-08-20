@@ -79,43 +79,6 @@ func (this *ConcurrencySlot) Equal(that interface{}) bool {
 	return proto.Equal(this, that1)
 }
 
-// Marshal an object of type ConcurrencyLimitUpdate to the protobuf v3 wire format
-func (val *ConcurrencyLimitUpdate) Marshal() ([]byte, error) {
-	return proto.Marshal(val)
-}
-
-// Unmarshal an object of type ConcurrencyLimitUpdate from the protobuf v3 wire format
-func (val *ConcurrencyLimitUpdate) Unmarshal(buf []byte) error {
-	return proto.Unmarshal(buf, val)
-}
-
-// Size returns the size of the object, in bytes, once serialized
-func (val *ConcurrencyLimitUpdate) Size() int {
-	return proto.Size(val)
-}
-
-// Equal returns whether two ConcurrencyLimitUpdate values are equivalent by recursively
-// comparing the message's fields.
-// For more information see the documentation for
-// https://pkg.go.dev/google.golang.org/protobuf/proto#Equal
-func (this *ConcurrencyLimitUpdate) Equal(that interface{}) bool {
-	if that == nil {
-		return this == nil
-	}
-
-	var that1 *ConcurrencyLimitUpdate
-	switch t := that.(type) {
-	case *ConcurrencyLimitUpdate:
-		that1 = t
-	case ConcurrencyLimitUpdate:
-		that1 = &t
-	default:
-		return false
-	}
-
-	return proto.Equal(this, that1)
-}
-
 // Marshal an object of type ConcurrencyReserveRequest to the protobuf v3 wire format
 func (val *ConcurrencyReserveRequest) Marshal() ([]byte, error) {
 	return proto.Marshal(val)

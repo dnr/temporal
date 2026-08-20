@@ -8,6 +8,8 @@ import (
 	"go.temporal.io/server/common/log"
 )
 
+const initialConcurrencyLimit = int32(1_000_000)
+
 type concurrencyHandler struct {
 	fcpb.UnimplementedConcurrencyServiceServer
 
@@ -32,13 +34,23 @@ func (h *concurrencyHandler) Reserve(ctx context.Context, req *fcpb.ConcurrencyR
 			BusinessID:  req.Key,
 		},
 		func(_ chasm.MutableContext, req *fcpb.ConcurrencyReserveRequest) (*concurrency, error) {
+			// For now (whole-queue limits), we should always have an initial limit here. For
+			// per-task limits, this may be missing and set via api later. Assume a very high
+			// limit initially.
+			limit := initialConcurrencyLimit
+			if update := req.GetLimitUpdate(); update != nil {
+				limit = update.ConcurrentTasks
+			}
 			return &concurrency{
 				ConcurrencyState: &fcpb.ConcurrencyState{
-					Limit: req.GetLimitUpdate().GetLimit(),
+					Limit: limit,
 				},
 			}, nil
 		},
 		func(c *concurrency, cctx chasm.MutableContext, req *fcpb.ConcurrencyReserveRequest) (*fcpb.ConcurrencyReserveResponse, error) {
+			if update := req.GetLimitUpdate(); update != nil {
+				c.setLimit(update.ConcurrentTasks)
+			}
 			slotsReserved := c.reserve(req.TaskUuid, cctx.Now(c))
 			return &fcpb.ConcurrencyReserveResponse{
 				Generation:    c.Generation,
@@ -50,7 +62,7 @@ func (h *concurrencyHandler) Reserve(ctx context.Context, req *fcpb.ConcurrencyR
 			chasm.BusinessIDReusePolicyAllowDuplicate,
 			chasm.BusinessIDConflictPolicyUseExisting,
 		),
-		chasm.WithSpeculative(), // TODO: does this work yet?
+		chasm.WithSpeculative(), // note: not implemented yet
 	)
 	return res.UpdateOutput, err
 }
@@ -69,7 +81,7 @@ func (h *concurrencyHandler) CancelReservation(ctx context.Context, req *fcpb.Co
 			return &fcpb.ConcurrencyCancelReservationResponse{}, nil
 		},
 		req,
-		chasm.WithSpeculative(), // TODO: does this work yet?
+		chasm.WithSpeculative(), // note: not implemented yet
 	)
 	return res, err
 }

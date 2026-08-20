@@ -3,6 +3,7 @@ syntax = "proto3";
 package temporal.server.chasm.lib.flowcontrol.proto.v1;
 
 import "google/protobuf/timestamp.proto";
+import "temporal/api/taskqueue/v1/message.proto";
 import "temporal/server/api/common/v1/api_category.proto";
 import "temporal/server/api/routing/v1/extension.proto";
 
@@ -27,10 +28,6 @@ message ConcurrencySlot {
   google.protobuf.Timestamp expires = 3;
 }
 
-message ConcurrencyLimitUpdate {
-  int32 limit = 1;
-}
-
 message ConcurrencyReserveRequest {
   string namespace_id = 1;
   string key = 2;
@@ -38,7 +35,7 @@ message ConcurrencyReserveRequest {
 
   // For whole-task-queue limits, the initial limit and updates to the limit come through task
   // queue config, so we need to pass them to the chasm object. We just do it on every Reserve.
-  ConcurrencyLimitUpdate limit_update = 4;
+  temporal.api.taskqueue.v1.ConcurrencyLimit limit_update = 4;
 }
 
 message ConcurrencyReserveResponse {

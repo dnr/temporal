@@ -66,6 +66,10 @@ func (c *concurrency) maintainGeneration() func() {
 	}
 }
 
+func (c *concurrency) setLimit(limit int32) {
+	c.Limit = limit
+}
+
 func (c *concurrency) reserve(taskUUID string, now time.Time) int32 {
 	defer c.maintainGeneration()()
 	c.expire(now)

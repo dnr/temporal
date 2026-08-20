@@ -52,13 +52,8 @@ func newConcurrencyCommitter(
 }
 
 func (c *concurrencyCommitter) reserve() error {
-	// TODO(fc): can we remove this type conversion?
-	var limitUpdate *fcpb.ConcurrencyLimitUpdate
-	if lim, ok := c.config.(*taskqueuepb.ConcurrencyLimit); ok {
-		limitUpdate = &fcpb.ConcurrencyLimitUpdate{
-			Limit: lim.ConcurrentTasks,
-		}
-	}
+	// if config is missing or wrong type, just leave it out
+	limitUpdate, _ := c.config.(*taskqueuepb.ConcurrencyLimit)
 
 	res, err := c.client.Reserve(c.ctx, &fcpb.ConcurrencyReserveRequest{
 		NamespaceId: c.nsID.String(),
