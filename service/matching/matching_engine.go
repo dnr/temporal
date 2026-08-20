@@ -63,6 +63,7 @@ import (
 	"go.temporal.io/server/common/util"
 	"go.temporal.io/server/common/worker_versioning"
 	"go.temporal.io/server/service/history/api"
+	"go.temporal.io/server/service/matching/fc"
 	"go.temporal.io/server/service/matching/hooks"
 	"go.temporal.io/server/service/worker/workerdeployment"
 	"google.golang.org/protobuf/types/known/timestamppb"
@@ -203,7 +204,7 @@ type (
 		// Rate limiter to limit the task dispatch
 		rateLimiter TaskDispatchRateLimiter
 		// Flow control readiness client
-		fcReadiness *fcReadiness
+		fcReadiness *fc.Readiness
 
 		taskHookFactories []hooks.TaskHookFactory
 	}
@@ -333,7 +334,7 @@ func NewEngine(
 		rateLimiter:               rateLimiter,
 		taskHookFactories:         taskHookFactories,
 		partitionScalerFactory:    partitionScalerFactory,
-		fcReadiness: newFcReadiness(
+		fcReadiness: fc.NewReadiness(
 			concurrencyServiceClient,
 		),
 	}

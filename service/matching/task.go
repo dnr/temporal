@@ -16,6 +16,7 @@ import (
 	persistencespb "go.temporal.io/server/api/persistence/v1"
 	taskqueuespb "go.temporal.io/server/api/taskqueue/v1"
 	"go.temporal.io/server/common/namespace"
+	"go.temporal.io/server/service/matching/fc"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
@@ -85,7 +86,7 @@ type (
 
 		// Flow control fields:
 		// After construction, limiters should only be accessed under matcherData lock.
-		limiters *fcLimiters
+		limiters *fc.Limiters
 
 		// The following fields are for use by priMatcher/matcherData:
 		waitableMatchResult
@@ -299,7 +300,7 @@ func (task *internalTask) workflowExecution() *commonpb.WorkflowExecution {
 // The UUID is specific to the attempt.
 // FIXME: need to move this to common for release
 // FIXME: need to improve this or generate uuid
-func (task *internalTask) taskUUID() string {
+func (task *internalTask) TaskUUID() string {
 	if task.event == nil {
 		return "" // FIXME: not sure what to do here
 	}
@@ -312,7 +313,10 @@ func (task *internalTask) taskUUID() string {
 		binary.LittleEndian.AppendUint32(nil, uint32(data.GetStamp())),
 	}, []byte{0})
 	return uuid.NewSHA1(uuid.NameSpaceURL, join).String()
+}
 
+func (task *internalTask) Limiters() *fc.Limiters {
+	return task.limiters
 }
 
 // pollWorkflowTaskQueueResponse returns the poll response for a workflow task that is

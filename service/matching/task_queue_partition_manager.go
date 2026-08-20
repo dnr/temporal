@@ -43,6 +43,7 @@ import (
 	"go.temporal.io/server/common/tqid"
 	"go.temporal.io/server/common/util"
 	"go.temporal.io/server/common/worker_versioning"
+	"go.temporal.io/server/service/matching/fc"
 	"go.temporal.io/server/service/matching/hooks"
 	"google.golang.org/protobuf/types/known/durationpb"
 	"google.golang.org/protobuf/types/known/timestamppb"
@@ -104,7 +105,7 @@ type (
 		// rateLimitManager is used to manage the rate limit for task queues.
 		rateLimitManager *rateLimitManager
 		// flow control manager
-		fcManager *fcManager
+		fcManager *fc.Manager
 
 		scaleManager *scaleManager
 
@@ -143,7 +144,7 @@ func newTaskQueuePartitionManager(
 		tqConfig,
 		partition.TaskQueue().TaskType(),
 	)
-	fcManager := newFCManager(
+	fcManager := fc.NewManager(
 		partition,
 		userDataManager,
 		e.fcReadiness,

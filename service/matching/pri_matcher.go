@@ -20,6 +20,7 @@ import (
 	"go.temporal.io/server/common/softassert"
 	"go.temporal.io/server/common/tqid"
 	"go.temporal.io/server/common/util"
+	"go.temporal.io/server/service/matching/fc"
 )
 
 // priTaskMatcher matches a task producer with a task consumer
@@ -39,7 +40,7 @@ type priTaskMatcher struct {
 	client           matchingservice.MatchingServiceClient
 	validator        taskValidator
 	rateLimitManager *rateLimitManager
-	fcManager        *fcManager
+	fcManager        *fc.Manager
 	metricsHandler   metrics.Handler // namespace metric scope
 	logger           log.Logger
 	markAlive        func() // function to mark the physical task queue alive
@@ -100,7 +101,7 @@ func newPriTaskMatcher(
 	logger log.Logger,
 	metricsHandler metrics.Handler,
 	rateLimitManager *rateLimitManager,
-	fcManager *fcManager,
+	fcManager *fc.Manager,
 	onRateLimited func(),
 	markAlive func(),
 ) *priTaskMatcher {

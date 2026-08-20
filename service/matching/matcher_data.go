@@ -12,6 +12,7 @@ import (
 	"go.temporal.io/server/common/log"
 	"go.temporal.io/server/common/softassert"
 	"go.temporal.io/server/common/util"
+	"go.temporal.io/server/service/matching/fc"
 )
 
 const (
@@ -217,7 +218,7 @@ type matcherData struct {
 	timeSource       clock.TimeSource
 	canForward       bool
 	rateLimitManager *rateLimitManager
-	fcManager        *fcManager
+	fcManager        *fc.Manager
 	// onRateLimited is called when a dispatch is blocked by the rate limiter.
 	onRateLimited func()
 
@@ -244,7 +245,7 @@ func newMatcherData(
 	timeSource clock.TimeSource,
 	canForward bool,
 	rateLimitManager *rateLimitManager,
-	fcManager *fcManager,
+	fcManager *fc.Manager,
 	onRateLimited func(),
 ) matcherData {
 	return matcherData{
@@ -277,7 +278,9 @@ func (d *matcherData) EnqueueTaskNoWait(task *internalTask) error {
 	}
 
 	task.initMatch(d)
-	if err := d.fcManager.UpdateLimitersFromConfig(task); err != nil {
+	var err error // FIXME: factor this out :(
+	task.limiters, err = d.fcManager.UpdateLimitersFromConfig(task.limiters)
+	if err != nil {
 		return err
 	}
 	d.tasks.Add(task)
@@ -300,7 +303,9 @@ func (d *matcherData) EnqueueTaskAndWait(ctxs []context.Context, task *internalT
 
 	// add and look for match
 	task.initMatch(d)
-	if err := d.fcManager.UpdateLimitersFromConfig(task); err != nil {
+	var err error // FIXME: factor this out :(
+	task.limiters, err = d.fcManager.UpdateLimitersFromConfig(task.limiters)
+	if err != nil {
 		// FIXME: this is kind of wrong, it's not a context error. not clear what to do if a
 		// task has three limiters and we add a whole-tq one...
 		return &matchResult{ctxErr: err}
@@ -393,7 +398,9 @@ func (d *matcherData) MatchTaskImmediately(task *internalTask) syncMatchOutcome 
 	}
 
 	task.initMatch(d)
-	if err := d.fcManager.UpdateLimitersFromConfig(task); err != nil {
+	var err error // FIXME: factor this out :(
+	task.limiters, err = d.fcManager.UpdateLimitersFromConfig(task.limiters)
+	if err != nil {
 		return syncMatchConcurrencyLimited // FIXME: kinda wrong, see comment in EnqueueTaskAndWait
 	}
 	d.tasks.Add(task)
@@ -428,8 +435,9 @@ func (d *matcherData) ReprocessTasks(pred func(*internalTask) bool) []*internalT
 	// This is called when userdata changes, which includes the whole-queue concurrency limit
 	// in task queue config. We should update limiters on all tasks that we have already.
 	d.tasks.ForEachTask(func(task *internalTask) bool {
-		_ = d.fcManager.UpdateLimitersFromConfig(task)
-		// FIXME: handle errors: only possible error here is "too many limiters"
+		var err error // FIXME: factor this out :(
+		task.limiters, err = d.fcManager.UpdateLimitersFromConfig(task.limiters)
+		_ = err // FIXME: handle errors: only possible error here is "too many limiters"
 		return false
 	}, nil)
 

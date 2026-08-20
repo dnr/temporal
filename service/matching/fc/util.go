@@ -1,4 +1,4 @@
-package matching
+package fc
 
 import (
 	"cmp"
@@ -34,13 +34,14 @@ func wholeQueueLimiterName(tqName string, tqType enumspb.TaskQueueType) string {
 	return fmt.Sprintf("/_sys/wholequeue/%s/%d/0", tqName, tqType)
 }
 
-func canonicalLimiters(task *internalTask) []fcLimiter {
-	if task.limiters == nil {
+func canonicalLimiters(task fcTask) []limiter {
+	limiters := task.Limiters()
+	if limiters == nil {
 		return nil
 	}
-	out := util.FilterSlice(task.limiters.limiters[:], fcLimiter.valid)
+	out := util.FilterSlice(limiters.limiters[:], limiter.valid)
 	// we must reserve limiters in a consistent canonical order to avoid quasi-deadlock
-	slices.SortFunc(out, func(a, b fcLimiter) int {
+	slices.SortFunc(out, func(a, b limiter) int {
 		if v := cmp.Compare(a.tp, b.tp); v != 0 {
 			return v
 		}
