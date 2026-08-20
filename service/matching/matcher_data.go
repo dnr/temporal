@@ -264,6 +264,7 @@ func (d *matcherData) Stop() {
 	d.lock.Lock()
 	defer d.lock.Unlock()
 
+	d.fcManager.CancelWholeQueueCallback(d)
 	d.stopped = true
 }
 
@@ -463,7 +464,7 @@ func (d *matcherData) findMatch(allowForwarding bool, now int64) (
 	// Check whole-queue concurrency limit.
 	// TODO(fc): This single check only works for a whole-queue limit. For per-task limits this
 	// needs to move this into the loop below, or a larger refactor.
-	wholeQueueLikely := d.fcManager.WholeQueueLikely()
+	wholeQueueLikely := d.fcManager.WholeQueueLikely(d)
 	if !wholeQueueLikely { // FIXME: only if tasks>0&&polls>0?
 		return nil, nil, 0, true
 	}
@@ -564,7 +565,7 @@ func (d *matcherData) allowForwarding() (allowForwarding bool) {
 		return true
 	}
 	delayToForwardingAllowed := d.config.MaxWaitForPollerBeforeFwd() - time.Since(d.lastPoller)
-	d.reconsiderForwardTimer.set(d.timeSource, d.rematchAfterTimer, delayToForwardingAllowed)
+	d.reconsiderForwardTimer.set(d.timeSource, d.OnReady, delayToForwardingAllowed)
 	return delayToForwardingAllowed <= 0
 }
 
@@ -579,7 +580,7 @@ func (d *matcherData) findAndWakeMatches() syncMatchOutcome {
 		task, poller, minDelay, hitConcurrencyLimit := d.findMatch(allowForwarding, now)
 		if task == nil || poller == nil {
 			if minDelay > 0 {
-				d.rateLimitTimer.set(d.timeSource, d.rematchAfterTimer, minDelay)
+				d.rateLimitTimer.set(d.timeSource, d.OnReady, minDelay)
 				d.onRateLimited()
 				return syncMatchRateLimited
 			}
@@ -621,10 +622,13 @@ func (d *matcherData) recycleToken(task *internalTask) {
 	d.findAndWakeMatches() // another task may be ready to match now
 }
 
-// called from timer
-func (d *matcherData) rematchAfterTimer() {
+// called from timer and flow control readiness callback
+func (d *matcherData) OnReady() {
 	d.lock.Lock()
 	defer d.lock.Unlock()
+	if d.stopped {
+		return
+	}
 	d.findAndWakeMatches()
 }
 

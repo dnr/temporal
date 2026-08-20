@@ -46,10 +46,15 @@ func newFCManager(
 	}
 }
 
-func (fc *fcManager) WholeQueueLikely() bool {
+func (fc *fcManager) WholeQueueLikely(cb fcReadinessCallback) bool {
 	nsID := namespace.ID(fc.partition.NamespaceId())
-	state := fc.readiness.ReadyState(nsID, fc.wholeQueueLimiter, enumsspb.LIMITER_TYPE_CONCURRENCY)
-	return state == fcReadinessUnknown || state == fcReadinessReady
+	state := fc.readiness.ReadyState(nsID, enumsspb.LIMITER_TYPE_CONCURRENCY, fc.wholeQueueLimiter, cb)
+	return state.Likely()
+}
+
+func (fc *fcManager) CancelWholeQueueCallback(cb fcReadinessCallback) {
+	nsID := namespace.ID(fc.partition.NamespaceId())
+	fc.readiness.CancelCallback(nsID, enumsspb.LIMITER_TYPE_CONCURRENCY, fc.wholeQueueLimiter, cb)
 }
 
 func (fc *fcManager) UpdateLimitersFromConfig(

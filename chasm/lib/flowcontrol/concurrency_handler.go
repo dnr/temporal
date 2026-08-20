@@ -156,5 +156,6 @@ func (h *concurrencyHandler) Wait(ctx context.Context, req *fcpb.ConcurrencyWait
 	if err == nil && res == nil {
 		return &fcpb.ConcurrencyWaitResponse{}, nil
 	}
+	// TODO(fc): we can try again if we still have time and we got a stale generation?
 	return res, err
 }
