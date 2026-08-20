@@ -344,6 +344,43 @@ func (s *mutableStateSuite) TestRedirectInfoValidation_Valid() {
 	s.Equal(int64(1), s.mutableState.GetExecutionInfo().GetBuildIdRedirectCounter())
 }
 
+func (s *mutableStateSuite) TestWorkflowTaskLimitersStoredForAttempt() {
+	tq := &taskqueuepb.TaskQueue{Name: "tq"}
+	s.createVersionedMutableStateWithCompletedWFT(tq)
+
+	wft, err := s.mutableState.AddWorkflowTaskScheduledEvent(true, enumsspb.WORKFLOW_TASK_TYPE_NORMAL)
+	s.NoError(err)
+	limiters := []*taskqueuespb.LimiterRef{{
+		LimiterType: enumsspb.LIMITER_TYPE_CONCURRENCY,
+		Key:         "limiter-1",
+	}}
+	s.mutableState.GetExecutionInfo().WorkflowTaskLimiters = limiters
+
+	_, wft, err = s.mutableState.AddWorkflowTaskStartedEvent(
+		wft.ScheduledEventID,
+		"",
+		tq,
+		"",
+		worker_versioning.StampFromBuildId("b1"),
+		nil,
+		nil,
+		false,
+		nil,
+		0,
+	)
+	s.NoError(err)
+	s.Equal(limiters, wft.Limiters)
+	s.Equal(limiters, s.mutableState.GetExecutionInfo().WorkflowTaskLimiters)
+
+	_, err = s.mutableState.AddWorkflowTaskCompletedEvent(
+		wft,
+		&workflowservice.RespondWorkflowTaskCompletedRequest{},
+		workflowTaskCompletionLimits,
+	)
+	s.NoError(err)
+	s.Nil(s.mutableState.GetExecutionInfo().WorkflowTaskLimiters)
+}
+
 func (s *mutableStateSuite) TestRedirectInfoValidation_Invalid() {
 	tq := &taskqueuepb.TaskQueue{Name: "tq"}
 	s.createVersionedMutableStateWithCompletedWFT(tq)

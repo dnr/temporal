@@ -160,6 +160,7 @@ func Invoke(
 				return nil, err
 			}
 
+			mutableState.GetExecutionInfo().WorkflowTaskLimiters = req.GetLimiters()
 			_, workflowTask, err = mutableState.AddWorkflowTaskStartedEvent(
 				scheduledEventID,
 				requestID,
@@ -178,7 +179,8 @@ func Invoke(
 			}
 
 			if workflowTask.Type == enumsspb.WORKFLOW_TASK_TYPE_SPECULATIVE {
-				updateAction.Noop = true
+				// Persist limiter refs so a history process restart cannot lose the release obligation.
+				updateAction.Noop = len(req.GetLimiters()) == 0
 			} else {
 				// If the wft is speculative MS changes are not persisted, so the possibly started
 				// transition by the StartDeploymentTransition call above won't be persisted. This is OK

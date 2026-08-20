@@ -18,6 +18,7 @@ import (
 	clockspb "go.temporal.io/server/api/clock/v1"
 	enumsspb "go.temporal.io/server/api/enums/v1"
 	persistencespb "go.temporal.io/server/api/persistence/v1"
+	taskqueuespb "go.temporal.io/server/api/taskqueue/v1"
 	"go.temporal.io/server/common"
 	"go.temporal.io/server/common/backoff"
 	commonclock "go.temporal.io/server/common/clock"
@@ -65,6 +66,7 @@ func TestClearActivityStartedState(t *testing.T) {
 		RequestId:      "req-1",
 		StartedTime:    timestamppb.Now(),
 		StartedClock:   &clockspb.VectorClock{ClusterId: 1, ShardId: 1, Clock: 99},
+		Limiters:       []*taskqueuespb.LimiterRef{{Key: "limiter-1"}},
 		// Fields that should NOT be cleared.
 		ScheduledEventId: 7,
 		ActivityId:       "activity-1",
@@ -78,6 +80,7 @@ func TestClearActivityStartedState(t *testing.T) {
 	require.Empty(t, ai.RequestId)
 	require.Nil(t, ai.StartedTime)
 	require.Nil(t, ai.StartedClock)
+	require.Nil(t, ai.Limiters)
 	// Verify non-started fields are untouched.
 	require.Equal(t, int64(7), ai.ScheduledEventId)
 	require.Equal(t, "activity-1", ai.ActivityId)
