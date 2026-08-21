@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
 	enumsspb "go.temporal.io/server/api/enums/v1"
 	taskqueuespb "go.temporal.io/server/api/taskqueue/v1"
 	fcpb "go.temporal.io/server/chasm/lib/flowcontrol/gen/flowcontrolpb/v1"
@@ -263,8 +264,9 @@ func (r *Readiness) NewTx(ctx context.Context, nsID namespace.ID, task fcTask) (
 	for i, lim := range lims {
 		switch lim.tp {
 		case enumsspb.LIMITER_TYPE_CONCURRENCY:
-			committers[i] = newConcurrencyCommitter(ctx, r.concurrencyServiceClient, r, nsID, task.TaskUUID(), lim)
-			refs[i] = &taskqueuespb.LimiterRef{LimiterType: lim.tp, Key: lim.key}
+			slotID := uuid.NewString()
+			committers[i] = newConcurrencyCommitter(ctx, r.concurrencyServiceClient, r, nsID, slotID, lim)
+			refs[i] = &taskqueuespb.LimiterRef{LimiterType: lim.tp, Key: lim.key, SlotId: slotID}
 		default:
 			return nil, errors.New("invalid limiter type")
 		}

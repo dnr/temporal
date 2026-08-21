@@ -13,7 +13,6 @@ import (
 	persistencespb "go.temporal.io/server/api/persistence/v1"
 	taskqueuespb "go.temporal.io/server/api/taskqueue/v1"
 	"go.temporal.io/server/common/namespace"
-	commontaskqueue "go.temporal.io/server/common/taskqueue"
 	"go.temporal.io/server/service/matching/fc"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
@@ -292,23 +291,6 @@ func (task *internalTask) workflowExecution() *commonpb.WorkflowExecution {
 		return task.started.activityTaskInfo.WorkflowExecution
 	}
 	return &commonpb.WorkflowExecution{}
-}
-
-// Returns a UUID for the task that's the same whether it came from history or backlog.
-// The UUID is specific to the attempt.
-// FIXME: need to improve this or generate uuid
-func (task *internalTask) TaskUUID() string {
-	if task.event == nil {
-		return "" // FIXME: not sure what to do here
-	}
-	data := task.event.Data
-	return commontaskqueue.TaskUUID(
-		data.GetWorkflowId(),
-		data.GetRunId(),
-		data.GetScheduledEventId(),
-		data.GetComponentRef(),
-		data.GetStamp(),
-	)
 }
 
 func (task *internalTask) Limiters() *fc.Limiters {

@@ -47,9 +47,9 @@ func (c *concurrency) expire(now time.Time) {
 	})
 }
 
-func (c *concurrency) find(taskUUID string) int {
+func (c *concurrency) find(slotID string) int {
 	return slices.IndexFunc(c.Slots, func(slot *fcpb.ConcurrencySlot) bool {
-		return slot.TaskUuid == taskUUID
+		return slot.SlotId == slotID
 	})
 }
 
@@ -75,18 +75,18 @@ func (c *concurrency) updateConfig(config *taskqueuepb.ConcurrencyLimit, version
 	}
 }
 
-func (c *concurrency) reserve(taskUUID string, now time.Time) int32 {
+func (c *concurrency) reserve(slotID string, now time.Time) int32 {
 	defer c.maintainGeneration()()
 	c.expire(now)
 
-	if c.find(taskUUID) >= 0 {
+	if c.find(slotID) >= 0 {
 		return 1 // already reserved or committed, accept
 	}
 	if int32(len(c.Slots)) >= c.Config.ConcurrentTasks {
 		return 0
 	}
 	c.Slots = append(c.Slots, &fcpb.ConcurrencySlot{
-		TaskUuid:  taskUUID,
+		SlotId:    slotID,
 		Committed: false,
 		// Truncate is okay because expire adds a second anyway.
 		Expires: timestamppb.New(now.Add(reserveTimeout).Truncate(time.Second)),
@@ -94,20 +94,20 @@ func (c *concurrency) reserve(taskUUID string, now time.Time) int32 {
 	return 1
 }
 
-func (c *concurrency) cancelReservation(taskUUID string, now time.Time) {
+func (c *concurrency) cancelReservation(slotID string, now time.Time) {
 	defer c.maintainGeneration()()
 	c.expire(now)
 
 	c.Slots = slices.DeleteFunc(c.Slots, func(slot *fcpb.ConcurrencySlot) bool {
-		return !slot.Committed && slot.TaskUuid == taskUUID
+		return !slot.Committed && slot.SlotId == slotID
 	})
 }
 
-func (c *concurrency) commit(taskUUID string, now time.Time) error {
+func (c *concurrency) commit(slotID string, now time.Time) error {
 	defer c.maintainGeneration()()
 	c.expire(now)
 
-	if idx := c.find(taskUUID); idx >= 0 {
+	if idx := c.find(slotID); idx >= 0 {
 		// note this works even if it was already committed
 		c.Slots[idx].Committed = true
 		c.Slots[idx].Expires = nil
@@ -118,12 +118,12 @@ func (c *concurrency) commit(taskUUID string, now time.Time) error {
 	return serviceerror.NewFailedPrecondition("no reservation found")
 }
 
-func (c *concurrency) release(taskUUID string, now time.Time) {
+func (c *concurrency) release(slotID string, now time.Time) {
 	defer c.maintainGeneration()()
 	c.expire(now)
 
 	c.Slots = slices.DeleteFunc(c.Slots, func(slot *fcpb.ConcurrencySlot) bool {
-		return slot.Committed && slot.TaskUuid == taskUUID
+		return slot.Committed && slot.SlotId == slotID
 	})
 }
 

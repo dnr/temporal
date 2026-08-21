@@ -21,12 +21,12 @@ type readinessCacheInterface interface {
 }
 
 type concurrencyCommitter struct {
-	ctx      context.Context
-	client   fcpb.ConcurrencyServiceClient
-	cache    readinessCacheInterface
-	nsID     namespace.ID
-	taskUUID string
-	lim      limiter
+	ctx    context.Context
+	client fcpb.ConcurrencyServiceClient
+	cache  readinessCacheInterface
+	nsID   namespace.ID
+	slotID string
+	lim    limiter
 	// TODO(fc): we could maybe have this component do some opportunistic batching
 }
 
@@ -35,16 +35,16 @@ func newConcurrencyCommitter(
 	client fcpb.ConcurrencyServiceClient,
 	cache readinessCacheInterface,
 	nsID namespace.ID,
-	taskUUID string,
+	slotID string,
 	lim limiter,
 ) *concurrencyCommitter {
 	return &concurrencyCommitter{
-		ctx:      ctx,
-		client:   client,
-		cache:    cache,
-		nsID:     nsID,
-		taskUUID: taskUUID,
-		lim:      lim,
+		ctx:    ctx,
+		client: client,
+		cache:  cache,
+		nsID:   nsID,
+		slotID: slotID,
+		lim:    lim,
 	}
 }
 
@@ -55,7 +55,7 @@ func (c *concurrencyCommitter) reserve() error {
 	res, err := c.client.Reserve(c.ctx, &fcpb.ConcurrencyReserveRequest{
 		NamespaceId:         c.nsID.String(),
 		Key:                 c.lim.key,
-		TaskUuid:            c.taskUUID,
+		SlotId:              c.slotID,
 		ConfigUpdate:        configUpdate,
 		ConfigUpdateVersion: c.lim.configVersion,
 	})
@@ -74,7 +74,7 @@ func (c *concurrencyCommitter) commit() error {
 	_, err := c.client.Commit(c.ctx, &fcpb.ConcurrencyCommitRequest{
 		NamespaceId: c.nsID.String(),
 		Key:         c.lim.key,
-		TaskUuid:    c.taskUUID,
+		SlotId:      c.slotID,
 	})
 	return err
 }
@@ -83,6 +83,6 @@ func (c *concurrencyCommitter) cancelReservations() {
 	_, _ = c.client.CancelReservation(c.ctx, &fcpb.ConcurrencyCancelReservationRequest{
 		NamespaceId: c.nsID.String(),
 		Key:         c.lim.key,
-		TaskUuid:    c.taskUUID,
+		SlotId:      c.slotID,
 	})
 }

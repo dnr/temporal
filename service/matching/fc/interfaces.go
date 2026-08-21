@@ -7,7 +7,6 @@ type userDataManager interface {
 }
 
 type fcTask interface {
-	TaskUUID() string
 	Limiters() *Limiters
 }
 

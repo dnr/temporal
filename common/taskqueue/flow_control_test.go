@@ -8,13 +8,6 @@ import (
 	taskqueuespb "go.temporal.io/server/api/taskqueue/v1"
 )
 
-func TestTaskUUID(t *testing.T) {
-	require.Equal(t,
-		"9df2b244-3521-546d-b758-55023689c95d",
-		TaskUUID("workflow-id", "run-id", 42, []byte("component-ref"), 7),
-	)
-}
-
 func TestNeedsRelease(t *testing.T) {
 	testCases := []struct {
 		name string

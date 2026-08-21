@@ -48,7 +48,7 @@ func (h *concurrencyHandler) Reserve(ctx context.Context, req *fcpb.ConcurrencyR
 		},
 		func(c *concurrency, cctx chasm.MutableContext, req *fcpb.ConcurrencyReserveRequest) (*fcpb.ConcurrencyReserveResponse, error) {
 			c.updateConfig(req.GetConfigUpdate(), req.GetConfigUpdateVersion())
-			slotsReserved := c.reserve(req.TaskUuid, cctx.Now(c))
+			slotsReserved := c.reserve(req.SlotId, cctx.Now(c))
 			return &fcpb.ConcurrencyReserveResponse{
 				Generation:    c.Generation,
 				SlotsReserved: slotsReserved,
@@ -74,7 +74,7 @@ func (h *concurrencyHandler) CancelReservation(ctx context.Context, req *fcpb.Co
 			BusinessID:  req.Key,
 		}),
 		func(c *concurrency, cctx chasm.MutableContext, req *fcpb.ConcurrencyCancelReservationRequest) (*fcpb.ConcurrencyCancelReservationResponse, error) {
-			c.cancelReservation(req.TaskUuid, cctx.Now(c))
+			c.cancelReservation(req.SlotId, cctx.Now(c))
 			return &fcpb.ConcurrencyCancelReservationResponse{}, nil
 		},
 		req,
@@ -93,7 +93,7 @@ func (h *concurrencyHandler) Commit(ctx context.Context, req *fcpb.ConcurrencyCo
 			BusinessID:  req.Key,
 		}),
 		func(c *concurrency, cctx chasm.MutableContext, req *fcpb.ConcurrencyCommitRequest) (*fcpb.ConcurrencyCommitResponse, error) {
-			err := c.commit(req.TaskUuid, cctx.Now(c))
+			err := c.commit(req.SlotId, cctx.Now(c))
 			if err != nil {
 				return nil, err
 			}
@@ -115,7 +115,7 @@ func (h *concurrencyHandler) Release(ctx context.Context, req *fcpb.ConcurrencyR
 			BusinessID:  req.Key,
 		}),
 		func(c *concurrency, cctx chasm.MutableContext, req *fcpb.ConcurrencyReleaseRequest) (*fcpb.ConcurrencyReleaseResponse, error) {
-			c.release(req.TaskUuid, cctx.Now(c))
+			c.release(req.SlotId, cctx.Now(c))
 			// FIXME: add tasks to control slow release of notifications
 			return &fcpb.ConcurrencyReleaseResponse{}, nil
 		},
