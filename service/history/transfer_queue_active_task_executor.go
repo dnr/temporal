@@ -2,6 +2,7 @@ package history
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/google/uuid"
@@ -15,6 +16,7 @@ import (
 	workflowpb "go.temporal.io/api/workflow/v1"
 	"go.temporal.io/api/workflowservice/v1"
 	clockspb "go.temporal.io/server/api/clock/v1"
+	enumsspb "go.temporal.io/server/api/enums/v1"
 	"go.temporal.io/server/api/historyservice/v1"
 	persistencespb "go.temporal.io/server/api/persistence/v1"
 	workflowspb "go.temporal.io/server/api/workflow/v1"
@@ -174,6 +176,8 @@ func (t *transferQueueActiveTaskExecutor) execute(
 		err = t.processResetWorkflow(ctx, task)
 	case *tasks.DeleteExecutionTask:
 		err = t.processDeleteExecutionTask(ctx, task)
+	case *tasks.ReleaseLimiterTask:
+		err = t.processReleaseLimiterTask(ctx, task)
 	case *tasks.ChasmTask:
 		task.Attempt = executable.Attempt()
 		err = t.executeChasmSideEffectTransferTask(ctx, task)
@@ -186,6 +190,30 @@ func (t *transferQueueActiveTaskExecutor) execute(
 		ExecutedAsActive:    true,
 		ExecutionErr:        err,
 	}
+}
+
+func (t *transferQueueActiveTaskExecutor) processReleaseLimiterTask(
+	ctx context.Context,
+	task *tasks.ReleaseLimiterTask,
+) error {
+	ctx, cancel := context.WithTimeout(ctx, taskTimeout)
+	defer cancel()
+
+	var releaseErrors []error
+	for _, limiter := range task.Limiters {
+		switch limiter.GetLimiterType() {
+		case enumsspb.LIMITER_TYPE_CONCURRENCY:
+			_, err := t.concurrencyServiceClient.Release(ctx, &fcpb.ConcurrencyReleaseRequest{
+				NamespaceId: task.NamespaceID,
+				Key:         limiter.GetKey(),
+				SlotId:      limiter.GetSlotId(),
+			})
+			if err != nil {
+				releaseErrors = append(releaseErrors, err)
+			}
+		}
+	}
+	return errors.Join(releaseErrors...)
 }
 
 func (t *transferQueueActiveTaskExecutor) executeChasmSideEffectTransferTask(
