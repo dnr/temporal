@@ -27,6 +27,7 @@ import (
 	"go.temporal.io/server/service/history/configs"
 	"go.temporal.io/server/service/history/events"
 	"go.temporal.io/server/service/history/hsm"
+	historyi "go.temporal.io/server/service/history/interfaces"
 	"go.temporal.io/server/service/history/shard"
 	"go.temporal.io/server/service/history/tasks"
 	"go.temporal.io/server/service/history/tests"
@@ -221,6 +222,7 @@ func (s *retryActivitySuite) TestRetryActivity_should_clear_per_attempt_fields()
 	s.Nil(s.activity.StartedClock, "StartedClock should be cleared on retry")
 	s.Nil(s.activity.StartedTime, "StartedTime should be cleared on retry")
 	s.Equal(common.EmptyEventID, s.activity.StartedEventId, "StartedEventId should be reset to EmptyEventID")
+	s.mutableState.closeTransactionGenerateReleaseLimiterTask(historyi.TransactionPolicyActive)
 	transferTasks := s.mutableState.PopTasks()[tasks.CategoryTransfer]
 	s.Require().Len(transferTasks, 1)
 	releaseTask, ok := transferTasks[0].(*tasks.ReleaseLimiterTask)

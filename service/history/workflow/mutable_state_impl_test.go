@@ -426,7 +426,53 @@ func (s *mutableStateSuite) TestActivityLimiterReleasedOnCompletion() {
 	s.requireReleaseLimiterTask(limiters)
 }
 
+func (s *mutableStateSuite) TestWorkflowCloseReleasesPendingTaskLimiters() {
+	s.mutableState.PopTasks()
+	workflowTaskLimiter := &taskqueuespb.LimiterRef{
+		LimiterType: enumsspb.LIMITER_TYPE_CONCURRENCY,
+		Key:         "workflow-task-limiter",
+		SlotId:      uuid.NewString(),
+	}
+	activityLimiter := &taskqueuespb.LimiterRef{
+		LimiterType: enumsspb.LIMITER_TYPE_CONCURRENCY,
+		Key:         "activity-limiter",
+		SlotId:      uuid.NewString(),
+	}
+	s.mutableState.executionInfo.WorkflowTaskLimiters = []*taskqueuespb.LimiterRef{workflowTaskLimiter}
+	s.mutableState.pendingActivityInfoIDs[123] = &persistencespb.ActivityInfo{
+		Limiters: []*taskqueuespb.LimiterRef{activityLimiter},
+	}
+	s.mutableState.executionState.State = enumsspb.WORKFLOW_EXECUTION_STATE_COMPLETED
+	s.mutableState.stateInDB = enumsspb.WORKFLOW_EXECUTION_STATE_RUNNING
+
+	s.mutableState.closeTransactionGenerateReleaseLimiterTask(historyi.TransactionPolicyActive)
+
+	transferTasks := s.mutableState.PopTasks()[tasks.CategoryTransfer]
+	s.Require().Len(transferTasks, 1)
+	releaseTask, ok := transferTasks[0].(*tasks.ReleaseLimiterTask)
+	s.Require().True(ok)
+	protorequire.ProtoElementsMatch(
+		s.T(),
+		[]*taskqueuespb.LimiterRef{workflowTaskLimiter, activityLimiter},
+		releaseTask.Limiters,
+	)
+}
+
+func (s *mutableStateSuite) TestPassiveTransactionDoesNotReleaseLimiters() {
+	s.mutableState.PopTasks()
+	s.mutableState.releaseLimiterRefs = []*taskqueuespb.LimiterRef{{
+		LimiterType: enumsspb.LIMITER_TYPE_CONCURRENCY,
+		Key:         "limiter",
+		SlotId:      uuid.NewString(),
+	}}
+
+	s.mutableState.closeTransactionGenerateReleaseLimiterTask(historyi.TransactionPolicyPassive)
+
+	s.Empty(s.mutableState.PopTasks()[tasks.CategoryTransfer])
+}
+
 func (s *mutableStateSuite) requireReleaseLimiterTask(limiters []*taskqueuespb.LimiterRef) {
+	s.mutableState.closeTransactionGenerateReleaseLimiterTask(historyi.TransactionPolicyActive)
 	transferTasks := s.mutableState.PopTasks()[tasks.CategoryTransfer]
 	s.Require().Len(transferTasks, 1)
 	releaseTask, ok := transferTasks[0].(*tasks.ReleaseLimiterTask)
