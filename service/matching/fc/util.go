@@ -6,16 +6,12 @@ import (
 	"slices"
 
 	enumspb "go.temporal.io/api/enums/v1"
-	"go.temporal.io/api/serviceerror"
 	"go.temporal.io/server/common/util"
 )
 
 // Maximum total limiters that can apply to any task. (Currently this includes the whole-queue
 // limiter, in the future we may allow the whole-queue limiter to be separate from this limit.)
 const maxLimiters = 3
-
-// Error used to indicate a limiter is blocked.
-var errFCLimiterBlocked = serviceerror.NewFailedPrecondition("limiter blocked")
 
 type limiterSource int32
 

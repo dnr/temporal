@@ -719,11 +719,12 @@ func taskAddErrResult(err error) string {
 }
 
 func (pm *taskQueuePartitionManagerImpl) shouldBacklogSyncMatchTaskOnError(err error) bool {
-	var resourceExhaustedErr *serviceerror.ResourceExhausted
-	if err != nil && errors.As(err, &resourceExhaustedErr) {
+	if resourceExhaustedErr, ok := errors.AsType[*serviceerror.ResourceExhausted](err); ok {
 		if resourceExhaustedErr.Cause == enumspb.RESOURCE_EXHAUSTED_CAUSE_BUSY_WORKFLOW {
 			return true
 		}
+	} else if _, ok := errors.AsType[*serviceerrors.FlowControlBlocked](err); ok {
+		return true
 	}
 	return false
 }

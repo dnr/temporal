@@ -7,6 +7,7 @@ import (
 	enumsspb "go.temporal.io/server/api/enums/v1"
 	fcpb "go.temporal.io/server/chasm/lib/flowcontrol/gen/flowcontrolpb/v1"
 	"go.temporal.io/server/common/namespace"
+	serviceerrors "go.temporal.io/server/common/serviceerror"
 )
 
 type committer interface {
@@ -64,7 +65,7 @@ func (c *concurrencyCommitter) reserve() error {
 	}
 	if res.SlotsReserved == 0 {
 		c.cache.reportBlocked(c.nsID, c.lim.tp, c.lim.key, res.Generation)
-		return errFCLimiterBlocked
+		return serviceerrors.NewFlowControlBlocked()
 	}
 	c.cache.reportReady(c.nsID, c.lim.tp, c.lim.key, res.Generation)
 	return nil
