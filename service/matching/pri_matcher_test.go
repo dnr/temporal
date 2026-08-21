@@ -65,7 +65,8 @@ func (s *PriMatcherSuite) TestValidatorWorksOnRoot() {
 		return true // task is valid
 	})
 
-	rateLimitManager := newRateLimitManager(&mockUserDataManager{}, cfg, enumspb.TASK_QUEUE_TYPE_WORKFLOW)
+	userDataManager := &mockUserDataManager{}
+	rateLimitManager := newRateLimitManager(userDataManager, cfg, enumspb.TASK_QUEUE_TYPE_WORKFLOW)
 	rateLimitManager.Start()
 
 	tm := newPriTaskMatcher(
@@ -78,6 +79,7 @@ func (s *PriMatcherSuite) TestValidatorWorksOnRoot() {
 		s.logger,
 		metrics.NoopMetricsHandler,
 		rateLimitManager,
+		newTestFCManager(partition, userDataManager),
 		func() {}, // onRateLimited
 		func() {}, // markAlive
 	)
@@ -160,7 +162,8 @@ func (s *PriMatcherSuite) TestForwardPollRetriesOnResourceExhausted() {
 		)
 		require.NoError(t, err)
 
-		rateLimitManager := newRateLimitManager(&mockUserDataManager{}, cfg, enumspb.TASK_QUEUE_TYPE_WORKFLOW)
+		userDataManager := &mockUserDataManager{}
+		rateLimitManager := newRateLimitManager(userDataManager, cfg, enumspb.TASK_QUEUE_TYPE_WORKFLOW)
 		rateLimitManager.Start()
 
 		tm := newPriTaskMatcher(
@@ -173,6 +176,7 @@ func (s *PriMatcherSuite) TestForwardPollRetriesOnResourceExhausted() {
 			s.logger,
 			metrics.NoopMetricsHandler,
 			rateLimitManager,
+			newTestFCManager(childPartition, userDataManager),
 			func() {},
 			func() {},
 		)
@@ -229,7 +233,8 @@ func (s *PriMatcherSuite) TestValidatorDrop_SetsDropReason() {
 			mockValidator := NewMocktaskValidator(s.controller)
 			mockValidator.EXPECT().maybeValidate(gomock.Any(), gomock.Any()).Return(false).AnyTimes()
 
-			rateLimitManager := newRateLimitManager(&mockUserDataManager{}, cfg, enumspb.TASK_QUEUE_TYPE_WORKFLOW)
+			userDataManager := &mockUserDataManager{}
+			rateLimitManager := newRateLimitManager(userDataManager, cfg, enumspb.TASK_QUEUE_TYPE_WORKFLOW)
 			rateLimitManager.Start()
 			tm := newPriTaskMatcher(
 				ctx,
@@ -241,6 +246,7 @@ func (s *PriMatcherSuite) TestValidatorDrop_SetsDropReason() {
 				s.logger,
 				metrics.NoopMetricsHandler,
 				rateLimitManager,
+				newTestFCManager(partition, userDataManager),
 				func() {},
 				func() {},
 			)

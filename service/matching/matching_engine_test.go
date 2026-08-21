@@ -74,6 +74,7 @@ import (
 	"go.temporal.io/server/common/worker_versioning"
 	"go.temporal.io/server/components/nexusoperations"
 	"go.temporal.io/server/service/history/consts"
+	"go.temporal.io/server/service/matching/fc"
 	"go.uber.org/mock/gomock"
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/types/known/durationpb"
@@ -269,6 +270,7 @@ func newMatchingEngine(
 		timeSource:          clock.NewRealTimeSource(),
 		visibilityManager:   mockVisibilityManager,
 		nexusEndpointClient: newEndpointClient(config.NexusEndpointsRefreshInterval, nexusEndpointManager),
+		fcReadiness:         fc.NewReadiness(nil),
 	}
 	e.nexusEndpointsOwnershipLostCh.Store(make(chan struct{}))
 	return e

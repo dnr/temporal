@@ -18,6 +18,11 @@ func (t testFCTask) Limiters() *Limiters {
 	return t.limiters
 }
 
+func TestNilTxLimiterRefs(t *testing.T) {
+	var tx *tx
+	require.Nil(t, tx.LimiterRefs())
+}
+
 func TestNewTxGeneratesSlotIDs(t *testing.T) {
 	limiters := &Limiters{}
 	limiters.limiters[0] = limiter{

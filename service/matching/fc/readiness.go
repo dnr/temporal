@@ -297,6 +297,9 @@ const (
 )
 
 func (tx *tx) LimiterRefs() []*taskqueuespb.LimiterRef {
+	if tx == nil {
+		return nil
+	}
 	return tx.refs
 }
 

@@ -25,6 +25,7 @@ import (
 	"go.temporal.io/server/common/softassert"
 	"go.temporal.io/server/common/testing/testlogger"
 	"go.temporal.io/server/common/tqid"
+	"go.temporal.io/server/service/matching/fc"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
@@ -41,18 +42,28 @@ func TestMatcherDataSuite(t *testing.T) {
 }
 
 func (s *MatcherDataSuite) SetupTest() {
+	taskQueue := tqid.UnsafeTaskQueueFamily("nsid", "tq").TaskQueue(enumspb.TASK_QUEUE_TYPE_ACTIVITY)
 	cfg := newTaskQueueConfig(
-		tqid.UnsafeTaskQueueFamily("nsid", "tq").TaskQueue(enumspb.TASK_QUEUE_TYPE_ACTIVITY),
+		taskQueue,
 		NewConfig(dynamicconfig.NewNoopCollection()),
 		"nsname",
 	)
 	logger := testlogger.NewTestLogger(s.T(), testlogger.FailOnAnyUnexpectedError)
 	s.ts = clock.NewEventTimeSource().Update(time.Now())
 	s.ts.UseAsyncTimers(true)
-	rateLimitManager := newRateLimitManager(&mockUserDataManager{}, cfg, enumspb.TASK_QUEUE_TYPE_ACTIVITY)
+	userDataManager := &mockUserDataManager{}
+	rateLimitManager := newRateLimitManager(userDataManager, cfg, enumspb.TASK_QUEUE_TYPE_ACTIVITY)
 	rateLimitManager.Start()
 	s.rateLimitedCount.Store(0)
-	s.md = newMatcherData(cfg, logger, s.ts, true, rateLimitManager, func() { s.rateLimitedCount.Add(1) })
+	s.md = newMatcherData(
+		cfg,
+		logger,
+		s.ts,
+		true,
+		rateLimitManager,
+		newTestFCManager(taskQueue.RootPartition(), userDataManager),
+		func() { s.rateLimitedCount.Add(1) },
+	)
 }
 
 func (s *MatcherDataSuite) now() time.Time {
@@ -982,7 +993,7 @@ func (s *MatcherDataSuite) TestFindMatch() {
 			// Call findMatch
 			s.md.lock.Lock()
 			now := s.ts.Now().UnixNano()
-			foundTask, foundPoller, _ := s.md.findMatch(tc.allowForwarding, now)
+			foundTask, foundPoller, _, _ := s.md.findMatch(tc.allowForwarding, now)
 			s.md.lock.Unlock()
 
 			if tc.shouldMatch {
@@ -1131,17 +1142,27 @@ func TestCheckConstants(t *testing.T) {
 
 func FuzzMatcherData(f *testing.F) {
 	f.Fuzz(func(t *testing.T, tape []byte) {
+		taskQueue := tqid.UnsafeTaskQueueFamily("nsid", "tq").TaskQueue(enumspb.TASK_QUEUE_TYPE_ACTIVITY)
 		cfg := newTaskQueueConfig(
-			tqid.UnsafeTaskQueueFamily("nsid", "tq").TaskQueue(enumspb.TASK_QUEUE_TYPE_ACTIVITY),
+			taskQueue,
 			NewConfig(dynamicconfig.NewNoopCollection()),
 			"nsname",
 		)
 		ts := clock.NewEventTimeSource()
 		ts.UseAsyncTimers(true)
 		logger := log.NewNoopLogger()
-		rateLimitManager := newRateLimitManager(&mockUserDataManager{}, cfg, enumspb.TASK_QUEUE_TYPE_ACTIVITY)
+		userDataManager := &mockUserDataManager{}
+		rateLimitManager := newRateLimitManager(userDataManager, cfg, enumspb.TASK_QUEUE_TYPE_ACTIVITY)
 		rateLimitManager.Start()
-		md := newMatcherData(cfg, logger, ts, true, rateLimitManager, func() {})
+		md := newMatcherData(
+			cfg,
+			logger,
+			ts,
+			true,
+			rateLimitManager,
+			newTestFCManager(taskQueue.RootPartition(), userDataManager),
+			func() {},
+		)
 
 		next := func() int {
 			if len(tape) == 0 {
@@ -1257,6 +1278,10 @@ func FuzzMatcherData(f *testing.F) {
 			gosched(3)
 		}
 	})
+}
+
+func newTestFCManager(partition tqid.Partition, userDataManager *mockUserDataManager) *fc.Manager {
+	return fc.NewManager(partition, userDataManager, fc.NewReadiness(nil))
 }
 
 func gosched(n int) {
