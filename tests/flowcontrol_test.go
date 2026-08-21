@@ -77,7 +77,11 @@ func (t *concurrencyTracker) wait(timeout time.Duration) bool {
 }
 
 func (s *flowControlTestSuite) TestWorkflowTaskConcurrencyLimit() {
-	env := testcore.NewEnv(s.T())
+	env := testcore.NewEnv(s.T(),
+		// force more partitions for better coverage
+		testcore.WithDynamicConfig(dynamicconfig.MatchingNumTaskqueueReadPartitions, 5),
+		testcore.WithDynamicConfig(dynamicconfig.MatchingNumTaskqueueWritePartitions, 5),
+	)
 	tv := testvars.New(s.T())
 	taskQueue := tv.TaskQueue().GetName()
 	s.setConcurrencyLimit(env, taskQueue, enumspb.TASK_QUEUE_TYPE_WORKFLOW)
@@ -114,10 +118,13 @@ func (s *flowControlTestSuite) TestWorkflowTaskConcurrencyLimit() {
 }
 
 func (s *flowControlTestSuite) TestActivityTaskConcurrencyLimit() {
-	env := testcore.NewEnv(s.T(), testcore.WithDynamicConfig(
+	env := testcore.NewEnv(s.T(),
+		// force more partitions for better coverage
+		testcore.WithDynamicConfig(dynamicconfig.MatchingNumTaskqueueReadPartitions, 5),
+		testcore.WithDynamicConfig(dynamicconfig.MatchingNumTaskqueueWritePartitions, 5),
 		// default pending activities limit is very low, raise it
-		dynamicconfig.NumPendingActivitiesLimitError, flowControlTaskCount+1,
-	))
+		testcore.WithDynamicConfig(dynamicconfig.NumPendingActivitiesLimitError, flowControlTaskCount+1),
+	)
 	tv := testvars.New(s.T())
 	taskQueue := tv.TaskQueue().GetName()
 	s.setConcurrencyLimit(env, taskQueue, enumspb.TASK_QUEUE_TYPE_ACTIVITY)
@@ -164,7 +171,11 @@ func (s *flowControlTestSuite) TestActivityTaskConcurrencyLimit() {
 }
 
 func (s *flowControlTestSuite) TestStandaloneActivityTaskConcurrencyLimit() {
-	env := testcore.NewEnv(s.T())
+	env := testcore.NewEnv(s.T(),
+		// force more partitions for better coverage
+		testcore.WithDynamicConfig(dynamicconfig.MatchingNumTaskqueueReadPartitions, 5),
+		testcore.WithDynamicConfig(dynamicconfig.MatchingNumTaskqueueWritePartitions, 5),
+	)
 	nsValues := func(value any) []dynamicconfig.ConstrainedValue {
 		return []dynamicconfig.ConstrainedValue{{
 			Constraints: dynamicconfig.Constraints{Namespace: env.Namespace().String()},
