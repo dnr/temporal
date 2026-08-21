@@ -19,6 +19,7 @@ import (
 	persistencespb "go.temporal.io/server/api/persistence/v1"
 	workflowspb "go.temporal.io/server/api/workflow/v1"
 	"go.temporal.io/server/chasm"
+	fcpb "go.temporal.io/server/chasm/lib/flowcontrol/gen/flowcontrolpb/v1"
 	"go.temporal.io/server/common"
 	"go.temporal.io/server/common/definition"
 	"go.temporal.io/server/common/locks"
@@ -53,10 +54,11 @@ type (
 	transferQueueActiveTaskExecutor struct {
 		*transferQueueTaskExecutorBase
 
-		workflowResetter        ndc.WorkflowResetter
-		parentClosePolicyClient parentclosepolicy.Client
-		versionCache            worker_versioning.VersionMembershipAndReactivationStatusCache
-		testHooks               testhooks.TestHooks
+		workflowResetter         ndc.WorkflowResetter
+		parentClosePolicyClient  parentclosepolicy.Client
+		concurrencyServiceClient fcpb.ConcurrencyServiceClient
+		versionCache             worker_versioning.VersionMembershipAndReactivationStatusCache
+		testHooks                testhooks.TestHooks
 	}
 )
 
@@ -69,6 +71,7 @@ func newTransferQueueActiveTaskExecutor(
 	config *configs.Config,
 	historyRawClient resource.HistoryRawClient,
 	matchingRawClient resource.MatchingRawClient,
+	concurrencyServiceClient fcpb.ConcurrencyServiceClient,
 	visibilityManager manager.VisibilityManager,
 	chasmEngine chasm.Engine,
 	versionCache worker_versioning.VersionMembershipAndReactivationStatusCache,
@@ -96,8 +99,9 @@ func newTransferQueueActiveTaskExecutor(
 			sdkClientFactory,
 			config.NumParentClosePolicySystemWorkflows(),
 		),
-		versionCache: versionCache,
-		testHooks:    testHooks,
+		concurrencyServiceClient: concurrencyServiceClient,
+		versionCache:             versionCache,
+		testHooks:                testHooks,
 	}
 }
 
