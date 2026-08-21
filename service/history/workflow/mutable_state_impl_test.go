@@ -353,6 +353,7 @@ func (s *mutableStateSuite) TestWorkflowTaskLimitersStoredForAttempt() {
 	limiters := []*taskqueuespb.LimiterRef{{
 		LimiterType: enumsspb.LIMITER_TYPE_CONCURRENCY,
 		Key:         "limiter-1",
+		SlotId:      uuid.NewString(),
 	}}
 	s.mutableState.GetExecutionInfo().WorkflowTaskLimiters = limiters
 
@@ -379,6 +380,58 @@ func (s *mutableStateSuite) TestWorkflowTaskLimitersStoredForAttempt() {
 	)
 	s.NoError(err)
 	s.Nil(s.mutableState.GetExecutionInfo().WorkflowTaskLimiters)
+	s.requireReleaseLimiterTask(limiters)
+}
+
+func (s *mutableStateSuite) TestActivityLimiterReleasedOnCompletion() {
+	tq, completedEvent := s.scheduleCompletedWFTForBatchIDTest()
+	s.mutableState.PopTasks()
+
+	_, activityInfo, err := s.mutableState.AddActivityTaskScheduledEvent(
+		completedEvent.GetEventId(),
+		&commandpb.ScheduleActivityTaskCommandAttributes{
+			ActivityId:   "activity-id",
+			ActivityType: &commonpb.ActivityType{Name: "activity-type"},
+			TaskQueue:    tq,
+		},
+		true,
+	)
+	s.Require().NoError(err)
+	limiters := []*taskqueuespb.LimiterRef{{
+		LimiterType: enumsspb.LIMITER_TYPE_CONCURRENCY,
+		Key:         "limiter-1",
+		SlotId:      uuid.NewString(),
+	}}
+	activityInfo.Limiters = limiters
+
+	_, err = s.mutableState.AddActivityTaskStartedEvent(
+		activityInfo,
+		activityInfo.ScheduledEventId,
+		uuid.NewString(),
+		"worker-identity",
+		nil,
+		nil,
+		nil,
+		"",
+		nil,
+	)
+	s.Require().NoError(err)
+	_, err = s.mutableState.AddActivityTaskCompletedEvent(
+		activityInfo.ScheduledEventId,
+		activityInfo.StartedEventId,
+		&workflowservice.RespondActivityTaskCompletedRequest{},
+	)
+	s.Require().NoError(err)
+
+	s.requireReleaseLimiterTask(limiters)
+}
+
+func (s *mutableStateSuite) requireReleaseLimiterTask(limiters []*taskqueuespb.LimiterRef) {
+	transferTasks := s.mutableState.PopTasks()[tasks.CategoryTransfer]
+	s.Require().Len(transferTasks, 1)
+	releaseTask, ok := transferTasks[0].(*tasks.ReleaseLimiterTask)
+	s.Require().True(ok)
+	protorequire.ProtoElementsMatch(s.T(), limiters, releaseTask.Limiters)
 }
 
 func (s *mutableStateSuite) TestRedirectInfoValidation_Invalid() {

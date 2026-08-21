@@ -4581,7 +4581,8 @@ func (ms *MutableStateImpl) AddActivityTaskCompletedEvent(
 		return nil, err
 	}
 
-	if ai, ok := ms.GetActivityInfo(scheduledEventID); !ok || ai.StartedEventId != startedEventID {
+	ai, ok := ms.GetActivityInfo(scheduledEventID)
+	if !ok || ai.StartedEventId != startedEventID {
 		ms.logger.Warn(mutableStateInvalidHistoryActionMsg, opTag,
 			tag.WorkflowEventID(ms.GetNextEventID()),
 			tag.ErrorTypeInvalidHistoryAction,
@@ -4604,6 +4605,7 @@ func (ms *MutableStateImpl) AddActivityTaskCompletedEvent(
 	if err := ms.ApplyActivityTaskCompletedEvent(event); err != nil {
 		return nil, err
 	}
+	addReleaseLimiterTask(ms, ai.GetLimiters())
 
 	return event, nil
 }
@@ -4630,7 +4632,8 @@ func (ms *MutableStateImpl) AddActivityTaskFailedEvent(
 		return nil, err
 	}
 
-	if ai, ok := ms.GetActivityInfo(scheduledEventID); !ok || ai.StartedEventId != startedEventID {
+	ai, ok := ms.GetActivityInfo(scheduledEventID)
+	if !ok || ai.StartedEventId != startedEventID {
 		ms.logger.Warn(mutableStateInvalidHistoryActionMsg, opTag,
 			tag.WorkflowEventID(ms.GetNextEventID()),
 			tag.ErrorTypeInvalidHistoryAction,
@@ -4654,6 +4657,7 @@ func (ms *MutableStateImpl) AddActivityTaskFailedEvent(
 	if err := ms.ApplyActivityTaskFailedEvent(event); err != nil {
 		return nil, err
 	}
+	addReleaseLimiterTask(ms, ai.GetLimiters())
 
 	return event, nil
 }
@@ -4706,6 +4710,7 @@ func (ms *MutableStateImpl) AddActivityTaskTimedOutEvent(
 	if err := ms.ApplyActivityTaskTimedOutEvent(event); err != nil {
 		return nil, err
 	}
+	addReleaseLimiterTask(ms, ai.GetLimiters())
 
 	return event, nil
 }
@@ -4918,6 +4923,7 @@ func (ms *MutableStateImpl) AddActivityTaskCanceledEvent(
 	if err := ms.ApplyActivityTaskCanceledEvent(event); err != nil {
 		return nil, err
 	}
+	addReleaseLimiterTask(ms, ai.GetLimiters())
 
 	return event, nil
 }
@@ -6902,6 +6908,7 @@ func (ms *MutableStateImpl) RetryActivity(
 
 	// if activity is paused
 	if ai.Paused {
+		limiters := ai.GetLimiters()
 		// need to update activity
 		if err := ms.UpdateActivity(ai.ScheduledEventId, func(activityInfo *persistencespb.ActivityInfo, _ historyi.MutableState) error {
 			ClearActivityStartedState(activityInfo)
@@ -6914,6 +6921,7 @@ func (ms *MutableStateImpl) RetryActivity(
 		}); err != nil {
 			return enumspb.RETRY_STATE_INTERNAL_SERVER_ERROR, err
 		}
+		addReleaseLimiterTask(ms, limiters)
 
 		// TODO: uncomment once RETRY_STATE_PAUSED is supported
 		// return enumspb.RETRY_STATE_PAUSED, nil
@@ -6942,6 +6950,7 @@ func (ms *MutableStateImpl) RetryActivity(
 		return retryState, nil
 	}
 
+	limiters := ai.GetLimiters()
 	err := ms.updateActivityInfoForRetries(ai,
 		now.Add(retryBackoff),
 		ai.Attempt+1,
@@ -6953,6 +6962,7 @@ func (ms *MutableStateImpl) RetryActivity(
 	if err := ms.taskGenerator.GenerateActivityRetryTasks(ai); err != nil {
 		return enumspb.RETRY_STATE_INTERNAL_SERVER_ERROR, err
 	}
+	addReleaseLimiterTask(ms, limiters)
 	return enumspb.RETRY_STATE_IN_PROGRESS, nil
 }
 

@@ -771,6 +771,7 @@ func (m *workflowTaskStateMachine) AddWorkflowTaskCompletedEvent(
 	// before calling m.beforeAddWorkflowTaskCompletedEvent() because it will delete workflow task info from mutable state.
 	workflowTaskScheduledStartedEventsCreated := !m.ms.IsTransientWorkflowTask() && workflowTask.Type != enumsspb.WORKFLOW_TASK_TYPE_SPECULATIVE
 	m.beforeAddWorkflowTaskCompletedEvent()
+	addReleaseLimiterTask(m.ms, workflowTask.Limiters)
 
 	if m.skipWorkflowTaskCompletedEvent(workflowTask.Type, request) {
 		return nil, nil
@@ -953,6 +954,7 @@ func (m *workflowTaskStateMachine) AddWorkflowTaskFailedEvent(
 	if err := m.ApplyWorkflowTaskFailedEvent(); err != nil {
 		return nil, err
 	}
+	addReleaseLimiterTask(m.ms, workflowTask.Limiters)
 
 	switch cause {
 	case enumspb.WORKFLOW_TASK_FAILED_CAUSE_RESET_WORKFLOW,
@@ -1020,6 +1022,7 @@ func (m *workflowTaskStateMachine) AddWorkflowTaskTimedOutEvent(
 	if err := m.ApplyWorkflowTaskTimedOutEvent(enumspb.TIMEOUT_TYPE_START_TO_CLOSE); err != nil {
 		return nil, err
 	}
+	addReleaseLimiterTask(m.ms, workflowTask.Limiters)
 	return event, nil
 }
 
