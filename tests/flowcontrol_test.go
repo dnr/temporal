@@ -170,6 +170,76 @@ func (s *flowControlTestSuite) TestActivityTaskConcurrencyLimit() {
 	s.waitAndVerifyConcurrency(tracker)
 }
 
+func (s *flowControlTestSuite) TestWorkflowCloseReleasesRunningActivitySlots() {
+	const firstWorkflowActivityCount = int32(3)
+
+	env := testcore.NewEnv(s.T())
+	tv := testvars.New(s.T())
+	taskQueue := tv.TaskQueue().GetName()
+	s.setConcurrencyLimit(env, taskQueue, enumspb.TASK_QUEUE_TYPE_ACTIVITY)
+
+	activityType := tv.ActivityType().GetName()
+	activitiesStarted := atomic.Int32{}
+	unblockActivities := make(chan struct{})
+	activityFn := func(context.Context) error {
+		activitiesStarted.Add(1)
+		<-unblockActivities
+		return nil
+	}
+	workflowType := tv.WorkflowType().GetName()
+	workflowFn := func(ctx workflow.Context, activityCount int32) error {
+		ctx = workflow.WithActivityOptions(ctx, workflow.ActivityOptions{
+			TaskQueue:              taskQueue,
+			ScheduleToCloseTimeout: time.Minute,
+			StartToCloseTimeout:    time.Minute,
+		})
+		for range activityCount {
+			workflow.ExecuteActivity(ctx, activityType)
+		}
+		return workflow.Await(ctx, func() bool { return false })
+	}
+
+	workflowWorker := worker.New(env.SdkClient(), taskQueue, worker.Options{LocalActivityWorkerOnly: true})
+	workflowWorker.RegisterWorkflowWithOptions(workflowFn, workflow.RegisterOptions{Name: workflowType})
+	s.Require().NoError(workflowWorker.Start())
+	workers := append([]worker.Worker{workflowWorker}, s.startActivityWorkers(env, taskQueue, activityType, activityFn)...)
+	defer stopWorkers(workers)
+	defer close(unblockActivities)
+
+	firstRun, err := env.SdkClient().ExecuteWorkflow(s.Context(), sdkclient.StartWorkflowOptions{
+		ID:        tv.WithWorkflowIDNumber(1).WorkflowID(),
+		TaskQueue: taskQueue,
+	}, workflowType, firstWorkflowActivityCount)
+	s.Require().NoError(err)
+	s.Require().Eventually(
+		func() bool { return activitiesStarted.Load() == firstWorkflowActivityCount },
+		10*time.Second,
+		100*time.Millisecond,
+	)
+
+	err = env.SdkClient().TerminateWorkflow(s.Context(), firstRun.GetID(), firstRun.GetRunID(), "test workflow closure")
+	s.Require().NoError(err)
+
+	secondRun, err := env.SdkClient().ExecuteWorkflow(s.Context(), sdkclient.StartWorkflowOptions{
+		ID:        tv.WithWorkflowIDNumber(2).WorkflowID(),
+		TaskQueue: taskQueue,
+	}, workflowType, flowControlConcurrencyLimit)
+	s.Require().NoError(err)
+	s.Require().Eventually(
+		func() bool {
+			return activitiesStarted.Load() == firstWorkflowActivityCount+flowControlConcurrencyLimit
+		},
+		10*time.Second,
+		100*time.Millisecond,
+	)
+	s.Require().NoError(env.SdkClient().TerminateWorkflow(
+		s.Context(),
+		secondRun.GetID(),
+		secondRun.GetRunID(),
+		"test cleanup",
+	))
+}
+
 func (s *flowControlTestSuite) TestStandaloneActivityTaskConcurrencyLimit() {
 	env := testcore.NewEnv(s.T(),
 		// force more partitions for better coverage
