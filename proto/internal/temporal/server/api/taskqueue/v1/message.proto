@@ -206,4 +206,6 @@ message ClientPartitionCounts {
 message LimiterRef {
   temporal.server.api.enums.v1.LimiterType limiter_type = 1;
   string key = 2;
+  // Identifier for the reserved or committed slot. Empty for limiters that don't allocate slots.
+  string slot_id = 3;
 }

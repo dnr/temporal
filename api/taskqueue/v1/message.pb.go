@@ -1057,9 +1057,11 @@ func (x *ClientPartitionCounts) GetBacklogCap() int32 {
 
 // LimiterRef is a reference to a flow control limiter. Limiters have namespace scope.
 type LimiterRef struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	LimiterType   v14.LimiterType        `protobuf:"varint,1,opt,name=limiter_type,json=limiterType,proto3,enum=temporal.server.api.enums.v1.LimiterType" json:"limiter_type,omitempty"`
-	Key           string                 `protobuf:"bytes,2,opt,name=key,proto3" json:"key,omitempty"`
+	state       protoimpl.MessageState `protogen:"open.v1"`
+	LimiterType v14.LimiterType        `protobuf:"varint,1,opt,name=limiter_type,json=limiterType,proto3,enum=temporal.server.api.enums.v1.LimiterType" json:"limiter_type,omitempty"`
+	Key         string                 `protobuf:"bytes,2,opt,name=key,proto3" json:"key,omitempty"`
+	// Identifier for the reserved or committed slot. Empty for limiters that don't allocate slots.
+	SlotId        string `protobuf:"bytes,3,opt,name=slot_id,json=slotId,proto3" json:"slot_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1104,6 +1106,13 @@ func (x *LimiterRef) GetLimiterType() v14.LimiterType {
 func (x *LimiterRef) GetKey() string {
 	if x != nil {
 		return x.Key
+	}
+	return ""
+}
+
+func (x *LimiterRef) GetSlotId() string {
+	if x != nil {
+		return x.SlotId
 	}
 	return ""
 }
@@ -1307,11 +1316,12 @@ const file_temporal_server_api_taskqueue_v1_message_proto_rawDesc = "" +
 	"\x05write\x18\x02 \x01(\x05R\x05write\x12#\n" +
 	"\rbacklog_count\x18\x03 \x01(\fR\fbacklogCount\x12\x1f\n" +
 	"\vbacklog_cap\x18\x04 \x01(\x05R\n" +
-	"backlogCap\"l\n" +
+	"backlogCap\"\x85\x01\n" +
 	"\n" +
 	"LimiterRef\x12L\n" +
 	"\flimiter_type\x18\x01 \x01(\x0e2).temporal.server.api.enums.v1.LimiterTypeR\vlimiterType\x12\x10\n" +
-	"\x03key\x18\x02 \x01(\tR\x03keyB2Z0go.temporal.io/server/api/taskqueue/v1;taskqueueb\x06proto3"
+	"\x03key\x18\x02 \x01(\tR\x03key\x12\x17\n" +
+	"\aslot_id\x18\x03 \x01(\tR\x06slotIdB2Z0go.temporal.io/server/api/taskqueue/v1;taskqueueb\x06proto3"
 
 var (
 	file_temporal_server_api_taskqueue_v1_message_proto_rawDescOnce sync.Once
