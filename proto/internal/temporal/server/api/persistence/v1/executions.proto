@@ -434,11 +434,16 @@ message TransferTaskInfo {
     // by some other task, so this task doesn't need to worry about it.
     bool can_skip_visibility_archival = 1;
   }
+  message ReleaseLimiterTaskDetails {
+    repeated temporal.server.api.taskqueue.v1.LimiterRef limiters = 1;
+  }
   oneof task_details {
     CloseExecutionTaskDetails close_execution_task_details = 16;
 
     // If the task addresses a CHASM component, this field will be set.
     ChasmTaskInfo chasm_task_info = 18;
+
+    ReleaseLimiterTaskDetails release_limiter_task_details = 19;
   }
   // Stamp represents the "version" of the entity's internal state for which the transfer task was created.
   // It increases monotonically when the entity's options are modified.

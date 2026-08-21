@@ -1,13 +1,10 @@
 package matching
 
 import (
-	"bytes"
 	"context"
-	"encoding/binary"
 	"sync/atomic"
 	"time"
 
-	"github.com/google/uuid"
 	commonpb "go.temporal.io/api/common/v1"
 	taskqueuepb "go.temporal.io/api/taskqueue/v1"
 	deploymentspb "go.temporal.io/server/api/deployment/v1"
@@ -16,6 +13,7 @@ import (
 	persistencespb "go.temporal.io/server/api/persistence/v1"
 	taskqueuespb "go.temporal.io/server/api/taskqueue/v1"
 	"go.temporal.io/server/common/namespace"
+	commontaskqueue "go.temporal.io/server/common/taskqueue"
 	"go.temporal.io/server/service/matching/fc"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
@@ -298,21 +296,19 @@ func (task *internalTask) workflowExecution() *commonpb.WorkflowExecution {
 
 // Returns a UUID for the task that's the same whether it came from history or backlog.
 // The UUID is specific to the attempt.
-// FIXME: need to move this to common for release
 // FIXME: need to improve this or generate uuid
 func (task *internalTask) TaskUUID() string {
 	if task.event == nil {
 		return "" // FIXME: not sure what to do here
 	}
 	data := task.event.Data
-	join := bytes.Join([][]byte{
-		[]byte(data.GetWorkflowId()),
-		[]byte(data.GetRunId()),
-		binary.LittleEndian.AppendUint64(nil, uint64(data.GetScheduledEventId())),
+	return commontaskqueue.TaskUUID(
+		data.GetWorkflowId(),
+		data.GetRunId(),
+		data.GetScheduledEventId(),
 		data.GetComponentRef(),
-		binary.LittleEndian.AppendUint32(nil, uint32(data.GetStamp())),
-	}, []byte{0})
-	return uuid.NewSHA1(uuid.NameSpaceURL, join).String()
+		data.GetStamp(),
+	)
 }
 
 func (task *internalTask) Limiters() *fc.Limiters {
