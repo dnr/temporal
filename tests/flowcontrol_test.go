@@ -281,6 +281,75 @@ func (s *flowControlTestSuite) TestStandaloneActivityTaskConcurrencyLimit() {
 	s.waitAndVerifyConcurrency(tracker)
 }
 
+func (s *flowControlTestSuite) TestStandaloneActivityTerminateReleasesRunningSlots() {
+	const terminatedActivityCount = int32(3)
+
+	env := testcore.NewEnv(s.T())
+	nsValues := func(value any) []dynamicconfig.ConstrainedValue {
+		return []dynamicconfig.ConstrainedValue{{
+			Constraints: dynamicconfig.Constraints{Namespace: env.Namespace().String()},
+			Value:       value,
+		}}
+	}
+	cluster := env.GetTestCluster()
+	cluster.OverrideDynamicConfig(s.T(), dynamicconfig.EnableChasm, nsValues(true))
+	cluster.OverrideDynamicConfig(s.T(), chasmactivity.Enabled, nsValues(true))
+
+	tv := testvars.New(s.T())
+	taskQueue := tv.TaskQueue().GetName()
+	s.setConcurrencyLimit(env, taskQueue, enumspb.TASK_QUEUE_TYPE_ACTIVITY)
+
+	activitiesStarted := atomic.Int32{}
+	unblockActivities := make(chan struct{})
+	activityFn := func(context.Context) error {
+		activitiesStarted.Add(1)
+		<-unblockActivities
+		return nil
+	}
+	workers := s.startActivityWorkers(env, taskQueue, tv.ActivityType().GetName(), activityFn)
+	defer stopWorkers(workers)
+	defer close(unblockActivities)
+
+	startActivity := func(activityID string) {
+		_, err := env.FrontendClient().StartActivityExecution(s.Context(), &workflowservice.StartActivityExecutionRequest{
+			Namespace:           env.Namespace().String(),
+			ActivityId:          activityID,
+			ActivityType:        tv.ActivityType(),
+			TaskQueue:           tv.TaskQueue(),
+			StartToCloseTimeout: durationpb.New(time.Minute),
+		})
+		s.Require().NoError(err)
+	}
+
+	for i := range terminatedActivityCount {
+		startActivity(fmt.Sprintf("%s-terminated-%d", tv.ActivityID(), i))
+	}
+	s.Require().Eventually(
+		func() bool { return activitiesStarted.Load() == terminatedActivityCount },
+		10*time.Second,
+		100*time.Millisecond,
+	)
+	for i := range terminatedActivityCount {
+		_, err := env.FrontendClient().TerminateActivityExecution(s.Context(), &workflowservice.TerminateActivityExecutionRequest{
+			Namespace:  env.Namespace().String(),
+			ActivityId: fmt.Sprintf("%s-terminated-%d", tv.ActivityID(), i),
+			Reason:     "test activity termination",
+		})
+		s.Require().NoError(err)
+	}
+
+	for i := range flowControlConcurrencyLimit {
+		startActivity(fmt.Sprintf("%s-replacement-%d", tv.ActivityID(), i))
+	}
+	s.Require().Eventually(
+		func() bool {
+			return activitiesStarted.Load() == terminatedActivityCount+flowControlConcurrencyLimit
+		},
+		10*time.Second,
+		100*time.Millisecond,
+	)
+}
+
 func (s *flowControlTestSuite) setConcurrencyLimit(
 	env *testcore.TestEnv,
 	taskQueue string,
