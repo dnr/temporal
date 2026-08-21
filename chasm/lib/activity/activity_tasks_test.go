@@ -2,6 +2,7 @@ package activity
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -9,16 +10,66 @@ import (
 	commonpb "go.temporal.io/api/common/v1"
 	enumspb "go.temporal.io/api/enums/v1"
 	taskqueuepb "go.temporal.io/api/taskqueue/v1"
+	enumsspb "go.temporal.io/server/api/enums/v1"
+	taskqueuespb "go.temporal.io/server/api/taskqueue/v1"
 	"go.temporal.io/server/chasm"
 	"go.temporal.io/server/chasm/lib/activity/gen/activitypb/v1"
+	fcpb "go.temporal.io/server/chasm/lib/flowcontrol/gen/flowcontrolpb/v1"
 	"go.temporal.io/server/common"
 	"go.temporal.io/server/common/dynamicconfig"
 	"go.temporal.io/server/common/metrics"
 	"go.temporal.io/server/common/metrics/metricstest"
 	"go.temporal.io/server/common/retrypolicy"
+	"google.golang.org/grpc"
 	"google.golang.org/protobuf/types/known/durationpb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
+
+type testConcurrencyServiceClient struct {
+	fcpb.ConcurrencyServiceClient
+	release func(context.Context, *fcpb.ConcurrencyReleaseRequest, ...grpc.CallOption) (*fcpb.ConcurrencyReleaseResponse, error)
+}
+
+func (c *testConcurrencyServiceClient) Release(
+	ctx context.Context,
+	request *fcpb.ConcurrencyReleaseRequest,
+	opts ...grpc.CallOption,
+) (*fcpb.ConcurrencyReleaseResponse, error) {
+	return c.release(ctx, request, opts...)
+}
+
+func TestReleaseLimiterTaskExecute(t *testing.T) {
+	releaseErr := errors.New("release failed")
+	var requests []*fcpb.ConcurrencyReleaseRequest
+	handler := newReleaseLimiterTaskHandler(&testConcurrencyServiceClient{
+		release: func(
+			_ context.Context,
+			request *fcpb.ConcurrencyReleaseRequest,
+			_ ...grpc.CallOption,
+		) (*fcpb.ConcurrencyReleaseResponse, error) {
+			requests = append(requests, request)
+			if request.GetSlotId() == "bad-slot" {
+				return nil, releaseErr
+			}
+			return &fcpb.ConcurrencyReleaseResponse{}, nil
+		},
+	})
+	task := &activitypb.ReleaseLimiterTask{Limiters: []*taskqueuespb.LimiterRef{
+		{LimiterType: enumsspb.LIMITER_TYPE_CONCURRENCY, Key: "first-key", SlotId: "bad-slot"},
+		{LimiterType: enumsspb.LIMITER_TYPE_UNSPECIFIED, Key: "ignored-key", SlotId: "ignored-slot"},
+		{LimiterType: enumsspb.LIMITER_TYPE_CONCURRENCY, Key: "second-key", SlotId: "good-slot"},
+	}}
+
+	err := handler.Execute(t.Context(), chasm.ComponentRef{ExecutionKey: chasm.ExecutionKey{
+		NamespaceID: "namespace-id",
+	}}, chasm.TaskAttributes{}, task)
+
+	require.ErrorIs(t, err, releaseErr)
+	require.Equal(t, []*fcpb.ConcurrencyReleaseRequest{
+		{NamespaceId: "namespace-id", Key: "first-key", SlotId: "bad-slot"},
+		{NamespaceId: "namespace-id", Key: "second-key", SlotId: "good-slot"},
+	}, requests)
+}
 
 func TestScheduleToCloseTimeoutTaskValidateStamp(t *testing.T) {
 	handler := newScheduleToCloseTimeoutTaskHandler()

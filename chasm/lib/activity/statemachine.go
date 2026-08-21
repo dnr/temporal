@@ -146,6 +146,7 @@ var TransitionStarted = chasm.NewTransition(
 			a.FirstAttemptStartedTime = attempt.GetStartedTime()
 		}
 		attempt.StartRequestId = request.GetRequestId()
+		attempt.Limiters = request.GetLimiters()
 		attempt.LastWorkerIdentity = request.GetPollRequest().GetIdentity()
 		attempt.SdkName = ctx.RequestHeader(headers.ClientNameHeaderName)
 		attempt.SdkVersion = ctx.RequestHeader(headers.ClientVersionHeaderName)
@@ -201,6 +202,7 @@ var TransitionCompleted = chasm.NewTransition(
 	activitypb.ACTIVITY_EXECUTION_STATUS_COMPLETED,
 	func(a *Activity, ctx chasm.MutableContext, event completeEvent) error {
 		return a.StoreOrSelf(ctx).RecordCompleted(ctx, func(ctx chasm.MutableContext) error {
+			a.releaseAttemptLimiters(ctx)
 			req := event.req.GetCompleteRequest()
 
 			attemptWasStarted := a.hasAttemptInProgress()
@@ -247,6 +249,7 @@ var TransitionFailed = chasm.NewTransition(
 	activitypb.ACTIVITY_EXECUTION_STATUS_FAILED,
 	func(a *Activity, ctx chasm.MutableContext, event failedEvent) error {
 		return a.StoreOrSelf(ctx).RecordCompleted(ctx, func(ctx chasm.MutableContext) error {
+			a.releaseAttemptLimiters(ctx)
 			req := event.req.GetFailedRequest()
 			a.Outcome.Get(ctx).RetryState = event.retryState
 
@@ -294,6 +297,7 @@ var TransitionTerminated = chasm.NewTransition(
 	activitypb.ACTIVITY_EXECUTION_STATUS_TERMINATED,
 	func(a *Activity, ctx chasm.MutableContext, event terminateEvent) error {
 		return a.StoreOrSelf(ctx).RecordCompleted(ctx, func(ctx chasm.MutableContext) error {
+			a.releaseAttemptLimiters(ctx)
 			a.TerminateState = &activitypb.ActivityTerminateState{
 				RequestId: event.request.RequestID,
 			}
@@ -359,6 +363,7 @@ var TransitionCanceled = chasm.NewTransition(
 	activitypb.ACTIVITY_EXECUTION_STATUS_CANCELED,
 	func(a *Activity, ctx chasm.MutableContext, event cancelEvent) error {
 		return a.StoreOrSelf(ctx).RecordCompleted(ctx, func(ctx chasm.MutableContext) error {
+			a.releaseAttemptLimiters(ctx)
 			outcome := a.Outcome.Get(ctx)
 			failure := &failurepb.Failure{
 				Message: "Activity canceled",
@@ -403,6 +408,7 @@ var TransitionTimedOut = chasm.NewTransition(
 		timeoutType := event.timeoutType
 
 		return a.StoreOrSelf(ctx).RecordCompleted(ctx, func(ctx chasm.MutableContext) error {
+			a.releaseAttemptLimiters(ctx)
 			a.Outcome.Get(ctx).RetryState = event.retryState
 			priorAttemptFailure := a.LastAttempt.Get(ctx).GetLastFailureDetails().GetFailure()
 			var err error
