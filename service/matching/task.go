@@ -293,8 +293,13 @@ func (task *internalTask) workflowExecution() *commonpb.WorkflowExecution {
 	return &commonpb.WorkflowExecution{}
 }
 
+// Limiters implements fc.fcTask interface.
 func (task *internalTask) Limiters() *fc.Limiters {
 	return task.limiters
+}
+
+func (task *internalTask) updateLimitersFromConfig(manager *fc.Manager) {
+	task.limiters = manager.UpdateLimitersFromConfig(task.limiters)
 }
 
 // pollWorkflowTaskQueueResponse returns the poll response for a workflow task that is

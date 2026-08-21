@@ -1,7 +1,6 @@
 package fc
 
 import (
-	"errors"
 	"slices"
 
 	enumsspb "go.temporal.io/server/api/enums/v1"
@@ -60,10 +59,10 @@ func (m *Manager) CancelWholeQueueCallback(cb readinessCallback) {
 	m.readiness.CancelCallback(nsID, enumsspb.LIMITER_TYPE_CONCURRENCY, m.wholeQueueLimiter, cb)
 }
 
-func (m *Manager) UpdateLimitersFromConfig(limiters *Limiters) (*Limiters, error) {
+func (m *Manager) UpdateLimitersFromConfig(limiters *Limiters) *Limiters {
 	userData, _, err := m.userDataManager.GetUserData()
 	if err != nil {
-		return nil, err
+		return nil
 	}
 	tqType := m.partition.TaskType()
 	limit := userData.GetData().GetPerType()[int32(tqType)].GetConfig().GetQueueConcurrencyLimit().GetConcurrencyLimit()
@@ -74,7 +73,7 @@ func (m *Manager) UpdateLimitersFromConfig(limiters *Limiters) (*Limiters, error
 				return lim.source == limiterSourceConfig_WholeQueue
 			})
 		}
-		return limiters, nil
+		return limiters
 	}
 	// need to add limiter
 	if limiters == nil {
@@ -90,13 +89,20 @@ func (m *Manager) UpdateLimitersFromConfig(limiters *Limiters) (*Limiters, error
 				config:        limit,
 				configVersion: userData.GetVersion(),
 			}
-			return limiters, nil
+			return limiters
 		} else if lim.source == limiterSourceConfig_WholeQueue {
 			// we found one we previously set, update config
 			lim.config = limit
 			lim.configVersion = userData.GetVersion()
-			return limiters, nil
+			return limiters
 		}
 	}
-	return nil, errors.New("too many limiters") // FIXME: proper type
+	// We get here if we already have three per-task limiters set and we also try to add a
+	// whole-queue limiter. This should be an error, but it's quite awkward to handle an error
+	// at our call sites. Even if we could "handle" the error, the behavior would be to either
+	// drop the task or to block it forever, both of which are not good. Ideally we should
+	// detect and surface this at a higher level. For now, at this level, we just ignore the
+	// whole-queue limiter.
+	// TODO(fc): surface this error at a higher level somehow
+	return limiters
 }
