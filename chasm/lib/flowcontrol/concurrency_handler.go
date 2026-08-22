@@ -2,8 +2,6 @@ package flowcontrol
 
 import (
 	"context"
-	"sync"
-	"sync/atomic"
 	"time"
 
 	taskqueuepb "go.temporal.io/api/taskqueue/v1"
@@ -18,23 +16,42 @@ type concurrencyHandler struct {
 	fcpb.UnimplementedConcurrencyServiceServer
 
 	logger   log.Logger
-	batchers sync.Map
+	batchers *stream_batcher.KeyedBatcher[concurrencyBatchKey, concurrencyBatchItem, concurrencyBatchResult]
+}
+
+type concurrencyBatchKey struct {
+	namespaceID string
+	key         string
 }
 
 type concurrencyBatchItem struct {
 	ctx context.Context
 	req *fcpb.ConcurrencyBatchRequest
-	res atomic.Pointer[fcpb.ConcurrencyBatchResponse]
 }
 
-type concurrencyBatcher = stream_batcher.Batcher[*concurrencyBatchItem, error]
+type concurrencyBatchResult struct {
+	res *fcpb.ConcurrencyBatchResponse
+	err error
+}
 
 func newConcurrencyHandler(
 	logger log.Logger,
 ) *concurrencyHandler {
-	return &concurrencyHandler{
+	h := &concurrencyHandler{
 		logger: logger,
 	}
+	h.batchers = stream_batcher.NewKeyedBatcherWithPerItemResults(
+		h.applyBatch,
+		stream_batcher.BatcherOptions{
+			MaxItems: 100,
+			MinDelay: 5 * time.Millisecond,
+			MaxDelay: 10 * time.Millisecond,
+			IdleTime: time.Minute,
+		},
+		time.Hour,
+		clock.NewRealTimeSource(),
+	)
+	return h
 }
 
 func concurrencyInit(_ chasm.MutableContext, items []concurrencyBatchItem) (*concurrency, error) {
@@ -109,7 +126,10 @@ func concurrencyUpdate(c *concurrency, cctx chasm.MutableContext, items []concur
 	return ress, nil
 }
 
-func (h *concurrencyHandler) applyBatch(items []*concurrencyBatchItem) error {
+func (h *concurrencyHandler) applyBatch(
+	key concurrencyBatchKey,
+	items []concurrencyBatchItem,
+) []concurrencyBatchResult {
 	needStart := false
 	canSpeculate := true
 
@@ -134,8 +154,8 @@ func (h *concurrencyHandler) applyBatch(items []*concurrencyBatchItem) error {
 		updateRes, err := chasm.UpdateWithStartExecution(
 			items[0].ctx,
 			chasm.ExecutionKey{
-				NamespaceID: items[0].req.NamespaceId,
-				BusinessID:  items[0].req.Key,
+				NamespaceID: key.namespaceID,
+				BusinessID:  key.key,
 			},
 			concurrencyInit,
 			concurrencyUpdate,
@@ -143,61 +163,54 @@ func (h *concurrencyHandler) applyBatch(items []*concurrencyBatchItem) error {
 			opts...,
 		)
 		if err != nil {
-			return err
+			return concurrencyBatchErrorResults(len(items), err)
 		}
-		for i, res := range updateRes.UpdateOutput {
-			items[i].res.Store(res)
-		}
-		return nil
+		return concurrencyBatchResults(updateRes.UpdateOutput)
 	}
 
 	ress, _, err := chasm.UpdateComponent(
 		items[0].ctx,
 		chasm.NewComponentRef[*concurrency](chasm.ExecutionKey{
-			NamespaceID: items[0].req.NamespaceId,
-			BusinessID:  items[0].req.Key,
+			NamespaceID: key.namespaceID,
+			BusinessID:  key.key,
 		}),
 		concurrencyUpdate,
 		items,
 		opts...,
 	)
 	if err != nil {
-		return err
+		return concurrencyBatchErrorResults(len(items), err)
 	}
-	for i, res := range ress {
-		items[i].res.Store(res)
-	}
-	return nil
+	return concurrencyBatchResults(ress)
 }
 
-func (h *concurrencyHandler) getBatcher(req *fcpb.ConcurrencyBatchRequest) *concurrencyBatcher {
-	// TODO(fc): these should be cleaned up eventually. we can just clear the whole map every
-	// hour or something like that. chasm synchronizes operations anyway so "forgetting"
-	// batchers is safe.
-	key := req.NamespaceId + req.Key
-	if v, ok := h.batchers.Load(key); ok {
-		return v.(*concurrencyBatcher) // nolint:revive
+func concurrencyBatchResults(responses []*fcpb.ConcurrencyBatchResponse) []concurrencyBatchResult {
+	results := make([]concurrencyBatchResult, len(responses))
+	for i, response := range responses {
+		results[i].response = response
 	}
-	opts := stream_batcher.BatcherOptions{
-		MaxItems: 100,
-		MinDelay: 5 * time.Millisecond,
-		MaxDelay: 10 * time.Millisecond,
-		IdleTime: time.Minute,
+	return results
+}
+
+func concurrencyBatchErrorResults(size int, err error) []concurrencyBatchResult {
+	results := make([]concurrencyBatchResult, size)
+	for i := range results {
+		results[i].err = err
 	}
-	newBatcher := stream_batcher.NewBatcher(h.applyBatch, opts, clock.NewRealTimeSource())
-	v, _ := h.batchers.LoadOrStore(key, newBatcher)
-	return v.(*concurrencyBatcher) // nolint:revive
+	return results
 }
 
 func (h *concurrencyHandler) Batch(ctx context.Context, req *fcpb.ConcurrencyBatchRequest) (retRes *fcpb.ConcurrencyBatchResponse, retErr error) {
 	defer log.CapturePanic(h.logger, &retErr)
 
-	item := concurrencyBatchItem{ctx: ctx, req: req}
-	_, err := h.getBatcher(req).Add(ctx, &item)
+	res, err := h.batchers.Add(ctx, concurrencyBatchKey{
+		namespaceID: req.GetNamespaceId(),
+		key:         req.GetKey(),
+	}, concurrencyBatchItem{ctx: ctx, req: req})
 	if err != nil {
 		return nil, err
 	}
-	return item.res.Load(), nil
+	return res.res, res.err
 }
 
 func (h *concurrencyHandler) Wait(ctx context.Context, req *fcpb.ConcurrencyWaitRequest) (retRes *fcpb.ConcurrencyWaitResponse, retErr error) {
