@@ -1,6 +1,9 @@
 package history
 
 import (
+	"time"
+
+	"go.temporal.io/server/chasm/lib/flowcontrol/concurrency"
 	fcpb "go.temporal.io/server/chasm/lib/flowcontrol/gen/flowcontrolpb/v1"
 	"go.temporal.io/server/client"
 	"go.temporal.io/server/common/log"
@@ -9,6 +12,7 @@ import (
 	"go.temporal.io/server/common/persistence/visibility/manager"
 	"go.temporal.io/server/common/resource"
 	"go.temporal.io/server/common/sdk"
+	"go.temporal.io/server/common/stream_batcher"
 	ctasks "go.temporal.io/server/common/tasks"
 	"go.temporal.io/server/common/telemetry"
 	"go.temporal.io/server/common/testing/testhooks"
@@ -42,6 +46,7 @@ type (
 	transferQueueFactory struct {
 		transferQueueFactoryParams
 		QueueFactoryBase
+		concurrencyBatchingClient fcpb.ConcurrencyServiceClient
 	}
 )
 
@@ -50,6 +55,17 @@ func NewTransferQueueFactory(
 ) QueueFactory {
 	return &transferQueueFactory{
 		transferQueueFactoryParams: params,
+		concurrencyBatchingClient: concurrency.NewBatchingClient(
+			params.ConcurrencyServiceClient,
+			stream_batcher.BatcherOptions{
+				MaxItems:      100,
+				MinDelay:      5 * time.Millisecond,
+				MaxDelay:      20 * time.Millisecond,
+				IdleTime:      time.Minute,
+				ClearInterval: time.Hour,
+			},
+			params.TimeSource,
+		),
 		QueueFactoryBase: QueueFactoryBase{
 			HostScheduler: queues.NewScheduler(
 				params.ClusterMetadata.GetCurrentClusterName(),
@@ -127,7 +143,7 @@ func (f *transferQueueFactory) CreateQueue(
 		f.Config,
 		f.HistoryRawClient,
 		f.MatchingRawClient,
-		f.ConcurrencyServiceClient,
+		f.concurrencyBatchingClient,
 		f.VisibilityManager,
 		f.ChasmEngine,
 		f.VersionMembershipCache,
