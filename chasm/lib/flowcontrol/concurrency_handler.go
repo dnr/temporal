@@ -23,68 +23,95 @@ func newConcurrencyHandler(
 	}
 }
 
-func (h *concurrencyHandler) Reserve(ctx context.Context, req *fcpb.ConcurrencyReserveRequest) (retRes *fcpb.ConcurrencyReserveResponse, retErr error) {
+func concurrencyInit(_ chasm.MutableContext, req *fcpb.ConcurrencyBatchRequest) (*concurrency, error) {
+	// For now (whole-queue limits), we should always have an initial config here. For
+	// per-task limits, this may be missing and set via api later.
+	config := req.GetConfigUpdate()
+	if config == nil {
+		config = &taskqueuepb.ConcurrencyLimit{ConcurrentTasks: initialConcurrencyLimit}
+	}
+	return &concurrency{
+		ConcurrencyState: &fcpb.ConcurrencyState{
+			Config:        config,
+			ConfigVersion: req.GetConfigUpdateVersion(),
+		},
+	}, nil
+}
+
+func concurrencyUpdate(c *concurrency, cctx chasm.MutableContext, req *fcpb.ConcurrencyBatchRequest) (*fcpb.ConcurrencyBatchResponse, error) {
+	now := cctx.Now(c)
+
+	// expire old reservations
+	c.expire(now)
+
+	// update config
+	c.updateConfig(req.GetConfigUpdate(), req.GetConfigUpdateVersion())
+
+	var res fcpb.ConcurrencyBatchResponse
+
+	// apply releases (shouldn't be combined with anything but releases)
+	for _, slotId := range req.GetReleaseSlots() {
+		// FIXME: add tasks to control slow release of notifications
+		c.release(slotId)
+	}
+
+	// apply commits
+	for _, slotId := range req.GetCommitSlots() {
+		success := c.commit(slotId)
+		res.CommitSuccess = append(res.CommitSuccess, success)
+	}
+
+	// apply cancels
+	for _, slotId := range req.GetCancelReservationSlots() {
+		c.cancelReservation(slotId)
+	}
+
+	// apply reserves
+	for _, slotId := range req.GetReserveSlots() {
+		success := c.reserve(slotId, now)
+		res.ReserveSuccess = append(res.ReserveSuccess, success)
+	}
+
+	// capture Generation after c.reserve, which may increment it
+	res.Generation = c.Generation
+
+	return &res, nil
+}
+
+func (h *concurrencyHandler) Batch(ctx context.Context, req *fcpb.ConcurrencyBatchRequest) (retRes *fcpb.ConcurrencyBatchResponse, retErr error) {
 	defer log.CapturePanic(h.logger, &retErr)
 
-	res, err := chasm.UpdateWithStartExecution(
-		ctx,
-		chasm.ExecutionKey{
-			NamespaceID: req.NamespaceId,
-			BusinessID:  req.Key,
-		},
-		func(_ chasm.MutableContext, req *fcpb.ConcurrencyReserveRequest) (*concurrency, error) {
-			// For now (whole-queue limits), we should always have an initial config here. For
-			// per-task limits, this may be missing and set via api later.
-			config := req.GetConfigUpdate()
-			if config == nil {
-				config = &taskqueuepb.ConcurrencyLimit{ConcurrentTasks: initialConcurrencyLimit}
-			}
-			return &concurrency{
-				ConcurrencyState: &fcpb.ConcurrencyState{
-					Config:        config,
-					ConfigVersion: req.GetConfigUpdateVersion(),
-				},
-			}, nil
-		},
-		func(c *concurrency, cctx chasm.MutableContext, req *fcpb.ConcurrencyReserveRequest) (*fcpb.ConcurrencyReserveResponse, error) {
-			c.updateConfig(req.GetConfigUpdate(), req.GetConfigUpdateVersion())
-			slotsReserved := c.reserve(req.SlotId, cctx.Now(c))
-			return &fcpb.ConcurrencyReserveResponse{
-				Generation:    c.Generation,
-				SlotsReserved: slotsReserved,
-			}, nil
-		},
-		req,
-		chasm.WithBusinessIDPolicy(
+	// FIXME: add server-side batching
+
+	// only Reserve should be called on a brand new object, other calls can assume it exists
+	needStart := len(req.GetReserveSlots()) > 0
+
+	// Commit and Release must be durable, Reserve and cancel may be speculative
+	canSpeculate := len(req.GetCommitSlots()) == 0 && len(req.GetReleaseSlots()) == 0
+
+	opts := make([]chasm.TransitionOption, 0, 2)
+	if canSpeculate {
+		opts = append(opts, chasm.WithSpeculative()) // note: not implemented yet
+	}
+
+	if needStart {
+		opts = append(opts, chasm.WithBusinessIDPolicy(
 			chasm.BusinessIDReusePolicyAllowDuplicate,
 			chasm.BusinessIDConflictPolicyUseExisting,
-		),
-		chasm.WithSpeculative(), // note: not implemented yet
-	)
-	return res.UpdateOutput, err
-}
-
-func (h *concurrencyHandler) CancelReservation(ctx context.Context, req *fcpb.ConcurrencyCancelReservationRequest) (retRes *fcpb.ConcurrencyCancelReservationResponse, retErr error) {
-	defer log.CapturePanic(h.logger, &retErr)
-
-	res, _, err := chasm.UpdateComponent(
-		ctx,
-		chasm.NewComponentRef[*concurrency](chasm.ExecutionKey{
-			NamespaceID: req.NamespaceId,
-			BusinessID:  req.Key,
-		}),
-		func(c *concurrency, cctx chasm.MutableContext, req *fcpb.ConcurrencyCancelReservationRequest) (*fcpb.ConcurrencyCancelReservationResponse, error) {
-			c.cancelReservation(req.SlotId, cctx.Now(c))
-			return &fcpb.ConcurrencyCancelReservationResponse{}, nil
-		},
-		req,
-		chasm.WithSpeculative(), // note: not implemented yet
-	)
-	return res, err
-}
-
-func (h *concurrencyHandler) Commit(ctx context.Context, req *fcpb.ConcurrencyCommitRequest) (retRes *fcpb.ConcurrencyCommitResponse, retErr error) {
-	defer log.CapturePanic(h.logger, &retErr)
+		))
+		res, err := chasm.UpdateWithStartExecution(
+			ctx,
+			chasm.ExecutionKey{
+				NamespaceID: req.NamespaceId,
+				BusinessID:  req.Key,
+			},
+			concurrencyInit,
+			concurrencyUpdate,
+			req,
+			opts...,
+		)
+		return res.UpdateOutput, err
+	}
 
 	res, _, err := chasm.UpdateComponent(
 		ctx,
@@ -92,34 +119,9 @@ func (h *concurrencyHandler) Commit(ctx context.Context, req *fcpb.ConcurrencyCo
 			NamespaceID: req.NamespaceId,
 			BusinessID:  req.Key,
 		}),
-		func(c *concurrency, cctx chasm.MutableContext, req *fcpb.ConcurrencyCommitRequest) (*fcpb.ConcurrencyCommitResponse, error) {
-			err := c.commit(req.SlotId, cctx.Now(c))
-			if err != nil {
-				return nil, err
-			}
-			return &fcpb.ConcurrencyCommitResponse{}, nil
-		},
+		concurrencyUpdate,
 		req,
-	)
-	return res, err
-}
-
-// FIXME: have to get history to call Release
-func (h *concurrencyHandler) Release(ctx context.Context, req *fcpb.ConcurrencyReleaseRequest) (retRes *fcpb.ConcurrencyReleaseResponse, retErr error) {
-	defer log.CapturePanic(h.logger, &retErr)
-
-	res, _, err := chasm.UpdateComponent(
-		ctx,
-		chasm.NewComponentRef[*concurrency](chasm.ExecutionKey{
-			NamespaceID: req.NamespaceId,
-			BusinessID:  req.Key,
-		}),
-		func(c *concurrency, cctx chasm.MutableContext, req *fcpb.ConcurrencyReleaseRequest) (*fcpb.ConcurrencyReleaseResponse, error) {
-			c.release(req.SlotId, cctx.Now(c))
-			// FIXME: add tasks to control slow release of notifications
-			return &fcpb.ConcurrencyReleaseResponse{}, nil
-		},
-		req,
+		opts...,
 	)
 	return res, err
 }

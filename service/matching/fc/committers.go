@@ -3,12 +3,15 @@ package fc
 import (
 	"context"
 
+	"go.temporal.io/api/serviceerror"
 	taskqueuepb "go.temporal.io/api/taskqueue/v1"
 	enumsspb "go.temporal.io/server/api/enums/v1"
 	fcpb "go.temporal.io/server/chasm/lib/flowcontrol/gen/flowcontrolpb/v1"
 	"go.temporal.io/server/common/namespace"
 	serviceerrors "go.temporal.io/server/common/serviceerror"
 )
+
+var errCommitFailure = serviceerror.NewFailedPrecondition("commit failed")
 
 type committer interface {
 	reserve() error
@@ -53,17 +56,18 @@ func (c *concurrencyCommitter) reserve() error {
 	// if config is missing or wrong type, just leave it out
 	configUpdate, _ := c.lim.config.(*taskqueuepb.ConcurrencyLimit)
 
-	res, err := c.client.Reserve(c.ctx, &fcpb.ConcurrencyReserveRequest{
+	// FIXME: batch
+	res, err := c.client.Batch(c.ctx, &fcpb.ConcurrencyBatchRequest{
 		NamespaceId:         c.nsID.String(),
 		Key:                 c.lim.key,
-		SlotId:              c.slotID,
+		ReserveSlots:        []string{c.slotID},
 		ConfigUpdate:        configUpdate,
 		ConfigUpdateVersion: c.lim.configVersion,
 	})
 	if err != nil {
 		return err // don't update cache on rpc error
 	}
-	if res.SlotsReserved == 0 {
+	if !res.ReserveSuccess[0] {
 		c.cache.reportBlocked(c.nsID, c.lim.tp, c.lim.key, res.Generation)
 		return serviceerrors.NewFlowControlBlocked()
 	}
@@ -72,18 +76,25 @@ func (c *concurrencyCommitter) reserve() error {
 }
 
 func (c *concurrencyCommitter) commit() error {
-	_, err := c.client.Commit(c.ctx, &fcpb.ConcurrencyCommitRequest{
+	// FIXME: batch!
+	res, err := c.client.Batch(c.ctx, &fcpb.ConcurrencyBatchRequest{
 		NamespaceId: c.nsID.String(),
 		Key:         c.lim.key,
-		SlotId:      c.slotID,
+		CommitSlots: []string{c.slotID},
 	})
+	if err != nil {
+		return err
+	} else if !res.CommitSuccess[0] {
+		return errCommitFailure
+	}
 	return err
 }
 
 func (c *concurrencyCommitter) cancelReservations() {
-	_, _ = c.client.CancelReservation(c.ctx, &fcpb.ConcurrencyCancelReservationRequest{
-		NamespaceId: c.nsID.String(),
-		Key:         c.lim.key,
-		SlotId:      c.slotID,
+	// FIXME: batch
+	_, _ = c.client.Batch(c.ctx, &fcpb.ConcurrencyBatchRequest{
+		NamespaceId:            c.nsID.String(),
+		Key:                    c.lim.key,
+		CancelReservationSlots: []string{c.slotID},
 	})
 }

@@ -20,31 +20,28 @@ import (
 const _ = grpc.SupportPackageIsVersion7
 
 const (
-	ConcurrencyService_Reserve_FullMethodName           = "/temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyService/Reserve"
-	ConcurrencyService_CancelReservation_FullMethodName = "/temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyService/CancelReservation"
-	ConcurrencyService_Commit_FullMethodName            = "/temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyService/Commit"
-	ConcurrencyService_Release_FullMethodName           = "/temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyService/Release"
-	ConcurrencyService_Wait_FullMethodName              = "/temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyService/Wait"
+	ConcurrencyService_Batch_FullMethodName = "/temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyService/Batch"
+	ConcurrencyService_Wait_FullMethodName  = "/temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyService/Wait"
 )
 
 // ConcurrencyServiceClient is the client API for ConcurrencyService service.
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type ConcurrencyServiceClient interface {
-	// Reserve reserves a slot for a limited time. Succeeds if the slot is newly reserved or
-	// already reserved _or already committed_ for the task, i.e. idempotent. May not be durable:
-	// a successful Reserve followed by a Commit may not succeed even within the timeout. Callers
-	// must handle that situation correctly.
-	Reserve(ctx context.Context, in *ConcurrencyReserveRequest, opts ...grpc.CallOption) (*ConcurrencyReserveResponse, error)
-	// CancelReservation cancels a reservation early. Note that committed slots cannot be
-	// canceled, they must be Released. Idempotent. May not be durable.
-	CancelReservation(ctx context.Context, in *ConcurrencyCancelReservationRequest, opts ...grpc.CallOption) (*ConcurrencyCancelReservationResponse, error)
-	// Commit promotes a reservation to a committed slot. Succeeds if the reservation was
-	// promoted, or was already committed, i.e. idempotent. Durable.
-	Commit(ctx context.Context, in *ConcurrencyCommitRequest, opts ...grpc.CallOption) (*ConcurrencyCommitResponse, error)
-	// Release frees a comitted slot. Succeeds if the committed slot was released or if there was
-	// no committed slot, i.e. idempotent. Durable.
-	Release(ctx context.Context, in *ConcurrencyReleaseRequest, opts ...grpc.CallOption) (*ConcurrencyReleaseResponse, error)
+	// Batch applies a batch of operations to one limiter.
+	//
+	// Note that matching calls Reserve, CancelReservation, and Commit, and history calls
+	// Release, so no single batch should ever contain Release mixed with anything else, but
+	// they're combined in one RPC definition for simplicity.
+	//
+	// All slot ids in one batch should be distinct; it's not possible to Reserve and Commit the
+	// same slot at once. However, the server is not required to flag this as an error.
+	//
+	// Reserve and CancelReservation may not be durable, while Commit and Release must be
+	// durable. The server may or may not split the batch into multiple CHASM transitions with
+	// different durability, so callers should not assume that e.g. a Reserve plus Commit in one
+	// batch means that the Reserve was durable.
+	Batch(ctx context.Context, in *ConcurrencyBatchRequest, opts ...grpc.CallOption) (*ConcurrencyBatchResponse, error)
 	// Wait is a long-poll RPC that returns when at least one slot is free, or the caller's
 	// generation is too old.
 	Wait(ctx context.Context, in *ConcurrencyWaitRequest, opts ...grpc.CallOption) (*ConcurrencyWaitResponse, error)
@@ -58,36 +55,9 @@ func NewConcurrencyServiceClient(cc grpc.ClientConnInterface) ConcurrencyService
 	return &concurrencyServiceClient{cc}
 }
 
-func (c *concurrencyServiceClient) Reserve(ctx context.Context, in *ConcurrencyReserveRequest, opts ...grpc.CallOption) (*ConcurrencyReserveResponse, error) {
-	out := new(ConcurrencyReserveResponse)
-	err := c.cc.Invoke(ctx, ConcurrencyService_Reserve_FullMethodName, in, out, opts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *concurrencyServiceClient) CancelReservation(ctx context.Context, in *ConcurrencyCancelReservationRequest, opts ...grpc.CallOption) (*ConcurrencyCancelReservationResponse, error) {
-	out := new(ConcurrencyCancelReservationResponse)
-	err := c.cc.Invoke(ctx, ConcurrencyService_CancelReservation_FullMethodName, in, out, opts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *concurrencyServiceClient) Commit(ctx context.Context, in *ConcurrencyCommitRequest, opts ...grpc.CallOption) (*ConcurrencyCommitResponse, error) {
-	out := new(ConcurrencyCommitResponse)
-	err := c.cc.Invoke(ctx, ConcurrencyService_Commit_FullMethodName, in, out, opts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *concurrencyServiceClient) Release(ctx context.Context, in *ConcurrencyReleaseRequest, opts ...grpc.CallOption) (*ConcurrencyReleaseResponse, error) {
-	out := new(ConcurrencyReleaseResponse)
-	err := c.cc.Invoke(ctx, ConcurrencyService_Release_FullMethodName, in, out, opts...)
+func (c *concurrencyServiceClient) Batch(ctx context.Context, in *ConcurrencyBatchRequest, opts ...grpc.CallOption) (*ConcurrencyBatchResponse, error) {
+	out := new(ConcurrencyBatchResponse)
+	err := c.cc.Invoke(ctx, ConcurrencyService_Batch_FullMethodName, in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -107,20 +77,20 @@ func (c *concurrencyServiceClient) Wait(ctx context.Context, in *ConcurrencyWait
 // All implementations must embed UnimplementedConcurrencyServiceServer
 // for forward compatibility
 type ConcurrencyServiceServer interface {
-	// Reserve reserves a slot for a limited time. Succeeds if the slot is newly reserved or
-	// already reserved _or already committed_ for the task, i.e. idempotent. May not be durable:
-	// a successful Reserve followed by a Commit may not succeed even within the timeout. Callers
-	// must handle that situation correctly.
-	Reserve(context.Context, *ConcurrencyReserveRequest) (*ConcurrencyReserveResponse, error)
-	// CancelReservation cancels a reservation early. Note that committed slots cannot be
-	// canceled, they must be Released. Idempotent. May not be durable.
-	CancelReservation(context.Context, *ConcurrencyCancelReservationRequest) (*ConcurrencyCancelReservationResponse, error)
-	// Commit promotes a reservation to a committed slot. Succeeds if the reservation was
-	// promoted, or was already committed, i.e. idempotent. Durable.
-	Commit(context.Context, *ConcurrencyCommitRequest) (*ConcurrencyCommitResponse, error)
-	// Release frees a comitted slot. Succeeds if the committed slot was released or if there was
-	// no committed slot, i.e. idempotent. Durable.
-	Release(context.Context, *ConcurrencyReleaseRequest) (*ConcurrencyReleaseResponse, error)
+	// Batch applies a batch of operations to one limiter.
+	//
+	// Note that matching calls Reserve, CancelReservation, and Commit, and history calls
+	// Release, so no single batch should ever contain Release mixed with anything else, but
+	// they're combined in one RPC definition for simplicity.
+	//
+	// All slot ids in one batch should be distinct; it's not possible to Reserve and Commit the
+	// same slot at once. However, the server is not required to flag this as an error.
+	//
+	// Reserve and CancelReservation may not be durable, while Commit and Release must be
+	// durable. The server may or may not split the batch into multiple CHASM transitions with
+	// different durability, so callers should not assume that e.g. a Reserve plus Commit in one
+	// batch means that the Reserve was durable.
+	Batch(context.Context, *ConcurrencyBatchRequest) (*ConcurrencyBatchResponse, error)
 	// Wait is a long-poll RPC that returns when at least one slot is free, or the caller's
 	// generation is too old.
 	Wait(context.Context, *ConcurrencyWaitRequest) (*ConcurrencyWaitResponse, error)
@@ -131,17 +101,8 @@ type ConcurrencyServiceServer interface {
 type UnimplementedConcurrencyServiceServer struct {
 }
 
-func (UnimplementedConcurrencyServiceServer) Reserve(context.Context, *ConcurrencyReserveRequest) (*ConcurrencyReserveResponse, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method Reserve not implemented")
-}
-func (UnimplementedConcurrencyServiceServer) CancelReservation(context.Context, *ConcurrencyCancelReservationRequest) (*ConcurrencyCancelReservationResponse, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method CancelReservation not implemented")
-}
-func (UnimplementedConcurrencyServiceServer) Commit(context.Context, *ConcurrencyCommitRequest) (*ConcurrencyCommitResponse, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method Commit not implemented")
-}
-func (UnimplementedConcurrencyServiceServer) Release(context.Context, *ConcurrencyReleaseRequest) (*ConcurrencyReleaseResponse, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method Release not implemented")
+func (UnimplementedConcurrencyServiceServer) Batch(context.Context, *ConcurrencyBatchRequest) (*ConcurrencyBatchResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method Batch not implemented")
 }
 func (UnimplementedConcurrencyServiceServer) Wait(context.Context, *ConcurrencyWaitRequest) (*ConcurrencyWaitResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Wait not implemented")
@@ -159,74 +120,20 @@ func RegisterConcurrencyServiceServer(s grpc.ServiceRegistrar, srv ConcurrencySe
 	s.RegisterService(&ConcurrencyService_ServiceDesc, srv)
 }
 
-func _ConcurrencyService_Reserve_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(ConcurrencyReserveRequest)
+func _ConcurrencyService_Batch_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ConcurrencyBatchRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(ConcurrencyServiceServer).Reserve(ctx, in)
+		return srv.(ConcurrencyServiceServer).Batch(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: ConcurrencyService_Reserve_FullMethodName,
+		FullMethod: ConcurrencyService_Batch_FullMethodName,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(ConcurrencyServiceServer).Reserve(ctx, req.(*ConcurrencyReserveRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _ConcurrencyService_CancelReservation_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(ConcurrencyCancelReservationRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(ConcurrencyServiceServer).CancelReservation(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: ConcurrencyService_CancelReservation_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(ConcurrencyServiceServer).CancelReservation(ctx, req.(*ConcurrencyCancelReservationRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _ConcurrencyService_Commit_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(ConcurrencyCommitRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(ConcurrencyServiceServer).Commit(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: ConcurrencyService_Commit_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(ConcurrencyServiceServer).Commit(ctx, req.(*ConcurrencyCommitRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _ConcurrencyService_Release_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(ConcurrencyReleaseRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(ConcurrencyServiceServer).Release(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: ConcurrencyService_Release_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(ConcurrencyServiceServer).Release(ctx, req.(*ConcurrencyReleaseRequest))
+		return srv.(ConcurrencyServiceServer).Batch(ctx, req.(*ConcurrencyBatchRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -257,20 +164,8 @@ var ConcurrencyService_ServiceDesc = grpc.ServiceDesc{
 	HandlerType: (*ConcurrencyServiceServer)(nil),
 	Methods: []grpc.MethodDesc{
 		{
-			MethodName: "Reserve",
-			Handler:    _ConcurrencyService_Reserve_Handler,
-		},
-		{
-			MethodName: "CancelReservation",
-			Handler:    _ConcurrencyService_CancelReservation_Handler,
-		},
-		{
-			MethodName: "Commit",
-			Handler:    _ConcurrencyService_Commit_Handler,
-		},
-		{
-			MethodName: "Release",
-			Handler:    _ConcurrencyService_Release_Handler,
+			MethodName: "Batch",
+			Handler:    _ConcurrencyService_Batch_Handler,
 		},
 		{
 			MethodName: "Wait",

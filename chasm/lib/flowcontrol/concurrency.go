@@ -4,7 +4,6 @@ import (
 	"slices"
 	"time"
 
-	"go.temporal.io/api/serviceerror"
 	taskqueuepb "go.temporal.io/api/taskqueue/v1"
 	"go.temporal.io/server/chasm"
 	fcpb "go.temporal.io/server/chasm/lib/flowcontrol/gen/flowcontrolpb/v1"
@@ -36,19 +35,19 @@ func (c *concurrency) ContextMetadata(_ chasm.Context) map[string]string {
 	return nil
 }
 
-func expiredReservation(slot *fcpb.ConcurrencySlot, nowSec int64) bool {
+func expiredReservation(slot *fcpb.ConcurrencyState_Slot, nowSec int64) bool {
 	return !slot.Committed && slot.Expires != nil && slot.Expires.Seconds < nowSec
 }
 
 func (c *concurrency) expire(now time.Time) {
 	nowSec := now.Unix() + 1
-	c.Slots = slices.DeleteFunc(c.Slots, func(slot *fcpb.ConcurrencySlot) bool {
+	c.Slots = slices.DeleteFunc(c.Slots, func(slot *fcpb.ConcurrencyState_Slot) bool {
 		return expiredReservation(slot, nowSec)
 	})
 }
 
 func (c *concurrency) find(slotID string) int {
-	return slices.IndexFunc(c.Slots, func(slot *fcpb.ConcurrencySlot) bool {
+	return slices.IndexFunc(c.Slots, func(slot *fcpb.ConcurrencyState_Slot) bool {
 		return slot.SlotId == slotID
 	})
 }
@@ -75,61 +74,51 @@ func (c *concurrency) updateConfig(config *taskqueuepb.ConcurrencyLimit, version
 	}
 }
 
-func (c *concurrency) reserve(slotID string, now time.Time) int32 {
+func (c *concurrency) reserve(slotID string, now time.Time) bool {
+	// reserve is the only method that can increment generation, when it takes the last slot
 	defer c.maintainGeneration()()
-	c.expire(now)
 
 	if c.find(slotID) >= 0 {
-		return 1 // already reserved or committed, accept
+		return true // already reserved or committed, accept
 	}
 	if int32(len(c.Slots)) >= c.Config.ConcurrentTasks {
-		return 0
+		return false
 	}
-	c.Slots = append(c.Slots, &fcpb.ConcurrencySlot{
+	c.Slots = append(c.Slots, &fcpb.ConcurrencyState_Slot{
 		SlotId:    slotID,
 		Committed: false,
 		// Truncate is okay because expire adds a second anyway.
 		Expires: timestamppb.New(now.Add(reserveTimeout).Truncate(time.Second)),
 	})
-	return 1
+	return true
 }
 
-func (c *concurrency) cancelReservation(slotID string, now time.Time) {
-	defer c.maintainGeneration()()
-	c.expire(now)
-
-	c.Slots = slices.DeleteFunc(c.Slots, func(slot *fcpb.ConcurrencySlot) bool {
+func (c *concurrency) cancelReservation(slotID string) {
+	c.Slots = slices.DeleteFunc(c.Slots, func(slot *fcpb.ConcurrencyState_Slot) bool {
 		return !slot.Committed && slot.SlotId == slotID
 	})
 }
 
-func (c *concurrency) commit(slotID string, now time.Time) error {
-	defer c.maintainGeneration()()
-	c.expire(now)
-
+func (c *concurrency) commit(slotID string) bool {
 	if idx := c.find(slotID); idx >= 0 {
 		// note this works even if it was already committed
 		c.Slots[idx].Committed = true
 		c.Slots[idx].Expires = nil
-		return nil
+		return true
 	}
 
 	// TODO(fc): consider fast-recover if free slots
-	return serviceerror.NewFailedPrecondition("no reservation found")
+	return false
 }
 
-func (c *concurrency) release(slotID string, now time.Time) {
-	defer c.maintainGeneration()()
-	c.expire(now)
-
-	c.Slots = slices.DeleteFunc(c.Slots, func(slot *fcpb.ConcurrencySlot) bool {
+func (c *concurrency) release(slotID string) {
+	c.Slots = slices.DeleteFunc(c.Slots, func(slot *fcpb.ConcurrencyState_Slot) bool {
 		return slot.Committed && slot.SlotId == slotID
 	})
 }
 
 // notifyWaiters is called from PollComponent and should not modify the state.
 func (c *concurrency) notifyWaiters(now time.Time) int32 {
-	// We can't call c.expire so just count:
 	nowSec := now.Unix() + 1
 	usedSlots := int32(0)
 	for _, slot := range c.Slots {
