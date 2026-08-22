@@ -2,6 +2,7 @@ package flowcontrol
 
 import (
 	"go.temporal.io/server/chasm"
+	"go.temporal.io/server/chasm/lib/flowcontrol/concurrency"
 	fcpb "go.temporal.io/server/chasm/lib/flowcontrol/gen/flowcontrolpb/v1"
 	"google.golang.org/grpc"
 )
@@ -9,10 +10,10 @@ import (
 type library struct {
 	chasm.UnimplementedLibrary
 
-	concurrencyHandler *concurrencyHandler
+	concurrencyHandler *concurrency.Handler
 }
 
-func newLibrary(handler *concurrencyHandler) *library {
+func newLibrary(handler *concurrency.Handler) *library {
 	return &library{
 		concurrencyHandler: handler,
 	}
@@ -24,7 +25,7 @@ func (l *library) Name() string {
 
 func (l *library) Components() []*chasm.RegistrableComponent {
 	return []*chasm.RegistrableComponent{
-		chasm.NewRegistrableComponent[*concurrency](
+		chasm.NewRegistrableComponent[*concurrency.Component](
 			"concurrency_limiter",
 			// chasm.WithBusinessIDAlias("ConcurrencyLimiterId"), // TODO(fc): enable visibility?
 		),

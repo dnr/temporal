@@ -1,4 +1,4 @@
-package flowcontrol
+package concurrency
 
 import (
 	"context"
@@ -12,32 +12,32 @@ import (
 	"go.temporal.io/server/common/stream_batcher"
 )
 
-type concurrencyHandler struct {
-	fcpb.UnimplementedConcurrencyServiceServer
-
-	logger   log.Logger
-	batchers *stream_batcher.KeyedBatcher[concurrencyBatchKey, concurrencyBatchItem, concurrencyBatchResult]
-}
-
-type concurrencyBatchKey struct {
+type batchKey struct {
 	namespaceID string
 	key         string
 }
 
-type concurrencyBatchItem struct {
+type batchReq struct {
 	ctx context.Context
 	req *fcpb.ConcurrencyBatchRequest
 }
 
-type concurrencyBatchResult struct {
+type batchRes struct {
 	res *fcpb.ConcurrencyBatchResponse
 	err error
 }
 
-func newConcurrencyHandler(
+type Handler struct {
+	fcpb.UnimplementedConcurrencyServiceServer
+
+	logger   log.Logger
+	batchers *stream_batcher.KeyedBatcher[batchKey, batchReq, batchRes]
+}
+
+func NewHandler(
 	logger log.Logger,
-) *concurrencyHandler {
-	h := &concurrencyHandler{
+) *Handler {
+	h := &Handler{
 		logger: logger,
 	}
 	h.batchers = stream_batcher.NewKeyedBatcherWithPerItemResults(
@@ -54,13 +54,13 @@ func newConcurrencyHandler(
 	return h
 }
 
-func concurrencyInit(_ chasm.MutableContext, items []concurrencyBatchItem) (*concurrency, error) {
+func initFn(_ chasm.MutableContext, items []batchReq) (*Component, error) {
 	// For now (whole-queue limits), we should always have an initial config here.
 	// For per-task limits, this may be missing and set via api later.
-	c := &concurrency{
+	c := &Component{
 		ConcurrencyState: &fcpb.ConcurrencyState{
 			Config: &taskqueuepb.ConcurrencyLimit{
-				ConcurrentTasks: initialConcurrencyLimit,
+				ConcurrentTasks: initialLimit,
 			},
 		},
 	}
@@ -70,7 +70,7 @@ func concurrencyInit(_ chasm.MutableContext, items []concurrencyBatchItem) (*con
 	return c, nil
 }
 
-func concurrencyUpdate(c *concurrency, cctx chasm.MutableContext, items []concurrencyBatchItem) ([]*fcpb.ConcurrencyBatchResponse, error) {
+func updateFn(c *Component, cctx chasm.MutableContext, items []batchReq) ([]*fcpb.ConcurrencyBatchResponse, error) {
 	now := cctx.Now(c)
 
 	// allocate new protos for responses
@@ -126,10 +126,10 @@ func concurrencyUpdate(c *concurrency, cctx chasm.MutableContext, items []concur
 	return ress, nil
 }
 
-func (h *concurrencyHandler) applyBatch(
-	key concurrencyBatchKey,
-	items []concurrencyBatchItem,
-) []concurrencyBatchResult {
+func (h *Handler) applyBatch(
+	key batchKey,
+	items []batchReq,
+) []batchRes {
 	needStart := false
 	canSpeculate := true
 
@@ -157,62 +157,61 @@ func (h *concurrencyHandler) applyBatch(
 				NamespaceID: key.namespaceID,
 				BusinessID:  key.key,
 			},
-			concurrencyInit,
-			concurrencyUpdate,
+			initFn,
+			updateFn,
 			items,
 			opts...,
 		)
-		if err != nil {
-			return concurrencyBatchResults(len(items), nil, err)
-		}
-		return concurrencyBatchResults(len(items), updateRes.UpdateOutput, nil)
+		return makeBatchResults(len(items), updateRes.UpdateOutput, err)
 	}
 
 	ress, _, err := chasm.UpdateComponent(
 		items[0].ctx,
-		chasm.NewComponentRef[*concurrency](chasm.ExecutionKey{
+		chasm.NewComponentRef[*Component](chasm.ExecutionKey{
 			NamespaceID: key.namespaceID,
 			BusinessID:  key.key,
 		}),
-		concurrencyUpdate,
+		updateFn,
 		items,
 		opts...,
 	)
-	if err != nil {
-		return concurrencyBatchResults(len(items), nil, err)
-	}
-	return concurrencyBatchResults(len(items), ress, nil)
+	return makeBatchResults(len(items), ress, err)
 }
 
-func concurrencyBatchResults(
+func makeBatchResults(
 	size int,
 	ress []*fcpb.ConcurrencyBatchResponse,
 	err error,
-) []concurrencyBatchResult {
-	results := make([]concurrencyBatchResult, size)
-	for i := range results {
-		results[i].err = err
-		if err == nil && i < len(ress) {
-			results[i].res = ress[i]
+) []batchRes {
+	results := make([]batchRes, size)
+	if err != nil {
+		for i := range results {
+			results[i].err = err
+		}
+	} else {
+		for i := range results {
+			if i < len(ress) {
+				results[i].res = ress[i]
+			}
 		}
 	}
 	return results
 }
 
-func (h *concurrencyHandler) Batch(ctx context.Context, req *fcpb.ConcurrencyBatchRequest) (retRes *fcpb.ConcurrencyBatchResponse, retErr error) {
+func (h *Handler) Batch(ctx context.Context, req *fcpb.ConcurrencyBatchRequest) (retRes *fcpb.ConcurrencyBatchResponse, retErr error) {
 	defer log.CapturePanic(h.logger, &retErr)
 
-	res, err := h.batchers.Add(ctx, concurrencyBatchKey{
+	res, err := h.batchers.Add(ctx, batchKey{
 		namespaceID: req.GetNamespaceId(),
 		key:         req.GetKey(),
-	}, concurrencyBatchItem{ctx: ctx, req: req})
+	}, batchReq{ctx: ctx, req: req})
 	if err != nil {
 		return nil, err
 	}
 	return res.res, res.err
 }
 
-func (h *concurrencyHandler) Wait(ctx context.Context, req *fcpb.ConcurrencyWaitRequest) (retRes *fcpb.ConcurrencyWaitResponse, retErr error) {
+func (h *Handler) Wait(ctx context.Context, req *fcpb.ConcurrencyWaitRequest) (retRes *fcpb.ConcurrencyWaitResponse, retErr error) {
 	defer log.CapturePanic(h.logger, &retErr)
 
 	// CHASM requires that PollComponent be monotonic: if it returns true at some state, then
@@ -226,11 +225,11 @@ func (h *concurrencyHandler) Wait(ctx context.Context, req *fcpb.ConcurrencyWait
 	// too new than we wait for it to catch up (false).
 	res, _, err := chasm.PollComponent(
 		ctx,
-		chasm.NewComponentRef[*concurrency](chasm.ExecutionKey{
+		chasm.NewComponentRef[*Component](chasm.ExecutionKey{
 			NamespaceID: req.NamespaceId,
 			BusinessID:  req.Key,
 		}),
-		func(c *concurrency, cctx chasm.Context, req *fcpb.ConcurrencyWaitRequest) (*fcpb.ConcurrencyWaitResponse, bool, error) {
+		func(c *Component, cctx chasm.Context, req *fcpb.ConcurrencyWaitRequest) (*fcpb.ConcurrencyWaitResponse, bool, error) {
 			notify := c.notifyWaiters(cctx.Now(c))
 
 			if req.Generation < c.Generation {

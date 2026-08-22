@@ -1,4 +1,4 @@
-package flowcontrol
+package concurrency
 
 import (
 	"testing"
@@ -11,7 +11,7 @@ import (
 
 func TestConcurrencySlotLifecycle(t *testing.T) {
 	now := time.Now().UTC()
-	limiter := &concurrency{
+	limiter := &Component{
 		ConcurrencyState: &fcpb.ConcurrencyState{
 			Config: &taskqueuepb.ConcurrencyLimit{ConcurrentTasks: 1},
 		},
@@ -37,7 +37,7 @@ func TestConcurrencySlotLifecycle(t *testing.T) {
 
 func TestConcurrencyExpiredSlotIDCanBeReplaced(t *testing.T) {
 	now := time.Now().UTC()
-	limiter := &concurrency{
+	limiter := &Component{
 		ConcurrencyState: &fcpb.ConcurrencyState{
 			Config: &taskqueuepb.ConcurrencyLimit{ConcurrentTasks: 1},
 		},

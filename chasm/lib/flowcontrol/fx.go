@@ -2,6 +2,7 @@ package flowcontrol
 
 import (
 	"go.temporal.io/server/chasm"
+	"go.temporal.io/server/chasm/lib/flowcontrol/concurrency"
 	fcpb "go.temporal.io/server/chasm/lib/flowcontrol/gen/flowcontrolpb/v1"
 	"go.uber.org/fx"
 )
@@ -9,7 +10,7 @@ import (
 var HistoryModule = fx.Module(
 	"flowcontrol-history",
 	fx.Provide(
-		newConcurrencyHandler,
+		concurrency.NewHandler,
 		newLibrary,
 		fcpb.NewConcurrencyServiceLayeredClient,
 	),
