@@ -29,6 +29,7 @@ import (
 	replicationspb "go.temporal.io/server/api/replication/v1"
 	taskqueuespb "go.temporal.io/server/api/taskqueue/v1"
 	tokenspb "go.temporal.io/server/api/token/v1"
+	"go.temporal.io/server/chasm/lib/flowcontrol/concurrency"
 	fcpb "go.temporal.io/server/chasm/lib/flowcontrol/gen/flowcontrolpb/v1"
 	"go.temporal.io/server/client/matching"
 	"go.temporal.io/server/common"
@@ -334,9 +335,17 @@ func NewEngine(
 		rateLimiter:               rateLimiter,
 		taskHookFactories:         taskHookFactories,
 		partitionScalerFactory:    partitionScalerFactory,
-		fcReadiness: fc.NewReadiness(
+		fcReadiness: fc.NewReadiness(concurrency.NewBatchingClient(
 			concurrencyServiceClient,
-		),
+			stream_batcher.BatcherOptions{
+				MaxItems:      100,
+				MinDelay:      5 * time.Millisecond,
+				MaxDelay:      20 * time.Millisecond,
+				IdleTime:      time.Minute,
+				ClearInterval: time.Hour,
+			},
+			clock.NewRealTimeSource(),
+		)),
 	}
 	e.userDataUpdateBatcher = stream_batcher.NewKeyedBatcher(
 		e.applyUserDataUpdateBatch,
