@@ -114,6 +114,7 @@ type Config struct {
 	StandbyClusterDelay                  dynamicconfig.DurationPropertyFn
 	StandbyTaskMissingEventsResendDelay  dynamicconfig.DurationPropertyFnWithTaskTypeFilter
 	StandbyTaskMissingEventsDiscardDelay dynamicconfig.DurationPropertyFnWithTaskTypeFilter
+	StandbyReleaseLimiterDiscardDelay    dynamicconfig.DurationPropertyFn
 	ChasmStandbyTaskDiscardDelay         dynamicconfig.DurationPropertyFnWithChasmTaskTypeFilter
 
 	QueuePendingTaskCriticalCount      dynamicconfig.IntPropertyFn
@@ -555,6 +556,7 @@ func NewConfig(
 		StandbyClusterDelay:                  dynamicconfig.StandbyClusterDelay.Get(dc),
 		StandbyTaskMissingEventsResendDelay:  dynamicconfig.StandbyTaskMissingEventsResendDelay.Get(dc),
 		StandbyTaskMissingEventsDiscardDelay: dynamicconfig.StandbyTaskMissingEventsDiscardDelay.Get(dc),
+		StandbyReleaseLimiterDiscardDelay:    dynamicconfig.StandbyReleaseLimiterDiscardDelay.Get(dc),
 		ChasmStandbyTaskDiscardDelay:         dynamicconfig.ChasmStandbyTaskDiscardDelay.Get(dc),
 
 		QueuePendingTaskCriticalCount:      dynamicconfig.QueuePendingTaskCriticalCount.Get(dc),

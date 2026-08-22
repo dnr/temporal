@@ -152,6 +152,7 @@ func (f *transferQueueFactory) CreateQueue(
 		f.VisibilityManager,
 		f.ChasmEngine,
 		f.ClientBean,
+		f.concurrencyBatchingClient,
 	)
 
 	executor := queues.NewActiveStandbyExecutor(

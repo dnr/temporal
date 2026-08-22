@@ -25,7 +25,9 @@ const (
 	// future: namespace policy, etc.
 )
 
-func wholeQueueLimiterName(tqName string, tqType enumspb.TaskQueueType) string {
+// WholeQueueLimiterName returns the limiter key for the whole-queue limiter of a task queue.
+// It's exported so that tests can address the limiter directly.
+func WholeQueueLimiterName(tqName string, tqType enumspb.TaskQueueType) string {
 	// the "/0" at the end is for future extension for partitioning limiters
 	return fmt.Sprintf("/_sys/wholequeue/%s/%d/0", tqName, tqType)
 }

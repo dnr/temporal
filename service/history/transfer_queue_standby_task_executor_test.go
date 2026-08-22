@@ -17,13 +17,16 @@ import (
 	"go.temporal.io/api/workflowservice/v1"
 	"go.temporal.io/server/api/adminservice/v1"
 	"go.temporal.io/server/api/adminservicemock/v1"
+	enumsspb "go.temporal.io/server/api/enums/v1"
 	"go.temporal.io/server/api/historyservice/v1"
 	"go.temporal.io/server/api/historyservicemock/v1"
 	"go.temporal.io/server/api/matchingservice/v1"
 	"go.temporal.io/server/api/matchingservicemock/v1"
 	persistencespb "go.temporal.io/server/api/persistence/v1"
+	taskqueuespb "go.temporal.io/server/api/taskqueue/v1"
 	workflowspb "go.temporal.io/server/api/workflow/v1"
 	"go.temporal.io/server/chasm"
+	fcpb "go.temporal.io/server/chasm/lib/flowcontrol/gen/flowcontrolpb/v1"
 	"go.temporal.io/server/client"
 	"go.temporal.io/server/common/archiver"
 	"go.temporal.io/server/common/archiver/provider"
@@ -54,6 +57,7 @@ import (
 	"go.temporal.io/server/service/history/workflow"
 	wcache "go.temporal.io/server/service/history/workflow/cache"
 	"go.uber.org/mock/gomock"
+	"google.golang.org/grpc"
 	"google.golang.org/protobuf/types/known/durationpb"
 )
 
@@ -97,6 +101,7 @@ type (
 		mockSearchAttributesProvider     *searchattribute.MockProvider
 		mockVisibilityManager            *manager.MockVisibilityManager
 		clientBean                       *client.MockBean
+		concurrencyServiceClient         *testConcurrencyServiceClient
 	}
 )
 
@@ -199,6 +204,7 @@ func (s *transferQueueStandbyTaskExecutorSuite) SetupTest() {
 	}
 	s.mockShard.SetEngineForTesting(h)
 	s.clusterName = cluster.TestAlternativeClusterName
+	s.concurrencyServiceClient = &testConcurrencyServiceClient{}
 
 	s.transferQueueStandbyTaskExecutor = newTransferQueueStandbyTaskExecutor(
 		s.mockShard,
@@ -211,6 +217,7 @@ func (s *transferQueueStandbyTaskExecutorSuite) SetupTest() {
 		s.mockVisibilityManager,
 		s.mockChasmEngine,
 		s.clientBean,
+		s.concurrencyServiceClient,
 	).(*transferQueueStandbyTaskExecutor)
 }
 
@@ -349,6 +356,7 @@ func (s *transferQueueStandbyTaskExecutorSuite) TestExecuteChasmSideEffectTransf
 		s.mockVisibilityManager,
 		s.mockChasmEngine,
 		s.clientBean,
+		s.concurrencyServiceClient,
 	).(*transferQueueStandbyTaskExecutor)
 
 	// Task in tree and valid by component — retry.
@@ -1326,6 +1334,103 @@ func (s *transferQueueStandbyTaskExecutorSuite) createPersistenceMutableState(
 	return workflow.TestCloneToProto(context.Background(), ms)
 }
 
+func (s *transferQueueStandbyTaskExecutorSuite) newReleaseLimiterTask() *tasks.ReleaseLimiterTask {
+	return &tasks.ReleaseLimiterTask{
+		WorkflowKey: definition.NewWorkflowKey(
+			s.namespaceID.String(),
+			"some random workflow ID",
+			uuid.NewString(),
+		),
+		VisibilityTimestamp: s.now,
+		TaskID:              s.mustGenerateTaskID(),
+		Limiters: []*taskqueuespb.LimiterRef{
+			{LimiterType: enumsspb.LIMITER_TYPE_CONCURRENCY, Key: "limiter-1", SlotId: uuid.NewString()},
+			{LimiterType: enumsspb.LIMITER_TYPE_CONCURRENCY, Key: "limiter-2", SlotId: uuid.NewString()},
+		},
+	}
+}
+
+func (s *transferQueueStandbyTaskExecutorSuite) TestProcessReleaseLimiterTask_Released() {
+	transferTask := s.newReleaseLimiterTask()
+	var verified []string
+	s.concurrencyServiceClient.verify = func(
+		_ context.Context,
+		request *fcpb.ConcurrencyVerifyRequest,
+		_ ...grpc.CallOption,
+	) (*fcpb.ConcurrencyVerifyResponse, error) {
+		verified = append(verified, request.GetKey())
+		s.Equal(s.namespaceID.String(), request.GetNamespaceId())
+		return &fcpb.ConcurrencyVerifyResponse{Released: []bool{true}}, nil
+	}
+
+	resp := s.transferQueueStandbyTaskExecutor.Execute(context.Background(), s.newTaskExecutable(transferTask))
+	s.NoError(resp.ExecutionErr)
+	s.Equal([]string{"limiter-1", "limiter-2"}, verified)
+}
+
+func (s *transferQueueStandbyTaskExecutorSuite) TestProcessReleaseLimiterTask_StillHeld_Retry() {
+	transferTask := s.newReleaseLimiterTask()
+	s.concurrencyServiceClient.verify = func(
+		_ context.Context,
+		request *fcpb.ConcurrencyVerifyRequest,
+		_ ...grpc.CallOption,
+	) (*fcpb.ConcurrencyVerifyResponse, error) {
+		return &fcpb.ConcurrencyVerifyResponse{Released: []bool{request.GetKey() != "limiter-2"}}, nil
+	}
+
+	s.mockShard.SetCurrentTime(s.clusterName, s.now)
+	resp := s.transferQueueStandbyTaskExecutor.Execute(context.Background(), s.newTaskExecutable(transferTask))
+	s.Equal(consts.ErrTaskRetry, resp.ExecutionErr)
+}
+
+func (s *transferQueueStandbyTaskExecutorSuite) TestProcessReleaseLimiterTask_StillHeld_Discard() {
+	transferTask := s.newReleaseLimiterTask()
+	s.concurrencyServiceClient.verify = func(
+		_ context.Context,
+		_ *fcpb.ConcurrencyVerifyRequest,
+		_ ...grpc.CallOption,
+	) (*fcpb.ConcurrencyVerifyResponse, error) {
+		return &fcpb.ConcurrencyVerifyResponse{Released: []bool{false}}, nil
+	}
+
+	discardDelay := s.mockShard.GetConfig().StandbyReleaseLimiterDiscardDelay()
+	s.mockShard.SetCurrentTime(s.clusterName, s.now.Add(discardDelay+time.Second))
+	resp := s.transferQueueStandbyTaskExecutor.Execute(context.Background(), s.newTaskExecutable(transferTask))
+	s.Equal(consts.ErrTaskDiscarded, resp.ExecutionErr)
+}
+
+// A limiter that hasn't replicated here yet is not evidence that the release happened, so the
+// task has to stay around rather than be dropped.
+func (s *transferQueueStandbyTaskExecutorSuite) TestProcessReleaseLimiterTask_LimiterNotFound_Retry() {
+	transferTask := s.newReleaseLimiterTask()
+	s.concurrencyServiceClient.verify = func(
+		_ context.Context,
+		_ *fcpb.ConcurrencyVerifyRequest,
+		_ ...grpc.CallOption,
+	) (*fcpb.ConcurrencyVerifyResponse, error) {
+		return nil, serviceerror.NewNotFound("limiter not found")
+	}
+
+	s.mockShard.SetCurrentTime(s.clusterName, s.now)
+	resp := s.transferQueueStandbyTaskExecutor.Execute(context.Background(), s.newTaskExecutable(transferTask))
+	s.Equal(consts.ErrTaskRetry, resp.ExecutionErr)
+}
+
+func (s *transferQueueStandbyTaskExecutorSuite) TestProcessReleaseLimiterTask_VerificationFails() {
+	transferTask := s.newReleaseLimiterTask()
+	verifyErr := serviceerror.NewUnavailable("limiter unavailable")
+	s.concurrencyServiceClient.verify = func(
+		_ context.Context,
+		_ *fcpb.ConcurrencyVerifyRequest,
+		_ ...grpc.CallOption,
+	) (*fcpb.ConcurrencyVerifyResponse, error) {
+		return nil, verifyErr
+	}
+
+	resp := s.transferQueueStandbyTaskExecutor.Execute(context.Background(), s.newTaskExecutable(transferTask))
+	s.ErrorIs(resp.ExecutionErr, verifyErr)
+}
+
 func (s *transferQueueStandbyTaskExecutorSuite) newTaskExecutable(
 	task tasks.Task,
 ) queues.Executable {
@@ -1408,6 +1513,7 @@ func (s *transferQueueStandbyTaskExecutorSuite) TestExecuteChasmSideEffectTransf
 			s.mockVisibilityManager,
 			s.mockChasmEngine,
 			s.clientBean,
+			s.concurrencyServiceClient,
 		).(*transferQueueStandbyTaskExecutor)
 
 		// Advance the standby cluster's time past the CHASM discard delay.

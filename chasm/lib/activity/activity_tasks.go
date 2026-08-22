@@ -5,7 +5,6 @@ import (
 	"errors"
 
 	enumspb "go.temporal.io/api/enums/v1"
-	enumsspb "go.temporal.io/server/api/enums/v1"
 	"go.temporal.io/server/chasm"
 	"go.temporal.io/server/chasm/lib/activity/gen/activitypb/v1"
 	"go.temporal.io/server/chasm/lib/flowcontrol/concurrency"
@@ -16,6 +15,12 @@ import (
 	"go.temporal.io/server/common/util"
 	"go.uber.org/fx"
 )
+
+// errReleaseNotVerified keeps a standby release task alive: the active cluster's release hasn't
+// shown up in this cluster's copy of the limiter yet, so the task is still the only thing that
+// would free the slot if this cluster took over. Retrying is bounded by the queue's usual
+// unexpected-error budget, after which the task goes to the DLQ instead of being silently lost.
+var errReleaseNotVerified = errors.New("flow control limiter release not replicated to this cluster yet")
 
 type releaseLimiterTaskHandler struct {
 	chasm.SideEffectTaskHandlerBase[*activitypb.ReleaseLimiterTask]
@@ -50,22 +55,34 @@ func (h *releaseLimiterTaskHandler) Execute(
 	_ chasm.TaskAttributes,
 	task *activitypb.ReleaseLimiterTask,
 ) error {
-	var releaseErrors []error
-	for _, limiter := range task.GetLimiters() {
-		switch limiter.GetLimiterType() {
-		case enumsspb.LIMITER_TYPE_CONCURRENCY:
-			_, err := h.concurrencyServiceClient.Batch(ctx, &fcpb.ConcurrencyBatchRequest{
-				NamespaceId:  activityRef.NamespaceID,
-				Key:          limiter.GetKey(),
-				ReleaseSlots: []string{limiter.GetSlotId()},
-			})
-			if err != nil {
-				releaseErrors = append(releaseErrors, err)
-			}
-		default:
-		}
+	return concurrency.ReleaseSlots(ctx, h.concurrencyServiceClient, activityRef.NamespaceID, task.GetLimiters())
+}
+
+// Discard runs on a standby cluster once the task has been pending past the discard delay, i.e.
+// once the active cluster has had ample time to release these slots. Dropping the task at that
+// point is only safe if the release actually happened and reached this cluster: the limiter is on
+// a different shard than the activity and replicates independently, so nothing else here would
+// ever notice a slot that stayed committed. If the limiter still holds a slot we keep the task,
+// which is what lets this cluster perform the release itself if it becomes active.
+func (h *releaseLimiterTaskHandler) Discard(
+	ctx context.Context,
+	activityRef chasm.ComponentRef,
+	_ chasm.TaskAttributes,
+	task *activitypb.ReleaseLimiterTask,
+) error {
+	released, err := concurrency.SlotsReleased(
+		ctx,
+		h.concurrencyServiceClient,
+		activityRef.NamespaceID,
+		task.GetLimiters(),
+	)
+	if err != nil {
+		return err
 	}
-	return errors.Join(releaseErrors...)
+	if !released {
+		return errReleaseNotVerified
+	}
+	return chasm.ErrTaskDiscarded
 }
 
 type activityDispatchTaskHandlerOptions struct {

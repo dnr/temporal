@@ -12,6 +12,8 @@ import (
 	taskqueuepb "go.temporal.io/api/taskqueue/v1"
 	"go.temporal.io/server/api/historyservice/v1"
 	"go.temporal.io/server/chasm"
+	"go.temporal.io/server/chasm/lib/flowcontrol/concurrency"
+	fcpb "go.temporal.io/server/chasm/lib/flowcontrol/gen/flowcontrolpb/v1"
 	"go.temporal.io/server/client"
 	"go.temporal.io/server/common"
 	"go.temporal.io/server/common/definition"
@@ -30,14 +32,16 @@ import (
 
 const (
 	recordChildCompletionVerificationFailedMsg = "Failed to verify child execution completion recorded"
+	releaseLimiterVerificationFailedMsg        = "Failed to verify flow control limiter release"
 )
 
 type (
 	transferQueueStandbyTaskExecutor struct {
 		*transferQueueTaskExecutorBase
 
-		clusterName string
-		clientBean  client.Bean
+		clusterName              string
+		clientBean               client.Bean
+		concurrencyServiceClient fcpb.ConcurrencyServiceClient
 	}
 
 	verificationErr struct {
@@ -57,6 +61,7 @@ func newTransferQueueStandbyTaskExecutor(
 	visibilityManager manager.VisibilityManager,
 	chasmEngine chasm.Engine,
 	clientBean client.Bean,
+	concurrencyServiceClient fcpb.ConcurrencyServiceClient,
 ) queues.Executor {
 	return &transferQueueStandbyTaskExecutor{
 		transferQueueTaskExecutorBase: newTransferQueueTaskExecutorBase(
@@ -69,8 +74,9 @@ func newTransferQueueStandbyTaskExecutor(
 			visibilityManager,
 			chasmEngine,
 		),
-		clusterName: clusterName,
-		clientBean:  clientBean,
+		clusterName:              clusterName,
+		clientBean:               clientBean,
+		concurrencyServiceClient: concurrencyServiceClient,
 	}
 }
 
@@ -106,6 +112,8 @@ func (t *transferQueueStandbyTaskExecutor) Execute(
 		err = t.processCloseExecution(ctx, task)
 	case *tasks.DeleteExecutionTask:
 		err = t.processDeleteExecutionTask(ctx, task, false)
+	case *tasks.ReleaseLimiterTask:
+		err = t.processReleaseLimiterTask(ctx, task)
 	case *tasks.ChasmTask:
 		task.Attempt = executable.Attempt()
 		err = t.executeChasmSideEffectTransferTask(ctx, task)
@@ -118,6 +126,61 @@ func (t *transferQueueStandbyTaskExecutor) Execute(
 		ExecutedAsActive:    false,
 		ExecutionErr:        err,
 	}
+}
+
+// processReleaseLimiterTask is the standby counterpart of
+// transferQueueActiveTaskExecutor.processReleaseLimiterTask. Both clusters generate this task; the
+// active cluster releases the slots, and this side only checks whether that release has already
+// reached this cluster's copy of the limiter.
+//
+// The check has to go to the limiter rather than to the execution that held the slot: the two live
+// on different shards and replicate independently, so the execution's state says nothing about
+// whether the release survived. Retrying until the limiter agrees is what makes the release
+// failover-safe -- if this cluster becomes active while the task is still pending, it will run the
+// release itself.
+//
+// Unlike the other standby transfer tasks this one doesn't need mutable state: the slots to
+// release are carried in the task, and the execution that held them may legitimately be gone by
+// now (e.g. deleted after its retention expired).
+func (t *transferQueueStandbyTaskExecutor) processReleaseLimiterTask(
+	ctx context.Context,
+	transferTask *tasks.ReleaseLimiterTask,
+) error {
+	ctx, cancel := context.WithTimeout(ctx, taskTimeout)
+	defer cancel()
+
+	nsRecord, err := t.shardContext.GetNamespaceRegistry().GetNamespaceByID(namespace.ID(transferTask.GetNamespaceID()))
+	if err != nil {
+		return err
+	}
+	if !nsRecord.IsOnCluster(t.clusterName) {
+		// namespace is not replicated to local cluster, ignore corresponding tasks
+		return nil
+	}
+
+	released, err := concurrency.SlotsReleased(
+		ctx,
+		t.concurrencyServiceClient,
+		transferTask.GetNamespaceID(),
+		transferTask.Limiters,
+	)
+	if err != nil {
+		return &verificationErr{
+			msg: releaseLimiterVerificationFailedMsg,
+			err: err,
+		}
+	}
+	if released {
+		return nil
+	}
+
+	// Not released here yet. Returning a non-nil postActionInfo keeps the task around.
+	return getStandbyPostActionFn(
+		transferTask,
+		t.getCurrentTime,
+		t.config.StandbyReleaseLimiterDiscardDelay(),
+		standbyTransferTaskPostActionTaskDiscarded,
+	)(ctx, transferTask, &struct{}{}, t.logger)
 }
 
 func (t *transferQueueStandbyTaskExecutor) executeChasmSideEffectTransferTask(

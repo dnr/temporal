@@ -28,7 +28,8 @@ import (
 
 type testConcurrencyServiceClient struct {
 	fcpb.ConcurrencyServiceClient
-	batch func(context.Context, *fcpb.ConcurrencyBatchRequest, ...grpc.CallOption) (*fcpb.ConcurrencyBatchResponse, error)
+	batch  func(context.Context, *fcpb.ConcurrencyBatchRequest, ...grpc.CallOption) (*fcpb.ConcurrencyBatchResponse, error)
+	verify func(context.Context, *fcpb.ConcurrencyVerifyRequest, ...grpc.CallOption) (*fcpb.ConcurrencyVerifyResponse, error)
 }
 
 func (c *testConcurrencyServiceClient) Batch(
@@ -39,10 +40,27 @@ func (c *testConcurrencyServiceClient) Batch(
 	return c.batch(ctx, request, opts...)
 }
 
+func (c *testConcurrencyServiceClient) Verify(
+	ctx context.Context,
+	request *fcpb.ConcurrencyVerifyRequest,
+	opts ...grpc.CallOption,
+) (*fcpb.ConcurrencyVerifyResponse, error) {
+	return c.verify(ctx, request, opts...)
+}
+
+func testReleaseLimiterTaskHandler(client fcpb.ConcurrencyServiceClient) *releaseLimiterTaskHandler {
+	return newReleaseLimiterTaskHandler(client, &Config{
+		FlowControlClientBatcherOptions: dynamicconfig.GetTypedPropertyFn(stream_batcher.BatcherOptions{
+			MaxItems: 1,
+			IdleTime: time.Minute,
+		}),
+	})
+}
+
 func TestReleaseLimiterTaskExecute(t *testing.T) {
 	releaseErr := errors.New("release failed")
 	var requests []*fcpb.ConcurrencyBatchRequest
-	handler := newReleaseLimiterTaskHandler(&testConcurrencyServiceClient{
+	handler := testReleaseLimiterTaskHandler(&testConcurrencyServiceClient{
 		batch: func(
 			_ context.Context,
 			request *fcpb.ConcurrencyBatchRequest,
@@ -54,10 +72,7 @@ func TestReleaseLimiterTaskExecute(t *testing.T) {
 			}
 			return &fcpb.ConcurrencyBatchResponse{}, nil
 		},
-	}, &Config{FlowControlClientBatcherOptions: dynamicconfig.GetTypedPropertyFn(stream_batcher.BatcherOptions{
-		MaxItems: 1,
-		IdleTime: time.Minute,
-	})})
+	})
 	task := &activitypb.ReleaseLimiterTask{Limiters: []*taskqueuespb.LimiterRef{
 		{LimiterType: enumsspb.LIMITER_TYPE_CONCURRENCY, Key: "first-key", SlotId: "bad-slot"},
 		{LimiterType: enumsspb.LIMITER_TYPE_UNSPECIFIED, Key: "ignored-key", SlotId: "ignored-slot"},
@@ -73,6 +88,46 @@ func TestReleaseLimiterTaskExecute(t *testing.T) {
 		{NamespaceId: "namespace-id", Key: "first-key", ReleaseSlots: []string{"bad-slot"}},
 		{NamespaceId: "namespace-id", Key: "second-key", ReleaseSlots: []string{"good-slot"}},
 	}, requests)
+}
+
+// On a standby cluster the task is discarded only once the limiter here agrees the slots are
+// gone; otherwise it stays around so that this cluster can run the release if it takes over.
+func TestReleaseLimiterTaskDiscard(t *testing.T) {
+	task := &activitypb.ReleaseLimiterTask{Limiters: []*taskqueuespb.LimiterRef{
+		{LimiterType: enumsspb.LIMITER_TYPE_CONCURRENCY, Key: "key", SlotId: "slot"},
+	}}
+	ref := chasm.ComponentRef{ExecutionKey: chasm.ExecutionKey{NamespaceID: "namespace-id"}}
+	verifyErr := errors.New("verify failed")
+
+	for _, tc := range []struct {
+		name   string
+		verify func(context.Context, *fcpb.ConcurrencyVerifyRequest, ...grpc.CallOption) (*fcpb.ConcurrencyVerifyResponse, error)
+		err    error
+	}{{
+		name: "released",
+		verify: func(context.Context, *fcpb.ConcurrencyVerifyRequest, ...grpc.CallOption) (*fcpb.ConcurrencyVerifyResponse, error) {
+			return &fcpb.ConcurrencyVerifyResponse{Released: []bool{true}}, nil
+		},
+		err: chasm.ErrTaskDiscarded,
+	}, {
+		name: "still held",
+		verify: func(context.Context, *fcpb.ConcurrencyVerifyRequest, ...grpc.CallOption) (*fcpb.ConcurrencyVerifyResponse, error) {
+			return &fcpb.ConcurrencyVerifyResponse{Released: []bool{false}}, nil
+		},
+		err: errReleaseNotVerified,
+	}, {
+		name: "verify fails",
+		verify: func(context.Context, *fcpb.ConcurrencyVerifyRequest, ...grpc.CallOption) (*fcpb.ConcurrencyVerifyResponse, error) {
+			return nil, verifyErr
+		},
+		err: verifyErr,
+	}} {
+		t.Run(tc.name, func(t *testing.T) {
+			handler := testReleaseLimiterTaskHandler(&testConcurrencyServiceClient{verify: tc.verify})
+			err := handler.Discard(t.Context(), ref, chasm.TaskAttributes{}, task)
+			require.ErrorIs(t, err, tc.err)
+		})
+	}
 }
 
 func TestScheduleToCloseTimeoutTaskValidateStamp(t *testing.T) {

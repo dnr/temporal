@@ -20,8 +20,9 @@ import (
 const _ = grpc.SupportPackageIsVersion7
 
 const (
-	ConcurrencyService_Batch_FullMethodName = "/temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyService/Batch"
-	ConcurrencyService_Wait_FullMethodName  = "/temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyService/Wait"
+	ConcurrencyService_Batch_FullMethodName  = "/temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyService/Batch"
+	ConcurrencyService_Verify_FullMethodName = "/temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyService/Verify"
+	ConcurrencyService_Wait_FullMethodName   = "/temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyService/Wait"
 )
 
 // ConcurrencyServiceClient is the client API for ConcurrencyService service.
@@ -42,6 +43,12 @@ type ConcurrencyServiceClient interface {
 	// different durability, so callers should not assume that e.g. a Reserve plus Commit in one
 	// batch means that the Reserve was durable.
 	Batch(ctx context.Context, in *ConcurrencyBatchRequest, opts ...grpc.CallOption) (*ConcurrencyBatchResponse, error)
+	// Verify reports whether the given slots have been released. It never modifies limiter state,
+	// so it may be called on a standby cluster, where it reads whatever limiter state has been
+	// replicated so far. Standby history clusters use it to decide whether a pending release has
+	// already taken effect locally, and therefore whether their copy of the release task can be
+	// dropped. Returns NotFound if the limiter does not exist in this cluster.
+	Verify(ctx context.Context, in *ConcurrencyVerifyRequest, opts ...grpc.CallOption) (*ConcurrencyVerifyResponse, error)
 	// Wait is a long-poll RPC that returns when at least one slot is free, or the caller's
 	// generation is too old.
 	Wait(ctx context.Context, in *ConcurrencyWaitRequest, opts ...grpc.CallOption) (*ConcurrencyWaitResponse, error)
@@ -58,6 +65,15 @@ func NewConcurrencyServiceClient(cc grpc.ClientConnInterface) ConcurrencyService
 func (c *concurrencyServiceClient) Batch(ctx context.Context, in *ConcurrencyBatchRequest, opts ...grpc.CallOption) (*ConcurrencyBatchResponse, error) {
 	out := new(ConcurrencyBatchResponse)
 	err := c.cc.Invoke(ctx, ConcurrencyService_Batch_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *concurrencyServiceClient) Verify(ctx context.Context, in *ConcurrencyVerifyRequest, opts ...grpc.CallOption) (*ConcurrencyVerifyResponse, error) {
+	out := new(ConcurrencyVerifyResponse)
+	err := c.cc.Invoke(ctx, ConcurrencyService_Verify_FullMethodName, in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -91,6 +107,12 @@ type ConcurrencyServiceServer interface {
 	// different durability, so callers should not assume that e.g. a Reserve plus Commit in one
 	// batch means that the Reserve was durable.
 	Batch(context.Context, *ConcurrencyBatchRequest) (*ConcurrencyBatchResponse, error)
+	// Verify reports whether the given slots have been released. It never modifies limiter state,
+	// so it may be called on a standby cluster, where it reads whatever limiter state has been
+	// replicated so far. Standby history clusters use it to decide whether a pending release has
+	// already taken effect locally, and therefore whether their copy of the release task can be
+	// dropped. Returns NotFound if the limiter does not exist in this cluster.
+	Verify(context.Context, *ConcurrencyVerifyRequest) (*ConcurrencyVerifyResponse, error)
 	// Wait is a long-poll RPC that returns when at least one slot is free, or the caller's
 	// generation is too old.
 	Wait(context.Context, *ConcurrencyWaitRequest) (*ConcurrencyWaitResponse, error)
@@ -103,6 +125,9 @@ type UnimplementedConcurrencyServiceServer struct {
 
 func (UnimplementedConcurrencyServiceServer) Batch(context.Context, *ConcurrencyBatchRequest) (*ConcurrencyBatchResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Batch not implemented")
+}
+func (UnimplementedConcurrencyServiceServer) Verify(context.Context, *ConcurrencyVerifyRequest) (*ConcurrencyVerifyResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method Verify not implemented")
 }
 func (UnimplementedConcurrencyServiceServer) Wait(context.Context, *ConcurrencyWaitRequest) (*ConcurrencyWaitResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Wait not implemented")
@@ -138,6 +163,24 @@ func _ConcurrencyService_Batch_Handler(srv interface{}, ctx context.Context, dec
 	return interceptor(ctx, in, info, handler)
 }
 
+func _ConcurrencyService_Verify_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ConcurrencyVerifyRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ConcurrencyServiceServer).Verify(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ConcurrencyService_Verify_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ConcurrencyServiceServer).Verify(ctx, req.(*ConcurrencyVerifyRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _ConcurrencyService_Wait_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(ConcurrencyWaitRequest)
 	if err := dec(in); err != nil {
@@ -166,6 +209,10 @@ var ConcurrencyService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "Batch",
 			Handler:    _ConcurrencyService_Batch_Handler,
+		},
+		{
+			MethodName: "Verify",
+			Handler:    _ConcurrencyService_Verify_Handler,
 		},
 		{
 			MethodName: "Wait",

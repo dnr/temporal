@@ -2005,6 +2005,15 @@ The default is intentionally much higher than the non CHASM standby discard dela
 discarding a CHASM task can leave the execution in a stuck state after failover. Task types
 that can be safely offloaded should be configured with a shorter delay.`,
 	)
+	StandbyReleaseLimiterDiscardDelay = NewGlobalDurationSetting(
+		"history.standbyReleaseLimiterDiscardDelay",
+		24*time.Hour,
+		`StandbyReleaseLimiterDiscardDelay is how long a standby cluster keeps retrying a flow
+control limiter release task while it cannot confirm that the active cluster's release has
+replicated to this cluster's copy of the limiter. The default is much higher than
+StandbyTaskMissingEventsDiscardDelay because discarding the task leaks a concurrency slot for as
+long as the limiter lives, whereas retrying only costs a periodic read.`,
+	)
 	QueuePendingTaskCriticalCount = NewGlobalIntSetting(
 		"history.queuePendingTaskCriticalCount",
 		9000,

@@ -2,7 +2,6 @@ package history
 
 import (
 	"context"
-	"errors"
 	"fmt"
 
 	"github.com/google/uuid"
@@ -16,11 +15,11 @@ import (
 	workflowpb "go.temporal.io/api/workflow/v1"
 	"go.temporal.io/api/workflowservice/v1"
 	clockspb "go.temporal.io/server/api/clock/v1"
-	enumsspb "go.temporal.io/server/api/enums/v1"
 	"go.temporal.io/server/api/historyservice/v1"
 	persistencespb "go.temporal.io/server/api/persistence/v1"
 	workflowspb "go.temporal.io/server/api/workflow/v1"
 	"go.temporal.io/server/chasm"
+	"go.temporal.io/server/chasm/lib/flowcontrol/concurrency"
 	fcpb "go.temporal.io/server/chasm/lib/flowcontrol/gen/flowcontrolpb/v1"
 	"go.temporal.io/server/common"
 	"go.temporal.io/server/common/definition"
@@ -199,21 +198,7 @@ func (t *transferQueueActiveTaskExecutor) processReleaseLimiterTask(
 	ctx, cancel := context.WithTimeout(ctx, taskTimeout)
 	defer cancel()
 
-	var releaseErrors []error
-	for _, limiter := range task.Limiters {
-		switch limiter.GetLimiterType() {
-		case enumsspb.LIMITER_TYPE_CONCURRENCY:
-			_, err := t.concurrencyServiceClient.Batch(ctx, &fcpb.ConcurrencyBatchRequest{
-				NamespaceId:  task.NamespaceID,
-				Key:          limiter.GetKey(),
-				ReleaseSlots: []string{limiter.GetSlotId()},
-			})
-			if err != nil {
-				releaseErrors = append(releaseErrors, err)
-			}
-		}
-	}
-	return errors.Join(releaseErrors...)
+	return concurrency.ReleaseSlots(ctx, t.concurrencyServiceClient, task.NamespaceID, task.Limiters)
 }
 
 func (t *transferQueueActiveTaskExecutor) executeChasmSideEffectTransferTask(

@@ -8279,7 +8279,7 @@ func (ms *MutableStateImpl) closeTransactionPrepareTasks(
 	clearBufferEvents bool,
 	regenerateTimerTasksForTimeSkipping bool,
 ) error {
-	ms.closeTransactionGenerateReleaseLimiterTask(transactionPolicy)
+	ms.closeTransactionGenerateReleaseLimiterTask()
 
 	if err := ms.closeTransactionHandleWorkflowResetTask(
 		transactionPolicy,
@@ -9298,6 +9298,10 @@ func (ms *MutableStateImpl) applyUpdatesToSubStateMachines(
 	isSnapshot bool,
 ) error {
 	err := applyUpdatesToSubStateMachine(ms, ms.pendingActivityInfoIDs, ms.updateActivityInfos, updatedActivityInfos, isSnapshot, ms.DeleteActivity, func(current, incoming *persistencespb.ActivityInfo) {
+		// Replication replaces the whole ActivityInfo, so slots the incoming state no longer
+		// holds (e.g. the active cluster cleared them when starting a retry) have to be picked
+		// up here; the events themselves don't carry limiter refs.
+		ms.trackRemovedLimiterRefs(current.GetLimiters(), incoming.GetLimiters())
 		if current == nil || ms.ShouldResetActivityTimerTaskMask(current, incoming) {
 			incoming.TimerTaskStatus = TimerTaskStatusNone
 		} else {
@@ -9529,6 +9533,7 @@ func (ms *MutableStateImpl) syncExecutionInfo(current *persistencespb.WorkflowEx
 			HistorySizeBytes:            incoming.WorkflowTaskHistorySizeBytes,
 			BuildId:                     incoming.WorkflowTaskBuildId,
 			BuildIdRedirectCounter:      incoming.WorkflowTaskBuildIdRedirectCounter,
+			Limiters:                    incoming.WorkflowTaskLimiters,
 		})
 		workflowTaskVersionUpdated = true
 	}

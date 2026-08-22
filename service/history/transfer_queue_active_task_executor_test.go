@@ -77,7 +77,8 @@ import (
 type (
 	testConcurrencyServiceClient struct {
 		fcpb.ConcurrencyServiceClient
-		batch func(context.Context, *fcpb.ConcurrencyBatchRequest, ...grpc.CallOption) (*fcpb.ConcurrencyBatchResponse, error)
+		batch  func(context.Context, *fcpb.ConcurrencyBatchRequest, ...grpc.CallOption) (*fcpb.ConcurrencyBatchResponse, error)
+		verify func(context.Context, *fcpb.ConcurrencyVerifyRequest, ...grpc.CallOption) (*fcpb.ConcurrencyVerifyResponse, error)
 	}
 
 	transferQueueActiveTaskExecutorSuite struct {
@@ -125,6 +126,14 @@ func (c *testConcurrencyServiceClient) Batch(
 	opts ...grpc.CallOption,
 ) (*fcpb.ConcurrencyBatchResponse, error) {
 	return c.batch(ctx, request, opts...)
+}
+
+func (c *testConcurrencyServiceClient) Verify(
+	ctx context.Context,
+	request *fcpb.ConcurrencyVerifyRequest,
+	opts ...grpc.CallOption,
+) (*fcpb.ConcurrencyVerifyResponse, error) {
+	return c.verify(ctx, request, opts...)
 }
 
 var defaultWorkflowTaskCompletionLimits = historyi.WorkflowTaskCompletionLimits{MaxResetPoints: primitives.DefaultHistoryMaxAutoResetPoints, MaxSearchAttributeValueSize: 2048}

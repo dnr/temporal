@@ -27,11 +27,22 @@ type batchRes struct {
 	err error
 }
 
+type verifyReq struct {
+	ctx context.Context
+	req *fcpb.ConcurrencyVerifyRequest
+}
+
+type verifyRes struct {
+	res *fcpb.ConcurrencyVerifyResponse
+	err error
+}
+
 type Handler struct {
 	fcpb.UnimplementedConcurrencyServiceServer
 
-	logger   log.Logger
-	batchers *stream_batcher.KeyedBatcher[batchKey, batchReq, batchRes]
+	logger         log.Logger
+	batchers       *stream_batcher.KeyedBatcher[batchKey, batchReq, batchRes]
+	verifyBatchers *stream_batcher.KeyedBatcher[batchKey, verifyReq, verifyRes]
 }
 
 func NewHandler(
@@ -43,6 +54,11 @@ func NewHandler(
 	}
 	h.batchers = stream_batcher.NewKeyedBatcherWithPerItemResults(
 		h.applyBatch,
+		ServerBatcherOptions.Get(dc)(),
+		clock.NewRealTimeSource(),
+	)
+	h.verifyBatchers = stream_batcher.NewKeyedBatcherWithPerItemResults(
+		h.applyVerifyBatch,
 		ServerBatcherOptions.Get(dc)(),
 		clock.NewRealTimeSource(),
 	)
@@ -191,6 +207,60 @@ func makeBatchResults(
 		}
 	}
 	return results
+}
+
+// verifyFn answers, for each requested slot, whether the limiter still holds it as a committed
+// slot. It is read-only so that it can run on a standby cluster, against whatever limiter state
+// has replicated there so far.
+func verifyFn(c *Component, _ chasm.Context, items []verifyReq) ([]*fcpb.ConcurrencyVerifyResponse, error) {
+	ress := make([]*fcpb.ConcurrencyVerifyResponse, len(items))
+	for i, it := range items {
+		slotIDs := it.req.GetSlotIds()
+		released := make([]bool, len(slotIDs))
+		for j, slotID := range slotIDs {
+			idx := c.find(slotID)
+			released[j] = idx < 0 || !c.Slots[idx].Committed
+		}
+		ress[i] = &fcpb.ConcurrencyVerifyResponse{Released: released}
+	}
+	return ress, nil
+}
+
+func (h *Handler) applyVerifyBatch(
+	key batchKey,
+	items []verifyReq,
+) []verifyRes {
+	ress, err := chasm.ReadComponent(
+		items[0].ctx,
+		chasm.NewComponentRef[*Component](chasm.ExecutionKey{
+			NamespaceID: key.namespaceID,
+			BusinessID:  key.key,
+		}),
+		verifyFn,
+		items,
+	)
+	results := make([]verifyRes, len(items))
+	for i := range results {
+		if err != nil {
+			results[i].err = err
+		} else if i < len(ress) {
+			results[i].res = ress[i]
+		}
+	}
+	return results
+}
+
+func (h *Handler) Verify(ctx context.Context, req *fcpb.ConcurrencyVerifyRequest) (retRes *fcpb.ConcurrencyVerifyResponse, retErr error) {
+	defer log.CapturePanic(h.logger, &retErr)
+
+	res, err := h.verifyBatchers.Add(ctx, batchKey{
+		namespaceID: req.GetNamespaceId(),
+		key:         req.GetKey(),
+	}, verifyReq{ctx: ctx, req: req})
+	if err != nil {
+		return nil, err
+	}
+	return res.res, res.err
 }
 
 func (h *Handler) Batch(ctx context.Context, req *fcpb.ConcurrencyBatchRequest) (retRes *fcpb.ConcurrencyBatchResponse, retErr error) {

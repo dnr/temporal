@@ -445,7 +445,7 @@ func (s *mutableStateSuite) TestWorkflowCloseReleasesPendingTaskLimiters() {
 	s.mutableState.executionState.State = enumsspb.WORKFLOW_EXECUTION_STATE_COMPLETED
 	s.mutableState.stateInDB = enumsspb.WORKFLOW_EXECUTION_STATE_RUNNING
 
-	s.mutableState.closeTransactionGenerateReleaseLimiterTask(historyi.TransactionPolicyActive)
+	s.mutableState.closeTransactionGenerateReleaseLimiterTask()
 
 	transferTasks := s.mutableState.PopTasks()[tasks.CategoryTransfer]
 	s.Require().Len(transferTasks, 1)
@@ -458,21 +458,53 @@ func (s *mutableStateSuite) TestWorkflowCloseReleasesPendingTaskLimiters() {
 	)
 }
 
-func (s *mutableStateSuite) TestPassiveTransactionDoesNotReleaseLimiters() {
+// The standby cluster generates the same release task as the active cluster, so that a failover
+// before the active side ran the release still leaves someone holding the obligation.
+func (s *mutableStateSuite) TestPassiveTransactionAlsoReleasesLimiters() {
 	s.mutableState.PopTasks()
-	s.mutableState.releaseLimiterRefs = []*taskqueuespb.LimiterRef{{
+	limiters := []*taskqueuespb.LimiterRef{{
 		LimiterType: enumsspb.LIMITER_TYPE_CONCURRENCY,
 		Key:         "limiter",
 		SlotId:      uuid.NewString(),
 	}}
+	s.mutableState.releaseLimiterRefs = limiters
 
-	s.mutableState.closeTransactionGenerateReleaseLimiterTask(historyi.TransactionPolicyPassive)
+	s.mutableState.closeTransactionGenerateReleaseLimiterTask()
 
-	s.Empty(s.mutableState.PopTasks()[tasks.CategoryTransfer])
+	transferTasks := s.mutableState.PopTasks()[tasks.CategoryTransfer]
+	s.Require().Len(transferTasks, 1)
+	releaseTask, ok := transferTasks[0].(*tasks.ReleaseLimiterTask)
+	s.Require().True(ok)
+	protorequire.ProtoElementsMatch(s.T(), limiters, releaseTask.Limiters)
+}
+
+// A transaction that both closes the execution and drops a pending activity collects the same
+// slot twice; the task should still carry it once.
+func (s *mutableStateSuite) TestReleaseLimitersDeduplicatesRefs() {
+	s.mutableState.PopTasks()
+	limiter := &taskqueuespb.LimiterRef{
+		LimiterType: enumsspb.LIMITER_TYPE_CONCURRENCY,
+		Key:         "activity-limiter",
+		SlotId:      uuid.NewString(),
+	}
+	s.mutableState.releaseLimiterRefs = []*taskqueuespb.LimiterRef{limiter}
+	s.mutableState.pendingActivityInfoIDs[123] = &persistencespb.ActivityInfo{
+		Limiters: []*taskqueuespb.LimiterRef{limiter},
+	}
+	s.mutableState.executionState.State = enumsspb.WORKFLOW_EXECUTION_STATE_COMPLETED
+	s.mutableState.stateInDB = enumsspb.WORKFLOW_EXECUTION_STATE_RUNNING
+
+	s.mutableState.closeTransactionGenerateReleaseLimiterTask()
+
+	transferTasks := s.mutableState.PopTasks()[tasks.CategoryTransfer]
+	s.Require().Len(transferTasks, 1)
+	releaseTask, ok := transferTasks[0].(*tasks.ReleaseLimiterTask)
+	s.Require().True(ok)
+	protorequire.ProtoElementsMatch(s.T(), []*taskqueuespb.LimiterRef{limiter}, releaseTask.Limiters)
 }
 
 func (s *mutableStateSuite) requireReleaseLimiterTask(limiters []*taskqueuespb.LimiterRef) {
-	s.mutableState.closeTransactionGenerateReleaseLimiterTask(historyi.TransactionPolicyActive)
+	s.mutableState.closeTransactionGenerateReleaseLimiterTask()
 	transferTasks := s.mutableState.PopTasks()[tasks.CategoryTransfer]
 	s.Require().Len(transferTasks, 1)
 	releaseTask, ok := transferTasks[0].(*tasks.ReleaseLimiterTask)

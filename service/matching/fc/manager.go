@@ -44,7 +44,7 @@ func NewManager(
 		partition:         partition,
 		userDataManager:   userDataManager,
 		readiness:         readiness,
-		wholeQueueLimiter: wholeQueueLimiterName(tqName, tqType),
+		wholeQueueLimiter: WholeQueueLimiterName(tqName, tqType),
 	}
 }
 

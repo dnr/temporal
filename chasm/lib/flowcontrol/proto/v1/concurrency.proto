@@ -70,6 +70,21 @@ message ConcurrencyBatchResponse {
   // Note: we don't need a release_success, it's always considered successful.
 }
 
+message ConcurrencyVerifyRequest {
+  string namespace_id = 1;
+  string key = 2;
+
+  // Slots to check. Verify is a read-only operation on the local cluster's copy of the limiter
+  // state, so unlike the other operations it can be called on a standby cluster.
+  repeated string slot_ids = 3;
+}
+
+message ConcurrencyVerifyResponse {
+  // Parallel to the requested slot_ids: true if the limiter does not hold a committed slot with
+  // that id, i.e. the slot has been released (or was never committed here).
+  repeated bool released = 1;
+}
+
 message ConcurrencyWaitRequest {
   string namespace_id = 1;
   string key = 2;
@@ -102,6 +117,16 @@ service ConcurrencyService {
   // different durability, so callers should not assume that e.g. a Reserve plus Commit in one
   // batch means that the Reserve was durable.
   rpc Batch(ConcurrencyBatchRequest) returns (ConcurrencyBatchResponse) {
+    option (temporal.server.api.routing.v1.routing).business_id = "key";
+    option (temporal.server.api.common.v1.api_category).category = API_CATEGORY_STANDARD;
+  };
+
+  // Verify reports whether the given slots have been released. It never modifies limiter state,
+  // so it may be called on a standby cluster, where it reads whatever limiter state has been
+  // replicated so far. Standby history clusters use it to decide whether a pending release has
+  // already taken effect locally, and therefore whether their copy of the release task can be
+  // dropped. Returns NotFound if the limiter does not exist in this cluster.
+  rpc Verify(ConcurrencyVerifyRequest) returns (ConcurrencyVerifyResponse) {
     option (temporal.server.api.routing.v1.routing).business_id = "key";
     option (temporal.server.api.common.v1.api_category).category = API_CATEGORY_STANDARD;
   };
