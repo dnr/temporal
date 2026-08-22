@@ -2,18 +2,32 @@ package flowcontrol
 
 import (
 	"context"
+	"sync"
+	"sync/atomic"
+	"time"
 
 	taskqueuepb "go.temporal.io/api/taskqueue/v1"
 	"go.temporal.io/server/chasm"
 	fcpb "go.temporal.io/server/chasm/lib/flowcontrol/gen/flowcontrolpb/v1"
+	"go.temporal.io/server/common/clock"
 	"go.temporal.io/server/common/log"
+	"go.temporal.io/server/common/stream_batcher"
 )
 
 type concurrencyHandler struct {
 	fcpb.UnimplementedConcurrencyServiceServer
 
-	logger log.Logger
+	logger   log.Logger
+	batchers sync.Map
 }
+
+type concurrencyBatchItem struct {
+	ctx context.Context
+	req *fcpb.ConcurrencyBatchRequest
+	res atomic.Pointer[fcpb.ConcurrencyBatchResponse]
+}
+
+type concurrencyBatcher = stream_batcher.Batcher[*concurrencyBatchItem, error]
 
 func newConcurrencyHandler(
 	logger log.Logger,
@@ -23,71 +37,89 @@ func newConcurrencyHandler(
 	}
 }
 
-func concurrencyInit(_ chasm.MutableContext, req *fcpb.ConcurrencyBatchRequest) (*concurrency, error) {
-	// For now (whole-queue limits), we should always have an initial config here. For
-	// per-task limits, this may be missing and set via api later.
-	config := req.GetConfigUpdate()
-	if config == nil {
-		config = &taskqueuepb.ConcurrencyLimit{ConcurrentTasks: initialConcurrencyLimit}
-	}
-	return &concurrency{
+func concurrencyInit(_ chasm.MutableContext, items []concurrencyBatchItem) (*concurrency, error) {
+	// For now (whole-queue limits), we should always have an initial config here.
+	// For per-task limits, this may be missing and set via api later.
+	c := &concurrency{
 		ConcurrencyState: &fcpb.ConcurrencyState{
-			Config:        config,
-			ConfigVersion: req.GetConfigUpdateVersion(),
+			Config: &taskqueuepb.ConcurrencyLimit{
+				ConcurrentTasks: initialConcurrencyLimit,
+			},
 		},
-	}, nil
+	}
+	for _, it := range items {
+		c.updateConfig(it.req.GetConfigUpdate(), it.req.GetConfigUpdateVersion())
+	}
+	return c, nil
 }
 
-func concurrencyUpdate(c *concurrency, cctx chasm.MutableContext, req *fcpb.ConcurrencyBatchRequest) (*fcpb.ConcurrencyBatchResponse, error) {
+func concurrencyUpdate(c *concurrency, cctx chasm.MutableContext, items []concurrencyBatchItem) ([]*fcpb.ConcurrencyBatchResponse, error) {
 	now := cctx.Now(c)
+
+	// allocate new protos for responses
+	ress := make([]*fcpb.ConcurrencyBatchResponse, len(items))
+	for i := range ress {
+		ress[i] = &fcpb.ConcurrencyBatchResponse{}
+	}
 
 	// expire old reservations
 	c.expire(now)
 
 	// update config
-	c.updateConfig(req.GetConfigUpdate(), req.GetConfigUpdateVersion())
+	for _, it := range items {
+		c.updateConfig(it.req.GetConfigUpdate(), it.req.GetConfigUpdateVersion())
+	}
 
-	var res fcpb.ConcurrencyBatchResponse
-
-	// apply releases (shouldn't be combined with anything but releases)
-	for _, slotId := range req.GetReleaseSlots() {
-		// FIXME: add tasks to control slow release of notifications
-		c.release(slotId)
+	// apply releases
+	for _, it := range items {
+		for _, slotId := range it.req.GetReleaseSlots() {
+			// FIXME: add tasks to control slow release of notifications
+			c.release(slotId)
+		}
 	}
 
 	// apply commits
-	for _, slotId := range req.GetCommitSlots() {
-		success := c.commit(slotId)
-		res.CommitSuccess = append(res.CommitSuccess, success)
+	for i, it := range items {
+		for _, slotId := range it.req.GetCommitSlots() {
+			success := c.commit(slotId)
+			ress[i].CommitSuccess = append(ress[i].CommitSuccess, success)
+		}
 	}
 
 	// apply cancels
-	for _, slotId := range req.GetCancelReservationSlots() {
-		c.cancelReservation(slotId)
+	for _, it := range items {
+		for _, slotId := range it.req.GetCancelReservationSlots() {
+			c.cancelReservation(slotId)
+		}
 	}
 
 	// apply reserves
-	for _, slotId := range req.GetReserveSlots() {
-		success := c.reserve(slotId, now)
-		res.ReserveSuccess = append(res.ReserveSuccess, success)
+	for i, it := range items {
+		for _, slotId := range it.req.GetReserveSlots() {
+			success := c.reserve(slotId, now)
+			ress[i].ReserveSuccess = append(ress[i].ReserveSuccess, success)
+		}
 	}
 
 	// capture Generation after c.reserve, which may increment it
-	res.Generation = c.Generation
+	for i := range items {
+		ress[i].Generation = c.Generation
+	}
 
-	return &res, nil
+	return ress, nil
 }
 
-func (h *concurrencyHandler) Batch(ctx context.Context, req *fcpb.ConcurrencyBatchRequest) (retRes *fcpb.ConcurrencyBatchResponse, retErr error) {
-	defer log.CapturePanic(h.logger, &retErr)
+func (h *concurrencyHandler) applyBatch(items []*concurrencyBatchItem) error {
+	needStart := false
+	canSpeculate := true
 
-	// FIXME: add server-side batching
+	for _, it := range items {
+		// only Reserve needs UpdateWithStart, other calls can assume it exists
+		needStart = needStart || len(it.req.GetReserveSlots()) > 0
 
-	// only Reserve should be called on a brand new object, other calls can assume it exists
-	needStart := len(req.GetReserveSlots()) > 0
-
-	// Commit and Release must be durable, Reserve and cancel may be speculative
-	canSpeculate := len(req.GetCommitSlots()) == 0 && len(req.GetReleaseSlots()) == 0
+		// Commit and Release must be durable, Reserve and cancel may be speculative
+		canSpeculate = canSpeculate && len(it.req.GetCommitSlots()) == 0 && len(it.req.GetReleaseSlots()) == 0
+	}
 
 	opts := make([]chasm.TransitionOption, 0, 2)
 	if canSpeculate {
@@ -99,31 +131,73 @@ func (h *concurrencyHandler) Batch(ctx context.Context, req *fcpb.ConcurrencyBat
 			chasm.BusinessIDReusePolicyAllowDuplicate,
 			chasm.BusinessIDConflictPolicyUseExisting,
 		))
-		res, err := chasm.UpdateWithStartExecution(
-			ctx,
+		updateRes, err := chasm.UpdateWithStartExecution(
+			items[0].ctx,
 			chasm.ExecutionKey{
-				NamespaceID: req.NamespaceId,
-				BusinessID:  req.Key,
+				NamespaceID: items[0].req.NamespaceId,
+				BusinessID:  items[0].req.Key,
 			},
 			concurrencyInit,
 			concurrencyUpdate,
-			req,
+			items,
 			opts...,
 		)
-		return res.UpdateOutput, err
+		if err != nil {
+			return err
+		}
+		for i, res := range updateRes.UpdateOutput {
+			items[i].res.Store(res)
+		}
+		return nil
 	}
 
-	res, _, err := chasm.UpdateComponent(
-		ctx,
+	ress, _, err := chasm.UpdateComponent(
+		items[0].ctx,
 		chasm.NewComponentRef[*concurrency](chasm.ExecutionKey{
-			NamespaceID: req.NamespaceId,
-			BusinessID:  req.Key,
+			NamespaceID: items[0].req.NamespaceId,
+			BusinessID:  items[0].req.Key,
 		}),
 		concurrencyUpdate,
-		req,
+		items,
 		opts...,
 	)
-	return res, err
+	if err != nil {
+		return err
+	}
+	for i, res := range ress {
+		items[i].res.Store(res)
+	}
+	return nil
+}
+
+func (h *concurrencyHandler) getBatcher(req *fcpb.ConcurrencyBatchRequest) *concurrencyBatcher {
+	// TODO(fc): these should be cleaned up eventually. we can just clear the whole map every
+	// hour or something like that. chasm synchronizes operations anyway so "forgetting"
+	// batchers is safe.
+	key := req.NamespaceId + req.Key
+	if v, ok := h.batchers.Load(key); ok {
+		return v.(*concurrencyBatcher) // nolint:revive
+	}
+	opts := stream_batcher.BatcherOptions{
+		MaxItems: 100,
+		MinDelay: 5 * time.Millisecond,
+		MaxDelay: 10 * time.Millisecond,
+		IdleTime: time.Minute,
+	}
+	newBatcher := stream_batcher.NewBatcher(h.applyBatch, opts, clock.NewRealTimeSource())
+	v, _ := h.batchers.LoadOrStore(key, newBatcher)
+	return v.(*concurrencyBatcher) // nolint:revive
+}
+
+func (h *concurrencyHandler) Batch(ctx context.Context, req *fcpb.ConcurrencyBatchRequest) (retRes *fcpb.ConcurrencyBatchResponse, retErr error) {
+	defer log.CapturePanic(h.logger, &retErr)
+
+	item := concurrencyBatchItem{ctx: ctx, req: req}
+	_, err := h.getBatcher(req).Add(ctx, &item)
+	if err != nil {
+		return nil, err
+	}
+	return item.res.Load(), nil
 }
 
 func (h *concurrencyHandler) Wait(ctx context.Context, req *fcpb.ConcurrencyWaitRequest) (retRes *fcpb.ConcurrencyWaitResponse, retErr error) {
