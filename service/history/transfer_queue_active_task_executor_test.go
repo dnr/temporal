@@ -77,7 +77,7 @@ import (
 type (
 	testConcurrencyServiceClient struct {
 		fcpb.ConcurrencyServiceClient
-		release func(context.Context, *fcpb.ConcurrencyReleaseRequest, ...grpc.CallOption) (*fcpb.ConcurrencyReleaseResponse, error)
+		batch func(context.Context, *fcpb.ConcurrencyBatchRequest, ...grpc.CallOption) (*fcpb.ConcurrencyBatchResponse, error)
 	}
 
 	transferQueueActiveTaskExecutorSuite struct {
@@ -119,12 +119,12 @@ type (
 	}
 )
 
-func (c *testConcurrencyServiceClient) Release(
+func (c *testConcurrencyServiceClient) Batch(
 	ctx context.Context,
-	request *fcpb.ConcurrencyReleaseRequest,
+	request *fcpb.ConcurrencyBatchRequest,
 	opts ...grpc.CallOption,
-) (*fcpb.ConcurrencyReleaseResponse, error) {
-	return c.release(ctx, request, opts...)
+) (*fcpb.ConcurrencyBatchResponse, error) {
+	return c.batch(ctx, request, opts...)
 }
 
 var defaultWorkflowTaskCompletionLimits = historyi.WorkflowTaskCompletionLimits{MaxResetPoints: primitives.DefaultHistoryMaxAutoResetPoints, MaxSearchAttributeValueSize: 2048}
@@ -262,15 +262,15 @@ func (s *transferQueueActiveTaskExecutorSuite) TearDownTest() {
 }
 
 func (s *transferQueueActiveTaskExecutorSuite) TestProcessReleaseLimiterTask_Success() {
-	var requests []*fcpb.ConcurrencyReleaseRequest
+	var requests []*fcpb.ConcurrencyBatchRequest
 	s.transferQueueActiveTaskExecutor.concurrencyServiceClient = &testConcurrencyServiceClient{
-		release: func(
+		batch: func(
 			_ context.Context,
-			request *fcpb.ConcurrencyReleaseRequest,
+			request *fcpb.ConcurrencyBatchRequest,
 			_ ...grpc.CallOption,
-		) (*fcpb.ConcurrencyReleaseResponse, error) {
+		) (*fcpb.ConcurrencyBatchResponse, error) {
 			requests = append(requests, request)
-			return &fcpb.ConcurrencyReleaseResponse{}, nil
+			return &fcpb.ConcurrencyBatchResponse{}, nil
 		},
 	}
 	task := &tasks.ReleaseLimiterTask{
@@ -295,28 +295,28 @@ func (s *transferQueueActiveTaskExecutorSuite) TestProcessReleaseLimiterTask_Suc
 	s.Require().NoError(response.ExecutionErr)
 	s.Require().Len(requests, len(task.Limiters))
 	for i, limiter := range task.Limiters {
-		protorequire.ProtoEqual(s.T(), &fcpb.ConcurrencyReleaseRequest{
-			NamespaceId: task.NamespaceID,
-			Key:         limiter.GetKey(),
-			SlotId:      limiter.GetSlotId(),
+		protorequire.ProtoEqual(s.T(), &fcpb.ConcurrencyBatchRequest{
+			NamespaceId:  task.NamespaceID,
+			Key:          limiter.GetKey(),
+			ReleaseSlots: []string{limiter.GetSlotId()},
 		}, requests[i])
 	}
 }
 
 func (s *transferQueueActiveTaskExecutorSuite) TestProcessReleaseLimiterTask_AttemptsAllReleasesOnError() {
 	releaseErr := serviceerror.NewUnavailable("release failed")
-	var requests []*fcpb.ConcurrencyReleaseRequest
+	var requests []*fcpb.ConcurrencyBatchRequest
 	s.transferQueueActiveTaskExecutor.concurrencyServiceClient = &testConcurrencyServiceClient{
-		release: func(
+		batch: func(
 			_ context.Context,
-			request *fcpb.ConcurrencyReleaseRequest,
+			request *fcpb.ConcurrencyBatchRequest,
 			_ ...grpc.CallOption,
-		) (*fcpb.ConcurrencyReleaseResponse, error) {
+		) (*fcpb.ConcurrencyBatchResponse, error) {
 			requests = append(requests, request)
 			if request.GetKey() == "limiter-2" {
 				return nil, releaseErr
 			}
-			return &fcpb.ConcurrencyReleaseResponse{}, nil
+			return &fcpb.ConcurrencyBatchResponse{}, nil
 		},
 	}
 	task := &tasks.ReleaseLimiterTask{

@@ -27,31 +27,31 @@ import (
 
 type testConcurrencyServiceClient struct {
 	fcpb.ConcurrencyServiceClient
-	release func(context.Context, *fcpb.ConcurrencyReleaseRequest, ...grpc.CallOption) (*fcpb.ConcurrencyReleaseResponse, error)
+	batch func(context.Context, *fcpb.ConcurrencyBatchRequest, ...grpc.CallOption) (*fcpb.ConcurrencyBatchResponse, error)
 }
 
-func (c *testConcurrencyServiceClient) Release(
+func (c *testConcurrencyServiceClient) Batch(
 	ctx context.Context,
-	request *fcpb.ConcurrencyReleaseRequest,
+	request *fcpb.ConcurrencyBatchRequest,
 	opts ...grpc.CallOption,
-) (*fcpb.ConcurrencyReleaseResponse, error) {
-	return c.release(ctx, request, opts...)
+) (*fcpb.ConcurrencyBatchResponse, error) {
+	return c.batch(ctx, request, opts...)
 }
 
 func TestReleaseLimiterTaskExecute(t *testing.T) {
 	releaseErr := errors.New("release failed")
-	var requests []*fcpb.ConcurrencyReleaseRequest
+	var requests []*fcpb.ConcurrencyBatchRequest
 	handler := newReleaseLimiterTaskHandler(&testConcurrencyServiceClient{
-		release: func(
+		batch: func(
 			_ context.Context,
-			request *fcpb.ConcurrencyReleaseRequest,
+			request *fcpb.ConcurrencyBatchRequest,
 			_ ...grpc.CallOption,
-		) (*fcpb.ConcurrencyReleaseResponse, error) {
+		) (*fcpb.ConcurrencyBatchResponse, error) {
 			requests = append(requests, request)
-			if request.GetSlotId() == "bad-slot" {
+			if request.GetReleaseSlots()[0] == "bad-slot" {
 				return nil, releaseErr
 			}
-			return &fcpb.ConcurrencyReleaseResponse{}, nil
+			return &fcpb.ConcurrencyBatchResponse{}, nil
 		},
 	})
 	task := &activitypb.ReleaseLimiterTask{Limiters: []*taskqueuespb.LimiterRef{
@@ -65,9 +65,9 @@ func TestReleaseLimiterTaskExecute(t *testing.T) {
 	}}, chasm.TaskAttributes{}, task)
 
 	require.ErrorIs(t, err, releaseErr)
-	require.Equal(t, []*fcpb.ConcurrencyReleaseRequest{
-		{NamespaceId: "namespace-id", Key: "first-key", SlotId: "bad-slot"},
-		{NamespaceId: "namespace-id", Key: "second-key", SlotId: "good-slot"},
+	require.Equal(t, []*fcpb.ConcurrencyBatchRequest{
+		{NamespaceId: "namespace-id", Key: "first-key", ReleaseSlots: []string{"bad-slot"}},
+		{NamespaceId: "namespace-id", Key: "second-key", ReleaseSlots: []string{"good-slot"}},
 	}, requests)
 }
 

@@ -17,21 +17,21 @@ func TestConcurrencySlotLifecycle(t *testing.T) {
 		},
 	}
 
-	require.Equal(t, int32(1), limiter.reserve("slot-1", now))
-	require.Equal(t, int32(1), limiter.reserve("slot-1", now))
+	require.True(t, limiter.reserve("slot-1", now))
+	require.True(t, limiter.reserve("slot-1", now))
 	require.Len(t, limiter.Slots, 1)
-	require.Equal(t, int32(0), limiter.reserve("slot-2", now))
-	require.Error(t, limiter.commit("slot-2", now))
+	require.False(t, limiter.reserve("slot-2", now))
+	require.False(t, limiter.commit("slot-2"))
 
-	require.NoError(t, limiter.commit("slot-1", now))
-	limiter.cancelReservation("slot-1", now)
+	require.True(t, limiter.commit("slot-1"))
+	limiter.cancelReservation("slot-1")
 	require.Len(t, limiter.Slots, 1)
 
-	limiter.release("slot-2", now)
+	limiter.release("slot-2")
 	require.Len(t, limiter.Slots, 1)
-	limiter.release("slot-1", now)
+	limiter.release("slot-1")
 	require.Empty(t, limiter.Slots)
-	limiter.release("slot-1", now)
+	limiter.release("slot-1")
 	require.Empty(t, limiter.Slots)
 }
 
@@ -43,8 +43,9 @@ func TestConcurrencyExpiredSlotIDCanBeReplaced(t *testing.T) {
 		},
 	}
 
-	require.Equal(t, int32(1), limiter.reserve("expired-slot", now))
-	require.Equal(t, int32(1), limiter.reserve("new-slot", now.Add(reserveTimeout+time.Second)))
+	require.True(t, limiter.reserve("expired-slot", now))
+	limiter.expire(now.Add(reserveTimeout + time.Second))
+	require.True(t, limiter.reserve("new-slot", now.Add(reserveTimeout+time.Second)))
 	require.Len(t, limiter.Slots, 1)
 	require.Equal(t, "new-slot", limiter.Slots[0].GetSlotId())
 }
