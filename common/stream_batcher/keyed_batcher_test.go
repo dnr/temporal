@@ -29,7 +29,7 @@ func TestKeyedBatcherClearsBatchers(t *testing.T) {
 	)
 	first := batcher.get("a")
 
-	timeSource.Advance(time.Hour)
+	timeSource.Advance(2 * time.Hour)
 	batcher.maybeClear()
 
 	require.NotSame(t, first, batcher.get("a"))

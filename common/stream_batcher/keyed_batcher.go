@@ -6,6 +6,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"go.temporal.io/server/common/backoff"
 	"go.temporal.io/server/common/clock"
 )
 
@@ -17,8 +18,8 @@ type KeyedBatcher[K comparable, T, R any] struct {
 	newBatcher    func(K) *Batcher[T, R]
 	timeSource    clock.TimeSource
 	clearInterval time.Duration
-	lastClear     atomic.Int64
-	batchers      sync.Map // K -> *Batcher[T, R]
+	nextClear     atomic.Int64 // unix nano
+	batchers      sync.Map     // K -> *Batcher[T, R]
 }
 
 // NewKeyedBatcher creates a KeyedBatcher whose processing function returns one result shared by
@@ -63,7 +64,11 @@ func newKeyedBatcher[K comparable, T, R any](
 		timeSource:    timeSource,
 		clearInterval: clearInterval,
 	}
-	b.lastClear.Store(timeSource.Now().UnixNano())
+	if clearInterval > 0 {
+		now := b.timeSource.Now().UnixNano()
+		newNextClear := now + int64(backoff.Jitter(b.clearInterval, 0.2))
+		b.nextClear.Store(newNextClear)
+	}
 	return b
 }
 
@@ -86,13 +91,13 @@ func (b *KeyedBatcher[K, T, R]) maybeClear() {
 	if b.clearInterval <= 0 {
 		return
 	}
-
-	now := b.timeSource.Now()
-	lastClear := b.lastClear.Load()
-	if now.Sub(time.Unix(0, lastClear)) < b.clearInterval {
+	now := b.timeSource.Now().UnixNano()
+	nextClear := b.nextClear.Load()
+	if now < nextClear {
 		return
 	}
-	if b.lastClear.CompareAndSwap(lastClear, now.UnixNano()) {
+	newNextClear := now + int64(backoff.Jitter(b.clearInterval, 0.2))
+	if b.nextClear.CompareAndSwap(nextClear, newNextClear) {
 		b.batchers.Clear()
 	}
 }
