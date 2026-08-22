@@ -203,7 +203,6 @@ func (t *transferQueueActiveTaskExecutor) processReleaseLimiterTask(
 	for _, limiter := range task.Limiters {
 		switch limiter.GetLimiterType() {
 		case enumsspb.LIMITER_TYPE_CONCURRENCY:
-			// TODO(fc): do some client-side batching
 			_, err := t.concurrencyServiceClient.Batch(ctx, &fcpb.ConcurrencyBatchRequest{
 				NamespaceId:  task.NamespaceID,
 				Key:          limiter.GetKey(),

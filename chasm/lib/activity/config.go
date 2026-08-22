@@ -66,7 +66,7 @@ type Config struct {
 	MaxUserMetadataSummarySize                dynamicconfig.IntPropertyFnWithNamespaceFilter
 	StartDelayEnabled                         dynamicconfig.BoolPropertyFnWithNamespaceFilter
 	VisibilityMaxPageSize                     dynamicconfig.IntPropertyFnWithNamespaceFilter
-	FlowControlClientBatcherOptions           stream_batcher.BatcherOptions
+	FlowControlClientBatcherOptions           dynamicconfig.TypedPropertyFn[stream_batcher.BatcherOptions]
 }
 
 func ConfigProvider(dc *dynamicconfig.Collection) *Config {
@@ -87,7 +87,7 @@ func ConfigProvider(dc *dynamicconfig.Collection) *Config {
 		MaxUserMetadataDetailsSize:                dynamicconfig.MaxUserMetadataDetailsSize.Get(dc),
 		MaxUserMetadataSummarySize:                dynamicconfig.MaxUserMetadataSummarySize.Get(dc),
 		VisibilityMaxPageSize:                     dynamicconfig.FrontendVisibilityMaxPageSize.Get(dc),
-		FlowControlClientBatcherOptions:           concurrency.ActivityClientBatcherOptions.Get(dc)(),
+		FlowControlClientBatcherOptions:           concurrency.HistoryClientBatcherOptions.Get(dc),
 	}
 }
 

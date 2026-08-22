@@ -54,7 +54,7 @@ func NewTransferQueueFactory(
 		transferQueueFactoryParams: params,
 		concurrencyBatchingClient: concurrency.NewBatchingClient(
 			params.ConcurrencyServiceClient,
-			params.Config.FlowControlClientBatcherOptions,
+			params.Config.FlowControlClientBatcherOptions(),
 			params.TimeSource,
 		),
 		QueueFactoryBase: QueueFactoryBase{

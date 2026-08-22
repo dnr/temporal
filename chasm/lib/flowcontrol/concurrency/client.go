@@ -51,14 +51,14 @@ func (c *BatchingClient) Batch(
 	if len(opts) > 0 {
 		return c.ConcurrencyServiceClient.Batch(ctx, req, opts...)
 	}
-	result, err := c.batchers.Add(ctx, clientBatchKey{
+	res, err := c.batchers.Add(ctx, clientBatchKey{
 		namespaceID: req.GetNamespaceId(),
 		key:         req.GetKey(),
 	}, clientBatchItem{ctx: ctx, req: req})
 	if err != nil {
 		return nil, err
 	}
-	return result.res, result.err
+	return res.res, res.err
 }
 
 func (c *BatchingClient) applyBatch(key clientBatchKey, items []clientBatchItem) []clientBatchResult {
@@ -111,11 +111,11 @@ func (c *BatchingClient) applyBatch(key clientBatchKey, items []clientBatchItem)
 		}
 	}
 	res, err := c.ConcurrencyServiceClient.Batch(ctx, req)
+	if err == nil && (res == nil || len(res.ReserveSuccess) != reserveCount || len(res.CommitSuccess) != commitCount) {
+		err = serviceerror.NewInternal("invalid concurrency batch response")
+	}
 	if err != nil {
 		return clientBatchResults(len(items), nil, err)
-	}
-	if res == nil || len(res.GetReserveSuccess()) != reserveCount || len(res.GetCommitSuccess()) != commitCount {
-		return clientBatchResults(len(items), nil, serviceerror.NewInternal("invalid concurrency batch response"))
 	}
 
 	results := make([]clientBatchResult, len(items))
@@ -127,7 +127,7 @@ func (c *BatchingClient) applyBatch(key clientBatchKey, items []clientBatchItem)
 		results[i].res = &fcpb.ConcurrencyBatchResponse{
 			ReserveSuccess: slices.Clone(res.ReserveSuccess[reserveOffset : reserveOffset+itemReserveCount]),
 			CommitSuccess:  slices.Clone(res.CommitSuccess[commitOffset : commitOffset+itemCommitCount]),
-			Generation:     res.GetGeneration(),
+			Generation:     res.Generation,
 		}
 		reserveOffset += itemReserveCount
 		commitOffset += itemCommitCount

@@ -54,10 +54,10 @@ func TestReleaseLimiterTaskExecute(t *testing.T) {
 			}
 			return &fcpb.ConcurrencyBatchResponse{}, nil
 		},
-	}, &Config{FlowControlClientBatcherOptions: stream_batcher.BatcherOptions{
+	}, &Config{FlowControlClientBatcherOptions: dynamicconfig.GetTypedPropertyFn(stream_batcher.BatcherOptions{
 		MaxItems: 1,
 		IdleTime: time.Minute,
-	}})
+	})})
 	task := &activitypb.ReleaseLimiterTask{Limiters: []*taskqueuespb.LimiterRef{
 		{LimiterType: enumsspb.LIMITER_TYPE_CONCURRENCY, Key: "first-key", SlotId: "bad-slot"},
 		{LimiterType: enumsspb.LIMITER_TYPE_UNSPECIFIED, Key: "ignored-key", SlotId: "ignored-slot"},

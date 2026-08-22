@@ -64,17 +64,13 @@ func newKeyedBatcher[K comparable, T, R any](
 		timeSource:    timeSource,
 		clearInterval: clearInterval,
 	}
-	if clearInterval > 0 {
-		now := b.timeSource.Now().UnixNano()
-		newNextClear := now + int64(backoff.Jitter(b.clearInterval, 0.2))
-		b.nextClear.Store(newNextClear)
-	}
+	b.maybeClear(true)
 	return b
 }
 
 // Add adds an item to the stream identified by key.
 func (b *KeyedBatcher[K, T, R]) Add(ctx context.Context, key K, item T) (R, error) {
-	b.maybeClear()
+	b.maybeClear(false)
 	return b.get(key).Add(ctx, item)
 }
 
@@ -87,13 +83,13 @@ func (b *KeyedBatcher[K, T, R]) get(key K) *Batcher[T, R] {
 	return value.(*Batcher[T, R]) // nolint:revive
 }
 
-func (b *KeyedBatcher[K, T, R]) maybeClear() {
+func (b *KeyedBatcher[K, T, R]) maybeClear(force bool) {
 	if b.clearInterval <= 0 {
 		return
 	}
 	now := b.timeSource.Now().UnixNano()
 	nextClear := b.nextClear.Load()
-	if now < nextClear {
+	if now < nextClear && !force {
 		return
 	}
 	newNextClear := now + int64(backoff.Jitter(b.clearInterval, 0.2))

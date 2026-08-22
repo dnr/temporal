@@ -40,7 +40,7 @@ type (
 		MaxTaskQueuesInDeployment            dynamicconfig.IntPropertyFnWithNamespaceFilter
 		MaxVersionsInTaskQueue               dynamicconfig.IntPropertyFnWithNamespaceFilter
 		MaxIDLengthLimit                     dynamicconfig.IntPropertyFn
-		FlowControlClientBatcherOptions      stream_batcher.BatcherOptions
+		FlowControlClientBatcherOptions      dynamicconfig.TypedPropertyFn[stream_batcher.BatcherOptions]
 
 		// task queue configuration
 
@@ -364,7 +364,7 @@ func NewConfig(
 		FairnessKeyRateLimitCacheSize:            dynamicconfig.MatchingFairnessKeyRateLimitCacheSize.Get(dc),
 		MaxFairnessKeyWeightOverrides:            dynamicconfig.MatchingMaxFairnessKeyWeightOverrides.Get(dc),
 		MaxIDLengthLimit:                         dynamicconfig.MaxIDLengthLimit.Get(dc),
-		FlowControlClientBatcherOptions:          concurrency.MatchingClientBatcherOptions.Get(dc)(),
+		FlowControlClientBatcherOptions:          concurrency.MatchingClientBatcherOptions.Get(dc),
 
 		AdminNamespaceToPartitionDispatchRate:          dynamicconfig.AdminMatchingNamespaceToPartitionDispatchRate.Get(dc),
 		AdminNamespaceToPartitionRateSub:               dynamicconfig.AdminMatchingNamespaceToPartitionDispatchRate.Subscribe(dc),

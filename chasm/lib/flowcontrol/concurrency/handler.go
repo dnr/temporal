@@ -43,7 +43,7 @@ func NewHandler(
 	}
 	h.batchers = stream_batcher.NewKeyedBatcherWithPerItemResults(
 		h.applyBatch,
-		serverBatcherOptions(dc),
+		ServerBatcherOptions.Get(dc)(),
 		clock.NewRealTimeSource(),
 	)
 	return h

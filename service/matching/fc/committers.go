@@ -31,7 +31,6 @@ type concurrencyCommitter struct {
 	nsID   namespace.ID
 	slotID string
 	lim    limiter
-	// TODO(fc): we could maybe have this component do some opportunistic batching
 }
 
 func newConcurrencyCommitter(
@@ -56,7 +55,6 @@ func (c *concurrencyCommitter) reserve() error {
 	// if config is missing or wrong type, just leave it out
 	configUpdate, _ := c.lim.config.(*taskqueuepb.ConcurrencyLimit)
 
-	// FIXME: batch
 	res, err := c.client.Batch(c.ctx, &fcpb.ConcurrencyBatchRequest{
 		NamespaceId:         c.nsID.String(),
 		Key:                 c.lim.key,

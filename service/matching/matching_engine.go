@@ -337,7 +337,7 @@ func NewEngine(
 		partitionScalerFactory:    partitionScalerFactory,
 		fcReadiness: fc.NewReadiness(concurrency.NewBatchingClient(
 			concurrencyServiceClient,
-			config.FlowControlClientBatcherOptions,
+			config.FlowControlClientBatcherOptions(),
 			clock.NewRealTimeSource(),
 		)),
 	}

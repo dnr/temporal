@@ -26,11 +26,13 @@ func newReleaseLimiterTaskHandler(
 	concurrencyServiceClient fcpb.ConcurrencyServiceClient,
 	config *Config,
 ) *releaseLimiterTaskHandler {
-	return &releaseLimiterTaskHandler{concurrencyServiceClient: concurrency.NewBatchingClient(
-		concurrencyServiceClient,
-		config.FlowControlClientBatcherOptions,
-		clock.NewRealTimeSource(),
-	)}
+	return &releaseLimiterTaskHandler{
+		concurrencyServiceClient: concurrency.NewBatchingClient(
+			concurrencyServiceClient,
+			config.FlowControlClientBatcherOptions(),
+			clock.NewRealTimeSource(),
+		),
+	}
 }
 
 func (h *releaseLimiterTaskHandler) Validate(
@@ -52,7 +54,6 @@ func (h *releaseLimiterTaskHandler) Execute(
 	for _, limiter := range task.GetLimiters() {
 		switch limiter.GetLimiterType() {
 		case enumsspb.LIMITER_TYPE_CONCURRENCY:
-			// TODO(fc): do some client-side batching
 			_, err := h.concurrencyServiceClient.Batch(ctx, &fcpb.ConcurrencyBatchRequest{
 				NamespaceId:  activityRef.NamespaceID,
 				Key:          limiter.GetKey(),

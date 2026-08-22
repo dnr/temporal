@@ -26,7 +26,6 @@ type Config struct {
 	NamespaceRPS                                dynamicconfig.IntPropertyFnWithNamespaceFilter
 	OperatorRPSRatio                            dynamicconfig.FloatPropertyFn
 	MaxIDLengthLimit                            dynamicconfig.IntPropertyFn
-	FlowControlClientBatcherOptions             stream_batcher.BatcherOptions
 	PersistenceMaxQPS                           dynamicconfig.IntPropertyFn
 	PersistenceGlobalMaxQPS                     dynamicconfig.IntPropertyFn
 	PersistenceNamespaceMaxQPS                  dynamicconfig.IntPropertyFnWithNamespaceFilter
@@ -180,6 +179,7 @@ type Config struct {
 	TransferProcessorPollBackoffInterval                dynamicconfig.DurationPropertyFn
 	TransferProcessorEnsureCloseBeforeDelete            dynamicconfig.BoolPropertyFn
 	TransferQueueMaxReaderCount                         dynamicconfig.IntPropertyFn
+	FlowControlClientBatcherOptions                     dynamicconfig.TypedPropertyFn[stream_batcher.BatcherOptions]
 
 	// OutboundQueueProcessor settings
 	OutboundTaskBatchSize                               dynamicconfig.IntPropertyFn
@@ -477,7 +477,6 @@ func NewConfig(
 		NamespaceRPS:                         dynamicconfig.HistoryNamespaceRPS.Get(dc),
 		OperatorRPSRatio:                     dynamicconfig.OperatorRPSRatio.Get(dc),
 		MaxIDLengthLimit:                     dynamicconfig.MaxIDLengthLimit.Get(dc),
-		FlowControlClientBatcherOptions:      concurrency.HistoryClientBatcherOptions.Get(dc)(),
 		PersistenceMaxQPS:                    dynamicconfig.HistoryPersistenceMaxQPS.Get(dc),
 		PersistenceGlobalMaxQPS:              dynamicconfig.HistoryPersistenceGlobalMaxQPS.Get(dc),
 		PersistenceNamespaceMaxQPS:           dynamicconfig.HistoryPersistenceNamespaceMaxQPS.Get(dc),
@@ -597,7 +596,7 @@ func NewConfig(
 		TimerProcessorMaxPollIntervalJitterCoefficient:   dynamicconfig.TimerProcessorMaxPollIntervalJitterCoefficient.Get(dc),
 		TimerProcessorPollBackoffInterval:                dynamicconfig.TimerProcessorPollBackoffInterval.Get(dc),
 		TimerProcessorMaxTimeShift:                       dynamicconfig.TimerProcessorMaxTimeShift.Get(dc),
-		TransferQueueMaxReaderCount:                      dynamicconfig.TransferQueueMaxReaderCount.Get(dc),
+		TimerQueueMaxReaderCount:                         dynamicconfig.TimerQueueMaxReaderCount.Get(dc),
 		RetentionTimerJitterDuration:                     dynamicconfig.RetentionTimerJitterDuration.Get(dc),
 
 		MemoryTimerProcessorSchedulerWorkerCount: dynamicconfig.MemoryTimerProcessorSchedulerWorkerCount.Subscribe(dc),
@@ -614,7 +613,8 @@ func NewConfig(
 		TransferProcessorUpdateAckIntervalJitterCoefficient: dynamicconfig.TransferProcessorUpdateAckIntervalJitterCoefficient.Get(dc),
 		TransferProcessorPollBackoffInterval:                dynamicconfig.TransferProcessorPollBackoffInterval.Get(dc),
 		TransferProcessorEnsureCloseBeforeDelete:            dynamicconfig.TransferProcessorEnsureCloseBeforeDelete.Get(dc),
-		TimerQueueMaxReaderCount:                            dynamicconfig.TimerQueueMaxReaderCount.Get(dc),
+		TransferQueueMaxReaderCount:                         dynamicconfig.TransferQueueMaxReaderCount.Get(dc),
+		FlowControlClientBatcherOptions:                     concurrency.HistoryClientBatcherOptions.Get(dc),
 
 		OutboundTaskBatchSize:                               dynamicconfig.OutboundTaskBatchSize.Get(dc),
 		OutboundProcessorMaxPollRPS:                         dynamicconfig.OutboundProcessorMaxPollRPS.Get(dc),
