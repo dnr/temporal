@@ -7,39 +7,28 @@ import (
 	"go.temporal.io/server/common/stream_batcher"
 )
 
-var defaultClientBatcherOptions = stream_batcher.BatcherOptions{
-	MaxItems:      100,
-	MinDelay:      5 * time.Millisecond,
-	MaxDelay:      20 * time.Millisecond,
-	IdleTime:      time.Minute,
-	ClearInterval: time.Hour,
-}
+var (
+	defaultServerBatcherOptions = stream_batcher.BatcherOptions{
+		MaxItems:      100,
+		MinDelay:      5 * time.Millisecond,
+		MaxDelay:      10 * time.Millisecond,
+		IdleTime:      time.Minute,
+		ClearInterval: time.Hour,
+	}
+	defaultClientBatcherOptions = stream_batcher.BatcherOptions{
+		MaxItems:      100,
+		MinDelay:      5 * time.Millisecond,
+		MaxDelay:      20 * time.Millisecond,
+		IdleTime:      time.Minute,
+		ClearInterval: time.Hour,
+	}
+)
 
 var (
-	ServerBatcherMaxItems = dynamicconfig.NewGlobalIntSetting(
-		"flowcontrol.concurrency.serverBatcher.maxItems",
-		100,
-		`Maximum number of concurrency limiter requests combined in one server-side batch.`,
-	)
-	ServerBatcherMinDelay = dynamicconfig.NewGlobalDurationSetting(
-		"flowcontrol.concurrency.serverBatcher.minDelay",
-		5*time.Millisecond,
-		`Minimum quiet period before a server-side concurrency limiter batch is processed.`,
-	)
-	ServerBatcherMaxDelay = dynamicconfig.NewGlobalDurationSetting(
-		"flowcontrol.concurrency.serverBatcher.maxDelay",
-		10*time.Millisecond,
-		`Maximum time the first request waits for a server-side concurrency limiter batch to fill.`,
-	)
-	ServerBatcherIdleTime = dynamicconfig.NewGlobalDurationSetting(
-		"flowcontrol.concurrency.serverBatcher.idleTime",
-		time.Minute,
-		`How long an idle server-side concurrency limiter batcher goroutine is retained.`,
-	)
-	ServerBatcherClearInterval = dynamicconfig.NewGlobalDurationSetting(
-		"flowcontrol.concurrency.serverBatcher.clearInterval",
-		time.Hour,
-		`How often cached server-side concurrency limiter batchers are cleared.`,
+	ServerBatcherOptions = dynamicconfig.NewGlobalTypedSetting(
+		"flowcontrol.concurrency.serverBatcher",
+		defaultServerBatcherOptions,
+		`Batching options for concurrency limiter requests received by the server. Fields: MaxItems, MinDelay, MaxDelay, IdleTime, and ClearInterval.`,
 	)
 
 	MatchingClientBatcherOptions = dynamicconfig.NewGlobalTypedSetting(
@@ -60,11 +49,5 @@ var (
 )
 
 func serverBatcherOptions(dc *dynamicconfig.Collection) stream_batcher.BatcherOptions {
-	return stream_batcher.BatcherOptions{
-		MaxItems:      ServerBatcherMaxItems.Get(dc)(),
-		MinDelay:      ServerBatcherMinDelay.Get(dc)(),
-		MaxDelay:      ServerBatcherMaxDelay.Get(dc)(),
-		IdleTime:      ServerBatcherIdleTime.Get(dc)(),
-		ClearInterval: ServerBatcherClearInterval.Get(dc)(),
-	}
+	return ServerBatcherOptions.Get(dc)()
 }
