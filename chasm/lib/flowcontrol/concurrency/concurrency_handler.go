@@ -2,12 +2,12 @@ package concurrency
 
 import (
 	"context"
-	"time"
 
 	taskqueuepb "go.temporal.io/api/taskqueue/v1"
 	"go.temporal.io/server/chasm"
 	fcpb "go.temporal.io/server/chasm/lib/flowcontrol/gen/flowcontrolpb/v1"
 	"go.temporal.io/server/common/clock"
+	"go.temporal.io/server/common/dynamicconfig"
 	"go.temporal.io/server/common/log"
 	"go.temporal.io/server/common/stream_batcher"
 )
@@ -36,19 +36,14 @@ type Handler struct {
 
 func NewHandler(
 	logger log.Logger,
+	dc *dynamicconfig.Collection,
 ) *Handler {
 	h := &Handler{
 		logger: logger,
 	}
 	h.batchers = stream_batcher.NewKeyedBatcherWithPerItemResults(
 		h.applyBatch,
-		stream_batcher.BatcherOptions{
-			MaxItems:      100,
-			MinDelay:      5 * time.Millisecond,
-			MaxDelay:      10 * time.Millisecond,
-			IdleTime:      time.Minute,
-			ClearInterval: time.Hour,
-		},
+		serverBatcherOptions(dc),
 		clock.NewRealTimeSource(),
 	)
 	return h
