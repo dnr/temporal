@@ -7,6 +7,14 @@ import (
 	"go.temporal.io/server/common/stream_batcher"
 )
 
+var defaultClientBatcherOptions = stream_batcher.BatcherOptions{
+	MaxItems:      100,
+	MinDelay:      5 * time.Millisecond,
+	MaxDelay:      20 * time.Millisecond,
+	IdleTime:      time.Minute,
+	ClearInterval: time.Hour,
+}
+
 var (
 	ServerBatcherMaxItems = dynamicconfig.NewGlobalIntSetting(
 		"flowcontrol.concurrency.serverBatcher.maxItems",
@@ -32,6 +40,22 @@ var (
 		"flowcontrol.concurrency.serverBatcher.clearInterval",
 		time.Hour,
 		`How often cached server-side concurrency limiter batchers are cleared.`,
+	)
+
+	MatchingClientBatcherOptions = dynamicconfig.NewGlobalTypedSetting(
+		"flowcontrol.concurrency.matchingClientBatcher",
+		defaultClientBatcherOptions,
+		`Batching options for concurrency limiter requests made by matching. Fields: MaxItems, MinDelay, MaxDelay, IdleTime, and ClearInterval.`,
+	)
+	HistoryClientBatcherOptions = dynamicconfig.NewGlobalTypedSetting(
+		"flowcontrol.concurrency.historyClientBatcher",
+		defaultClientBatcherOptions,
+		`Batching options for concurrency limiter releases made by the history transfer queue. Fields: MaxItems, MinDelay, MaxDelay, IdleTime, and ClearInterval.`,
+	)
+	ActivityClientBatcherOptions = dynamicconfig.NewGlobalTypedSetting(
+		"flowcontrol.concurrency.activityClientBatcher",
+		defaultClientBatcherOptions,
+		`Batching options for concurrency limiter releases made by CHASM activities. Fields: MaxItems, MinDelay, MaxDelay, IdleTime, and ClearInterval.`,
 	)
 )
 

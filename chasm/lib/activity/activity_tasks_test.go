@@ -20,6 +20,7 @@ import (
 	"go.temporal.io/server/common/metrics"
 	"go.temporal.io/server/common/metrics/metricstest"
 	"go.temporal.io/server/common/retrypolicy"
+	"go.temporal.io/server/common/stream_batcher"
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/types/known/durationpb"
 	"google.golang.org/protobuf/types/known/timestamppb"
@@ -53,7 +54,10 @@ func TestReleaseLimiterTaskExecute(t *testing.T) {
 			}
 			return &fcpb.ConcurrencyBatchResponse{}, nil
 		},
-	})
+	}, &Config{FlowControlClientBatcherOptions: stream_batcher.BatcherOptions{
+		MaxItems: 1,
+		IdleTime: time.Minute,
+	}})
 	task := &activitypb.ReleaseLimiterTask{Limiters: []*taskqueuespb.LimiterRef{
 		{LimiterType: enumsspb.LIMITER_TYPE_CONCURRENCY, Key: "first-key", SlotId: "bad-slot"},
 		{LimiterType: enumsspb.LIMITER_TYPE_UNSPECIFIED, Key: "ignored-key", SlotId: "ignored-slot"},

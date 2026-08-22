@@ -6,9 +6,11 @@ package matching
 import (
 	"time"
 
+	"go.temporal.io/server/chasm/lib/flowcontrol/concurrency"
 	"go.temporal.io/server/common/backoff"
 	"go.temporal.io/server/common/dynamicconfig"
 	"go.temporal.io/server/common/namespace"
+	"go.temporal.io/server/common/stream_batcher"
 	"go.temporal.io/server/common/tqid"
 	"go.temporal.io/server/components/nexusoperations"
 	"go.temporal.io/server/service/matching/counter"
@@ -38,6 +40,7 @@ type (
 		MaxTaskQueuesInDeployment            dynamicconfig.IntPropertyFnWithNamespaceFilter
 		MaxVersionsInTaskQueue               dynamicconfig.IntPropertyFnWithNamespaceFilter
 		MaxIDLengthLimit                     dynamicconfig.IntPropertyFn
+		FlowControlClientBatcherOptions      stream_batcher.BatcherOptions
 
 		// task queue configuration
 
@@ -361,6 +364,7 @@ func NewConfig(
 		FairnessKeyRateLimitCacheSize:            dynamicconfig.MatchingFairnessKeyRateLimitCacheSize.Get(dc),
 		MaxFairnessKeyWeightOverrides:            dynamicconfig.MatchingMaxFairnessKeyWeightOverrides.Get(dc),
 		MaxIDLengthLimit:                         dynamicconfig.MaxIDLengthLimit.Get(dc),
+		FlowControlClientBatcherOptions:          concurrency.MatchingClientBatcherOptions.Get(dc)(),
 
 		AdminNamespaceToPartitionDispatchRate:          dynamicconfig.AdminMatchingNamespaceToPartitionDispatchRate.Get(dc),
 		AdminNamespaceToPartitionRateSub:               dynamicconfig.AdminMatchingNamespaceToPartitionDispatchRate.Subscribe(dc),

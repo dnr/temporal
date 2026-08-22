@@ -2,9 +2,11 @@ package activity
 
 import (
 	"go.temporal.io/server/chasm/lib/callback"
+	"go.temporal.io/server/chasm/lib/flowcontrol/concurrency"
 	"go.temporal.io/server/common"
 	"go.temporal.io/server/common/dynamicconfig"
 	"go.temporal.io/server/common/retrypolicy"
+	"go.temporal.io/server/common/stream_batcher"
 )
 
 var (
@@ -64,6 +66,7 @@ type Config struct {
 	MaxUserMetadataSummarySize                dynamicconfig.IntPropertyFnWithNamespaceFilter
 	StartDelayEnabled                         dynamicconfig.BoolPropertyFnWithNamespaceFilter
 	VisibilityMaxPageSize                     dynamicconfig.IntPropertyFnWithNamespaceFilter
+	FlowControlClientBatcherOptions           stream_batcher.BatcherOptions
 }
 
 func ConfigProvider(dc *dynamicconfig.Collection) *Config {
@@ -84,6 +87,7 @@ func ConfigProvider(dc *dynamicconfig.Collection) *Config {
 		MaxUserMetadataDetailsSize:                dynamicconfig.MaxUserMetadataDetailsSize.Get(dc),
 		MaxUserMetadataSummarySize:                dynamicconfig.MaxUserMetadataSummarySize.Get(dc),
 		VisibilityMaxPageSize:                     dynamicconfig.FrontendVisibilityMaxPageSize.Get(dc),
+		FlowControlClientBatcherOptions:           concurrency.ActivityClientBatcherOptions.Get(dc)(),
 	}
 }
 

@@ -3,7 +3,6 @@ package activity
 import (
 	"context"
 	"errors"
-	"time"
 
 	enumspb "go.temporal.io/api/enums/v1"
 	enumsspb "go.temporal.io/server/api/enums/v1"
@@ -14,7 +13,6 @@ import (
 	"go.temporal.io/server/common/clock"
 	"go.temporal.io/server/common/metrics"
 	"go.temporal.io/server/common/resource"
-	"go.temporal.io/server/common/stream_batcher"
 	"go.temporal.io/server/common/util"
 	"go.uber.org/fx"
 )
@@ -26,16 +24,11 @@ type releaseLimiterTaskHandler struct {
 
 func newReleaseLimiterTaskHandler(
 	concurrencyServiceClient fcpb.ConcurrencyServiceClient,
+	config *Config,
 ) *releaseLimiterTaskHandler {
 	return &releaseLimiterTaskHandler{concurrencyServiceClient: concurrency.NewBatchingClient(
 		concurrencyServiceClient,
-		stream_batcher.BatcherOptions{
-			MaxItems:      100,
-			MinDelay:      5 * time.Millisecond,
-			MaxDelay:      20 * time.Millisecond,
-			IdleTime:      time.Minute,
-			ClearInterval: time.Hour,
-		},
+		config.FlowControlClientBatcherOptions,
 		clock.NewRealTimeSource(),
 	)}
 }

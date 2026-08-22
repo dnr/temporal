@@ -1,8 +1,6 @@
 package history
 
 import (
-	"time"
-
 	"go.temporal.io/server/chasm/lib/flowcontrol/concurrency"
 	fcpb "go.temporal.io/server/chasm/lib/flowcontrol/gen/flowcontrolpb/v1"
 	"go.temporal.io/server/client"
@@ -12,7 +10,6 @@ import (
 	"go.temporal.io/server/common/persistence/visibility/manager"
 	"go.temporal.io/server/common/resource"
 	"go.temporal.io/server/common/sdk"
-	"go.temporal.io/server/common/stream_batcher"
 	ctasks "go.temporal.io/server/common/tasks"
 	"go.temporal.io/server/common/telemetry"
 	"go.temporal.io/server/common/testing/testhooks"
@@ -57,13 +54,7 @@ func NewTransferQueueFactory(
 		transferQueueFactoryParams: params,
 		concurrencyBatchingClient: concurrency.NewBatchingClient(
 			params.ConcurrencyServiceClient,
-			stream_batcher.BatcherOptions{
-				MaxItems:      100,
-				MinDelay:      5 * time.Millisecond,
-				MaxDelay:      20 * time.Millisecond,
-				IdleTime:      time.Minute,
-				ClearInterval: time.Hour,
-			},
+			params.Config.FlowControlClientBatcherOptions,
 			params.TimeSource,
 		),
 		QueueFactoryBase: QueueFactoryBase{

@@ -337,13 +337,7 @@ func NewEngine(
 		partitionScalerFactory:    partitionScalerFactory,
 		fcReadiness: fc.NewReadiness(concurrency.NewBatchingClient(
 			concurrencyServiceClient,
-			stream_batcher.BatcherOptions{
-				MaxItems:      100,
-				MinDelay:      5 * time.Millisecond,
-				MaxDelay:      20 * time.Millisecond,
-				IdleTime:      time.Minute,
-				ClearInterval: time.Hour,
-			},
+			config.FlowControlClientBatcherOptions,
 			clock.NewRealTimeSource(),
 		)),
 	}

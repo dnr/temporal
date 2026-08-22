@@ -2,12 +2,14 @@ package configs
 
 import (
 	"go.temporal.io/server/chasm/lib/callback"
+	"go.temporal.io/server/chasm/lib/flowcontrol/concurrency"
 	"go.temporal.io/server/chasm/lib/nexusoperation"
 	"go.temporal.io/server/common"
 	"go.temporal.io/server/common/dynamicconfig"
 	"go.temporal.io/server/common/health"
 	"go.temporal.io/server/common/namespace"
 	"go.temporal.io/server/common/retrypolicy"
+	"go.temporal.io/server/common/stream_batcher"
 )
 
 // Config represents configuration for history service
@@ -24,6 +26,7 @@ type Config struct {
 	NamespaceRPS                                dynamicconfig.IntPropertyFnWithNamespaceFilter
 	OperatorRPSRatio                            dynamicconfig.FloatPropertyFn
 	MaxIDLengthLimit                            dynamicconfig.IntPropertyFn
+	FlowControlClientBatcherOptions             stream_batcher.BatcherOptions
 	PersistenceMaxQPS                           dynamicconfig.IntPropertyFn
 	PersistenceGlobalMaxQPS                     dynamicconfig.IntPropertyFn
 	PersistenceNamespaceMaxQPS                  dynamicconfig.IntPropertyFnWithNamespaceFilter
@@ -474,6 +477,7 @@ func NewConfig(
 		NamespaceRPS:                         dynamicconfig.HistoryNamespaceRPS.Get(dc),
 		OperatorRPSRatio:                     dynamicconfig.OperatorRPSRatio.Get(dc),
 		MaxIDLengthLimit:                     dynamicconfig.MaxIDLengthLimit.Get(dc),
+		FlowControlClientBatcherOptions:      concurrency.HistoryClientBatcherOptions.Get(dc)(),
 		PersistenceMaxQPS:                    dynamicconfig.HistoryPersistenceMaxQPS.Get(dc),
 		PersistenceGlobalMaxQPS:              dynamicconfig.HistoryPersistenceGlobalMaxQPS.Get(dc),
 		PersistenceNamespaceMaxQPS:           dynamicconfig.HistoryPersistenceNamespaceMaxQPS.Get(dc),
