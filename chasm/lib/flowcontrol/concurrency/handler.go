@@ -3,6 +3,7 @@ package concurrency
 import (
 	"context"
 
+	"go.temporal.io/api/serviceerror"
 	taskqueuepb "go.temporal.io/api/taskqueue/v1"
 	"go.temporal.io/server/chasm"
 	fcpb "go.temporal.io/server/chasm/lib/flowcontrol/gen/flowcontrolpb/v1"
@@ -129,8 +130,8 @@ func (h *Handler) applyBatch(
 	canSpeculate := true
 
 	for _, it := range items {
-		// only Reserve needs UpdateWithStart, other calls can assume it exists
-		needStart = needStart || len(it.req.GetReserveSlots()) > 0
+		// Release also starts a missing limiter so it can establish a durable failover fence.
+		needStart = needStart || len(it.req.GetReserveSlots()) > 0 || len(it.req.GetReleaseSlots()) > 0
 
 		// Commit and Release must be durable, Reserve and cancel may be speculative
 		canSpeculate = canSpeculate && len(it.req.GetCommitSlots()) == 0 && len(it.req.GetReleaseSlots()) == 0
@@ -157,10 +158,11 @@ func (h *Handler) applyBatch(
 			items,
 			opts...,
 		)
+		setComponentRef(updateRes.UpdateOutput, updateRes.ExecutionRef)
 		return makeBatchResults(len(items), updateRes.UpdateOutput, err)
 	}
 
-	ress, _, err := chasm.UpdateComponent(
+	ress, componentRef, err := chasm.UpdateComponent(
 		items[0].ctx,
 		chasm.NewComponentRef[*Component](chasm.ExecutionKey{
 			NamespaceID: key.namespaceID,
@@ -170,7 +172,16 @@ func (h *Handler) applyBatch(
 		items,
 		opts...,
 	)
+	setComponentRef(ress, componentRef)
 	return makeBatchResults(len(items), ress, err)
+}
+
+func setComponentRef(responses []*fcpb.ConcurrencyBatchResponse, componentRef []byte) {
+	for _, response := range responses {
+		if response != nil {
+			response.ComponentRef = componentRef
+		}
+	}
 }
 
 func makeBatchResults(
@@ -248,4 +259,32 @@ func (h *Handler) Wait(ctx context.Context, req *fcpb.ConcurrencyWaitRequest) (r
 	}
 	// TODO(fc): we can try again if we still have time and we got a stale generation?
 	return res, err
+}
+
+func (h *Handler) VerifyRelease(
+	ctx context.Context,
+	req *fcpb.VerifyReleaseRequest,
+) (retRes *fcpb.VerifyReleaseResponse, retErr error) {
+	defer log.CapturePanic(h.logger, &retErr)
+
+	ref, err := chasm.DeserializeComponentRef(req.GetComponentRef())
+	if err != nil {
+		return nil, err
+	}
+	if ref.NamespaceID != req.GetNamespaceId() || ref.BusinessID != req.GetKey() {
+		return nil, serviceerror.NewInvalidArgument("component ref does not match limiter")
+	}
+
+	released, err := chasm.ReadComponent(
+		ctx,
+		ref,
+		func(c *Component, _ chasm.Context, slots []string) (bool, error) {
+			return c.released(slots), nil
+		},
+		req.GetSlots(),
+	)
+	if err != nil {
+		return nil, err
+	}
+	return &fcpb.VerifyReleaseResponse{Released: released}, nil
 }

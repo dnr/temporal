@@ -1,6 +1,7 @@
 package workflow
 
 import (
+	"bytes"
 	"cmp"
 	"context"
 	"errors"
@@ -62,6 +63,7 @@ import (
 	"go.temporal.io/server/common/searchattribute/sadefs"
 	serviceerrors "go.temporal.io/server/common/serviceerror"
 	"go.temporal.io/server/common/softassert"
+	commontaskqueue "go.temporal.io/server/common/taskqueue"
 	"go.temporal.io/server/common/tasktoken"
 	"go.temporal.io/server/common/util"
 	"go.temporal.io/server/common/worker_versioning"
@@ -133,6 +135,7 @@ type (
 		deleteActivityInfos            map[int64]struct{}                     // Deleted activities from last update.
 		syncActivityTasks              map[int64]struct{}                     // Activity to be sync to remote
 		releaseLimiterRefs             []*taskqueuespb.LimiterRef
+		releaseLimiterTasks            []*taskqueuespb.LimiterRelease
 
 		pendingTimerInfoIDs     map[string]*persistencespb.TimerInfo // User Timer ID -> Timer Info.
 		pendingTimerEventIDToID map[int64]string                     // User Timer Start Event ID -> User Timer ID.
@@ -201,9 +204,10 @@ type (
 		transitionHistoryEnabled bool
 		// following fields are for tracking if sub state machines are updated
 		// in a transaction. They are similar to field like updateActivityInfos
-		visibilityUpdated     bool
-		executionStateUpdated bool
-		workflowTaskUpdated   bool
+		visibilityUpdated             bool
+		executionStateUpdated         bool
+		workflowTaskUpdated           bool
+		pendingLimiterReleasesUpdated bool
 		// chasmRequestIDsAdded is set when a CHASM request ID is attached in the current transaction
 		// (via AttachChasmRequestID). It gates the lazy request-ID sweep at transaction close so only
 		// transactions that added an ID pay for the scan.
@@ -7538,6 +7542,7 @@ func (ms *MutableStateImpl) isStateDirty() bool {
 		ms.visibilityUpdated ||
 		ms.executionStateUpdated ||
 		ms.workflowTaskUpdated ||
+		ms.pendingLimiterReleasesUpdated ||
 		(ms.stateMachineNode != nil && ms.stateMachineNode.Dirty()) ||
 		ms.chasmTree.IsStateDirty() ||
 		ms.isResetStateUpdated ||
@@ -7783,6 +7788,7 @@ func (ms *MutableStateImpl) closeTransaction(
 	// and need to reconsider the sequence of time skipping close trx handling in this function
 	// when supporting chasm.
 	regenTimerTasksForWorkflowTimeSkipping := ms.closeTransactionHandleWorkflowTimeSkipping(ctx, transactionPolicy)
+	ms.closeTransactionGenerateReleaseLimiterTask()
 
 	// Save if the state is dirty before closeTransactionPrepareEvents since it flushes the buffer
 	// events, and therefore change the dirty state.
@@ -8279,8 +8285,6 @@ func (ms *MutableStateImpl) closeTransactionPrepareTasks(
 	clearBufferEvents bool,
 	regenerateTimerTasksForTimeSkipping bool,
 ) error {
-	ms.closeTransactionGenerateReleaseLimiterTask(transactionPolicy)
-
 	if err := ms.closeTransactionHandleWorkflowResetTask(
 		transactionPolicy,
 	); err != nil {
@@ -8460,6 +8464,7 @@ func (ms *MutableStateImpl) cleanupTransaction() error {
 	ms.deleteActivityInfos = make(map[int64]struct{})
 	ms.syncActivityTasks = make(map[int64]struct{})
 	ms.releaseLimiterRefs = nil
+	ms.releaseLimiterTasks = nil
 
 	ms.updateTimerInfos = make(map[string]*persistencespb.TimerInfo)
 	ms.deleteTimerInfos = make(map[string]struct{})
@@ -8479,6 +8484,7 @@ func (ms *MutableStateImpl) cleanupTransaction() error {
 	ms.visibilityUpdated = false
 	ms.executionStateUpdated = false
 	ms.workflowTaskUpdated = false
+	ms.pendingLimiterReleasesUpdated = false
 	ms.chasmRequestIDsAdded = false
 	ms.isResetStateUpdated = false
 	ms.timeSkippingInfoUpdated = false
@@ -9507,6 +9513,16 @@ func (ms *MutableStateImpl) applyUpdatesToUpdateInfos(
 }
 
 func (ms *MutableStateImpl) syncExecutionInfo(current *persistencespb.WorkflowExecutionInfo, incoming *persistencespb.WorkflowExecutionInfo, isSnapshot bool) error {
+	for _, incomingRelease := range incoming.GetPendingLimiterReleases() {
+		currentRelease := commontaskqueue.FindLimiterRelease(
+			current.GetPendingLimiterReleases(),
+			incomingRelease.GetLimiter(),
+		)
+		if currentRelease == nil || !bytes.Equal(currentRelease.GetComponentRef(), incomingRelease.GetComponentRef()) {
+			ms.releaseLimiterTasks = append(ms.releaseLimiterTasks, incomingRelease)
+		}
+	}
+
 	var workflowTaskVersionUpdated bool
 	if transitionhistory.Compare(current.WorkflowTaskLastUpdateVersionedTransition, incoming.WorkflowTaskLastUpdateVersionedTransition) != 0 {
 		ms.workflowTaskManager.UpdateWorkflowTask(&historyi.WorkflowTaskInfo{

@@ -1116,6 +1116,7 @@ func (t *timerQueueActiveTaskExecutor) executeChasmSideEffectTimerTask(
 		t.chasmEngine,
 		tree,
 		task,
+		bypassTaskGenerationValidation(task, t.shardContext.ChasmRegistry()),
 	)
 }
 

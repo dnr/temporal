@@ -77,7 +77,8 @@ import (
 type (
 	testConcurrencyServiceClient struct {
 		fcpb.ConcurrencyServiceClient
-		batch func(context.Context, *fcpb.ConcurrencyBatchRequest, ...grpc.CallOption) (*fcpb.ConcurrencyBatchResponse, error)
+		batch         func(context.Context, *fcpb.ConcurrencyBatchRequest, ...grpc.CallOption) (*fcpb.ConcurrencyBatchResponse, error)
+		verifyRelease func(context.Context, *fcpb.VerifyReleaseRequest, ...grpc.CallOption) (*fcpb.VerifyReleaseResponse, error)
 	}
 
 	transferQueueActiveTaskExecutorSuite struct {
@@ -125,6 +126,14 @@ func (c *testConcurrencyServiceClient) Batch(
 	opts ...grpc.CallOption,
 ) (*fcpb.ConcurrencyBatchResponse, error) {
 	return c.batch(ctx, request, opts...)
+}
+
+func (c *testConcurrencyServiceClient) VerifyRelease(
+	ctx context.Context,
+	request *fcpb.VerifyReleaseRequest,
+	opts ...grpc.CallOption,
+) (*fcpb.VerifyReleaseResponse, error) {
+	return c.verifyRelease(ctx, request, opts...)
 }
 
 var defaultWorkflowTaskCompletionLimits = historyi.WorkflowTaskCompletionLimits{MaxResetPoints: primitives.DefaultHistoryMaxAutoResetPoints, MaxSearchAttributeValueSize: 2048}
@@ -263,6 +272,8 @@ func (s *transferQueueActiveTaskExecutorSuite) TearDownTest() {
 
 func (s *transferQueueActiveTaskExecutorSuite) TestProcessReleaseLimiterTask_Success() {
 	var requests []*fcpb.ConcurrencyBatchRequest
+	componentRefPrefix := "released-"
+	verifyReleased := false
 	s.transferQueueActiveTaskExecutor.concurrencyServiceClient = &testConcurrencyServiceClient{
 		batch: func(
 			_ context.Context,
@@ -270,37 +281,108 @@ func (s *transferQueueActiveTaskExecutorSuite) TestProcessReleaseLimiterTask_Suc
 			_ ...grpc.CallOption,
 		) (*fcpb.ConcurrencyBatchResponse, error) {
 			requests = append(requests, request)
-			return &fcpb.ConcurrencyBatchResponse{}, nil
+			return &fcpb.ConcurrencyBatchResponse{ComponentRef: []byte(componentRefPrefix + request.GetKey())}, nil
+		},
+		verifyRelease: func(
+			_ context.Context,
+			_ *fcpb.VerifyReleaseRequest,
+			_ ...grpc.CallOption,
+		) (*fcpb.VerifyReleaseResponse, error) {
+			return &fcpb.VerifyReleaseResponse{Released: verifyReleased}, nil
 		},
 	}
 	task := &tasks.ReleaseLimiterTask{
 		WorkflowKey: tests.WorkflowKey,
 		TaskID:      s.mustGenerateTaskID(),
-		Limiters: []*taskqueuespb.LimiterRef{
+		Releases: []*taskqueuespb.LimiterRelease{
 			{
-				LimiterType: enumsspb.LIMITER_TYPE_CONCURRENCY,
-				Key:         "limiter-1",
-				SlotId:      uuid.NewString(),
+				Limiter: &taskqueuespb.LimiterRef{
+					LimiterType: enumsspb.LIMITER_TYPE_CONCURRENCY,
+					Key:         "limiter-1",
+					SlotId:      uuid.NewString(),
+				},
 			},
 			{
-				LimiterType: enumsspb.LIMITER_TYPE_CONCURRENCY,
-				Key:         "limiter-2",
-				SlotId:      uuid.NewString(),
+				Limiter: &taskqueuespb.LimiterRef{
+					LimiterType: enumsspb.LIMITER_TYPE_CONCURRENCY,
+					Key:         "limiter-2",
+					SlotId:      uuid.NewString(),
+				},
 			},
 		},
 	}
+	mutableState := workflow.TestGlobalMutableState(
+		s.mockShard,
+		s.mockShard.GetEventsCache(),
+		s.logger,
+		s.version,
+		task.WorkflowID,
+		task.RunID,
+	)
+	_, err := mutableState.AddWorkflowExecutionStartedEvent(
+		&commonpb.WorkflowExecution{WorkflowId: task.WorkflowID, RunId: task.RunID},
+		&historyservice.StartWorkflowExecutionRequest{
+			NamespaceId: task.NamespaceID,
+			StartRequest: &workflowservice.StartWorkflowExecutionRequest{
+				WorkflowType: &commonpb.WorkflowType{Name: "workflow-type"},
+				TaskQueue:    &taskqueuepb.TaskQueue{Name: "task-queue"},
+			},
+		},
+	)
+	s.Require().NoError(err)
+	mutableState.GetExecutionInfo().PendingLimiterReleases = task.Releases
+	mutableState.GetExecutionInfo().TaskGenerationShardClockTimestamp = task.TaskID + 1
+	wfContext := historyi.NewMockWorkflowContext(s.controller)
+	wfContext.EXPECT().LoadMutableState(gomock.Any(), s.mockShard).Return(mutableState, nil).Times(3)
+	wfContext.EXPECT().UpdateWorkflowExecutionAsActive(gomock.Any(), s.mockShard).Return(nil).Times(3)
+	mockCache := wcache.NewMockCache(s.controller)
+	mockCache.EXPECT().GetOrCreateChasmExecution(
+		gomock.Any(),
+		s.mockShard,
+		namespace.ID(task.NamespaceID),
+		&commonpb.WorkflowExecution{WorkflowId: task.WorkflowID, RunId: task.RunID},
+		chasm.WorkflowArchetypeID,
+		gomock.Any(),
+	).Return(wfContext, wcache.NoopReleaseFn, nil).Times(3)
+	s.transferQueueActiveTaskExecutor.cache = mockCache
 
 	response := s.transferQueueActiveTaskExecutor.Execute(context.Background(), s.newTaskExecutable(task))
 
 	s.Require().NoError(response.ExecutionErr)
-	s.Require().Len(requests, len(task.Limiters))
-	for i, limiter := range task.Limiters {
+	s.Require().Len(requests, len(task.Releases))
+	for i, release := range task.Releases {
+		limiter := release.GetLimiter()
 		protorequire.ProtoEqual(s.T(), &fcpb.ConcurrencyBatchRequest{
 			NamespaceId:  task.NamespaceID,
 			Key:          limiter.GetKey(),
 			ReleaseSlots: []string{limiter.GetSlotId()},
 		}, requests[i])
+		s.Require().Equal([]byte("released-"+limiter.GetKey()), mutableState.GetExecutionInfo().PendingLimiterReleases[i].GetComponentRef())
 	}
+
+	newVerificationTask := func() *tasks.ReleaseLimiterTask {
+		releases := make([]*taskqueuespb.LimiterRelease, 0, len(mutableState.GetExecutionInfo().PendingLimiterReleases))
+		for _, release := range mutableState.GetExecutionInfo().PendingLimiterReleases {
+			releases = append(releases, &taskqueuespb.LimiterRelease{
+				Limiter:      release.GetLimiter(),
+				ComponentRef: append([]byte(nil), release.GetComponentRef()...),
+			})
+		}
+		return &tasks.ReleaseLimiterTask{WorkflowKey: task.WorkflowKey, Releases: releases}
+	}
+
+	componentRefPrefix = "reissued-"
+	response = s.transferQueueActiveTaskExecutor.Execute(context.Background(), s.newTaskExecutable(newVerificationTask()))
+	s.Require().NoError(response.ExecutionErr)
+	s.Require().Len(requests, 2*len(task.Releases))
+	for _, release := range mutableState.GetExecutionInfo().PendingLimiterReleases {
+		s.Require().Equal([]byte("reissued-"+release.GetLimiter().GetKey()), release.GetComponentRef())
+	}
+
+	verifyReleased = true
+	response = s.transferQueueActiveTaskExecutor.Execute(context.Background(), s.newTaskExecutable(newVerificationTask()))
+	s.Require().NoError(response.ExecutionErr)
+	s.Require().Empty(mutableState.GetExecutionInfo().PendingLimiterReleases)
 }
 
 func (s *transferQueueActiveTaskExecutorSuite) TestProcessReleaseLimiterTask_AttemptsAllReleasesOnError() {
@@ -322,17 +404,17 @@ func (s *transferQueueActiveTaskExecutorSuite) TestProcessReleaseLimiterTask_Att
 	task := &tasks.ReleaseLimiterTask{
 		WorkflowKey: tests.WorkflowKey,
 		TaskID:      s.mustGenerateTaskID(),
-		Limiters: []*taskqueuespb.LimiterRef{
-			{LimiterType: enumsspb.LIMITER_TYPE_CONCURRENCY, Key: "limiter-1", SlotId: uuid.NewString()},
-			{LimiterType: enumsspb.LIMITER_TYPE_CONCURRENCY, Key: "limiter-2", SlotId: uuid.NewString()},
-			{LimiterType: enumsspb.LIMITER_TYPE_CONCURRENCY, Key: "limiter-3", SlotId: uuid.NewString()},
+		Releases: []*taskqueuespb.LimiterRelease{
+			{Limiter: &taskqueuespb.LimiterRef{LimiterType: enumsspb.LIMITER_TYPE_CONCURRENCY, Key: "limiter-1", SlotId: uuid.NewString()}},
+			{Limiter: &taskqueuespb.LimiterRef{LimiterType: enumsspb.LIMITER_TYPE_CONCURRENCY, Key: "limiter-2", SlotId: uuid.NewString()}},
+			{Limiter: &taskqueuespb.LimiterRef{LimiterType: enumsspb.LIMITER_TYPE_CONCURRENCY, Key: "limiter-3", SlotId: uuid.NewString()}},
 		},
 	}
 
 	response := s.transferQueueActiveTaskExecutor.Execute(context.Background(), s.newTaskExecutable(task))
 
 	s.Require().ErrorIs(response.ExecutionErr, releaseErr)
-	s.Require().Len(requests, len(task.Limiters))
+	s.Require().Len(requests, len(task.Releases))
 }
 
 func (s *transferQueueActiveTaskExecutorSuite) TestProcessActivityTask_Success() {

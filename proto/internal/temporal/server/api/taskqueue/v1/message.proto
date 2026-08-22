@@ -209,3 +209,10 @@ message LimiterRef {
   // Identifier for the reserved or committed slot. Empty for limiters that don't allocate slots.
   string slot_id = 3;
 }
+
+// A limiter Release operation and the durable transition that applied it.
+message LimiterRelease {
+  LimiterRef limiter = 1;
+  // CHASM component reference returned by Release. Empty until Release succeeds.
+  bytes component_ref = 2;
+}

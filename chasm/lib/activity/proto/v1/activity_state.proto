@@ -162,6 +162,9 @@ message ActivityState {
 
   // Used to de-dupe update requests.
   string last_update_options_request_id = 23;
+
+  // Flow control limiter releases awaiting a durable target transition or local verification.
+  repeated temporal.server.api.taskqueue.v1.LimiterRelease pending_limiter_releases = 24;
 }
 
 message ActivityCancelState {

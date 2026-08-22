@@ -38,6 +38,13 @@ type ChasmTree interface {
 		task *tasks.ChasmTask,
 		validate func(chasm.NodeBackend, chasm.Context, chasm.Component) error,
 	) error
+	ExecuteSideEffectStandbyTask(
+		ctx context.Context,
+		executionKey chasm.ExecutionKey,
+		task *tasks.ChasmTask,
+		taskExists bool,
+		validate func(chasm.NodeBackend, chasm.Context, chasm.Component) error,
+	) (bool, error)
 	ExecuteSideEffectDiscardTask(
 		ctx context.Context,
 		executionKey chasm.ExecutionKey,

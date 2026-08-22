@@ -3575,9 +3575,7 @@ func (n *Node) ExecutePureTask(
 // It returns two booleans:
 //   - isTaskInTree: true if the task's logical counterpart still exists in the
 //     replicated tree state (node found, InitialVersionedTransition matches, and
-//     logical task present in SideEffectTasks). A false value here means the
-//     active cluster has definitively invalidated the task via replication — the
-//     physical task should be dropped.
+//     logical task present in SideEffectTasks).
 //   - isValidByComponent: true if the component's own Validate method approves
 //     the task. Only meaningful when isTaskInTree is true. A false value here
 //     may be a transient false-negative caused by a code deployment changing
@@ -3710,6 +3708,36 @@ func (n *Node) ExecuteSideEffectTask(
 		return err
 	}
 	return n.invokeSideEffectTaskFn(ctx, rt, executionKey, chasmTask, validate, rt.sideEffectTaskExecuteFn)
+}
+
+// ExecuteSideEffectStandbyTask invokes a task's optional read-only standby handler.
+func (n *Node) ExecuteSideEffectStandbyTask(
+	ctx context.Context,
+	executionKey ExecutionKey,
+	chasmTask *tasks.ChasmTask,
+	taskExists bool,
+	validate func(NodeBackend, Context, Component) error,
+) (bool, error) {
+	rt, err := n.lookupSideEffectTask(ctx, "ExecuteSideEffectStandbyTask", chasmTask)
+	if err != nil {
+		return false, err
+	}
+	if rt.sideEffectTaskStandbyExecuteFn == nil {
+		return false, nil
+	}
+	return true, n.invokeSideEffectTaskFn(
+		ctx,
+		rt,
+		executionKey,
+		chasmTask,
+		validate,
+		func(ctx context.Context, ref ComponentRef, attrs TaskAttributes, task any) error {
+			return rt.sideEffectTaskStandbyExecuteFn(ctx, ref, StandbyTaskInvocation{
+				TaskAttributes: attrs,
+				TaskExists:     taskExists,
+			}, task)
+		},
+	)
 }
 
 // ExecuteSideEffectDiscardTask executes the discard handler for the given ChasmTask. This is called on standby

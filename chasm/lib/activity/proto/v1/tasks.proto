@@ -38,7 +38,7 @@ message ActivityDispatchTask {
 }
 
 message ReleaseLimiterTask {
-  repeated temporal.server.api.taskqueue.v1.LimiterRef limiters = 1;
+  repeated temporal.server.api.taskqueue.v1.LimiterRelease releases = 2;
 }
 
 message ScheduleToStartTimeoutTask {

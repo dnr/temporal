@@ -168,6 +168,13 @@ func (r *Registry) TaskFqnByID(id uint32) (string, bool) {
 	return rt.fqType(), true
 }
 
+// TaskHasStandbyHandler reports whether a task has side-effect verification that must survive
+// source-side task invalidation.
+func (r *Registry) TaskHasStandbyHandler(id uint32) bool {
+	rt, ok := r.rtByID[id]
+	return ok && rt.sideEffectTaskStandbyExecuteFn != nil
+}
+
 // TaskIDFor converts registered task instance to task type ID.
 // This method should only be used by CHASM framework internal code,
 // NOT CHASM library developers.

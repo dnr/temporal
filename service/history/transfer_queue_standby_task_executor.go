@@ -12,6 +12,7 @@ import (
 	taskqueuepb "go.temporal.io/api/taskqueue/v1"
 	"go.temporal.io/server/api/historyservice/v1"
 	"go.temporal.io/server/chasm"
+	fcpb "go.temporal.io/server/chasm/lib/flowcontrol/gen/flowcontrolpb/v1"
 	"go.temporal.io/server/client"
 	"go.temporal.io/server/common"
 	"go.temporal.io/server/common/definition"
@@ -20,6 +21,7 @@ import (
 	"go.temporal.io/server/common/namespace"
 	"go.temporal.io/server/common/persistence/visibility/manager"
 	"go.temporal.io/server/common/resource"
+	commontaskqueue "go.temporal.io/server/common/taskqueue"
 	"go.temporal.io/server/service/history/consts"
 	historyi "go.temporal.io/server/service/history/interfaces"
 	"go.temporal.io/server/service/history/ndc"
@@ -30,14 +32,16 @@ import (
 
 const (
 	recordChildCompletionVerificationFailedMsg = "Failed to verify child execution completion recorded"
+	limiterReleaseVerificationFailedMsg        = "Failed to verify limiter Release"
 )
 
 type (
 	transferQueueStandbyTaskExecutor struct {
 		*transferQueueTaskExecutorBase
 
-		clusterName string
-		clientBean  client.Bean
+		clusterName              string
+		clientBean               client.Bean
+		concurrencyServiceClient fcpb.ConcurrencyServiceClient
 	}
 
 	verificationErr struct {
@@ -54,6 +58,7 @@ func newTransferQueueStandbyTaskExecutor(
 	clusterName string,
 	historyRawClient resource.HistoryRawClient,
 	matchingRawClient resource.MatchingRawClient,
+	concurrencyServiceClient fcpb.ConcurrencyServiceClient,
 	visibilityManager manager.VisibilityManager,
 	chasmEngine chasm.Engine,
 	clientBean client.Bean,
@@ -69,8 +74,9 @@ func newTransferQueueStandbyTaskExecutor(
 			visibilityManager,
 			chasmEngine,
 		),
-		clusterName: clusterName,
-		clientBean:  clientBean,
+		clusterName:              clusterName,
+		clientBean:               clientBean,
+		concurrencyServiceClient: concurrencyServiceClient,
 	}
 }
 
@@ -106,6 +112,8 @@ func (t *transferQueueStandbyTaskExecutor) Execute(
 		err = t.processCloseExecution(ctx, task)
 	case *tasks.DeleteExecutionTask:
 		err = t.processDeleteExecutionTask(ctx, task, false)
+	case *tasks.ReleaseLimiterTask:
+		err = t.processReleaseLimiterTask(ctx, task)
 	case *tasks.ChasmTask:
 		task.Attempt = executable.Attempt()
 		err = t.executeChasmSideEffectTransferTask(ctx, task)
@@ -120,29 +128,101 @@ func (t *transferQueueStandbyTaskExecutor) Execute(
 	}
 }
 
+func (t *transferQueueStandbyTaskExecutor) processReleaseLimiterTask(
+	ctx context.Context,
+	task *tasks.ReleaseLimiterTask,
+) error {
+	actionFn := func(
+		ctx context.Context,
+		_ historyi.WorkflowContext,
+		mutableState historyi.MutableState,
+		releaseWorkflow historyi.ReleaseWorkflowContextFunc,
+	) (any, error) {
+		if !commontaskqueue.ReleaseRecorded(task.Releases) {
+			pendingReleases := mutableState.GetExecutionInfo().GetPendingLimiterReleases()
+			for _, release := range task.Releases {
+				pending := commontaskqueue.FindLimiterRelease(pendingReleases, release.GetLimiter())
+				if pending != nil && len(pending.GetComponentRef()) == 0 {
+					return &struct{}{}, nil
+				}
+			}
+			return nil, nil
+		}
+
+		releaseWorkflow(nil)
+		released, err := verifyLimiterReleases(ctx, t.concurrencyServiceClient, task.NamespaceID, task.Releases)
+		if err != nil {
+			return nil, &verificationErr{
+				msg: limiterReleaseVerificationFailedMsg,
+				err: err,
+			}
+		}
+		if !released {
+			return &struct{}{}, nil
+		}
+		return nil, nil
+	}
+
+	return t.processTransfer(
+		ctx,
+		true,
+		task,
+		actionFn,
+		getStandbyPostActionFn(
+			task,
+			t.getCurrentTime,
+			t.config.StandbyTaskMissingEventsDiscardDelay(task.GetType()),
+			standbyTransferTaskPostActionTaskDiscarded,
+		),
+	)
+}
+
 func (t *transferQueueStandbyTaskExecutor) executeChasmSideEffectTransferTask(
 	ctx context.Context,
 	task *tasks.ChasmTask,
 ) error {
 	actionFn := func(
 		ctx context.Context,
-		wfContext historyi.WorkflowContext,
+		_ historyi.WorkflowContext,
 		ms historyi.MutableState,
-		_ historyi.ReleaseWorkflowContextFunc,
+		release historyi.ReleaseWorkflowContextFunc,
 	) (any, error) {
 		isTaskInTree, isValid, err := validateChasmSideEffectTask(ctx, ms, task)
 		if err != nil {
 			return nil, err
 		}
-		if !isTaskInTree || !isValid {
-			// Replication has removed the logical task, or the component reports it
-			// invalid — drop the physical task.
+		if isTaskInTree && !isValid {
+			return nil, nil
+		}
+
+		chasmTree := ms.ChasmTree()
+		release(nil)
+		handled, err := executeChasmSideEffectStandbyTask(
+			ctx,
+			t.chasmEngine,
+			chasmTree,
+			task,
+			isTaskInTree,
+			bypassTaskGenerationValidation(task, t.shardContext.ChasmRegistry()),
+		)
+		switch {
+		case err == nil && handled:
+			return nil, nil
+		case errors.Is(err, chasm.ErrTaskNotReady):
+			return chasmTree, nil
+		case err != nil:
+			return nil, &verificationErr{
+				msg: "Failed to verify CHASM side effect",
+				err: err,
+			}
+		}
+		if !isTaskInTree {
 			return nil, nil
 		}
 
 		// Task still exists in the tree; retry until the active cluster executes
 		// and replicates the resulting state change.
-		return ms.ChasmTree(), nil
+		return chasmTree, nil
 	}
 
 	chasmTaskType, _ := t.shardContext.ChasmRegistry().TaskFqnByID(task.Info.GetTypeId())

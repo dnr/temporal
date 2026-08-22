@@ -14,7 +14,7 @@ type ReleaseLimiterTask struct {
 	definition.WorkflowKey
 	VisibilityTimestamp time.Time
 	TaskID              int64
-	Limiters            []*taskqueuespb.LimiterRef
+	Releases            []*taskqueuespb.LimiterRelease
 }
 
 func (a *ReleaseLimiterTask) GetKey() Key {

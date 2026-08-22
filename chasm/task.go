@@ -12,6 +12,9 @@ import (
 // indicating that a side-effect task on a standby cluster has been pending past the discard delay.
 var ErrTaskDiscarded = errors.New("standby task pending for too long")
 
+// ErrTaskNotReady indicates that standby verification is still waiting for replicated state.
+var ErrTaskNotReady = errors.New("standby task verification is not ready")
+
 type (
 	// TaskAttributes specifies scheduling metadata for a task, supplied by the component author when
 	// the task is added via [MutableContext.AddTask].
@@ -37,6 +40,14 @@ type (
 		Attempt int
 	}
 
+	// StandbyTaskInvocation describes the source-side state observed while verifying a side effect
+	// on a standby cluster. TaskExists is false when replication has removed the logical task; the
+	// physical task may still need to verify a side effect on another execution before it is dropped.
+	StandbyTaskInvocation struct {
+		TaskAttributes
+		TaskExists bool
+	}
+
 	// SideEffectTaskHandler handles side effect tasks that run outside of the state lock and have access to a Go
 	// context to perform I/O and access chasm engine methods such as [UpdateComponent]. Implementations must embed
 	// [SideEffectTaskHandlerBase].
@@ -50,6 +61,12 @@ type (
 		// clusters.
 		Discard(context.Context, ComponentRef, TaskAttributes, T) error
 		sideEffectTaskHandler()
+	}
+
+	// StandbySideEffectTaskHandler optionally lets a side-effect task verify its external side
+	// effect on standby without mutating component state.
+	StandbySideEffectTaskHandler[T any] interface {
+		ExecuteStandby(context.Context, ComponentRef, StandbyTaskInvocation, T) error
 	}
 
 	// PureTaskHandler handles pure tasks that run while holding execution state write lock and should not do I/O.

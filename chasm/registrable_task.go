@@ -19,16 +19,17 @@ const (
 
 type (
 	RegistrableTask struct {
-		taskType                string
-		goType                  reflect.Type
-		componentGoType         reflect.Type // It is not clear how this one is used.
-		validateFn              validateFn
-		pureTaskExecuteFn       pureTaskExecuteFn
-		sideEffectTaskExecuteFn sideEffectTaskExecuteFn
-		sideEffectTaskDiscardFn sideEffectTaskDiscardFn
-		isPureTask              bool
-		outboundTaskGroup       string            // For grouping on the outbound queue. See [WithTaskGroup] for details.
-		singletonMode           SingletonTaskMode // If non-zero, at most one task of this type may exist per component instance.
+		taskType                       string
+		goType                         reflect.Type
+		componentGoType                reflect.Type // It is not clear how this one is used.
+		validateFn                     validateFn
+		pureTaskExecuteFn              pureTaskExecuteFn
+		sideEffectTaskExecuteFn        sideEffectTaskExecuteFn
+		sideEffectTaskStandbyExecuteFn sideEffectTaskStandbyExecuteFn
+		sideEffectTaskDiscardFn        sideEffectTaskDiscardFn
+		isPureTask                     bool
+		outboundTaskGroup              string            // For grouping on the outbound queue. See [WithTaskGroup] for details.
+		singletonMode                  SingletonTaskMode // If non-zero, at most one task of this type may exist per component instance.
 
 		// Those two fields are initialized when the component is registered to a library.
 		library    namer
@@ -37,10 +38,11 @@ type (
 
 	RegistrableTaskOption func(*RegistrableTask)
 
-	validateFn              func(Context, any, TaskInvocation, any, *Registry) (bool, error)
-	pureTaskExecuteFn       func(MutableContext, any, TaskAttributes, any, *Registry) error
-	sideEffectTaskExecuteFn func(context.Context, ComponentRef, TaskAttributes, any) error
-	sideEffectTaskDiscardFn func(context.Context, ComponentRef, TaskAttributes, any) error
+	validateFn                     func(Context, any, TaskInvocation, any, *Registry) (bool, error)
+	pureTaskExecuteFn              func(MutableContext, any, TaskAttributes, any, *Registry) error
+	sideEffectTaskExecuteFn        func(context.Context, ComponentRef, TaskAttributes, any) error
+	sideEffectTaskStandbyExecuteFn func(context.Context, ComponentRef, StandbyTaskInvocation, any) error
+	sideEffectTaskDiscardFn        func(context.Context, ComponentRef, TaskAttributes, any) error
 )
 
 // NewRegistrableSideEffectTask creates a new registrable side-effect task. NOTE: C is not Component but any.
@@ -50,6 +52,17 @@ func NewRegistrableSideEffectTask[C any, T any](
 	handler SideEffectTaskHandler[C, T],
 	opts ...RegistrableTaskOption,
 ) *RegistrableTask {
+	var standbyExecuteFn sideEffectTaskStandbyExecuteFn
+	if standbyHandler, ok := any(handler).(StandbySideEffectTaskHandler[T]); ok {
+		standbyExecuteFn = func(
+			ctx context.Context,
+			componentRef ComponentRef,
+			invocation StandbyTaskInvocation,
+			taskData any,
+		) error {
+			return standbyHandler.ExecuteStandby(ctx, componentRef, invocation, taskData.(T))
+		}
+	}
 	return newRegistrableTask(
 		taskType,
 		reflect.TypeFor[T](),
@@ -77,6 +90,7 @@ func NewRegistrableSideEffectTask[C any, T any](
 		) error {
 			return handler.Execute(ctx, componentRef, taskAttrs, taskData.(T))
 		},
+		standbyExecuteFn,
 		false,
 		func(ctx context.Context, ref ComponentRef, attrs TaskAttributes, task any) error {
 			return handler.Discard(ctx, ref, attrs, task.(T))
@@ -123,6 +137,7 @@ func NewRegistrablePureTask[C any, T any](
 			)
 		},
 		nil, // sideEffectTaskExecuteFn is not used for pure tasks
+		nil, // sideEffectTaskStandbyExecuteFn is not used for pure tasks
 		true,
 		nil, // sideEffectTaskDiscardFn is not used for pure tasks
 		opts...,
@@ -135,19 +150,21 @@ func newRegistrableTask(
 	validateFn validateFn,
 	pureTaskExecuteFn pureTaskExecuteFn,
 	sideEffectTaskExecuteFn sideEffectTaskExecuteFn,
+	sideEffectTaskStandbyExecuteFn sideEffectTaskStandbyExecuteFn,
 	isPureTask bool,
 	sideEffectTaskDiscardFn sideEffectTaskDiscardFn,
 	opts ...RegistrableTaskOption,
 ) *RegistrableTask {
 	rt := &RegistrableTask{
-		taskType:                taskType,
-		goType:                  goType,
-		componentGoType:         componentGoType,
-		validateFn:              validateFn,
-		pureTaskExecuteFn:       pureTaskExecuteFn,
-		sideEffectTaskExecuteFn: sideEffectTaskExecuteFn,
-		sideEffectTaskDiscardFn: sideEffectTaskDiscardFn,
-		isPureTask:              isPureTask,
+		taskType:                       taskType,
+		goType:                         goType,
+		componentGoType:                componentGoType,
+		validateFn:                     validateFn,
+		pureTaskExecuteFn:              pureTaskExecuteFn,
+		sideEffectTaskExecuteFn:        sideEffectTaskExecuteFn,
+		sideEffectTaskStandbyExecuteFn: sideEffectTaskStandbyExecuteFn,
+		sideEffectTaskDiscardFn:        sideEffectTaskDiscardFn,
+		isPureTask:                     isPureTask,
 	}
 
 	for _, opt := range opts {

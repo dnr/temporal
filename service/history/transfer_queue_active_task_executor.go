@@ -19,6 +19,7 @@ import (
 	enumsspb "go.temporal.io/server/api/enums/v1"
 	"go.temporal.io/server/api/historyservice/v1"
 	persistencespb "go.temporal.io/server/api/persistence/v1"
+	taskqueuespb "go.temporal.io/server/api/taskqueue/v1"
 	workflowspb "go.temporal.io/server/api/workflow/v1"
 	"go.temporal.io/server/chasm"
 	fcpb "go.temporal.io/server/chasm/lib/flowcontrol/gen/flowcontrolpb/v1"
@@ -38,6 +39,7 @@ import (
 	"go.temporal.io/server/common/rpc"
 	"go.temporal.io/server/common/sdk"
 	serviceerrors "go.temporal.io/server/common/serviceerror"
+	commontaskqueue "go.temporal.io/server/common/taskqueue"
 	"go.temporal.io/server/common/testing/testhooks"
 	"go.temporal.io/server/common/worker_versioning"
 	"go.temporal.io/server/service/history/configs"
@@ -195,25 +197,69 @@ func (t *transferQueueActiveTaskExecutor) execute(
 func (t *transferQueueActiveTaskExecutor) processReleaseLimiterTask(
 	ctx context.Context,
 	task *tasks.ReleaseLimiterTask,
-) error {
+) (retError error) {
 	ctx, cancel := context.WithTimeout(ctx, taskTimeout)
 	defer cancel()
 
-	var releaseErrors []error
-	for _, limiter := range task.Limiters {
-		switch limiter.GetLimiterType() {
-		case enumsspb.LIMITER_TYPE_CONCURRENCY:
-			_, err := t.concurrencyServiceClient.Batch(ctx, &fcpb.ConcurrencyBatchRequest{
-				NamespaceId:  task.NamespaceID,
-				Key:          limiter.GetKey(),
-				ReleaseSlots: []string{limiter.GetSlotId()},
-			})
-			if err != nil {
-				releaseErrors = append(releaseErrors, err)
-			}
+	verified := false
+	if commontaskqueue.ReleaseRecorded(task.Releases) {
+		var err error
+		verified, err = verifyLimiterReleases(ctx, t.concurrencyServiceClient, task.NamespaceID, task.Releases)
+		if err != nil {
+			return err
 		}
 	}
-	return errors.Join(releaseErrors...)
+	if !verified {
+		var releaseErrors []error
+		recorded := make([]*taskqueuespb.LimiterRelease, 0, len(task.Releases))
+		for _, release := range task.Releases {
+			limiter := release.GetLimiter()
+			switch limiter.GetLimiterType() {
+			case enumsspb.LIMITER_TYPE_CONCURRENCY:
+				response, err := t.concurrencyServiceClient.Batch(ctx, &fcpb.ConcurrencyBatchRequest{
+					NamespaceId:  task.NamespaceID,
+					Key:          limiter.GetKey(),
+					ReleaseSlots: []string{limiter.GetSlotId()},
+				})
+				if err != nil {
+					releaseErrors = append(releaseErrors, err)
+					continue
+				}
+				if len(response.GetComponentRef()) == 0 {
+					releaseErrors = append(releaseErrors, serviceerror.NewInternal("Release response is missing component ref"))
+					continue
+				}
+				recorded = append(recorded, &taskqueuespb.LimiterRelease{
+					Limiter:      limiter,
+					ComponentRef: response.GetComponentRef(),
+				})
+			}
+		}
+		if err := errors.Join(releaseErrors...); err != nil {
+			return err
+		}
+		task = &tasks.ReleaseLimiterTask{
+			WorkflowKey: task.WorkflowKey,
+			Releases:    recorded,
+		}
+	}
+
+	wfContext, release, err := getWorkflowExecutionContextForTask(ctx, t.shardContext, t.cache, task)
+	if err != nil {
+		return err
+	}
+	defer func() { release(retError) }()
+
+	mutableState, err := loadMutableStateForTransferTask(ctx, t.shardContext, wfContext, task, t.metricHandler, t.logger)
+	if err != nil || mutableState == nil {
+		return err
+	}
+	if verified {
+		mutableState.CompleteLimiterRelease(task.Releases)
+	} else {
+		mutableState.RecordLimiterRelease(task.Releases)
+	}
+	return wfContext.UpdateWorkflowExecutionAsActive(ctx, t.shardContext)
 }
 
 func (t *transferQueueActiveTaskExecutor) executeChasmSideEffectTransferTask(
@@ -252,6 +298,7 @@ func (t *transferQueueActiveTaskExecutor) executeChasmSideEffectTransferTask(
 		t.chasmEngine,
 		tree,
 		task,
+		bypassTaskGenerationValidation(task, t.shardContext.ChasmRegistry()),
 	)
 }
 

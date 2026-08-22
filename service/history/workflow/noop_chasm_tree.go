@@ -93,6 +93,16 @@ func (*noopChasmTree) ExecuteSideEffectTask(
 	return nil
 }
 
+func (*noopChasmTree) ExecuteSideEffectStandbyTask(
+	ctx context.Context,
+	executionKey chasm.ExecutionKey,
+	task *tasks.ChasmTask,
+	taskExists bool,
+	validate func(chasm.NodeBackend, chasm.Context, chasm.Component) error,
+) (bool, error) {
+	return false, nil
+}
+
 func (*noopChasmTree) ExecuteSideEffectDiscardTask(
 	ctx context.Context,
 	executionKey chasm.ExecutionKey,

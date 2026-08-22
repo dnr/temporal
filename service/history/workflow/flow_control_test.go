@@ -32,7 +32,10 @@ func TestNewReleaseLimiterTask(t *testing.T) {
 
 	require.NotNil(t, task)
 	require.Equal(t, workflowKey, task.WorkflowKey)
-	require.Equal(t, []*taskqueuespb.LimiterRef{concurrencyLimiter1, concurrencyLimiter2}, task.Limiters)
+	require.Equal(t, []*taskqueuespb.LimiterRelease{
+		{Limiter: concurrencyLimiter1},
+		{Limiter: concurrencyLimiter2},
+	}, task.Releases)
 }
 
 func TestNewReleaseLimiterTask_NoReleaseNeeded(t *testing.T) {

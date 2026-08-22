@@ -152,6 +152,7 @@ func (e *outboundQueueActiveTaskExecutor) executeChasmSideEffectTask(
 		e.chasmEngine,
 		tree,
 		task,
+		bypassTaskGenerationValidation(task, e.shardContext.ChasmRegistry()),
 	)
 	return err
 }

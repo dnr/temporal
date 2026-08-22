@@ -468,7 +468,7 @@ func transferReleaseLimiterTaskToProto(
 		VisibilityTime: timestamppb.New(task.VisibilityTimestamp),
 		TaskDetails: &persistencespb.TransferTaskInfo_ReleaseLimiterTaskDetails_{
 			ReleaseLimiterTaskDetails: &persistencespb.TransferTaskInfo_ReleaseLimiterTaskDetails{
-				Limiters: task.Limiters,
+				Releases: task.Releases,
 			},
 		},
 	}
@@ -485,7 +485,7 @@ func transferReleaseLimiterTaskFromProto(
 		),
 		VisibilityTimestamp: task.VisibilityTime.AsTime(),
 		TaskID:              task.TaskId,
-		Limiters:            task.GetReleaseLimiterTaskDetails().GetLimiters(),
+		Releases:            task.GetReleaseLimiterTaskDetails().GetReleases(),
 	}
 }
 

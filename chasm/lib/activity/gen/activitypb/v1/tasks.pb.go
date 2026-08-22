@@ -247,7 +247,7 @@ func (x *ActivityDispatchTask) GetStartDelayBucket() StartDelayBucket {
 
 type ReleaseLimiterTask struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Limiters      []*v1.LimiterRef       `protobuf:"bytes,1,rep,name=limiters,proto3" json:"limiters,omitempty"`
+	Releases      []*v1.LimiterRelease   `protobuf:"bytes,2,rep,name=releases,proto3" json:"releases,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -282,9 +282,9 @@ func (*ReleaseLimiterTask) Descriptor() ([]byte, []int) {
 	return file_temporal_server_chasm_lib_activity_proto_v1_tasks_proto_rawDescGZIP(), []int{1}
 }
 
-func (x *ReleaseLimiterTask) GetLimiters() []*v1.LimiterRef {
+func (x *ReleaseLimiterTask) GetReleases() []*v1.LimiterRelease {
 	if x != nil {
-		return x.Limiters
+		return x.Releases
 	}
 	return nil
 }
@@ -480,9 +480,9 @@ const file_temporal_server_chasm_lib_activity_proto_v1_tasks_proto_rawDesc = "" 
 	"\x14ActivityDispatchTask\x12\x14\n" +
 	"\x05stamp\x18\x01 \x01(\x05R\x05stamp\x12d\n" +
 	"\x0fdispatch_reason\x18\x02 \x01(\x0e2;.temporal.server.chasm.lib.activity.proto.v1.DispatchReasonR\x0edispatchReason\x12k\n" +
-	"\x12start_delay_bucket\x18\x03 \x01(\x0e2=.temporal.server.chasm.lib.activity.proto.v1.StartDelayBucketR\x10startDelayBucket\"^\n" +
-	"\x12ReleaseLimiterTask\x12H\n" +
-	"\blimiters\x18\x01 \x03(\v2,.temporal.server.api.taskqueue.v1.LimiterRefR\blimiters\"2\n" +
+	"\x12start_delay_bucket\x18\x03 \x01(\x0e2=.temporal.server.chasm.lib.activity.proto.v1.StartDelayBucketR\x10startDelayBucket\"b\n" +
+	"\x12ReleaseLimiterTask\x12L\n" +
+	"\breleases\x18\x02 \x03(\v20.temporal.server.api.taskqueue.v1.LimiterReleaseR\breleases\"2\n" +
 	"\x1aScheduleToStartTimeoutTask\x12\x14\n" +
 	"\x05stamp\x18\x01 \x01(\x05R\x05stamp\"2\n" +
 	"\x1aScheduleToCloseTimeoutTask\x12\x14\n" +
@@ -531,12 +531,12 @@ var file_temporal_server_chasm_lib_activity_proto_v1_tasks_proto_goTypes = []any
 	(*ScheduleToCloseTimeoutTask)(nil), // 5: temporal.server.chasm.lib.activity.proto.v1.ScheduleToCloseTimeoutTask
 	(*StartToCloseTimeoutTask)(nil),    // 6: temporal.server.chasm.lib.activity.proto.v1.StartToCloseTimeoutTask
 	(*HeartbeatTimeoutTask)(nil),       // 7: temporal.server.chasm.lib.activity.proto.v1.HeartbeatTimeoutTask
-	(*v1.LimiterRef)(nil),              // 8: temporal.server.api.taskqueue.v1.LimiterRef
+	(*v1.LimiterRelease)(nil),          // 8: temporal.server.api.taskqueue.v1.LimiterRelease
 }
 var file_temporal_server_chasm_lib_activity_proto_v1_tasks_proto_depIdxs = []int32{
 	0, // 0: temporal.server.chasm.lib.activity.proto.v1.ActivityDispatchTask.dispatch_reason:type_name -> temporal.server.chasm.lib.activity.proto.v1.DispatchReason
 	1, // 1: temporal.server.chasm.lib.activity.proto.v1.ActivityDispatchTask.start_delay_bucket:type_name -> temporal.server.chasm.lib.activity.proto.v1.StartDelayBucket
-	8, // 2: temporal.server.chasm.lib.activity.proto.v1.ReleaseLimiterTask.limiters:type_name -> temporal.server.api.taskqueue.v1.LimiterRef
+	8, // 2: temporal.server.chasm.lib.activity.proto.v1.ReleaseLimiterTask.releases:type_name -> temporal.server.api.taskqueue.v1.LimiterRelease
 	3, // [3:3] is the sub-list for method output_type
 	3, // [3:3] is the sub-list for method input_type
 	3, // [3:3] is the sub-list for extension type_name

@@ -128,6 +128,7 @@ func (c *BatchingClient) applyBatch(key clientBatchKey, items []clientBatchItem)
 			ReserveSuccess: slices.Clone(res.ReserveSuccess[reserveOffset : reserveOffset+itemReserveCount]),
 			CommitSuccess:  slices.Clone(res.CommitSuccess[commitOffset : commitOffset+itemCommitCount]),
 			Generation:     res.Generation,
+			ComponentRef:   res.ComponentRef,
 		}
 		reserveOffset += itemReserveCount
 		commitOffset += itemCommitCount

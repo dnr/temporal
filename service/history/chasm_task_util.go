@@ -50,6 +50,7 @@ func executeChasmSideEffectTask(
 	engine chasm.Engine,
 	tree historyi.ChasmTree,
 	task *tasks.ChasmTask,
+	bypassGenerationValidation bool,
 ) error {
 	executionKey := chasm.ExecutionKey{
 		NamespaceID: task.NamespaceID,
@@ -67,10 +68,12 @@ func executeChasmSideEffectTask(
 
 		// Validate task generation. We don't need to refresh tasks as we re-generate
 		// CHASM tasks on transaction close.
-		taskID := task.TaskID
-		tgClock := backend.GetExecutionInfo().TaskGenerationShardClockTimestamp
-		if tgClock != 0 && taskID != 0 && taskID < tgClock {
-			return consts.ErrStaleReference
+		if !bypassGenerationValidation {
+			taskID := task.TaskID
+			tgClock := backend.GetExecutionInfo().TaskGenerationShardClockTimestamp
+			if tgClock != 0 && taskID != 0 && taskID < tgClock {
+				return consts.ErrStaleReference
+			}
 		}
 
 		return nil
@@ -81,6 +84,42 @@ func executeChasmSideEffectTask(
 		engineCtx,
 		executionKey,
 		task,
+		validate,
+	)
+}
+
+func executeChasmSideEffectStandbyTask(
+	ctx context.Context,
+	engine chasm.Engine,
+	tree historyi.ChasmTree,
+	task *tasks.ChasmTask,
+	taskExists bool,
+	bypassGenerationValidation bool,
+) (bool, error) {
+	executionKey := chasm.ExecutionKey{
+		NamespaceID: task.NamespaceID,
+		BusinessID:  task.WorkflowID,
+		RunID:       task.RunID,
+	}
+	validate := func(backend chasm.NodeBackend, _ chasm.Context, _ chasm.Component) error {
+		if backend.GetExecutionState().State == enumsspb.WORKFLOW_EXECUTION_STATE_ZOMBIE {
+			return consts.ErrWorkflowZombie
+		}
+		if !bypassGenerationValidation {
+			taskID := task.TaskID
+			tgClock := backend.GetExecutionInfo().TaskGenerationShardClockTimestamp
+			if tgClock != 0 && taskID != 0 && taskID < tgClock {
+				return consts.ErrStaleReference
+			}
+		}
+		return nil
+	}
+
+	return tree.ExecuteSideEffectStandbyTask(
+		chasm.NewEngineContext(ctx, engine),
+		executionKey,
+		task,
+		taskExists,
 		validate,
 	)
 }

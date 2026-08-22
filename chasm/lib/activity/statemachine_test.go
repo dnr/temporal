@@ -447,7 +447,10 @@ func TestReleaseAttemptLimiters(t *testing.T) {
 	attemptState := &activitypb.ActivityAttemptState{
 		Limiters: []*taskqueuespb.LimiterRef{rateLimiter, concurrencyLimiter},
 	}
-	activity := &Activity{LastAttempt: chasm.NewDataField(ctx, attemptState)}
+	activity := &Activity{
+		ActivityState: &activitypb.ActivityState{},
+		LastAttempt:   chasm.NewDataField(ctx, attemptState),
+	}
 
 	activity.releaseAttemptLimiters(ctx)
 
@@ -455,7 +458,8 @@ func TestReleaseAttemptLimiters(t *testing.T) {
 	require.Len(t, ctx.Tasks, 1)
 	releaseTask, ok := ctx.Tasks[0].Payload.(*activitypb.ReleaseLimiterTask)
 	require.True(t, ok)
-	protorequire.ProtoSliceEqual(t, []*taskqueuespb.LimiterRef{concurrencyLimiter}, releaseTask.GetLimiters())
+	require.Len(t, releaseTask.GetReleases(), 1)
+	protorequire.ProtoEqual(t, concurrencyLimiter, releaseTask.GetReleases()[0].GetLimiter())
 
 	activity.releaseAttemptLimiters(ctx)
 	require.Len(t, ctx.Tasks, 1)

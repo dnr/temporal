@@ -42,6 +42,7 @@ func TestBatchingClient(t *testing.T) {
 				ReserveSuccess: []bool{true, false},
 				CommitSuccess:  []bool{true},
 				Generation:     42,
+				ComponentRef:   []byte("component-ref"),
 			}, nil
 		}},
 		stream_batcher.BatcherOptions{
@@ -103,6 +104,7 @@ func TestBatchingClient(t *testing.T) {
 	for result := range results {
 		require.NoError(t, result.err)
 		require.Equal(t, int64(42), result.res.GetGeneration())
+		require.Equal(t, []byte("component-ref"), result.res.GetComponentRef())
 		reserveResults = append(reserveResults, result.res.GetReserveSuccess()...)
 		commitResults = append(commitResults, result.res.GetCommitSuccess()...)
 	}

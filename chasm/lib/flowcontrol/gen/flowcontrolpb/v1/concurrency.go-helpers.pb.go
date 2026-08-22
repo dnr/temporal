@@ -116,6 +116,80 @@ func (this *ConcurrencyBatchResponse) Equal(that interface{}) bool {
 	return proto.Equal(this, that1)
 }
 
+// Marshal an object of type VerifyReleaseRequest to the protobuf v3 wire format
+func (val *VerifyReleaseRequest) Marshal() ([]byte, error) {
+	return proto.Marshal(val)
+}
+
+// Unmarshal an object of type VerifyReleaseRequest from the protobuf v3 wire format
+func (val *VerifyReleaseRequest) Unmarshal(buf []byte) error {
+	return proto.Unmarshal(buf, val)
+}
+
+// Size returns the size of the object, in bytes, once serialized
+func (val *VerifyReleaseRequest) Size() int {
+	return proto.Size(val)
+}
+
+// Equal returns whether two VerifyReleaseRequest values are equivalent by recursively
+// comparing the message's fields.
+// For more information see the documentation for
+// https://pkg.go.dev/google.golang.org/protobuf/proto#Equal
+func (this *VerifyReleaseRequest) Equal(that interface{}) bool {
+	if that == nil {
+		return this == nil
+	}
+
+	var that1 *VerifyReleaseRequest
+	switch t := that.(type) {
+	case *VerifyReleaseRequest:
+		that1 = t
+	case VerifyReleaseRequest:
+		that1 = &t
+	default:
+		return false
+	}
+
+	return proto.Equal(this, that1)
+}
+
+// Marshal an object of type VerifyReleaseResponse to the protobuf v3 wire format
+func (val *VerifyReleaseResponse) Marshal() ([]byte, error) {
+	return proto.Marshal(val)
+}
+
+// Unmarshal an object of type VerifyReleaseResponse from the protobuf v3 wire format
+func (val *VerifyReleaseResponse) Unmarshal(buf []byte) error {
+	return proto.Unmarshal(buf, val)
+}
+
+// Size returns the size of the object, in bytes, once serialized
+func (val *VerifyReleaseResponse) Size() int {
+	return proto.Size(val)
+}
+
+// Equal returns whether two VerifyReleaseResponse values are equivalent by recursively
+// comparing the message's fields.
+// For more information see the documentation for
+// https://pkg.go.dev/google.golang.org/protobuf/proto#Equal
+func (this *VerifyReleaseResponse) Equal(that interface{}) bool {
+	if that == nil {
+		return this == nil
+	}
+
+	var that1 *VerifyReleaseResponse
+	switch t := that.(type) {
+	case *VerifyReleaseResponse:
+		that1 = t
+	case VerifyReleaseResponse:
+		that1 = &t
+	default:
+		return false
+	}
+
+	return proto.Equal(this, that1)
+}
+
 // Marshal an object of type ConcurrencyWaitRequest to the protobuf v3 wire format
 func (val *ConcurrencyWaitRequest) Marshal() ([]byte, error) {
 	return proto.Marshal(val)

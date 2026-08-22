@@ -42,3 +42,33 @@ func TestNeedsRelease(t *testing.T) {
 		})
 	}
 }
+
+func TestContainsLimiterRef(t *testing.T) {
+	ref := &taskqueuespb.LimiterRef{
+		LimiterType: enumsspb.LIMITER_TYPE_CONCURRENCY,
+		Key:         "key",
+		SlotId:      "slot-id",
+	}
+
+	require.True(t, ContainsLimiterRef([]*taskqueuespb.LimiterRef{ref}, ref))
+	require.False(t, ContainsLimiterRef([]*taskqueuespb.LimiterRef{ref}, &taskqueuespb.LimiterRef{
+		LimiterType: enumsspb.LIMITER_TYPE_CONCURRENCY,
+		Key:         "key",
+		SlotId:      "other-slot-id",
+	}))
+}
+
+func TestLimiterReleaseHelpers(t *testing.T) {
+	ref := &taskqueuespb.LimiterRef{
+		LimiterType: enumsspb.LIMITER_TYPE_CONCURRENCY,
+		Key:         "key",
+		SlotId:      "slot-id",
+	}
+	release := &taskqueuespb.LimiterRelease{Limiter: ref, ComponentRef: []byte("ref")}
+
+	require.Same(t, release, FindLimiterRelease([]*taskqueuespb.LimiterRelease{release}, ref))
+	require.Nil(t, FindLimiterRelease([]*taskqueuespb.LimiterRelease{release}, &taskqueuespb.LimiterRef{Key: "other"}))
+	require.True(t, ReleaseRecorded([]*taskqueuespb.LimiterRelease{release}))
+	require.False(t, ReleaseRecorded(nil))
+	require.False(t, ReleaseRecorded([]*taskqueuespb.LimiterRelease{{Limiter: ref}}))
+}

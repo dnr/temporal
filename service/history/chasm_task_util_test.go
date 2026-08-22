@@ -2,9 +2,29 @@ package history
 
 import (
 	"context"
+	"testing"
 
+	"github.com/stretchr/testify/require"
+	persistencespb "go.temporal.io/server/api/persistence/v1"
 	"go.temporal.io/server/chasm"
+	"go.temporal.io/server/common/log"
+	"go.temporal.io/server/service/history/tasks"
 )
+
+func TestBypassTaskGenerationValidation(t *testing.T) {
+	registry := chasm.NewRegistry(log.NewTestLogger())
+	require.NoError(t, registry.Register(&standbyVerifiableTaskTestLibrary{}))
+	taskTypeID, ok := registry.TaskIDFor(&standbyVerifiableTestTask{})
+	require.True(t, ok)
+
+	require.True(t, bypassTaskGenerationValidation(&tasks.ReleaseLimiterTask{}, registry))
+	require.True(t, bypassTaskGenerationValidation(&tasks.ChasmTask{
+		Info: &persistencespb.ChasmTaskInfo{TypeId: taskTypeID},
+	}, registry))
+	require.False(t, bypassTaskGenerationValidation(&tasks.ChasmTask{
+		Info: &persistencespb.ChasmTaskInfo{TypeId: taskTypeID + 1},
+	}, registry))
+}
 
 // discardableTaskTestLibrary is a minimal CHASM library that registers a side-effect task whose handler has a custom
 // Discard implementation, used for testing discard paths in standby task executors.
@@ -69,5 +89,38 @@ func (e *nonDiscardableTestTaskHandler) Validate(_ chasm.Context, _ any, _ chasm
 }
 
 func (e *nonDiscardableTestTaskHandler) Execute(_ context.Context, _ chasm.ComponentRef, _ chasm.TaskAttributes, _ *nonDiscardableTestTask) error {
+	return nil
+}
+
+type standbyVerifiableTaskTestLibrary struct {
+	chasm.UnimplementedLibrary
+}
+
+func (l *standbyVerifiableTaskTestLibrary) Name() string { return "StandbyVerifiableTestLib" }
+
+func (l *standbyVerifiableTaskTestLibrary) Tasks() []*chasm.RegistrableTask {
+	return []*chasm.RegistrableTask{
+		chasm.NewRegistrableSideEffectTask(
+			"standby_verifiable_task",
+			&standbyVerifiableTestTaskHandler{},
+		),
+	}
+}
+
+type standbyVerifiableTestTask struct{}
+
+type standbyVerifiableTestTaskHandler struct {
+	chasm.SideEffectTaskHandlerBase[*standbyVerifiableTestTask]
+}
+
+func (e *standbyVerifiableTestTaskHandler) Validate(_ chasm.Context, _ any, _ chasm.TaskInvocation, _ *standbyVerifiableTestTask) (bool, error) {
+	return true, nil
+}
+
+func (e *standbyVerifiableTestTaskHandler) Execute(_ context.Context, _ chasm.ComponentRef, _ chasm.TaskAttributes, _ *standbyVerifiableTestTask) error {
+	return nil
+}
+
+func (e *standbyVerifiableTestTaskHandler) ExecuteStandby(_ context.Context, _ chasm.ComponentRef, _ chasm.StandbyTaskInvocation, _ *standbyVerifiableTestTask) error {
 	return nil
 }

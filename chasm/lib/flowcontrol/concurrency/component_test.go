@@ -24,6 +24,7 @@ func TestConcurrencySlotLifecycle(t *testing.T) {
 	require.False(t, limiter.commit("slot-2"))
 
 	require.True(t, limiter.commit("slot-1"))
+	require.False(t, limiter.released([]string{"slot-1"}))
 	limiter.cancelReservation("slot-1")
 	require.Len(t, limiter.Slots, 1)
 
@@ -31,7 +32,12 @@ func TestConcurrencySlotLifecycle(t *testing.T) {
 	require.Len(t, limiter.Slots, 1)
 	limiter.release("slot-1")
 	require.Empty(t, limiter.Slots)
+	require.True(t, limiter.released([]string{"slot-1"}))
 	limiter.release("slot-1")
+	require.Empty(t, limiter.Slots)
+	require.Equal(t, int64(3), limiter.ReleaseCount)
+	require.True(t, limiter.reserve("reserved", now))
+	limiter.release("reserved")
 	require.Empty(t, limiter.Slots)
 }
 

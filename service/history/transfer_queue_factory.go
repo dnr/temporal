@@ -149,6 +149,7 @@ func (f *transferQueueFactory) CreateQueue(
 		currentClusterName,
 		f.HistoryRawClient,
 		f.MatchingRawClient,
+		f.concurrencyBatchingClient,
 		f.VisibilityManager,
 		f.ChasmEngine,
 		f.ClientBean,

@@ -147,7 +147,8 @@ func loadMutableStateForTask(
 		return nil, err
 	}
 
-	if task.GetRunID() == mutableState.GetWorkflowKey().RunID {
+	if task.GetRunID() == mutableState.GetWorkflowKey().RunID &&
+		!bypassTaskGenerationValidation(task, shardContext.ChasmRegistry()) {
 		// Task generation is scoped to a specific run, so only perform the validation if runID matches.
 		// Tasks targeting the current run (e.g. workflow execution timeout timer) should bypass the validation.
 		if err := validateTaskGeneration(ctx, shardContext, wfContext, mutableState, task.GetTaskID()); err != nil {
@@ -184,8 +185,10 @@ func loadMutableStateForTask(
 		return nil, err
 	}
 
-	if err := validateTaskGeneration(ctx, shardContext, wfContext, mutableState, task.GetTaskID()); err != nil {
-		return nil, err
+	if !bypassTaskGenerationValidation(task, shardContext.ChasmRegistry()) {
+		if err := validateTaskGeneration(ctx, shardContext, wfContext, mutableState, task.GetTaskID()); err != nil {
+			return nil, err
+		}
 	}
 
 	if eventID < mutableState.GetNextEventID() {
@@ -204,6 +207,17 @@ func loadMutableStateForTask(
 		tag.WorkflowNextEventID(mutableState.GetNextEventID()),
 	)
 	return nil, nil
+}
+
+func bypassTaskGenerationValidation(task tasks.Task, registry *chasm.Registry) bool {
+	switch task := task.(type) {
+	case *tasks.ReleaseLimiterTask:
+		return true
+	case *tasks.ChasmTask:
+		return registry != nil && registry.TaskHasStandbyHandler(task.Info.GetTypeId())
+	default:
+		return false
+	}
 }
 
 func validateTaskByClock(

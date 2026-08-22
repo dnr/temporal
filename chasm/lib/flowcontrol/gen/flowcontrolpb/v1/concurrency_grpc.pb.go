@@ -20,8 +20,9 @@ import (
 const _ = grpc.SupportPackageIsVersion7
 
 const (
-	ConcurrencyService_Batch_FullMethodName = "/temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyService/Batch"
-	ConcurrencyService_Wait_FullMethodName  = "/temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyService/Wait"
+	ConcurrencyService_Batch_FullMethodName         = "/temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyService/Batch"
+	ConcurrencyService_Wait_FullMethodName          = "/temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyService/Wait"
+	ConcurrencyService_VerifyRelease_FullMethodName = "/temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyService/VerifyRelease"
 )
 
 // ConcurrencyServiceClient is the client API for ConcurrencyService service.
@@ -45,6 +46,8 @@ type ConcurrencyServiceClient interface {
 	// Wait is a long-poll RPC that returns when at least one slot is free, or the caller's
 	// generation is too old.
 	Wait(ctx context.Context, in *ConcurrencyWaitRequest, opts ...grpc.CallOption) (*ConcurrencyWaitResponse, error)
+	// Verifies that a durable Release transition has replicated to this cluster.
+	VerifyRelease(ctx context.Context, in *VerifyReleaseRequest, opts ...grpc.CallOption) (*VerifyReleaseResponse, error)
 }
 
 type concurrencyServiceClient struct {
@@ -73,6 +76,15 @@ func (c *concurrencyServiceClient) Wait(ctx context.Context, in *ConcurrencyWait
 	return out, nil
 }
 
+func (c *concurrencyServiceClient) VerifyRelease(ctx context.Context, in *VerifyReleaseRequest, opts ...grpc.CallOption) (*VerifyReleaseResponse, error) {
+	out := new(VerifyReleaseResponse)
+	err := c.cc.Invoke(ctx, ConcurrencyService_VerifyRelease_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // ConcurrencyServiceServer is the server API for ConcurrencyService service.
 // All implementations must embed UnimplementedConcurrencyServiceServer
 // for forward compatibility
@@ -94,6 +106,8 @@ type ConcurrencyServiceServer interface {
 	// Wait is a long-poll RPC that returns when at least one slot is free, or the caller's
 	// generation is too old.
 	Wait(context.Context, *ConcurrencyWaitRequest) (*ConcurrencyWaitResponse, error)
+	// Verifies that a durable Release transition has replicated to this cluster.
+	VerifyRelease(context.Context, *VerifyReleaseRequest) (*VerifyReleaseResponse, error)
 	mustEmbedUnimplementedConcurrencyServiceServer()
 }
 
@@ -106,6 +120,9 @@ func (UnimplementedConcurrencyServiceServer) Batch(context.Context, *Concurrency
 }
 func (UnimplementedConcurrencyServiceServer) Wait(context.Context, *ConcurrencyWaitRequest) (*ConcurrencyWaitResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Wait not implemented")
+}
+func (UnimplementedConcurrencyServiceServer) VerifyRelease(context.Context, *VerifyReleaseRequest) (*VerifyReleaseResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method VerifyRelease not implemented")
 }
 func (UnimplementedConcurrencyServiceServer) mustEmbedUnimplementedConcurrencyServiceServer() {}
 
@@ -156,6 +173,24 @@ func _ConcurrencyService_Wait_Handler(srv interface{}, ctx context.Context, dec 
 	return interceptor(ctx, in, info, handler)
 }
 
+func _ConcurrencyService_VerifyRelease_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(VerifyReleaseRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ConcurrencyServiceServer).VerifyRelease(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ConcurrencyService_VerifyRelease_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ConcurrencyServiceServer).VerifyRelease(ctx, req.(*VerifyReleaseRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // ConcurrencyService_ServiceDesc is the grpc.ServiceDesc for ConcurrencyService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -170,6 +205,10 @@ var ConcurrencyService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "Wait",
 			Handler:    _ConcurrencyService_Wait_Handler,
+		},
+		{
+			MethodName: "VerifyRelease",
+			Handler:    _ConcurrencyService_VerifyRelease_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

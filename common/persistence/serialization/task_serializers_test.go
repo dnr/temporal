@@ -92,25 +92,26 @@ func (s *taskSerializerSuite) TestTransferReleaseLimiterTask() {
 		WorkflowKey:         s.workflowKey,
 		VisibilityTimestamp: time.Unix(0, rand.Int63()).UTC(),
 		TaskID:              rand.Int63(),
-		Limiters: []*taskqueuespb.LimiterRef{
-			{
+		Releases: []*taskqueuespb.LimiterRelease{{
+			Limiter: &taskqueuespb.LimiterRef{
 				LimiterType: enumsspb.LIMITER_TYPE_CONCURRENCY,
 				Key:         "limiter-key",
 				SlotId:      uuid.NewString(),
 			},
-		},
+			ComponentRef: []byte("component-ref"),
+		}},
 	}
 
 	s.assertEqualTasksWithOpts(task,
 		func(task, deserializedTask tasks.Task) {
-			original := task.(*tasks.ReleaseLimiterTask).Limiters
-			deserialized := deserializedTask.(*tasks.ReleaseLimiterTask).Limiters
+			original := task.(*tasks.ReleaseLimiterTask).Releases
+			deserialized := deserializedTask.(*tasks.ReleaseLimiterTask).Releases
 			s.Require().Len(deserialized, len(original))
 			for i := range original {
 				protorequire.ProtoEqual(s.T(), original[i], deserialized[i])
 			}
 		},
-		cmpopts.IgnoreFields(tasks.ReleaseLimiterTask{}, "Limiters"),
+		cmpopts.IgnoreFields(tasks.ReleaseLimiterTask{}, "Releases"),
 	)
 }
 

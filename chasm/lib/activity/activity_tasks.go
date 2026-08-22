@@ -5,7 +5,9 @@ import (
 	"errors"
 
 	enumspb "go.temporal.io/api/enums/v1"
+	"go.temporal.io/api/serviceerror"
 	enumsspb "go.temporal.io/server/api/enums/v1"
+	taskqueuespb "go.temporal.io/server/api/taskqueue/v1"
 	"go.temporal.io/server/chasm"
 	"go.temporal.io/server/chasm/lib/activity/gen/activitypb/v1"
 	"go.temporal.io/server/chasm/lib/flowcontrol/concurrency"
@@ -13,6 +15,7 @@ import (
 	"go.temporal.io/server/common/clock"
 	"go.temporal.io/server/common/metrics"
 	"go.temporal.io/server/common/resource"
+	commontaskqueue "go.temporal.io/server/common/taskqueue"
 	"go.temporal.io/server/common/util"
 	"go.uber.org/fx"
 )
@@ -36,12 +39,12 @@ func newReleaseLimiterTaskHandler(
 }
 
 func (h *releaseLimiterTaskHandler) Validate(
-	chasm.Context,
-	*Activity,
-	chasm.TaskInvocation,
-	*activitypb.ReleaseLimiterTask,
+	_ chasm.Context,
+	activity *Activity,
+	_ chasm.TaskInvocation,
+	task *activitypb.ReleaseLimiterTask,
 ) (bool, error) {
-	return true, nil
+	return commontaskqueue.ReleaseRecorded(task.GetReleases()) || activity.hasPendingLimiterRelease(task.GetReleases()), nil
 }
 
 func (h *releaseLimiterTaskHandler) Execute(
@@ -50,22 +53,108 @@ func (h *releaseLimiterTaskHandler) Execute(
 	_ chasm.TaskAttributes,
 	task *activitypb.ReleaseLimiterTask,
 ) error {
+	if commontaskqueue.ReleaseRecorded(task.GetReleases()) {
+		released, err := h.verifyReleases(ctx, activityRef.NamespaceID, task.GetReleases())
+		if err != nil {
+			return err
+		}
+		if released {
+			_, _, err = chasm.UpdateComponent(
+				ctx,
+				activityRef,
+				(*Activity).completeLimiterRelease,
+				task.GetReleases(),
+			)
+			return err
+		}
+	}
+
 	var releaseErrors []error
-	for _, limiter := range task.GetLimiters() {
+	recorded := make([]*taskqueuespb.LimiterRelease, 0, len(task.GetReleases()))
+	for _, release := range task.GetReleases() {
+		limiter := release.GetLimiter()
 		switch limiter.GetLimiterType() {
 		case enumsspb.LIMITER_TYPE_CONCURRENCY:
-			_, err := h.concurrencyServiceClient.Batch(ctx, &fcpb.ConcurrencyBatchRequest{
+			response, err := h.concurrencyServiceClient.Batch(ctx, &fcpb.ConcurrencyBatchRequest{
 				NamespaceId:  activityRef.NamespaceID,
 				Key:          limiter.GetKey(),
 				ReleaseSlots: []string{limiter.GetSlotId()},
 			})
 			if err != nil {
 				releaseErrors = append(releaseErrors, err)
+				continue
 			}
+			if len(response.GetComponentRef()) == 0 {
+				releaseErrors = append(releaseErrors, serviceerror.NewInternal("Release response is missing component ref"))
+				continue
+			}
+			recorded = append(recorded, &taskqueuespb.LimiterRelease{
+				Limiter:      limiter,
+				ComponentRef: response.GetComponentRef(),
+			})
 		default:
 		}
 	}
-	return errors.Join(releaseErrors...)
+	if err := errors.Join(releaseErrors...); err != nil {
+		return err
+	}
+
+	_, _, err := chasm.UpdateComponent(
+		ctx,
+		activityRef,
+		(*Activity).recordLimiterRelease,
+		recorded,
+	)
+	return err
+}
+
+func (h *releaseLimiterTaskHandler) ExecuteStandby(
+	ctx context.Context,
+	activityRef chasm.ComponentRef,
+	invocation chasm.StandbyTaskInvocation,
+	task *activitypb.ReleaseLimiterTask,
+) error {
+	if !commontaskqueue.ReleaseRecorded(task.GetReleases()) {
+		if !invocation.TaskExists {
+			return nil
+		}
+		return chasm.ErrTaskNotReady
+	}
+	released, err := h.verifyReleases(ctx, activityRef.NamespaceID, task.GetReleases())
+	if err != nil {
+		return err
+	}
+	if !released {
+		return chasm.ErrTaskNotReady
+	}
+	return nil
+}
+
+func (h *releaseLimiterTaskHandler) verifyReleases(
+	ctx context.Context,
+	namespaceID string,
+	releases []*taskqueuespb.LimiterRelease,
+) (bool, error) {
+	for _, release := range releases {
+		limiter := release.GetLimiter()
+		response, err := h.concurrencyServiceClient.VerifyRelease(ctx, &fcpb.VerifyReleaseRequest{
+			NamespaceId:  namespaceID,
+			Key:          limiter.GetKey(),
+			Slots:        []string{limiter.GetSlotId()},
+			ComponentRef: release.GetComponentRef(),
+		})
+		switch err.(type) {
+		case nil:
+			if !response.GetReleased() {
+				return false, nil
+			}
+		case *serviceerror.NotFound, *serviceerror.WorkflowNotReady, *serviceerror.Unavailable:
+			return false, nil
+		default:
+			return false, err
+		}
+	}
+	return true, nil
 }
 
 type activityDispatchTaskHandlerOptions struct {

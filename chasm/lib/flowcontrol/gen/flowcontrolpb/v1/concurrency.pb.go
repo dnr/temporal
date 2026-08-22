@@ -38,7 +38,9 @@ type ConcurrencyState struct {
 	// config.ConcurrentTasks.
 	Slots []*ConcurrencyState_Slot `protobuf:"bytes,3,rep,name=slots,proto3" json:"slots,omitempty"`
 	// Generation is used to ensure Wait is monotonic. See comment in Wait for details.
-	Generation    int64 `protobuf:"varint,4,opt,name=generation,proto3" json:"generation,omitempty"`
+	Generation int64 `protobuf:"varint,4,opt,name=generation,proto3" json:"generation,omitempty"`
+	// Incremented by every Release to make an idempotent no-op Release a durable transition.
+	ReleaseCount  int64 `protobuf:"varint,5,opt,name=release_count,json=releaseCount,proto3" json:"release_count,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -101,6 +103,13 @@ func (x *ConcurrencyState) GetGeneration() int64 {
 	return 0
 }
 
+func (x *ConcurrencyState) GetReleaseCount() int64 {
+	if x != nil {
+		return x.ReleaseCount
+	}
+	return 0
+}
+
 type ConcurrencyBatchRequest struct {
 	state       protoimpl.MessageState `protogen:"open.v1"`
 	NamespaceId string                 `protobuf:"bytes,1,opt,name=namespace_id,json=namespaceId,proto3" json:"namespace_id,omitempty"`
@@ -116,8 +125,8 @@ type ConcurrencyBatchRequest struct {
 	// Commit promotes a reservation to a committed slot. Succeeds if the reservation was
 	// promoted, or was already committed, i.e. idempotent. Durable.
 	CommitSlots []string `protobuf:"bytes,5,rep,name=commit_slots,json=commitSlots,proto3" json:"commit_slots,omitempty"`
-	// Release frees a comitted slot. Succeeds if the committed slot was released or if there was
-	// no committed slot, i.e. idempotent. Durable.
+	// Release frees a reserved or committed slot. Succeeds whether or not the slot exists, i.e.
+	// it is idempotent. Durable.
 	ReleaseSlots []string `protobuf:"bytes,6,rep,name=release_slots,json=releaseSlots,proto3" json:"release_slots,omitempty"`
 	// For whole-task-queue limits, the initial limit and updates to the limit come through task
 	// queue config, so we need to pass them to the chasm object. We just do it on every call.
@@ -220,6 +229,8 @@ type ConcurrencyBatchResponse struct {
 	ReserveSuccess []bool `protobuf:"varint,2,rep,packed,name=reserve_success,json=reserveSuccess,proto3" json:"reserve_success,omitempty"`
 	// Note: we don't need a cancel_success, it's always considered successful.
 	CommitSuccess []bool `protobuf:"varint,3,rep,packed,name=commit_success,json=commitSuccess,proto3" json:"commit_success,omitempty"` // Note: we don't need a release_success, it's always considered successful.
+	// Reference to the durable CHASM transition that applied this batch.
+	ComponentRef  []byte `protobuf:"bytes,4,opt,name=component_ref,json=componentRef,proto3" json:"component_ref,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -275,6 +286,126 @@ func (x *ConcurrencyBatchResponse) GetCommitSuccess() []bool {
 	return nil
 }
 
+func (x *ConcurrencyBatchResponse) GetComponentRef() []byte {
+	if x != nil {
+		return x.ComponentRef
+	}
+	return nil
+}
+
+type VerifyReleaseRequest struct {
+	state       protoimpl.MessageState `protogen:"open.v1"`
+	NamespaceId string                 `protobuf:"bytes,1,opt,name=namespace_id,json=namespaceId,proto3" json:"namespace_id,omitempty"`
+	Key         string                 `protobuf:"bytes,2,opt,name=key,proto3" json:"key,omitempty"`
+	Slots       []string               `protobuf:"bytes,3,rep,name=slots,proto3" json:"slots,omitempty"`
+	// Component reference returned by the Batch call that released these slots.
+	ComponentRef  []byte `protobuf:"bytes,4,opt,name=component_ref,json=componentRef,proto3" json:"component_ref,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *VerifyReleaseRequest) Reset() {
+	*x = VerifyReleaseRequest{}
+	mi := &file_temporal_server_chasm_lib_flowcontrol_proto_v1_concurrency_proto_msgTypes[3]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *VerifyReleaseRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*VerifyReleaseRequest) ProtoMessage() {}
+
+func (x *VerifyReleaseRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_temporal_server_chasm_lib_flowcontrol_proto_v1_concurrency_proto_msgTypes[3]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use VerifyReleaseRequest.ProtoReflect.Descriptor instead.
+func (*VerifyReleaseRequest) Descriptor() ([]byte, []int) {
+	return file_temporal_server_chasm_lib_flowcontrol_proto_v1_concurrency_proto_rawDescGZIP(), []int{3}
+}
+
+func (x *VerifyReleaseRequest) GetNamespaceId() string {
+	if x != nil {
+		return x.NamespaceId
+	}
+	return ""
+}
+
+func (x *VerifyReleaseRequest) GetKey() string {
+	if x != nil {
+		return x.Key
+	}
+	return ""
+}
+
+func (x *VerifyReleaseRequest) GetSlots() []string {
+	if x != nil {
+		return x.Slots
+	}
+	return nil
+}
+
+func (x *VerifyReleaseRequest) GetComponentRef() []byte {
+	if x != nil {
+		return x.ComponentRef
+	}
+	return nil
+}
+
+type VerifyReleaseResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Released      bool                   `protobuf:"varint,1,opt,name=released,proto3" json:"released,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *VerifyReleaseResponse) Reset() {
+	*x = VerifyReleaseResponse{}
+	mi := &file_temporal_server_chasm_lib_flowcontrol_proto_v1_concurrency_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *VerifyReleaseResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*VerifyReleaseResponse) ProtoMessage() {}
+
+func (x *VerifyReleaseResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_temporal_server_chasm_lib_flowcontrol_proto_v1_concurrency_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use VerifyReleaseResponse.ProtoReflect.Descriptor instead.
+func (*VerifyReleaseResponse) Descriptor() ([]byte, []int) {
+	return file_temporal_server_chasm_lib_flowcontrol_proto_v1_concurrency_proto_rawDescGZIP(), []int{4}
+}
+
+func (x *VerifyReleaseResponse) GetReleased() bool {
+	if x != nil {
+		return x.Released
+	}
+	return false
+}
+
 type ConcurrencyWaitRequest struct {
 	state       protoimpl.MessageState `protogen:"open.v1"`
 	NamespaceId string                 `protobuf:"bytes,1,opt,name=namespace_id,json=namespaceId,proto3" json:"namespace_id,omitempty"`
@@ -287,7 +418,7 @@ type ConcurrencyWaitRequest struct {
 
 func (x *ConcurrencyWaitRequest) Reset() {
 	*x = ConcurrencyWaitRequest{}
-	mi := &file_temporal_server_chasm_lib_flowcontrol_proto_v1_concurrency_proto_msgTypes[3]
+	mi := &file_temporal_server_chasm_lib_flowcontrol_proto_v1_concurrency_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -299,7 +430,7 @@ func (x *ConcurrencyWaitRequest) String() string {
 func (*ConcurrencyWaitRequest) ProtoMessage() {}
 
 func (x *ConcurrencyWaitRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_temporal_server_chasm_lib_flowcontrol_proto_v1_concurrency_proto_msgTypes[3]
+	mi := &file_temporal_server_chasm_lib_flowcontrol_proto_v1_concurrency_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -312,7 +443,7 @@ func (x *ConcurrencyWaitRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ConcurrencyWaitRequest.ProtoReflect.Descriptor instead.
 func (*ConcurrencyWaitRequest) Descriptor() ([]byte, []int) {
-	return file_temporal_server_chasm_lib_flowcontrol_proto_v1_concurrency_proto_rawDescGZIP(), []int{3}
+	return file_temporal_server_chasm_lib_flowcontrol_proto_v1_concurrency_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *ConcurrencyWaitRequest) GetNamespaceId() string {
@@ -350,7 +481,7 @@ type ConcurrencyWaitResponse struct {
 
 func (x *ConcurrencyWaitResponse) Reset() {
 	*x = ConcurrencyWaitResponse{}
-	mi := &file_temporal_server_chasm_lib_flowcontrol_proto_v1_concurrency_proto_msgTypes[4]
+	mi := &file_temporal_server_chasm_lib_flowcontrol_proto_v1_concurrency_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -362,7 +493,7 @@ func (x *ConcurrencyWaitResponse) String() string {
 func (*ConcurrencyWaitResponse) ProtoMessage() {}
 
 func (x *ConcurrencyWaitResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_temporal_server_chasm_lib_flowcontrol_proto_v1_concurrency_proto_msgTypes[4]
+	mi := &file_temporal_server_chasm_lib_flowcontrol_proto_v1_concurrency_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -375,7 +506,7 @@ func (x *ConcurrencyWaitResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ConcurrencyWaitResponse.ProtoReflect.Descriptor instead.
 func (*ConcurrencyWaitResponse) Descriptor() ([]byte, []int) {
-	return file_temporal_server_chasm_lib_flowcontrol_proto_v1_concurrency_proto_rawDescGZIP(), []int{4}
+	return file_temporal_server_chasm_lib_flowcontrol_proto_v1_concurrency_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *ConcurrencyWaitResponse) GetGeneration() int64 {
@@ -407,7 +538,7 @@ type ConcurrencyState_Slot struct {
 
 func (x *ConcurrencyState_Slot) Reset() {
 	*x = ConcurrencyState_Slot{}
-	mi := &file_temporal_server_chasm_lib_flowcontrol_proto_v1_concurrency_proto_msgTypes[5]
+	mi := &file_temporal_server_chasm_lib_flowcontrol_proto_v1_concurrency_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -419,7 +550,7 @@ func (x *ConcurrencyState_Slot) String() string {
 func (*ConcurrencyState_Slot) ProtoMessage() {}
 
 func (x *ConcurrencyState_Slot) ProtoReflect() protoreflect.Message {
-	mi := &file_temporal_server_chasm_lib_flowcontrol_proto_v1_concurrency_proto_msgTypes[5]
+	mi := &file_temporal_server_chasm_lib_flowcontrol_proto_v1_concurrency_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -460,14 +591,15 @@ var File_temporal_server_chasm_lib_flowcontrol_proto_v1_concurrency_proto protor
 
 const file_temporal_server_chasm_lib_flowcontrol_proto_v1_concurrency_proto_rawDesc = "" +
 	"\n" +
-	"@temporal/server/chasm/lib/flowcontrol/proto/v1/concurrency.proto\x12.temporal.server.chasm.lib.flowcontrol.proto.v1\x1a\x1fgoogle/protobuf/timestamp.proto\x1a'temporal/api/taskqueue/v1/message.proto\x1a0temporal/server/api/common/v1/api_category.proto\x1a.temporal/server/api/routing/v1/extension.proto\"\xf0\x02\n" +
+	"@temporal/server/chasm/lib/flowcontrol/proto/v1/concurrency.proto\x12.temporal.server.chasm.lib.flowcontrol.proto.v1\x1a\x1fgoogle/protobuf/timestamp.proto\x1a'temporal/api/taskqueue/v1/message.proto\x1a0temporal/server/api/common/v1/api_category.proto\x1a.temporal/server/api/routing/v1/extension.proto\"\x95\x03\n" +
 	"\x10ConcurrencyState\x12C\n" +
 	"\x06config\x18\x01 \x01(\v2+.temporal.api.taskqueue.v1.ConcurrencyLimitR\x06config\x12%\n" +
 	"\x0econfig_version\x18\x02 \x01(\x03R\rconfigVersion\x12[\n" +
 	"\x05slots\x18\x03 \x03(\v2E.temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyState.SlotR\x05slots\x12\x1e\n" +
 	"\n" +
 	"generation\x18\x04 \x01(\x03R\n" +
-	"generation\x1as\n" +
+	"generation\x12#\n" +
+	"\rrelease_count\x18\x05 \x01(\x03R\freleaseCount\x1as\n" +
 	"\x04Slot\x12\x17\n" +
 	"\aslot_id\x18\x01 \x01(\tR\x06slotId\x12\x1c\n" +
 	"\tcommitted\x18\x02 \x01(\bR\tcommitted\x124\n" +
@@ -480,13 +612,21 @@ const file_temporal_server_chasm_lib_flowcontrol_proto_v1_concurrency_proto_rawD
 	"\fcommit_slots\x18\x05 \x03(\tR\vcommitSlots\x12#\n" +
 	"\rrelease_slots\x18\x06 \x03(\tR\freleaseSlots\x12P\n" +
 	"\rconfig_update\x18\a \x01(\v2+.temporal.api.taskqueue.v1.ConcurrencyLimitR\fconfigUpdate\x122\n" +
-	"\x15config_update_version\x18\b \x01(\x03R\x13configUpdateVersion\"\x8a\x01\n" +
+	"\x15config_update_version\x18\b \x01(\x03R\x13configUpdateVersion\"\xaf\x01\n" +
 	"\x18ConcurrencyBatchResponse\x12\x1e\n" +
 	"\n" +
 	"generation\x18\x01 \x01(\x03R\n" +
 	"generation\x12'\n" +
 	"\x0freserve_success\x18\x02 \x03(\bR\x0ereserveSuccess\x12%\n" +
-	"\x0ecommit_success\x18\x03 \x03(\bR\rcommitSuccess\"m\n" +
+	"\x0ecommit_success\x18\x03 \x03(\bR\rcommitSuccess\x12#\n" +
+	"\rcomponent_ref\x18\x04 \x01(\fR\fcomponentRef\"\x86\x01\n" +
+	"\x14VerifyReleaseRequest\x12!\n" +
+	"\fnamespace_id\x18\x01 \x01(\tR\vnamespaceId\x12\x10\n" +
+	"\x03key\x18\x02 \x01(\tR\x03key\x12\x14\n" +
+	"\x05slots\x18\x03 \x03(\tR\x05slots\x12#\n" +
+	"\rcomponent_ref\x18\x04 \x01(\fR\fcomponentRef\"3\n" +
+	"\x15VerifyReleaseResponse\x12\x1a\n" +
+	"\breleased\x18\x01 \x01(\bR\breleased\"m\n" +
 	"\x16ConcurrencyWaitRequest\x12!\n" +
 	"\fnamespace_id\x18\x01 \x01(\tR\vnamespaceId\x12\x10\n" +
 	"\x03key\x18\x02 \x01(\tR\x03key\x12\x1e\n" +
@@ -498,10 +638,11 @@ const file_temporal_server_chasm_lib_flowcontrol_proto_v1_concurrency_proto_rawD
 	"generation\x18\x01 \x01(\x03R\n" +
 	"generation\x12\x1d\n" +
 	"\n" +
-	"wake_count\x18\x02 \x01(\x05R\twakeCount2\xed\x02\n" +
+	"wake_count\x18\x02 \x01(\x05R\twakeCount2\x9d\x04\n" +
 	"\x12ConcurrencyService\x12\xab\x01\n" +
 	"\x05Batch\x12G.temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyBatchRequest\x1aH.temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyBatchResponse\"\x0f\x8a\xb5\x18\x02\b\x01\xd2\xc3\x18\x05\x1a\x03key\x12\xa8\x01\n" +
-	"\x04Wait\x12F.temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyWaitRequest\x1aG.temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyWaitResponse\"\x0f\x8a\xb5\x18\x02\b\x02\xd2\xc3\x18\x05\x1a\x03keyB;Z9go.temporal.io/server/chasm/lib/flowcontrol/gen/fcpb;fcpbb\x06proto3"
+	"\x04Wait\x12F.temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyWaitRequest\x1aG.temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyWaitResponse\"\x0f\x8a\xb5\x18\x02\b\x02\xd2\xc3\x18\x05\x1a\x03key\x12\xad\x01\n" +
+	"\rVerifyRelease\x12D.temporal.server.chasm.lib.flowcontrol.proto.v1.VerifyReleaseRequest\x1aE.temporal.server.chasm.lib.flowcontrol.proto.v1.VerifyReleaseResponse\"\x0f\x8a\xb5\x18\x02\b\x01\xd2\xc3\x18\x05\x1a\x03keyB;Z9go.temporal.io/server/chasm/lib/flowcontrol/gen/fcpb;fcpbb\x06proto3"
 
 var (
 	file_temporal_server_chasm_lib_flowcontrol_proto_v1_concurrency_proto_rawDescOnce sync.Once
@@ -515,28 +656,32 @@ func file_temporal_server_chasm_lib_flowcontrol_proto_v1_concurrency_proto_rawDe
 	return file_temporal_server_chasm_lib_flowcontrol_proto_v1_concurrency_proto_rawDescData
 }
 
-var file_temporal_server_chasm_lib_flowcontrol_proto_v1_concurrency_proto_msgTypes = make([]protoimpl.MessageInfo, 6)
+var file_temporal_server_chasm_lib_flowcontrol_proto_v1_concurrency_proto_msgTypes = make([]protoimpl.MessageInfo, 8)
 var file_temporal_server_chasm_lib_flowcontrol_proto_v1_concurrency_proto_goTypes = []any{
 	(*ConcurrencyState)(nil),         // 0: temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyState
 	(*ConcurrencyBatchRequest)(nil),  // 1: temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyBatchRequest
 	(*ConcurrencyBatchResponse)(nil), // 2: temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyBatchResponse
-	(*ConcurrencyWaitRequest)(nil),   // 3: temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyWaitRequest
-	(*ConcurrencyWaitResponse)(nil),  // 4: temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyWaitResponse
-	(*ConcurrencyState_Slot)(nil),    // 5: temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyState.Slot
-	(*v1.ConcurrencyLimit)(nil),      // 6: temporal.api.taskqueue.v1.ConcurrencyLimit
-	(*timestamppb.Timestamp)(nil),    // 7: google.protobuf.Timestamp
+	(*VerifyReleaseRequest)(nil),     // 3: temporal.server.chasm.lib.flowcontrol.proto.v1.VerifyReleaseRequest
+	(*VerifyReleaseResponse)(nil),    // 4: temporal.server.chasm.lib.flowcontrol.proto.v1.VerifyReleaseResponse
+	(*ConcurrencyWaitRequest)(nil),   // 5: temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyWaitRequest
+	(*ConcurrencyWaitResponse)(nil),  // 6: temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyWaitResponse
+	(*ConcurrencyState_Slot)(nil),    // 7: temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyState.Slot
+	(*v1.ConcurrencyLimit)(nil),      // 8: temporal.api.taskqueue.v1.ConcurrencyLimit
+	(*timestamppb.Timestamp)(nil),    // 9: google.protobuf.Timestamp
 }
 var file_temporal_server_chasm_lib_flowcontrol_proto_v1_concurrency_proto_depIdxs = []int32{
-	6, // 0: temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyState.config:type_name -> temporal.api.taskqueue.v1.ConcurrencyLimit
-	5, // 1: temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyState.slots:type_name -> temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyState.Slot
-	6, // 2: temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyBatchRequest.config_update:type_name -> temporal.api.taskqueue.v1.ConcurrencyLimit
-	7, // 3: temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyState.Slot.expires:type_name -> google.protobuf.Timestamp
+	8, // 0: temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyState.config:type_name -> temporal.api.taskqueue.v1.ConcurrencyLimit
+	7, // 1: temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyState.slots:type_name -> temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyState.Slot
+	8, // 2: temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyBatchRequest.config_update:type_name -> temporal.api.taskqueue.v1.ConcurrencyLimit
+	9, // 3: temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyState.Slot.expires:type_name -> google.protobuf.Timestamp
 	1, // 4: temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyService.Batch:input_type -> temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyBatchRequest
-	3, // 5: temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyService.Wait:input_type -> temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyWaitRequest
-	2, // 6: temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyService.Batch:output_type -> temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyBatchResponse
-	4, // 7: temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyService.Wait:output_type -> temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyWaitResponse
-	6, // [6:8] is the sub-list for method output_type
-	4, // [4:6] is the sub-list for method input_type
+	5, // 5: temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyService.Wait:input_type -> temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyWaitRequest
+	3, // 6: temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyService.VerifyRelease:input_type -> temporal.server.chasm.lib.flowcontrol.proto.v1.VerifyReleaseRequest
+	2, // 7: temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyService.Batch:output_type -> temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyBatchResponse
+	6, // 8: temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyService.Wait:output_type -> temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyWaitResponse
+	4, // 9: temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyService.VerifyRelease:output_type -> temporal.server.chasm.lib.flowcontrol.proto.v1.VerifyReleaseResponse
+	7, // [7:10] is the sub-list for method output_type
+	4, // [4:7] is the sub-list for method input_type
 	4, // [4:4] is the sub-list for extension type_name
 	4, // [4:4] is the sub-list for extension extendee
 	0, // [0:4] is the sub-list for field type_name
@@ -553,7 +698,7 @@ func file_temporal_server_chasm_lib_flowcontrol_proto_v1_concurrency_proto_init(
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_temporal_server_chasm_lib_flowcontrol_proto_v1_concurrency_proto_rawDesc), len(file_temporal_server_chasm_lib_flowcontrol_proto_v1_concurrency_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   6,
+			NumMessages:   8,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

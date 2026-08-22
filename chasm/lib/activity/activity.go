@@ -22,6 +22,7 @@
 package activity
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"math/rand"
@@ -1376,15 +1377,59 @@ func (a *Activity) releaseAttemptLimiters(ctx chasm.MutableContext) {
 		return
 	}
 
-	toRelease := make([]*taskqueuespb.LimiterRef, 0, len(limiters))
+	toRelease := make([]*taskqueuespb.LimiterRelease, 0, len(limiters))
 	for _, limiter := range limiters {
 		if commontaskqueue.NeedsRelease(limiter) {
-			toRelease = append(toRelease, limiter)
+			toRelease = append(toRelease, &taskqueuespb.LimiterRelease{Limiter: limiter})
 		}
 	}
 	if len(toRelease) != 0 {
-		ctx.AddTask(a, chasm.TaskAttributes{}, &activitypb.ReleaseLimiterTask{Limiters: toRelease})
+		for _, release := range toRelease {
+			if commontaskqueue.FindLimiterRelease(a.PendingLimiterReleases, release.GetLimiter()) == nil {
+				a.PendingLimiterReleases = append(a.PendingLimiterReleases, release)
+			}
+		}
+		ctx.AddTask(a, chasm.TaskAttributes{}, &activitypb.ReleaseLimiterTask{Releases: toRelease})
 	}
+}
+
+func (a *Activity) hasPendingLimiterRelease(releases []*taskqueuespb.LimiterRelease) bool {
+	for _, release := range releases {
+		pending := commontaskqueue.FindLimiterRelease(a.PendingLimiterReleases, release.GetLimiter())
+		if pending != nil && bytes.Equal(pending.GetComponentRef(), release.GetComponentRef()) {
+			return true
+		}
+	}
+	return false
+}
+
+func (a *Activity) recordLimiterRelease(
+	ctx chasm.MutableContext,
+	releases []*taskqueuespb.LimiterRelease,
+) (struct{}, error) {
+	for _, release := range releases {
+		pending := commontaskqueue.FindLimiterRelease(a.PendingLimiterReleases, release.GetLimiter())
+		if pending == nil {
+			a.PendingLimiterReleases = append(a.PendingLimiterReleases, release)
+		} else {
+			pending.ComponentRef = release.GetComponentRef()
+		}
+	}
+	ctx.AddTask(a, chasm.TaskAttributes{}, &activitypb.ReleaseLimiterTask{Releases: releases})
+	return struct{}{}, nil
+}
+
+func (a *Activity) completeLimiterRelease(
+	_ chasm.MutableContext,
+	releases []*taskqueuespb.LimiterRelease,
+) (struct{}, error) {
+	a.PendingLimiterReleases = slices.DeleteFunc(
+		a.PendingLimiterReleases,
+		func(pending *taskqueuespb.LimiterRelease) bool {
+			return commontaskqueue.FindLimiterRelease(releases, pending.GetLimiter()) != nil
+		},
+	)
+	return struct{}{}, nil
 }
 
 // truncateRetryableFailure caps the size of a failure retained in the activity's state while it

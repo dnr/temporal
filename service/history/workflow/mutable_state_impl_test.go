@@ -445,7 +445,7 @@ func (s *mutableStateSuite) TestWorkflowCloseReleasesPendingTaskLimiters() {
 	s.mutableState.executionState.State = enumsspb.WORKFLOW_EXECUTION_STATE_COMPLETED
 	s.mutableState.stateInDB = enumsspb.WORKFLOW_EXECUTION_STATE_RUNNING
 
-	s.mutableState.closeTransactionGenerateReleaseLimiterTask(historyi.TransactionPolicyActive)
+	s.mutableState.closeTransactionGenerateReleaseLimiterTask()
 
 	transferTasks := s.mutableState.PopTasks()[tasks.CategoryTransfer]
 	s.Require().Len(transferTasks, 1)
@@ -453,12 +453,15 @@ func (s *mutableStateSuite) TestWorkflowCloseReleasesPendingTaskLimiters() {
 	s.Require().True(ok)
 	protorequire.ProtoElementsMatch(
 		s.T(),
-		[]*taskqueuespb.LimiterRef{workflowTaskLimiter, activityLimiter},
-		releaseTask.Limiters,
+		[]*taskqueuespb.LimiterRelease{
+			{Limiter: workflowTaskLimiter},
+			{Limiter: activityLimiter},
+		},
+		releaseTask.Releases,
 	)
 }
 
-func (s *mutableStateSuite) TestPassiveTransactionDoesNotReleaseLimiters() {
+func (s *mutableStateSuite) TestPassiveTransactionReleasesLimiters() {
 	s.mutableState.PopTasks()
 	s.mutableState.releaseLimiterRefs = []*taskqueuespb.LimiterRef{{
 		LimiterType: enumsspb.LIMITER_TYPE_CONCURRENCY,
@@ -466,18 +469,56 @@ func (s *mutableStateSuite) TestPassiveTransactionDoesNotReleaseLimiters() {
 		SlotId:      uuid.NewString(),
 	}}
 
-	s.mutableState.closeTransactionGenerateReleaseLimiterTask(historyi.TransactionPolicyPassive)
+	s.mutableState.closeTransactionGenerateReleaseLimiterTask()
 
-	s.Empty(s.mutableState.PopTasks()[tasks.CategoryTransfer])
+	s.Require().Len(s.mutableState.PopTasks()[tasks.CategoryTransfer], 1)
+}
+
+func (s *mutableStateSuite) TestLimiterReleaseVerificationTask() {
+	limiter := &taskqueuespb.LimiterRef{
+		LimiterType: enumsspb.LIMITER_TYPE_CONCURRENCY,
+		Key:         "limiter",
+		SlotId:      uuid.NewString(),
+	}
+	s.mutableState.releaseLimiterRefs = []*taskqueuespb.LimiterRef{limiter}
+	s.mutableState.closeTransactionGenerateReleaseLimiterTask()
+	s.mutableState.PopTasks()
+	s.mutableState.releaseLimiterRefs = nil
+	s.mutableState.releaseLimiterTasks = nil
+
+	recorded := []*taskqueuespb.LimiterRelease{{
+		Limiter:      limiter,
+		ComponentRef: []byte("component-ref"),
+	}}
+	s.mutableState.RecordLimiterRelease(recorded)
+	s.mutableState.closeTransactionGenerateReleaseLimiterTask()
+
+	transferTasks := s.mutableState.PopTasks()[tasks.CategoryTransfer]
+	s.Require().Len(transferTasks, 1)
+	verificationTask, ok := transferTasks[0].(*tasks.ReleaseLimiterTask)
+	s.Require().True(ok)
+	protorequire.ProtoElementsMatch(s.T(), recorded, verificationTask.Releases)
+	s.mutableState.CompleteLimiterRelease(recorded)
+	s.Empty(s.mutableState.GetExecutionInfo().GetPendingLimiterReleases())
+
+	s.mutableState.releaseLimiterTasks = nil
+	s.mutableState.RecordLimiterRelease(recorded)
+	s.mutableState.closeTransactionGenerateReleaseLimiterTask()
+	s.Require().Len(s.mutableState.PopTasks()[tasks.CategoryTransfer], 1)
+	protorequire.ProtoElementsMatch(s.T(), recorded, s.mutableState.GetExecutionInfo().GetPendingLimiterReleases())
 }
 
 func (s *mutableStateSuite) requireReleaseLimiterTask(limiters []*taskqueuespb.LimiterRef) {
-	s.mutableState.closeTransactionGenerateReleaseLimiterTask(historyi.TransactionPolicyActive)
+	s.mutableState.closeTransactionGenerateReleaseLimiterTask()
 	transferTasks := s.mutableState.PopTasks()[tasks.CategoryTransfer]
 	s.Require().Len(transferTasks, 1)
 	releaseTask, ok := transferTasks[0].(*tasks.ReleaseLimiterTask)
 	s.Require().True(ok)
-	protorequire.ProtoElementsMatch(s.T(), limiters, releaseTask.Limiters)
+	expected := make([]*taskqueuespb.LimiterRelease, 0, len(limiters))
+	for _, limiter := range limiters {
+		expected = append(expected, &taskqueuespb.LimiterRelease{Limiter: limiter})
+	}
+	protorequire.ProtoElementsMatch(s.T(), expected, releaseTask.Releases)
 }
 
 func (s *mutableStateSuite) TestRedirectInfoValidation_Invalid() {

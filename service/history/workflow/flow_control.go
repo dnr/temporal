@@ -1,11 +1,13 @@
 package workflow
 
 import (
+	"bytes"
+	"slices"
+
 	enumsspb "go.temporal.io/server/api/enums/v1"
 	taskqueuespb "go.temporal.io/server/api/taskqueue/v1"
 	"go.temporal.io/server/common/definition"
 	commontaskqueue "go.temporal.io/server/common/taskqueue"
-	historyi "go.temporal.io/server/service/history/interfaces"
 	"go.temporal.io/server/service/history/tasks"
 )
 
@@ -14,34 +16,14 @@ func (ms *MutableStateImpl) trackRemovedLimiterRefs(
 	current []*taskqueuespb.LimiterRef,
 ) {
 	for _, previousRef := range previous {
-		if !commontaskqueue.NeedsRelease(previousRef) || containsLimiterRef(current, previousRef) {
+		if !commontaskqueue.NeedsRelease(previousRef) || commontaskqueue.ContainsLimiterRef(current, previousRef) {
 			continue
 		}
 		ms.releaseLimiterRefs = append(ms.releaseLimiterRefs, previousRef)
 	}
 }
 
-func containsLimiterRef(
-	refs []*taskqueuespb.LimiterRef,
-	want *taskqueuespb.LimiterRef,
-) bool {
-	for _, ref := range refs {
-		if ref.GetLimiterType() == want.GetLimiterType() &&
-			ref.GetKey() == want.GetKey() &&
-			ref.GetSlotId() == want.GetSlotId() {
-			return true
-		}
-	}
-	return false
-}
-
-func (ms *MutableStateImpl) closeTransactionGenerateReleaseLimiterTask(
-	transactionPolicy historyi.TransactionPolicy,
-) {
-	if transactionPolicy != historyi.TransactionPolicyActive {
-		return
-	}
-
+func (ms *MutableStateImpl) closeTransactionGenerateReleaseLimiterTask() {
 	limiters := ms.releaseLimiterRefs
 	if ms.executionState.State == enumsspb.WORKFLOW_EXECUTION_STATE_COMPLETED &&
 		ms.stateInDB != enumsspb.WORKFLOW_EXECUTION_STATE_COMPLETED {
@@ -51,7 +33,57 @@ func (ms *MutableStateImpl) closeTransactionGenerateReleaseLimiterTask(
 		}
 	}
 	if task := newReleaseLimiterTask(ms.GetWorkflowKey(), limiters); task != nil {
-		ms.AddTasks(task)
+		oldSize := ms.executionInfo.Size()
+		for _, release := range task.Releases {
+			if commontaskqueue.FindLimiterRelease(ms.executionInfo.PendingLimiterReleases, release.GetLimiter()) == nil {
+				ms.executionInfo.PendingLimiterReleases = append(ms.executionInfo.PendingLimiterReleases, release)
+				ms.releaseLimiterTasks = append(ms.releaseLimiterTasks, release)
+				ms.pendingLimiterReleasesUpdated = true
+			}
+		}
+		ms.approximateSize += ms.executionInfo.Size() - oldSize
+	}
+
+	if len(ms.releaseLimiterTasks) > 0 {
+		ms.AddTasks(&tasks.ReleaseLimiterTask{
+			WorkflowKey: ms.GetWorkflowKey(),
+			Releases:    ms.releaseLimiterTasks,
+		})
+	}
+}
+
+func (ms *MutableStateImpl) RecordLimiterRelease(releases []*taskqueuespb.LimiterRelease) {
+	oldSize := ms.executionInfo.Size()
+	for _, release := range releases {
+		pending := commontaskqueue.FindLimiterRelease(
+			ms.executionInfo.PendingLimiterReleases,
+			release.GetLimiter(),
+		)
+		if pending == nil {
+			ms.executionInfo.PendingLimiterReleases = append(ms.executionInfo.PendingLimiterReleases, release)
+			ms.releaseLimiterTasks = append(ms.releaseLimiterTasks, release)
+			ms.pendingLimiterReleasesUpdated = true
+		} else if !bytes.Equal(pending.GetComponentRef(), release.GetComponentRef()) {
+			pending.ComponentRef = release.GetComponentRef()
+			ms.releaseLimiterTasks = append(ms.releaseLimiterTasks, release)
+			ms.pendingLimiterReleasesUpdated = true
+		}
+	}
+	ms.approximateSize += ms.executionInfo.Size() - oldSize
+}
+
+func (ms *MutableStateImpl) CompleteLimiterRelease(releases []*taskqueuespb.LimiterRelease) {
+	oldSize := ms.executionInfo.Size()
+	oldLen := len(ms.executionInfo.PendingLimiterReleases)
+	ms.executionInfo.PendingLimiterReleases = slices.DeleteFunc(
+		ms.executionInfo.PendingLimiterReleases,
+		func(pending *taskqueuespb.LimiterRelease) bool {
+			return commontaskqueue.FindLimiterRelease(releases, pending.GetLimiter()) != nil
+		},
+	)
+	if len(ms.executionInfo.PendingLimiterReleases) != oldLen {
+		ms.pendingLimiterReleasesUpdated = true
+		ms.approximateSize += ms.executionInfo.Size() - oldSize
 	}
 }
 
@@ -59,18 +91,18 @@ func newReleaseLimiterTask(
 	workflowKey definition.WorkflowKey,
 	limiters []*taskqueuespb.LimiterRef,
 ) *tasks.ReleaseLimiterTask {
-	var toRelease []*taskqueuespb.LimiterRef
+	var releases []*taskqueuespb.LimiterRelease
 	for _, limiter := range limiters {
 		if commontaskqueue.NeedsRelease(limiter) {
-			toRelease = append(toRelease, limiter)
+			releases = append(releases, &taskqueuespb.LimiterRelease{Limiter: limiter})
 		}
 	}
-	if len(toRelease) == 0 {
+	if len(releases) == 0 {
 		return nil
 	}
 
 	return &tasks.ReleaseLimiterTask{
 		WorkflowKey: workflowKey,
-		Limiters:    toRelease,
+		Releases:    releases,
 	}
 }

@@ -17,13 +17,16 @@ import (
 	"go.temporal.io/api/workflowservice/v1"
 	"go.temporal.io/server/api/adminservice/v1"
 	"go.temporal.io/server/api/adminservicemock/v1"
+	enumsspb "go.temporal.io/server/api/enums/v1"
 	"go.temporal.io/server/api/historyservice/v1"
 	"go.temporal.io/server/api/historyservicemock/v1"
 	"go.temporal.io/server/api/matchingservice/v1"
 	"go.temporal.io/server/api/matchingservicemock/v1"
 	persistencespb "go.temporal.io/server/api/persistence/v1"
+	taskqueuespb "go.temporal.io/server/api/taskqueue/v1"
 	workflowspb "go.temporal.io/server/api/workflow/v1"
 	"go.temporal.io/server/chasm"
+	fcpb "go.temporal.io/server/chasm/lib/flowcontrol/gen/flowcontrolpb/v1"
 	"go.temporal.io/server/client"
 	"go.temporal.io/server/common/archiver"
 	"go.temporal.io/server/common/archiver/provider"
@@ -41,6 +44,7 @@ import (
 	"go.temporal.io/server/common/telemetry"
 	"go.temporal.io/server/common/testing/mockapi/workflowservicemock/v1"
 	"go.temporal.io/server/common/testing/protomock"
+	"go.temporal.io/server/common/testing/protorequire"
 	"go.temporal.io/server/service/history/consts"
 	"go.temporal.io/server/service/history/events"
 	"go.temporal.io/server/service/history/hsm"
@@ -54,6 +58,7 @@ import (
 	"go.temporal.io/server/service/history/workflow"
 	wcache "go.temporal.io/server/service/history/workflow/cache"
 	"go.uber.org/mock/gomock"
+	"google.golang.org/grpc"
 	"google.golang.org/protobuf/types/known/durationpb"
 )
 
@@ -208,6 +213,7 @@ func (s *transferQueueStandbyTaskExecutorSuite) SetupTest() {
 		s.clusterName,
 		s.mockShard.Resource.HistoryClient,
 		s.mockShard.Resource.MatchingClient,
+		nil,
 		s.mockVisibilityManager,
 		s.mockChasmEngine,
 		s.clientBean,
@@ -217,6 +223,113 @@ func (s *transferQueueStandbyTaskExecutorSuite) SetupTest() {
 func (s *transferQueueStandbyTaskExecutorSuite) TearDownTest() {
 	s.controller.Finish()
 	s.mockShard.StopForTest()
+}
+
+func (s *transferQueueStandbyTaskExecutorSuite) TestProcessReleaseLimiterTask_Released() {
+	var requests []*fcpb.VerifyReleaseRequest
+	s.transferQueueStandbyTaskExecutor.concurrencyServiceClient = &testConcurrencyServiceClient{
+		verifyRelease: func(
+			_ context.Context,
+			request *fcpb.VerifyReleaseRequest,
+			_ ...grpc.CallOption,
+		) (*fcpb.VerifyReleaseResponse, error) {
+			requests = append(requests, request)
+			return &fcpb.VerifyReleaseResponse{Released: true}, nil
+		},
+	}
+	task := s.newReleaseLimiterTask()
+	s.prepareReleaseLimiterSource(task)
+
+	response := s.transferQueueStandbyTaskExecutor.Execute(context.Background(), s.newTaskExecutable(task))
+
+	s.Require().NoError(response.ExecutionErr)
+	s.Require().Len(requests, 2)
+	for i, release := range task.Releases[:2] {
+		limiter := release.GetLimiter()
+		protorequire.ProtoEqual(s.T(), &fcpb.VerifyReleaseRequest{
+			NamespaceId:  task.NamespaceID,
+			Key:          limiter.GetKey(),
+			Slots:        []string{limiter.GetSlotId()},
+			ComponentRef: release.GetComponentRef(),
+		}, requests[i])
+	}
+}
+
+func (s *transferQueueStandbyTaskExecutorSuite) TestProcessReleaseLimiterTask_NotReleased() {
+	s.transferQueueStandbyTaskExecutor.concurrencyServiceClient = &testConcurrencyServiceClient{
+		verifyRelease: func(
+			context.Context,
+			*fcpb.VerifyReleaseRequest,
+			...grpc.CallOption,
+		) (*fcpb.VerifyReleaseResponse, error) {
+			return &fcpb.VerifyReleaseResponse{}, nil
+		},
+	}
+	task := s.newReleaseLimiterTask()
+	s.prepareReleaseLimiterSource(task)
+	s.mockShard.SetCurrentTime(s.clusterName, task.VisibilityTimestamp)
+
+	response := s.transferQueueStandbyTaskExecutor.Execute(context.Background(), s.newTaskExecutable(task))
+
+	s.Require().ErrorIs(response.ExecutionErr, consts.ErrTaskRetry)
+}
+
+func (s *transferQueueStandbyTaskExecutorSuite) TestProcessReleaseLimiterTask_NotReleasedPastDiscardTime() {
+	s.transferQueueStandbyTaskExecutor.concurrencyServiceClient = &testConcurrencyServiceClient{
+		verifyRelease: func(
+			context.Context,
+			*fcpb.VerifyReleaseRequest,
+			...grpc.CallOption,
+		) (*fcpb.VerifyReleaseResponse, error) {
+			return &fcpb.VerifyReleaseResponse{}, nil
+		},
+	}
+	task := s.newReleaseLimiterTask()
+	s.prepareReleaseLimiterSource(task)
+	s.mockShard.SetCurrentTime(s.clusterName, task.VisibilityTimestamp.Add(s.discardDuration+time.Second))
+
+	response := s.transferQueueStandbyTaskExecutor.Execute(context.Background(), s.newTaskExecutable(task))
+
+	s.Require().ErrorIs(response.ExecutionErr, consts.ErrTaskDiscarded)
+}
+
+func (s *transferQueueStandbyTaskExecutorSuite) newReleaseLimiterTask() *tasks.ReleaseLimiterTask {
+	return &tasks.ReleaseLimiterTask{
+		WorkflowKey:         definition.NewWorkflowKey(s.namespaceID.String(), "workflow-id", uuid.NewString()),
+		TaskID:              s.mustGenerateTaskID(),
+		VisibilityTimestamp: s.now,
+		Releases: []*taskqueuespb.LimiterRelease{
+			{Limiter: &taskqueuespb.LimiterRef{LimiterType: enumsspb.LIMITER_TYPE_CONCURRENCY, Key: "limiter-1", SlotId: uuid.NewString()}, ComponentRef: []byte("component-ref-1")},
+			{Limiter: &taskqueuespb.LimiterRef{LimiterType: enumsspb.LIMITER_TYPE_CONCURRENCY, Key: "limiter-2", SlotId: uuid.NewString()}, ComponentRef: []byte("component-ref-2")},
+		},
+	}
+}
+
+func (s *transferQueueStandbyTaskExecutorSuite) prepareReleaseLimiterSource(task *tasks.ReleaseLimiterTask) {
+	execution := &commonpb.WorkflowExecution{WorkflowId: task.WorkflowID, RunId: task.RunID}
+	mutableState := workflow.TestGlobalMutableState(
+		s.mockShard,
+		s.mockShard.GetEventsCache(),
+		s.logger,
+		s.version,
+		execution.GetWorkflowId(),
+		execution.GetRunId(),
+	)
+	event, err := mutableState.AddWorkflowExecutionStartedEvent(execution, &historyservice.StartWorkflowExecutionRequest{
+		NamespaceId: s.namespaceID.String(),
+		StartRequest: &workflowservice.StartWorkflowExecutionRequest{
+			WorkflowType: &commonpb.WorkflowType{Name: "workflow-type"},
+			TaskQueue:    &taskqueuepb.TaskQueue{Name: "task-queue"},
+		},
+	})
+	s.Require().NoError(err)
+	mutableState.GetExecutionInfo().PendingLimiterReleases = task.Releases
+	mutableState.GetExecutionInfo().TaskGenerationShardClockTimestamp = task.TaskID + 1
+	persistenceMutableState := s.createPersistenceMutableState(mutableState, event.GetEventId(), event.GetVersion())
+	s.mockExecutionMgr.EXPECT().GetWorkflowExecution(gomock.Any(), gomock.Any()).Return(
+		&persistence.GetWorkflowExecutionResponse{State: persistenceMutableState},
+		nil,
+	).AnyTimes()
 }
 
 func (s *transferQueueStandbyTaskExecutorSuite) TestProcessActivityTask_Pending() {
@@ -346,6 +459,7 @@ func (s *transferQueueStandbyTaskExecutorSuite) TestExecuteChasmSideEffectTransf
 		s.clusterName,
 		s.mockShard.Resource.HistoryClient,
 		s.mockShard.Resource.MatchingClient,
+		nil,
 		s.mockVisibilityManager,
 		s.mockChasmEngine,
 		s.clientBean,
@@ -353,6 +467,9 @@ func (s *transferQueueStandbyTaskExecutorSuite) TestExecuteChasmSideEffectTransf
 
 	// Task in tree and valid by component — retry.
 	expectValidate(true, true, nil)
+	chasmTree.EXPECT().ExecuteSideEffectStandbyTask(
+		gomock.Any(), gomock.Any(), gomock.Any(), true, gomock.Any(),
+	).Return(false, nil).Times(1)
 	resp := transferQueueStandbyTaskExecutor.Execute(context.Background(), s.newTaskExecutable(transferTask))
 	s.NotNil(resp)
 	s.ErrorIs(consts.ErrTaskRetry, resp.ExecutionErr)
@@ -365,6 +482,9 @@ func (s *transferQueueStandbyTaskExecutorSuite) TestExecuteChasmSideEffectTransf
 
 	// Task not in tree — replication removed it, drop the physical task.
 	expectValidate(false, false, nil)
+	chasmTree.EXPECT().ExecuteSideEffectStandbyTask(
+		gomock.Any(), gomock.Any(), gomock.Any(), false, gomock.Any(),
+	).Return(false, nil).Times(1)
 	resp = transferQueueStandbyTaskExecutor.Execute(context.Background(), s.newTaskExecutable(transferTask))
 	s.NotNil(resp)
 	s.NoError(resp.ExecutionErr)
@@ -1348,7 +1468,11 @@ func (s *transferQueueStandbyTaskExecutorSuite) newTaskExecutable(
 }
 
 func (s *transferQueueStandbyTaskExecutorSuite) TestExecuteChasmSideEffectTransferTask_Discard() {
-	setupDiscard := func(lib chasm.Library, taskName string, treeMockFn func(*historyi.MockChasmTree)) (*transferQueueStandbyTaskExecutor, *tasks.ChasmTask) {
+	setupDiscard := func(
+		lib chasm.Library,
+		taskName string,
+		treeMockFn func(*historyi.MockChasmTree),
+	) (*transferQueueStandbyTaskExecutor, *tasks.ChasmTask) {
 		execution := &commonpb.WorkflowExecution{
 			WorkflowId: tests.WorkflowKey.WorkflowID,
 			RunId:      tests.WorkflowKey.RunID,
@@ -1405,6 +1529,7 @@ func (s *transferQueueStandbyTaskExecutorSuite) TestExecuteChasmSideEffectTransf
 			s.clusterName,
 			s.mockShard.Resource.HistoryClient,
 			s.mockShard.Resource.MatchingClient,
+			nil,
 			s.mockVisibilityManager,
 			s.mockChasmEngine,
 			s.clientBean,
@@ -1418,6 +1543,9 @@ func (s *transferQueueStandbyTaskExecutorSuite) TestExecuteChasmSideEffectTransf
 
 	s.Run("WithHandler", func() {
 		executor, task := setupDiscard(&discardableTaskTestLibrary{}, "discard_task", func(tree *historyi.MockChasmTree) {
+			tree.EXPECT().ExecuteSideEffectStandbyTask(
+				gomock.Any(), gomock.Any(), gomock.Any(), true, gomock.Any(),
+			).Return(false, nil).Times(1)
 			tree.EXPECT().ExecuteSideEffectDiscardTask(
 				gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(),
 			).Return(nil).Times(1)
@@ -1429,12 +1557,54 @@ func (s *transferQueueStandbyTaskExecutorSuite) TestExecuteChasmSideEffectTransf
 
 	s.Run("WithoutHandler", func() {
 		executor, task := setupDiscard(&nonDiscardableTaskTestLibrary{}, "non_discard_task", func(tree *historyi.MockChasmTree) {
+			tree.EXPECT().ExecuteSideEffectStandbyTask(
+				gomock.Any(), gomock.Any(), gomock.Any(), true, gomock.Any(),
+			).Return(false, nil).Times(1)
 			tree.EXPECT().ExecuteSideEffectDiscardTask(
 				gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(),
 			).Return(chasm.ErrTaskDiscarded).Times(1)
 		})
 		resp := executor.Execute(context.Background(), s.newTaskExecutable(task))
 		s.NotNil(resp)
+		s.ErrorIs(resp.ExecutionErr, consts.ErrTaskDiscarded)
+	})
+
+	s.Run("StandbyVerificationObserved", func() {
+		executor, task := setupDiscard(&standbyVerifiableTaskTestLibrary{}, "standby_verifiable_task", func(tree *historyi.MockChasmTree) {
+			tree.EXPECT().ExecuteSideEffectStandbyTask(
+				gomock.Any(), gomock.Any(), gomock.Any(), true, gomock.Any(),
+			).Return(true, nil).Times(1)
+		})
+		resp := executor.Execute(context.Background(), s.newTaskExecutable(task))
+
+		s.NoError(resp.ExecutionErr)
+	})
+
+	s.Run("StandbyVerificationPending", func() {
+		executor, task := setupDiscard(&standbyVerifiableTaskTestLibrary{}, "standby_verifiable_task", func(tree *historyi.MockChasmTree) {
+			tree.EXPECT().ExecuteSideEffectStandbyTask(
+				gomock.Any(), gomock.Any(), gomock.Any(), true, gomock.Any(),
+			).Return(true, chasm.ErrTaskNotReady).Times(1)
+		})
+		task.VisibilityTimestamp = s.mockShard.GetCurrentTime(s.clusterName)
+
+		resp := executor.Execute(context.Background(), s.newTaskExecutable(task))
+
+		s.ErrorIs(resp.ExecutionErr, consts.ErrTaskRetry)
+	})
+
+	s.Run("StandbyVerificationPendingPastDiscardTime", func() {
+		executor, task := setupDiscard(&standbyVerifiableTaskTestLibrary{}, "standby_verifiable_task", func(tree *historyi.MockChasmTree) {
+			tree.EXPECT().ExecuteSideEffectStandbyTask(
+				gomock.Any(), gomock.Any(), gomock.Any(), true, gomock.Any(),
+			).Return(true, chasm.ErrTaskNotReady).Times(1)
+			tree.EXPECT().ExecuteSideEffectDiscardTask(
+				gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(),
+			).Return(chasm.ErrTaskDiscarded).Times(1)
+		})
+
+		resp := executor.Execute(context.Background(), s.newTaskExecutable(task))
+
 		s.ErrorIs(resp.ExecutionErr, consts.ErrTaskDiscarded)
 	})
 }

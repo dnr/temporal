@@ -112,9 +112,19 @@ func (c *Component) commit(slotID string) bool {
 }
 
 func (c *Component) release(slotID string) {
+	c.ReleaseCount++
 	c.Slots = slices.DeleteFunc(c.Slots, func(slot *fcpb.ConcurrencyState_Slot) bool {
-		return slot.Committed && slot.SlotId == slotID
+		return slot.SlotId == slotID
 	})
+}
+
+func (c *Component) released(slotIDs []string) bool {
+	for _, slot := range c.Slots {
+		if slices.Contains(slotIDs, slot.SlotId) {
+			return false
+		}
+	}
+	return true
 }
 
 // notifyWaiters is called from PollComponent and should not modify the state.

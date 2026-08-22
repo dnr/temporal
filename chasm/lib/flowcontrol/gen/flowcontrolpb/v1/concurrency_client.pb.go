@@ -151,3 +151,46 @@ func (c *ConcurrencyServiceLayeredClient) Wait(
 	}
 	return backoff.ThrottleRetryContextWithReturn(ctx, call, c.retryPolicy, common.IsServiceClientTransientError)
 }
+func (c *ConcurrencyServiceLayeredClient) callVerifyReleaseNoRetry(
+	ctx context.Context,
+	request *VerifyReleaseRequest,
+	opts ...grpc.CallOption,
+) (*VerifyReleaseResponse, error) {
+	var response *VerifyReleaseResponse
+	var err error
+	startTime := time.Now().UTC()
+	// the caller is a namespace, hence the tag below.
+	caller := headers.GetCallerInfo(ctx).CallerName
+	metricsHandler := c.metricsHandler.WithTags(
+		metrics.OperationTag("ConcurrencyService.VerifyRelease"),
+		metrics.NamespaceTag(caller),
+		metrics.ServiceRoleTag(metrics.HistoryRoleTagValue),
+	)
+	metrics.ClientRequests.With(metricsHandler).Record(1)
+	defer func() {
+		if err != nil {
+			metrics.ClientFailures.With(metricsHandler).Record(1, metrics.ServiceErrorTypeTag(err))
+		}
+		metrics.ClientLatency.With(metricsHandler).Record(time.Since(startTime))
+	}()
+	shardID := common.WorkflowIDToHistoryShard(request.GetNamespaceId(), request.GetKey(), c.numShards)
+	op := func(ctx context.Context, client ConcurrencyServiceClient) error {
+		var err error
+		ctx, cancel := context.WithTimeout(ctx, history.DefaultTimeout)
+		defer cancel()
+		response, err = client.VerifyRelease(ctx, request, opts...)
+		return err
+	}
+	err = c.redirector.Execute(ctx, shardID, op)
+	return response, err
+}
+func (c *ConcurrencyServiceLayeredClient) VerifyRelease(
+	ctx context.Context,
+	request *VerifyReleaseRequest,
+	opts ...grpc.CallOption,
+) (*VerifyReleaseResponse, error) {
+	call := func(ctx context.Context) (*VerifyReleaseResponse, error) {
+		return c.callVerifyReleaseNoRetry(ctx, request, opts...)
+	}
+	return backoff.ThrottleRetryContextWithReturn(ctx, call, c.retryPolicy, common.IsServiceClientTransientError)
+}

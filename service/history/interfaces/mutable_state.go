@@ -183,6 +183,8 @@ type (
 		GetLastWriteVersion() (int64, error)
 		GetLastEventVersion() (int64, error)
 		GetExecutionInfo() *persistencespb.WorkflowExecutionInfo
+		RecordLimiterRelease([]*taskqueuespb.LimiterRelease)
+		CompleteLimiterRelease([]*taskqueuespb.LimiterRelease)
 		GetExecutionState() *persistencespb.WorkflowExecutionState
 		GetStartedWorkflowTask() *WorkflowTaskInfo
 		GetPendingWorkflowTask() *WorkflowTaskInfo
