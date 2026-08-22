@@ -77,12 +77,20 @@ func (c *BatchingClient) applyBatch(key clientBatchKey, items []clientBatchItem)
 	}
 
 	req := &fcpb.ConcurrencyBatchRequest{
-		NamespaceId:            key.namespaceID,
-		Key:                    key.key,
-		ReserveSlots:           make([]string, 0, reserveCount),
-		CancelReservationSlots: make([]string, 0, cancelCount),
-		CommitSlots:            make([]string, 0, commitCount),
-		ReleaseSlots:           make([]string, 0, releaseCount),
+		NamespaceId: key.namespaceID,
+		Key:         key.key,
+	}
+	if reserveCount > 0 {
+		req.ReserveSlots = make([]string, 0, reserveCount)
+	}
+	if cancelCount > 0 {
+		req.CancelReservationSlots = make([]string, 0, cancelCount)
+	}
+	if commitCount > 0 {
+		req.CommitSlots = make([]string, 0, commitCount)
+	}
+	if releaseCount > 0 {
+		req.ReleaseSlots = make([]string, 0, releaseCount)
 	}
 	if configItem != nil {
 		req.ConfigUpdate = configItem.req.GetConfigUpdate()
