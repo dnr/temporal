@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"go.temporal.io/server/common/clock"
 )
 
@@ -272,6 +273,26 @@ func TestStreamBatcher_AddTimeout(t *testing.T) {
 	time.Sleep(time.Millisecond)
 	clk.AdvanceNext()
 	wg.Wait()
+}
+
+func TestStreamBatcherWrongNumberOfPerItemResults(t *testing.T) {
+	testCases := map[string][]int{
+		"too few":  nil,
+		"too many": {1, 2},
+	}
+	for name, results := range testCases {
+		t.Run(name, func(t *testing.T) {
+			batcher := NewBatcherWithPerItemResults(
+				func([]int) []int { return results },
+				BatcherOptions{MaxItems: 1, IdleTime: time.Minute},
+				clock.NewRealTimeSource(),
+			)
+
+			result, err := batcher.Add(context.Background(), 1)
+			require.NoError(t, err)
+			require.Zero(t, result)
+		})
+	}
 }
 
 func TestStreamBatcher_Random(t *testing.T) {

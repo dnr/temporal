@@ -43,12 +43,12 @@ func newConcurrencyHandler(
 	h.batchers = stream_batcher.NewKeyedBatcherWithPerItemResults(
 		h.applyBatch,
 		stream_batcher.BatcherOptions{
-			MaxItems: 100,
-			MinDelay: 5 * time.Millisecond,
-			MaxDelay: 10 * time.Millisecond,
-			IdleTime: time.Minute,
+			MaxItems:      100,
+			MinDelay:      5 * time.Millisecond,
+			MaxDelay:      10 * time.Millisecond,
+			IdleTime:      time.Minute,
+			ClearInterval: time.Hour,
 		},
-		time.Hour,
 		clock.NewRealTimeSource(),
 	)
 	return h
@@ -163,9 +163,9 @@ func (h *concurrencyHandler) applyBatch(
 			opts...,
 		)
 		if err != nil {
-			return concurrencyBatchErrorResults(len(items), err)
+			return concurrencyBatchResults(len(items), nil, err)
 		}
-		return concurrencyBatchResults(updateRes.UpdateOutput)
+		return concurrencyBatchResults(len(items), updateRes.UpdateOutput, nil)
 	}
 
 	ress, _, err := chasm.UpdateComponent(
@@ -179,23 +179,22 @@ func (h *concurrencyHandler) applyBatch(
 		opts...,
 	)
 	if err != nil {
-		return concurrencyBatchErrorResults(len(items), err)
+		return concurrencyBatchResults(len(items), nil, err)
 	}
-	return concurrencyBatchResults(ress)
+	return concurrencyBatchResults(len(items), ress, nil)
 }
 
-func concurrencyBatchResults(responses []*fcpb.ConcurrencyBatchResponse) []concurrencyBatchResult {
-	results := make([]concurrencyBatchResult, len(responses))
-	for i, response := range responses {
-		results[i].response = response
-	}
-	return results
-}
-
-func concurrencyBatchErrorResults(size int, err error) []concurrencyBatchResult {
+func concurrencyBatchResults(
+	size int,
+	ress []*fcpb.ConcurrencyBatchResponse,
+	err error,
+) []concurrencyBatchResult {
 	results := make([]concurrencyBatchResult, size)
 	for i := range results {
 		results[i].err = err
+		if err == nil && i < len(ress) {
+			results[i].res = ress[i]
+		}
 	}
 	return results
 }

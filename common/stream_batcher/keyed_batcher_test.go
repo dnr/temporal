@@ -13,7 +13,6 @@ func TestKeyedBatcherReusesBatcherForKey(t *testing.T) {
 	batcher := NewKeyedBatcher(
 		func(string, []int) int { return 0 },
 		BatcherOptions{},
-		time.Hour,
 		timeSource,
 	)
 
@@ -25,8 +24,7 @@ func TestKeyedBatcherClearsBatchers(t *testing.T) {
 	timeSource := clock.NewEventTimeSource()
 	batcher := NewKeyedBatcher(
 		func(string, []int) int { return 0 },
-		BatcherOptions{},
-		time.Hour,
+		BatcherOptions{ClearInterval: time.Hour},
 		timeSource,
 	)
 	first := batcher.get("a")

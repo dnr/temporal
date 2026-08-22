@@ -254,10 +254,11 @@ var (
 
 	// Options for batching user data updates.
 	userDataBatcherOptions = stream_batcher.BatcherOptions{
-		MaxItems: 100,
-		MinDelay: 100 * time.Millisecond,
-		MaxDelay: 500 * time.Millisecond,
-		IdleTime: time.Minute,
+		MaxItems:      100,
+		MinDelay:      100 * time.Millisecond,
+		MaxDelay:      500 * time.Millisecond,
+		IdleTime:      time.Minute,
+		ClearInterval: 0, // overlapping batchers would violate per-namespace serialization
 	}
 )
 
@@ -340,7 +341,6 @@ func NewEngine(
 	e.userDataUpdateBatcher = stream_batcher.NewKeyedBatcher(
 		e.applyUserDataUpdateBatch,
 		userDataBatcherOptions,
-		0, // overlapping batchers would violate per-namespace serialization
 		e.timeSource,
 	)
 	e.nexusEndpointsOwnershipLostCh.Store(make(chan struct{}))

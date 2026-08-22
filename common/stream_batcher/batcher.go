@@ -47,6 +47,9 @@ type BatcherOptions struct {
 	// IdleTime is the time after which the internal goroutine will exit, to avoid wasting
 	// resources on idle streams.
 	IdleTime time.Duration
+	// ClearInterval controls how often a KeyedBatcher clears its cached batchers.
+	// Zero disables clearing. This option is ignored by Batcher.
+	ClearInterval time.Duration
 }
 
 // NewBatcher creates a Batcher. `fn` is the processing function, `opts` are the timing options.
@@ -58,8 +61,8 @@ func NewBatcher[T, R any](fn func([]T) R, opts BatcherOptions, timeSource clock.
 }
 
 // NewBatcherWithPerItemResults creates a Batcher whose processing function returns one result
-// for each input item, in the same order. The processing function must return exactly as many
-// results as it receives items.
+// for each input item, in the same order. If the processing function returns a different number
+// of results, each caller receives the zero value of R.
 func NewBatcherWithPerItemResults[T, R any](
 	fn func([]T) []R,
 	opts BatcherOptions,
@@ -171,13 +174,14 @@ func (b *Batcher[T, R]) loop(runningC *chan struct{}) {
 
 		// process batch
 		results := b.fn(items)
-		if results.hasPerItemResults && len(results.perItem) != len(items) {
-			panic("stream_batcher: processing function returned wrong number of results")
-		}
+		validPerItemResults := len(results.perItem) == len(items)
 
 		for i, resp := range resps {
-			if results.hasPerItemResults {
+			if results.perItem != nil && validPerItemResults {
 				resp <- results.perItem[i]
+			} else if results.perItem != nil {
+				var zeroR R
+				resp <- zeroR
 			} else {
 				resp <- results.shared
 			}

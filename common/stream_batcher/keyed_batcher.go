@@ -22,36 +22,33 @@ type KeyedBatcher[K comparable, T, R any] struct {
 }
 
 // NewKeyedBatcher creates a KeyedBatcher whose processing function returns one result shared by
-// all items in a batch. A non-positive clearInterval disables periodic clearing.
+// all items in a batch.
 func NewKeyedBatcher[K comparable, T, R any](
 	fn func(K, []T) R,
 	opts BatcherOptions,
-	clearInterval time.Duration,
 	timeSource clock.TimeSource,
 ) *KeyedBatcher[K, T, R] {
 	return newKeyedBatcher(
 		func(key K) *Batcher[T, R] {
 			return NewBatcher(func(items []T) R { return fn(key, items) }, opts, timeSource)
 		},
-		clearInterval,
+		opts.ClearInterval,
 		timeSource,
 	)
 }
 
 // NewKeyedBatcherWithPerItemResults creates a KeyedBatcher whose processing function returns
-// one result for each input item, in the same order. A non-positive clearInterval disables
-// periodic clearing.
+// one result for each input item, in the same order.
 func NewKeyedBatcherWithPerItemResults[K comparable, T, R any](
 	fn func(K, []T) []R,
 	opts BatcherOptions,
-	clearInterval time.Duration,
 	timeSource clock.TimeSource,
 ) *KeyedBatcher[K, T, R] {
 	return newKeyedBatcher(
 		func(key K) *Batcher[T, R] {
 			return NewBatcherWithPerItemResults(func(items []T) []R { return fn(key, items) }, opts, timeSource)
 		},
-		clearInterval,
+		opts.ClearInterval,
 		timeSource,
 	)
 }
