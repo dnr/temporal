@@ -323,16 +323,29 @@ func (tx *tx) Commit() error {
 	if tx == nil {
 		return nil // no limiters
 	}
-	// TODO(fc): we can call Commit concurrently on all limiters
-	// note: rate limiters don't have to be Committed
-	var errs []error
-	for i, com := range tx.committers {
-		if err := com.commit(); err != nil {
-			errs = append(errs, err)
+
+	n := len(tx.committers)
+
+	errC := make(chan error, n)
+	commit := func(i int) {
+		err := tx.committers[i].commit()
+		if err != nil {
 			tx.state[i] = txStateCommitFailed
 		} else {
 			tx.state[i] = txStateCommitted
 		}
+		errC <- err
+	}
+
+	// commit all concurrently and record success/failures
+	for i := range n - 1 {
+		go commit(i + 1)
+	}
+	commit(0)
+
+	errs := make([]error, n)
+	for i := range n {
+		errs[i] = <-errC
 	}
 	return errors.Join(errs...)
 }
