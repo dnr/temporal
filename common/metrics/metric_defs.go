@@ -1408,6 +1408,9 @@ var (
 	// Versioning and Reachability
 	ReachabilityExitPointCounter = NewCounterDef("reachability_exit_point_count")
 
+	// Flow control
+	FlowControlCommitFailed = NewCounterDef("fc_commit_failed")
+
 	// Worker
 	ExecutorTasksDoneCount                        = NewCounterDef("executor_done")
 	ExecutorTasksErrCount                         = NewCounterDef("executor_err")

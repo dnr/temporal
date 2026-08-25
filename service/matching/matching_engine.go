@@ -792,7 +792,7 @@ pollLoop:
 		// We need to run the flow control commit protocol.
 		fctx, err := e.fcReadiness.NewTx(ctx, namespaceID, task)
 		if err != nil {
-			e.nonRetryableErrorsDropTask(task, taskQueueName, err)
+			e.nonRetryableErrorsDropTask(task, taskQueueName, enumspb.TASK_QUEUE_TYPE_WORKFLOW, err)
 			// drop the task as otherwise task would be stuck in a retry-loop
 			task.finish(taskFinishResult{dropReason: dropReasonInternalError})
 			continue pollLoop
@@ -817,11 +817,11 @@ pollLoop:
 			fctx.CancelReservations()
 			switch err := err.(type) {
 			case *serviceerror.Internal:
-				e.nonRetryableErrorsDropTask(task, taskQueueName, err)
+				e.nonRetryableErrorsDropTask(task, taskQueueName, enumspb.TASK_QUEUE_TYPE_WORKFLOW, err)
 				// drop the task as otherwise task would be stuck in a retry-loop
 				task.finish(taskFinishResult{dropReason: dropReasonInternalError})
 			case *serviceerror.DataLoss:
-				e.nonRetryableErrorsDropTask(task, taskQueueName, err)
+				e.nonRetryableErrorsDropTask(task, taskQueueName, enumspb.TASK_QUEUE_TYPE_WORKFLOW, err)
 				// drop the task as otherwise task would be stuck in a retry-loop
 				task.finish(taskFinishResult{dropReason: dropReasonDataLoss})
 			case *serviceerror.NotFound: // mutable state not found, workflow not running or workflow task not found
@@ -891,8 +891,7 @@ pollLoop:
 		}
 
 		if err = fctx.Commit(); err != nil {
-			e.logger.Error("flow control commit failed", tag.Error(err)) // FIXME: more tags
-			// FIXME: metric
+			e.flowControlCommitFailed(task, taskQueueName, enumspb.TASK_QUEUE_TYPE_WORKFLOW, err)
 			fctx.CancelReservations()
 			// we must drop the task here!
 			task.finish(taskFinishResult{dropReason: dropReasonFlowControlCommitFailed})
@@ -967,13 +966,14 @@ func (e *matchingEngineImpl) getHistoryForQueryTask(
 	return hist, resp.GetResponse().GetNextPageToken(), nil
 }
 
-func (e *matchingEngineImpl) nonRetryableErrorsDropTask(task *internalTask, taskQueueName string, err error) {
+func (e *matchingEngineImpl) nonRetryableErrorsDropTask(task *internalTask, tqName string, tqType enumspb.TaskQueueType, err error) {
 	e.logger.Error("dropping task due to non-nonretryable errors",
 		tag.WorkflowNamespace(task.namespace.String()),
 		tag.WorkflowNamespaceID(task.event.Data.GetNamespaceId()),
 		tag.WorkflowID(task.event.Data.GetWorkflowId()),
 		tag.WorkflowRunID(task.event.Data.GetRunId()),
-		tag.WorkflowTaskQueueName(taskQueueName),
+		tag.WorkflowTaskQueueName(tqName),
+		tag.WorkflowTaskQueueType(tqType),
 		tag.TaskID(task.event.GetTaskId()),
 		tag.WorkflowScheduledEventID(task.event.Data.GetScheduledEventId()),
 		tag.Error(err),
@@ -981,6 +981,25 @@ func (e *matchingEngineImpl) nonRetryableErrorsDropTask(task *internalTask, task
 	)
 
 	metrics.NonRetryableTasks.With(e.metricsHandler).Record(1, metrics.ServiceErrorTypeTag(err))
+}
+
+func (e *matchingEngineImpl) flowControlCommitFailed(task *internalTask, tqName string, tqType enumspb.TaskQueueType, err error) {
+	// TODO: these should use the logger and metrics handler from the tqpm that we polled
+	e.logger.Error("flow control commit failed",
+		tag.WorkflowNamespace(task.namespace.String()),
+		tag.WorkflowNamespaceID(task.event.Data.GetNamespaceId()),
+		tag.WorkflowID(task.event.Data.GetWorkflowId()),
+		tag.WorkflowRunID(task.event.Data.GetRunId()),
+		tag.WorkflowTaskQueueName(tqName),
+		tag.WorkflowTaskQueueType(tqType),
+		tag.TaskID(task.event.GetTaskId()),
+		tag.WorkflowScheduledEventID(task.event.Data.GetScheduledEventId()),
+		tag.Error(err))
+
+	metrics.FlowControlCommitFailed.With(e.metricsHandler).Record(1,
+		metrics.NamespaceTag(task.namespace.String()),
+		metrics.ServiceErrorTypeTag(err),
+	)
 }
 
 // PollActivityTaskQueue takes one task from the task manager, update workflow execution history, mark task as
@@ -1046,7 +1065,7 @@ pollLoop:
 		// We need to run the flow control commit protocol.
 		fctx, err := e.fcReadiness.NewTx(ctx, namespace.ID(req.NamespaceId), task)
 		if err != nil {
-			e.nonRetryableErrorsDropTask(task, taskQueueName, err)
+			e.nonRetryableErrorsDropTask(task, taskQueueName, enumspb.TASK_QUEUE_TYPE_ACTIVITY, err)
 			// drop the task as otherwise task would be stuck in a retry-loop
 			task.finish(taskFinishResult{dropReason: dropReasonInternalError})
 			continue pollLoop
@@ -1071,11 +1090,11 @@ pollLoop:
 			fctx.CancelReservations()
 			switch err := err.(type) {
 			case *serviceerror.Internal:
-				e.nonRetryableErrorsDropTask(task, taskQueueName, err)
+				e.nonRetryableErrorsDropTask(task, taskQueueName, enumspb.TASK_QUEUE_TYPE_ACTIVITY, err)
 				// drop the task as otherwise task would be stuck in a retry-loop
 				task.finish(taskFinishResult{dropReason: dropReasonInternalError})
 			case *serviceerror.DataLoss:
-				e.nonRetryableErrorsDropTask(task, taskQueueName, err)
+				e.nonRetryableErrorsDropTask(task, taskQueueName, enumspb.TASK_QUEUE_TYPE_ACTIVITY, err)
 				// drop the task as otherwise task would be stuck in a retry-loop
 				task.finish(taskFinishResult{dropReason: dropReasonDataLoss})
 			case *serviceerror.NotFound: // mutable state not found, workflow not running or activity info not found
@@ -1162,8 +1181,7 @@ pollLoop:
 		}
 
 		if err = fctx.Commit(); err != nil {
-			e.logger.Error("flow control commit failed", tag.Error(err)) // FIXME: more tags
-			// FIXME: metric
+			e.flowControlCommitFailed(task, taskQueueName, enumspb.TASK_QUEUE_TYPE_ACTIVITY, err)
 			fctx.CancelReservations()
 			// we must drop the task here!
 			task.finish(taskFinishResult{dropReason: dropReasonFlowControlCommitFailed})
