@@ -9,7 +9,7 @@ import (
 )
 
 type limiter struct {
-	key    string // TODO(fc): consider interning? or intern whole limiter?
+	key    string
 	tp     enumsspb.LimiterType
 	source limiterSource
 	// for limiters set from config, we need to pass through to Reserve

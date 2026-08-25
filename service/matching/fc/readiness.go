@@ -41,7 +41,8 @@ type rcValue struct {
 	// (for now, until we add eviction)
 	waiters    map[readinessCallback]struct{}
 	goroCancel context.CancelFunc
-	// TODO(fc): cache some limiter-specific state?
+	// TODO(fc): cache some limiter-specific state, e.g. slots free so that we can change to
+	// not ready after taking last slot
 }
 
 type readinessNS struct {
@@ -50,6 +51,7 @@ type readinessNS struct {
 
 	lock  sync.Mutex
 	cache map[rcKey]*rcValue
+	// TODO(fc): gauges for size of cache
 }
 
 type Readiness struct {

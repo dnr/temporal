@@ -74,7 +74,6 @@ func (c *concurrencyCommitter) reserve() error {
 }
 
 func (c *concurrencyCommitter) commit() error {
-	// FIXME: batch!
 	res, err := c.client.Batch(c.ctx, &fcpb.ConcurrencyBatchRequest{
 		NamespaceId: c.nsID.String(),
 		Key:         c.lim.key,
@@ -89,7 +88,6 @@ func (c *concurrencyCommitter) commit() error {
 }
 
 func (c *concurrencyCommitter) cancelReservations() {
-	// FIXME: batch
 	_, _ = c.client.Batch(c.ctx, &fcpb.ConcurrencyBatchRequest{
 		NamespaceId:            c.nsID.String(),
 		Key:                    c.lim.key,
