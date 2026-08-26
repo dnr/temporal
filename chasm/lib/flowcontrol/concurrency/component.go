@@ -64,7 +64,7 @@ func (c *Component) maintainGeneration() func() {
 			// Increment Generation on any transition where Wait would have returned
 			// immediately before but would not now.
 			c.Generation++
-			c.WakeUpTo = nil // nil Timestamp is unix epoch, far in the past
+			c.WakeUpTo = 0
 			c.WakeAll = false
 		}
 	}
@@ -113,18 +113,10 @@ func (c *Component) commit(slotID string) bool {
 	return false
 }
 
-func (c *Component) release(slotID string, getWaiterAt func(int) time.Time) {
+func (c *Component) release(slotID string) {
 	c.Slots = slices.DeleteFunc(c.Slots, func(slot *fcpb.ConcurrencyState_Slot) bool {
 		return slot.Committed && slot.SlotId == slotID
 	})
-	if free := max(0, int(c.Config.ConcurrentTasks)-len(c.Slots)); free > 0 {
-		if upto := getWaiterAt(free); upto.IsZero() {
-			c.WakeUpTo = nil
-			c.WakeAll = true
-		} else {
-			c.WakeUpTo = timestamppb.New(upto)
-		}
-	}
 }
 
 // pollFreeSlots is called from PollComponent and should not modify the state.
@@ -140,29 +132,14 @@ func (c *Component) pollFreeSlots(now time.Time) int32 {
 }
 
 // poll is called from PollComponent and should not modify the state.
-func (c *Component) poll(now time.Time, reqGeneration int64, reqStartTime time.Time, reqTokens int32) (int64, int32, bool) {
-	if reqGeneration < c.Generation {
-		// Return current generation with no tokens.
-		return c.Generation, 0, true
-	} else if reqGeneration > c.Generation {
-		// Generation is too new. We have to return false until we get there.
-		return 0, 0, false
+func (c *Component) poll(now time.Time, reqGeneration int64, reqStartTime int64, reqTokens int32) (int64, int32, bool) {
+	if reqGeneration > c.Generation || // too new generation
+		reqGeneration == c.Generation && // waiting on this generation
+			!c.WakeAll && // doing staged wake
+			reqStartTime > c.WakeUpTo { // this one isn't ready yet
+		return 0, 0, false // wait for another transition
 	}
-
-	// Waiting for this generation, wait until wake time passes our start time.
-	mustWait := !c.WakeAll
-	if mustWait {
-		reqStart := reqStartTime
-		upTo := c.WakeUpTo.AsTime()
-		mustWait = reqStart.After(upTo)
-	}
-	if mustWait {
-		// Wait for another transition.
-		return 0, 0, false
-	}
-
-	// Wake as many as we have available.
+	// allow as many as we have available
 	tokens := min(c.pollFreeSlots(now), reqTokens)
-	tokens = max(1, tokens) // clip to one token even if reqTokens was left out
 	return c.Generation, tokens, true
 }

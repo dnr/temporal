@@ -39,10 +39,10 @@ type ConcurrencyState struct {
 	Slots []*ConcurrencyState_Slot `protobuf:"bytes,3,rep,name=slots,proto3" json:"slots,omitempty"`
 	// Generation is used to ensure Wait is monotonic. See comment in Wait for details.
 	Generation int64 `protobuf:"varint,4,opt,name=generation,proto3" json:"generation,omitempty"`
-	// Wake up to is used to select and stage wakeups.
-	WakeUpTo *timestamppb.Timestamp `protobuf:"bytes,5,opt,name=wake_up_to,json=wakeUpTo,proto3" json:"wake_up_to,omitempty"`
+	// Wake up to is used to select and stage wakeups. Unix nanos.
+	WakeUpTo int64 `protobuf:"varint,5,opt,name=wake_up_to,json=wakeUpTo,proto3" json:"wake_up_to,omitempty"`
 	// Wake all == true means "wake_time == end of time" (without having to worry about the
-	// maximum representable Timestamp).
+	// maximum representable time).
 	WakeAll       bool `protobuf:"varint,6,opt,name=wake_all,json=wakeAll,proto3" json:"wake_all,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -106,11 +106,11 @@ func (x *ConcurrencyState) GetGeneration() int64 {
 	return 0
 }
 
-func (x *ConcurrencyState) GetWakeUpTo() *timestamppb.Timestamp {
+func (x *ConcurrencyState) GetWakeUpTo() int64 {
 	if x != nil {
 		return x.WakeUpTo
 	}
-	return nil
+	return 0
 }
 
 func (x *ConcurrencyState) GetWakeAll() bool {
@@ -303,13 +303,13 @@ type ConcurrencyWaitRequest struct {
 	// generation, and return a newer one. Before context timeout, the server should return
 	// success with zero wake_tokens and the current generation.
 	Generation int64 `protobuf:"varint,3,opt,name=generation,proto3" json:"generation,omitempty"`
-	// Start time is when this wait operation started. It's used to order waiters.
-	StartTime *timestamppb.Timestamp `protobuf:"bytes,4,opt,name=start_time,json=startTime,proto3" json:"start_time,omitempty"`
-	// Requested tokens is how many tasks are known to be waiting for this limiter. The server
-	// may take this into account when staging wakes. Missing requested_tokens is taken as 1.
-	RequestedTokens int32 `protobuf:"varint,5,opt,name=requested_tokens,json=requestedTokens,proto3" json:"requested_tokens,omitempty"`
-	unknownFields   protoimpl.UnknownFields
-	sizeCache       protoimpl.SizeCache
+	// Start time is when this wait operation started, in unix nanos. It's used to order waiters.
+	StartTime int64 `protobuf:"varint,4,opt,name=start_time,json=startTime,proto3" json:"start_time,omitempty"`
+	// How many tasks are known to be waiting for this limiter. The server may take this into
+	// account when staging wakes. If this is missing, 1 is assumed.
+	RequestedWakeTokens int32 `protobuf:"varint,5,opt,name=requested_wake_tokens,json=requestedWakeTokens,proto3" json:"requested_wake_tokens,omitempty"`
+	unknownFields       protoimpl.UnknownFields
+	sizeCache           protoimpl.SizeCache
 }
 
 func (x *ConcurrencyWaitRequest) Reset() {
@@ -363,16 +363,16 @@ func (x *ConcurrencyWaitRequest) GetGeneration() int64 {
 	return 0
 }
 
-func (x *ConcurrencyWaitRequest) GetStartTime() *timestamppb.Timestamp {
+func (x *ConcurrencyWaitRequest) GetStartTime() int64 {
 	if x != nil {
 		return x.StartTime
 	}
-	return nil
+	return 0
 }
 
-func (x *ConcurrencyWaitRequest) GetRequestedTokens() int32 {
+func (x *ConcurrencyWaitRequest) GetRequestedWakeTokens() int32 {
 	if x != nil {
-		return x.RequestedTokens
+		return x.RequestedWakeTokens
 	}
 	return 0
 }
@@ -442,6 +442,7 @@ type ConcurrencyState_Slot struct {
 	// Committed slots don't expire, they must be Released.
 	Committed bool `protobuf:"varint,2,opt,name=committed,proto3" json:"committed,omitempty"`
 	// Expiry time for reserved slot.
+	// TODO(fc): make this into int64 unix nanos too?
 	Expires       *timestamppb.Timestamp `protobuf:"bytes,3,opt,name=expires,proto3" json:"expires,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -502,16 +503,16 @@ var File_temporal_server_chasm_lib_flowcontrol_proto_v1_concurrency_proto protor
 
 const file_temporal_server_chasm_lib_flowcontrol_proto_v1_concurrency_proto_rawDesc = "" +
 	"\n" +
-	"@temporal/server/chasm/lib/flowcontrol/proto/v1/concurrency.proto\x12.temporal.server.chasm.lib.flowcontrol.proto.v1\x1a\x1fgoogle/protobuf/timestamp.proto\x1a'temporal/api/taskqueue/v1/message.proto\x1a0temporal/server/api/common/v1/api_category.proto\x1a.temporal/server/api/routing/v1/extension.proto\"\xc5\x03\n" +
+	"@temporal/server/chasm/lib/flowcontrol/proto/v1/concurrency.proto\x12.temporal.server.chasm.lib.flowcontrol.proto.v1\x1a\x1fgoogle/protobuf/timestamp.proto\x1a'temporal/api/taskqueue/v1/message.proto\x1a0temporal/server/api/common/v1/api_category.proto\x1a.temporal/server/api/routing/v1/extension.proto\"\xa9\x03\n" +
 	"\x10ConcurrencyState\x12C\n" +
 	"\x06config\x18\x01 \x01(\v2+.temporal.api.taskqueue.v1.ConcurrencyLimitR\x06config\x12%\n" +
 	"\x0econfig_version\x18\x02 \x01(\x03R\rconfigVersion\x12[\n" +
 	"\x05slots\x18\x03 \x03(\v2E.temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyState.SlotR\x05slots\x12\x1e\n" +
 	"\n" +
 	"generation\x18\x04 \x01(\x03R\n" +
-	"generation\x128\n" +
+	"generation\x12\x1c\n" +
 	"\n" +
-	"wake_up_to\x18\x05 \x01(\v2\x1a.google.protobuf.TimestampR\bwakeUpTo\x12\x19\n" +
+	"wake_up_to\x18\x05 \x01(\x03R\bwakeUpTo\x12\x19\n" +
 	"\bwake_all\x18\x06 \x01(\bR\awakeAll\x1as\n" +
 	"\x04Slot\x12\x17\n" +
 	"\aslot_id\x18\x01 \x01(\tR\x06slotId\x12\x1c\n" +
@@ -531,16 +532,16 @@ const file_temporal_server_chasm_lib_flowcontrol_proto_v1_concurrency_proto_rawD
 	"generation\x18\x01 \x01(\x03R\n" +
 	"generation\x12'\n" +
 	"\x0freserve_success\x18\x02 \x03(\bR\x0ereserveSuccess\x12%\n" +
-	"\x0ecommit_success\x18\x03 \x03(\bR\rcommitSuccess\"\xd3\x01\n" +
+	"\x0ecommit_success\x18\x03 \x03(\bR\rcommitSuccess\"\xc0\x01\n" +
 	"\x16ConcurrencyWaitRequest\x12!\n" +
 	"\fnamespace_id\x18\x01 \x01(\tR\vnamespaceId\x12\x10\n" +
 	"\x03key\x18\x02 \x01(\tR\x03key\x12\x1e\n" +
 	"\n" +
 	"generation\x18\x03 \x01(\x03R\n" +
-	"generation\x129\n" +
+	"generation\x12\x1d\n" +
 	"\n" +
-	"start_time\x18\x04 \x01(\v2\x1a.google.protobuf.TimestampR\tstartTime\x12)\n" +
-	"\x10requested_tokens\x18\x05 \x01(\x05R\x0frequestedTokens\"Z\n" +
+	"start_time\x18\x04 \x01(\x03R\tstartTime\x122\n" +
+	"\x15requested_wake_tokens\x18\x05 \x01(\x05R\x13requestedWakeTokens\"Z\n" +
 	"\x17ConcurrencyWaitResponse\x12\x1e\n" +
 	"\n" +
 	"generation\x18\x01 \x01(\x03R\n" +
@@ -577,19 +578,17 @@ var file_temporal_server_chasm_lib_flowcontrol_proto_v1_concurrency_proto_goType
 var file_temporal_server_chasm_lib_flowcontrol_proto_v1_concurrency_proto_depIdxs = []int32{
 	6, // 0: temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyState.config:type_name -> temporal.api.taskqueue.v1.ConcurrencyLimit
 	5, // 1: temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyState.slots:type_name -> temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyState.Slot
-	7, // 2: temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyState.wake_up_to:type_name -> google.protobuf.Timestamp
-	6, // 3: temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyBatchRequest.config_update:type_name -> temporal.api.taskqueue.v1.ConcurrencyLimit
-	7, // 4: temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyWaitRequest.start_time:type_name -> google.protobuf.Timestamp
-	7, // 5: temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyState.Slot.expires:type_name -> google.protobuf.Timestamp
-	1, // 6: temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyService.Batch:input_type -> temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyBatchRequest
-	3, // 7: temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyService.Wait:input_type -> temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyWaitRequest
-	2, // 8: temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyService.Batch:output_type -> temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyBatchResponse
-	4, // 9: temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyService.Wait:output_type -> temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyWaitResponse
-	8, // [8:10] is the sub-list for method output_type
-	6, // [6:8] is the sub-list for method input_type
-	6, // [6:6] is the sub-list for extension type_name
-	6, // [6:6] is the sub-list for extension extendee
-	0, // [0:6] is the sub-list for field type_name
+	6, // 2: temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyBatchRequest.config_update:type_name -> temporal.api.taskqueue.v1.ConcurrencyLimit
+	7, // 3: temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyState.Slot.expires:type_name -> google.protobuf.Timestamp
+	1, // 4: temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyService.Batch:input_type -> temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyBatchRequest
+	3, // 5: temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyService.Wait:input_type -> temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyWaitRequest
+	2, // 6: temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyService.Batch:output_type -> temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyBatchResponse
+	4, // 7: temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyService.Wait:output_type -> temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyWaitResponse
+	6, // [6:8] is the sub-list for method output_type
+	4, // [4:6] is the sub-list for method input_type
+	4, // [4:4] is the sub-list for extension type_name
+	4, // [4:4] is the sub-list for extension extendee
+	0, // [0:4] is the sub-list for field type_name
 }
 
 func init() { file_temporal_server_chasm_lib_flowcontrol_proto_v1_concurrency_proto_init() }

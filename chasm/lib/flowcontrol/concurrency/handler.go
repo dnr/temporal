@@ -30,7 +30,7 @@ type batchReq struct {
 
 type chasmReq struct {
 	items       []batchReq
-	getWaiterAt func(int) time.Time
+	getWakeTime func(int32) (int64, bool)
 }
 
 type batchRes struct {
@@ -38,9 +38,12 @@ type batchRes struct {
 	err error
 }
 
-// FIXME: change to int32 or int64?
-// FIXME: oops, need multiplicity in values
-type waiterTree = btree.BTreeG[time.Time]
+type waiterEntry struct {
+	startTime int64 // unix nanos
+	tokens    int32 // including multiplicity
+}
+
+type waiterEntries = btree.BTreeG[waiterEntry]
 
 type Handler struct {
 	fcpb.UnimplementedConcurrencyServiceServer
@@ -48,9 +51,9 @@ type Handler struct {
 	logger   log.Logger
 	batchers *stream_batcher.KeyedBatcher[batchKey, batchReq, batchRes]
 
-	// waiterLock protects map, trees are individually locked
+	// waiterLock protects map and entries
 	waiterLock sync.Mutex
-	waiters    map[batchKey]*waiterTree
+	waiters    map[batchKey]*waiterEntries
 }
 
 func NewHandler(
@@ -59,7 +62,7 @@ func NewHandler(
 ) *Handler {
 	h := &Handler{
 		logger:  logger,
-		waiters: make(map[batchKey]*waiterTree),
+		waiters: make(map[batchKey]*waiterEntries),
 	}
 	h.batchers = stream_batcher.NewKeyedBatcherWithPerItemResults(
 		h.applyBatch,
@@ -106,8 +109,7 @@ func updateFn(c *Component, cctx chasm.MutableContext, creq chasmReq) ([]*fcpb.C
 	// apply releases
 	for _, it := range creq.items {
 		for _, slotId := range it.req.GetReleaseSlots() {
-			c.release(slotId, creq.getWaiterAt)
-			// FIXME: add tasks if not fully released
+			c.release(slotId)
 		}
 	}
 
@@ -139,6 +141,14 @@ func updateFn(c *Component, cctx chasm.MutableContext, creq chasmReq) ([]*fcpb.C
 		ress[i].Generation = c.Generation
 	}
 
+	// if we have free slots and waiters, then we can wake some waiters
+	if free := max(0, c.Config.ConcurrentTasks) - int32(len(c.Slots)); free > 0 {
+		c.WakeUpTo, c.WakeAll = creq.getWakeTime(free)
+		if c.WakeUpTo > 0 {
+			// FIXME: tasks
+		}
+	}
+
 	return ress, nil
 }
 
@@ -162,7 +172,10 @@ func (h *Handler) applyBatch(
 		opts = append(opts, chasm.WithSpeculative()) // note: not implemented yet
 	}
 
-	getWaiterAt := func(n int) time.Time { return h.getWaiterAt(key.namespaceID, key.key, n) }
+	creq := chasmReq{
+		items:       items,
+		getWakeTime: func(n int32) (int64, bool) { return h.getWakeTime(key, n) },
+	}
 
 	if needStart {
 		opts = append(opts, chasm.WithBusinessIDPolicy(
@@ -177,7 +190,7 @@ func (h *Handler) applyBatch(
 			},
 			initFn,
 			updateFn,
-			chasmReq{items: items, getWaiterAt: getWaiterAt},
+			creq,
 			opts...,
 		)
 		return makeBatchResults(len(items), updateRes.UpdateOutput, err)
@@ -190,7 +203,7 @@ func (h *Handler) applyBatch(
 			BusinessID:  key.key,
 		}),
 		updateFn,
-		chasmReq{items: items, getWaiterAt: getWaiterAt},
+		creq,
 		opts...,
 	)
 	return makeBatchResults(len(items), ress, err)
@@ -233,6 +246,14 @@ func (h *Handler) Wait(ctx context.Context, req *fcpb.ConcurrencyWaitRequest) (r
 	defer log.CapturePanic(h.logger, &retErr)
 
 	req = common.CloneProto(req)
+	// assume one token if unset
+	if req.RequestedWakeTokens == 0 {
+		req.RequestedWakeTokens = 1
+	}
+	// we use time 0 to mean far-future
+	if req.StartTime == 0 {
+		req.StartTime = 1
+	}
 
 	// TODO(fc): move to dynamic config
 	ctx, cancel := contextutil.WithDeadlineBuffer(ctx, time.Minute, time.Second)
@@ -242,9 +263,9 @@ func (h *Handler) Wait(ctx context.Context, req *fcpb.ConcurrencyWaitRequest) (r
 	// return zero and never get the right generation on the client
 	var lastKnownGeneration atomic.Int64
 
-	startTime := req.StartTime.AsTime()
-	h.registerWaiter(req.NamespaceId, req.Key, startTime)
-	defer h.unregisterWaiter(req.NamespaceId, req.Key, startTime)
+	k := batchKey{namespaceID: req.NamespaceId, key: req.Key}
+	h.registerWaiter(k, req.StartTime, req.RequestedWakeTokens)
+	defer h.unregisterWaiter(k, req.StartTime, req.RequestedWakeTokens)
 
 	// loop to do internal retries with increased generation
 	for {
@@ -262,7 +283,7 @@ func (h *Handler) Wait(ctx context.Context, req *fcpb.ConcurrencyWaitRequest) (r
 				BusinessID:  req.Key,
 			}),
 			func(c *Component, cctx chasm.Context, req *fcpb.ConcurrencyWaitRequest) (*fcpb.ConcurrencyWaitResponse, bool, error) {
-				generation, tokens, ready := c.poll(cctx.Now(c), req.Generation, req.StartTime.AsTime(), req.RequestedTokens)
+				generation, tokens, ready := c.poll(cctx.Now(c), req.Generation, req.StartTime, req.RequestedWakeTokens)
 				if !ready {
 					lastKnownGeneration.Store(generation)
 					return nil, false, nil
@@ -283,44 +304,83 @@ func (h *Handler) Wait(ctx context.Context, req *fcpb.ConcurrencyWaitRequest) (r
 	}
 }
 
-func (h *Handler) getWaiterTreeOrNil(namespaceID, key string) *waiterTree {
-	h.waiterLock.Lock()
-	defer h.waiterLock.Unlock()
-	k := batchKey{namespaceID: namespaceID, key: key}
-	wt, _ := h.waiters[k]
-	return wt
-}
-
-func (h *Handler) getWaiterTree(namespaceID, key string) *waiterTree {
-	h.waiterLock.Lock()
-	defer h.waiterLock.Unlock()
-	k := batchKey{namespaceID: namespaceID, key: key}
-	if wt, ok := h.waiters[k]; ok {
+func (h *Handler) getWaiterEntriesLocked(key batchKey) *waiterEntries {
+	if wt, ok := h.waiters[key]; ok {
 		return wt
 	}
-	wt := btree.NewBTreeG(time.Time.Before)
-	h.waiters[k] = wt
+	wt := btree.NewBTreeGOptions(
+		func(a, b waiterEntry) bool { return a.startTime < b.startTime },
+		// degree 3 allows up to 5 values per node without splitting
+		btree.Options{Degree: 3, NoLocks: true},
+	)
+	h.waiters[key] = wt
 	return wt
 }
 
-func (h *Handler) registerWaiter(namespaceID, key string, startTime time.Time) {
-	wt := h.getWaiterTree(namespaceID, key)
-	wt.Set(startTime)
+func (h *Handler) registerWaiter(key batchKey, startTime int64, tokens int32) {
+	h.waiterLock.Lock()
+	defer h.waiterLock.Unlock()
+
+	wt := h.getWaiterEntriesLocked(key)
+	newTokens := tokens
+	var hint btree.PathHint
+	if entry, ok := wt.GetHint(waiterEntry{startTime: startTime}, &hint); ok {
+		newTokens += entry.tokens
+	}
+	wt.SetHint(waiterEntry{startTime: startTime, tokens: newTokens}, &hint)
 }
 
-func (h *Handler) unregisterWaiter(namespaceID, key string, startTime time.Time) {
-	wt := h.getWaiterTree(namespaceID, key)
-	wt.Delete(startTime)
+func (h *Handler) unregisterWaiter(key batchKey, startTime int64, tokens int32) {
+	h.waiterLock.Lock()
+	defer h.waiterLock.Unlock()
+
+	wt, ok := h.waiters[key]
+	if !ok {
+		return
+	}
+	var hint btree.PathHint
+	if entry, ok := wt.GetHint(waiterEntry{startTime: startTime}, &hint); ok {
+		newTokens := max(0, entry.tokens-tokens)
+		if newTokens == 0 {
+			wt.DeleteHint(waiterEntry{startTime: startTime}, &hint)
+		} else {
+			wt.SetHint(waiterEntry{startTime: startTime, tokens: newTokens}, &hint)
+		}
+	}
 	if wt.Len() == 0 {
-		// FIXME: delete from map
+		delete(h.waiters, key)
 	}
 }
 
-func (h *Handler) getWaiterAt(namespaceID, key string, n int) time.Time {
-	wt := h.getWaiterTreeOrNil(namespaceID, key)
-	if wt == nil {
-		return time.Time{}
+// getWakeTime returns t such that waiters representing wantTokens tokens have startTime <= t.
+// If there aren't enough waiters to satisfy all the tokens, then wakeAll is true.
+func (h *Handler) getWakeTime(key batchKey, wantTokens int32) (wakeUpTo int64, wakeAll bool) {
+	h.waiterLock.Lock()
+	defer h.waiterLock.Unlock()
+
+	wt, ok := h.waiters[key]
+	if !ok {
+		return 0, true // no waiters at all
 	}
-	t, _ := wt.GetAt(n - 1)
-	return t
+
+	remaining := false
+	wt.Scan(func(entry waiterEntry) bool {
+		if wakeUpTo != 0 {
+			// we satisfied all our tokens, but there are more waiters
+			remaining = true
+			return false
+		}
+		if wantTokens -= entry.tokens; wantTokens <= 0 {
+			// satisfied all tokens. set wakeUpTo but keep scanning to see
+			// if there are more waiters.
+			wakeUpTo = entry.startTime
+		}
+		return true
+	})
+	// if we have any waiters we _don't_ want to wake, do a staged wake
+	if remaining {
+		return wakeUpTo, false
+	}
+	// otherwise wake all
+	return 0, true
 }
