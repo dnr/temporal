@@ -2,9 +2,11 @@ package concurrency
 
 import (
 	"context"
+	"sync"
 	"sync/atomic"
 	"time"
 
+	"github.com/tidwall/btree"
 	taskqueuepb "go.temporal.io/api/taskqueue/v1"
 	"go.temporal.io/server/chasm"
 	fcpb "go.temporal.io/server/chasm/lib/flowcontrol/gen/flowcontrolpb/v1"
@@ -31,11 +33,19 @@ type batchRes struct {
 	err error
 }
 
+// FIXME: change to int32 or int64?
+// FIXME: oops, need multiplicity in values
+type waiterTree = btree.BTreeG[time.Time]
+
 type Handler struct {
 	fcpb.UnimplementedConcurrencyServiceServer
 
 	logger   log.Logger
 	batchers *stream_batcher.KeyedBatcher[batchKey, batchReq, batchRes]
+
+	// waiterLock protects map, trees are individually locked
+	waiterLock sync.Mutex
+	waiters    map[batchKey]*waiterTree
 }
 
 func NewHandler(
@@ -43,7 +53,8 @@ func NewHandler(
 	dc *dynamicconfig.Collection,
 ) *Handler {
 	h := &Handler{
-		logger: logger,
+		logger:  logger,
+		waiters: make(map[batchKey]*waiterTree),
 	}
 	h.batchers = stream_batcher.NewKeyedBatcherWithPerItemResults(
 		h.applyBatch,
@@ -224,6 +235,10 @@ func (h *Handler) Wait(ctx context.Context, req *fcpb.ConcurrencyWaitRequest) (r
 	// return zero and never get the right generation on the client
 	var lastKnownGeneration atomic.Int64
 
+	startTime := req.StartTime.AsTime()
+	h.registerWaiter(req.NamespaceId, req.Key, startTime)
+	defer h.unregisterWaiter(req.NamespaceId, req.Key, startTime)
+
 	// loop to do internal retries with increased generation
 	for {
 		// CHASM requires that PollComponent be monotonic: if it returns true at some state,
@@ -259,4 +274,46 @@ func (h *Handler) Wait(ctx context.Context, req *fcpb.ConcurrencyWaitRequest) (r
 		}
 		return res, err
 	}
+}
+
+func (h *Handler) getWaiterTreeOrNil(namespaceID, key string) *waiterTree {
+	h.waiterLock.Lock()
+	defer h.waiterLock.Unlock()
+	k := batchKey{namespaceID: namespaceID, key: key}
+	wt, _ := h.waiters[k]
+	return wt
+}
+
+func (h *Handler) getWaiterTree(namespaceID, key string) *waiterTree {
+	h.waiterLock.Lock()
+	defer h.waiterLock.Unlock()
+	k := batchKey{namespaceID: namespaceID, key: key}
+	if wt, ok := h.waiters[k]; ok {
+		return wt
+	}
+	wt := btree.NewBTreeG(time.Time.Before)
+	h.waiters[k] = wt
+	return wt
+}
+
+func (h *Handler) registerWaiter(namespaceID, key string, startTime time.Time) {
+	wt := h.getWaiterTree(namespaceID, key)
+	wt.Set(startTime)
+}
+
+func (h *Handler) unregisterWaiter(namespaceID, key string, startTime time.Time) {
+	wt := h.getWaiterTree(namespaceID, key)
+	wt.Delete(startTime)
+	if wt.Len() == 0 {
+		// FIXME: delete from map
+	}
+}
+
+func (h *Handler) getNextWaiters(namespaceID, key string, n int) time.Time {
+	wt := h.getWaiterTreeOrNil(namespaceID, key)
+	if wt == nil {
+		return time.Time{}
+	}
+	t, _ := wt.GetAt(n - 1)
+	return t
 }

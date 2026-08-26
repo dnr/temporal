@@ -15,6 +15,7 @@ import (
 	"go.temporal.io/server/common/headers"
 	"go.temporal.io/server/common/namespace"
 	"go.temporal.io/server/common/util"
+	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 type ReadinessState int32
@@ -36,8 +37,9 @@ type rcKey struct {
 
 type rcValue struct {
 	generation int64
+	startTime  *timestamppb.Timestamp
 	state      ReadinessState
-	// invariant: len(waiters) > 0 == Wait goroutine is running == goroCancel != nil
+	// invariant: {len(waiters) > 0} == {Wait goroutine is running} == {goroCancel != nil}
 	// (for now, until we add eviction)
 	waiters    map[readinessCallback]struct{}
 	goroCancel context.CancelFunc
@@ -104,7 +106,8 @@ func (rn *readinessNS) getValueLocked(rkey rcKey) *rcValue {
 		return v
 	}
 	v := &rcValue{
-		waiters: make(map[readinessCallback]struct{}),
+		startTime: timestamppb.Now(),
+		waiters:   make(map[readinessCallback]struct{}),
 	}
 	rn.cache[rkey] = v
 	return v
@@ -228,14 +231,16 @@ func (r *Readiness) callWait(ctx context.Context, rn *readinessNS, rkey rcKey, v
 		switch rkey.tp {
 		case enumsspb.LIMITER_TYPE_CONCURRENCY:
 			rn.lock.Lock()
-			gen := v.generation
+			req := &fcpb.ConcurrencyWaitRequest{
+				NamespaceId:     rn.nsID.String(),
+				Key:             rkey.key,
+				Generation:      v.generation,
+				StartTime:       v.startTime,
+				RequestedTokens: int32(len(v.waiters)),
+			}
 			rn.lock.Unlock()
 
-			res, err := r.concurrencyServiceClient.Wait(ctx, &fcpb.ConcurrencyWaitRequest{
-				NamespaceId: rn.nsID.String(),
-				Key:         rkey.key,
-				Generation:  gen,
-			})
+			res, err := r.concurrencyServiceClient.Wait(ctx, req)
 			if err != nil {
 				util.InterruptibleSleep(ctx, retrier.NextBackOff(err))
 				continue
