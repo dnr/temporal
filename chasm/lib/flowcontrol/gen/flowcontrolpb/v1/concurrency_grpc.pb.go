@@ -42,8 +42,7 @@ type ConcurrencyServiceClient interface {
 	// different durability, so callers should not assume that e.g. a Reserve plus Commit in one
 	// batch means that the Reserve was durable.
 	Batch(ctx context.Context, in *ConcurrencyBatchRequest, opts ...grpc.CallOption) (*ConcurrencyBatchResponse, error)
-	// Wait is a long-poll RPC that returns when at least one slot is free, or the caller's
-	// generation is too old.
+	// Wait is a long-poll RPC that returns when at least one slot is free, or timeout.
 	Wait(ctx context.Context, in *ConcurrencyWaitRequest, opts ...grpc.CallOption) (*ConcurrencyWaitResponse, error)
 }
 
@@ -91,8 +90,7 @@ type ConcurrencyServiceServer interface {
 	// different durability, so callers should not assume that e.g. a Reserve plus Commit in one
 	// batch means that the Reserve was durable.
 	Batch(context.Context, *ConcurrencyBatchRequest) (*ConcurrencyBatchResponse, error)
-	// Wait is a long-poll RPC that returns when at least one slot is free, or the caller's
-	// generation is too old.
+	// Wait is a long-poll RPC that returns when at least one slot is free, or timeout.
 	Wait(context.Context, *ConcurrencyWaitRequest) (*ConcurrencyWaitResponse, error)
 	mustEmbedUnimplementedConcurrencyServiceServer()
 }
