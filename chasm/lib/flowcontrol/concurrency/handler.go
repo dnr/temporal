@@ -2,11 +2,15 @@ package concurrency
 
 import (
 	"context"
+	"sync/atomic"
+	"time"
 
 	taskqueuepb "go.temporal.io/api/taskqueue/v1"
 	"go.temporal.io/server/chasm"
 	fcpb "go.temporal.io/server/chasm/lib/flowcontrol/gen/flowcontrolpb/v1"
+	"go.temporal.io/server/common"
 	"go.temporal.io/server/common/clock"
+	"go.temporal.io/server/common/contextutil"
 	"go.temporal.io/server/common/dynamicconfig"
 	"go.temporal.io/server/common/log"
 	"go.temporal.io/server/common/stream_batcher"
@@ -57,6 +61,7 @@ func initFn(_ chasm.MutableContext, items []batchReq) (*Component, error) {
 			Config: &taskqueuepb.ConcurrencyLimit{
 				ConcurrentTasks: initialLimit,
 			},
+			WakeAll: true, // start will all slots available in generation 0
 		},
 	}
 	for _, it := range items {
@@ -209,43 +214,49 @@ func (h *Handler) Batch(ctx context.Context, req *fcpb.ConcurrencyBatchRequest) 
 func (h *Handler) Wait(ctx context.Context, req *fcpb.ConcurrencyWaitRequest) (retRes *fcpb.ConcurrencyWaitResponse, retErr error) {
 	defer log.CapturePanic(h.logger, &retErr)
 
-	// CHASM requires that PollComponent be monotonic: if it returns true at some state, then
-	// it should return true at future states. Our predicate is essentially "is there any free
-	// slot?" This can switch from false to true on a Release or CancelReservation or
-	// reservation expiry, which is monotonic. The problem is the other way, on Reserve, it
-	// could switch from true to false, which isn't allowed. To fix this, we add a
-	// "generation": whenever there was a free slot but isn't anymore, we increment a
-	// generation counter. We return it on every Reserve and Wait, so callers should have the
-	// current value. If their value is out of date then we return immediately (true), if it's
-	// too new than we wait for it to catch up (false).
-	res, _, err := chasm.PollComponent(
-		ctx,
-		chasm.NewComponentRef[*Component](chasm.ExecutionKey{
-			NamespaceID: req.NamespaceId,
-			BusinessID:  req.Key,
-		}),
-		func(c *Component, cctx chasm.Context, req *fcpb.ConcurrencyWaitRequest) (*fcpb.ConcurrencyWaitResponse, bool, error) {
-			notify := c.notifyWaiters(cctx.Now(c))
+	req = common.CloneProto(req)
 
-			if req.Generation < c.Generation {
-				// TODO(fc): don't always notify all free slots on stale generation?
-				return &fcpb.ConcurrencyWaitResponse{Generation: c.Generation, WakeCount: notify}, true, nil
-			} else if req.Generation > c.Generation {
-				// Generation is too new. We have to return false until we get there.
-				return nil, false, nil
-			}
-			if notify == 0 {
-				// No free slots, wait for another transition.
-				return nil, false, nil
-			}
-			// Notify caller with some slots.
-			return &fcpb.ConcurrencyWaitResponse{Generation: c.Generation, WakeCount: notify}, true, nil
-		},
-		req,
-	)
-	if err == nil && res == nil {
-		return &fcpb.ConcurrencyWaitResponse{}, nil
+	// TODO(fc): move to dynamic config
+	ctx, cancel := contextutil.WithDeadlineBuffer(ctx, time.Minute, time.Second)
+	defer cancel()
+
+	// TODO(fc): do we actually need to return generation with timeout? if we don't, we'll
+	// return zero and never get the right generation on the client
+	var lastKnownGeneration atomic.Int64
+
+	// loop to do internal retries with increased generation
+	for {
+		// CHASM requires that PollComponent be monotonic: if it returns true at some state,
+		// then it should return true at future states. Our predicate is "is state.wake_up_to
+		// >= req.start_time" (or state.wake_all means wake_upto = forever in the future). But
+		// when we go from having slots to not having slots, we need to reset wake_up_to to
+		// some time in the past, so that everyone is blocked again. So we need to add a
+		// "generation" on top of the timestamps. Essentially, the state moves the pair
+		// <generation, wake_up_to> monotonically.
+		res, _, err := chasm.PollComponent(
+			ctx,
+			chasm.NewComponentRef[*Component](chasm.ExecutionKey{
+				NamespaceID: req.NamespaceId,
+				BusinessID:  req.Key,
+			}),
+			func(c *Component, cctx chasm.Context, req *fcpb.ConcurrencyWaitRequest) (*fcpb.ConcurrencyWaitResponse, bool, error) {
+				generation, tokens, ready := c.poll(cctx.Now(c), req.Generation, req.StartTime.AsTime(), req.RequestedTokens)
+				if !ready {
+					lastKnownGeneration.Store(generation)
+					return nil, false, nil
+				}
+				return &fcpb.ConcurrencyWaitResponse{Generation: generation, WakeTokens: tokens}, true, nil
+			},
+			req,
+		)
+		if err == nil && res == nil {
+			// timed out without becoming ready
+			return &fcpb.ConcurrencyWaitResponse{Generation: lastKnownGeneration.Load()}, nil
+		} else if res.Generation != req.Generation {
+			// try again on server with new generation
+			req.Generation = res.Generation
+			continue
+		}
+		return res, err
 	}
-	// TODO(fc): we can try again if we still have time and we got a stale generation?
-	return res, err
 }

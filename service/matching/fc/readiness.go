@@ -242,7 +242,7 @@ func (r *Readiness) callWait(ctx context.Context, rn *readinessNS, rkey rcKey, v
 			}
 			retrier.Reset()
 
-			if res.WakeCount > 0 {
+			if res.WakeTokens > 0 {
 				rn.reportReady(rkey, res.Generation)
 			} else {
 				rn.reportBlocked(rkey, res.Generation)
