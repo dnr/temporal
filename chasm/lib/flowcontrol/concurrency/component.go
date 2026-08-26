@@ -113,10 +113,18 @@ func (c *Component) commit(slotID string) bool {
 	return false
 }
 
-func (c *Component) release(slotID string) {
+func (c *Component) release(slotID string, getWaiterAt func(int) time.Time) {
 	c.Slots = slices.DeleteFunc(c.Slots, func(slot *fcpb.ConcurrencyState_Slot) bool {
 		return slot.Committed && slot.SlotId == slotID
 	})
+	if free := max(0, int(c.Config.ConcurrentTasks)-len(c.Slots)); free > 0 {
+		if upto := getWaiterAt(free); upto.IsZero() {
+			c.WakeUpTo = nil
+			c.WakeAll = true
+		} else {
+			c.WakeUpTo = timestamppb.New(upto)
+		}
+	}
 }
 
 // pollFreeSlots is called from PollComponent and should not modify the state.

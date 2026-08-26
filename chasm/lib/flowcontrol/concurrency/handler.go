@@ -28,6 +28,11 @@ type batchReq struct {
 	req *fcpb.ConcurrencyBatchRequest
 }
 
+type chasmReq struct {
+	items       []batchReq
+	getWaiterAt func(int) time.Time
+}
+
 type batchRes struct {
 	res *fcpb.ConcurrencyBatchResponse
 	err error
@@ -64,7 +69,7 @@ func NewHandler(
 	return h
 }
 
-func initFn(_ chasm.MutableContext, items []batchReq) (*Component, error) {
+func initFn(_ chasm.MutableContext, creq chasmReq) (*Component, error) {
 	// For now (whole-queue limits), we should always have an initial config here.
 	// For per-task limits, this may be missing and set via api later.
 	c := &Component{
@@ -75,17 +80,17 @@ func initFn(_ chasm.MutableContext, items []batchReq) (*Component, error) {
 			WakeAll: true, // start will all slots available in generation 0
 		},
 	}
-	for _, it := range items {
+	for _, it := range creq.items {
 		c.updateConfig(it.req.GetConfigUpdate(), it.req.GetConfigUpdateVersion())
 	}
 	return c, nil
 }
 
-func updateFn(c *Component, cctx chasm.MutableContext, items []batchReq) ([]*fcpb.ConcurrencyBatchResponse, error) {
+func updateFn(c *Component, cctx chasm.MutableContext, creq chasmReq) ([]*fcpb.ConcurrencyBatchResponse, error) {
 	now := cctx.Now(c)
 
 	// allocate new protos for responses
-	ress := make([]*fcpb.ConcurrencyBatchResponse, len(items))
+	ress := make([]*fcpb.ConcurrencyBatchResponse, len(creq.items))
 	for i := range ress {
 		ress[i] = &fcpb.ConcurrencyBatchResponse{}
 	}
@@ -94,20 +99,20 @@ func updateFn(c *Component, cctx chasm.MutableContext, items []batchReq) ([]*fcp
 	c.expire(now)
 
 	// update config
-	for _, it := range items {
+	for _, it := range creq.items {
 		c.updateConfig(it.req.GetConfigUpdate(), it.req.GetConfigUpdateVersion())
 	}
 
 	// apply releases
-	for _, it := range items {
+	for _, it := range creq.items {
 		for _, slotId := range it.req.GetReleaseSlots() {
-			// FIXME: add tasks to control slow release of notifications
-			c.release(slotId)
+			c.release(slotId, creq.getWaiterAt)
+			// FIXME: add tasks if not fully released
 		}
 	}
 
 	// apply commits
-	for i, it := range items {
+	for i, it := range creq.items {
 		for _, slotId := range it.req.GetCommitSlots() {
 			success := c.commit(slotId)
 			ress[i].CommitSuccess = append(ress[i].CommitSuccess, success)
@@ -115,14 +120,14 @@ func updateFn(c *Component, cctx chasm.MutableContext, items []batchReq) ([]*fcp
 	}
 
 	// apply cancels
-	for _, it := range items {
+	for _, it := range creq.items {
 		for _, slotId := range it.req.GetCancelReservationSlots() {
 			c.cancelReservation(slotId)
 		}
 	}
 
 	// apply reserves
-	for i, it := range items {
+	for i, it := range creq.items {
 		for _, slotId := range it.req.GetReserveSlots() {
 			success := c.reserve(slotId, now)
 			ress[i].ReserveSuccess = append(ress[i].ReserveSuccess, success)
@@ -130,7 +135,7 @@ func updateFn(c *Component, cctx chasm.MutableContext, items []batchReq) ([]*fcp
 	}
 
 	// capture Generation after c.reserve, which may increment it
-	for i := range items {
+	for i := range creq.items {
 		ress[i].Generation = c.Generation
 	}
 
@@ -157,6 +162,8 @@ func (h *Handler) applyBatch(
 		opts = append(opts, chasm.WithSpeculative()) // note: not implemented yet
 	}
 
+	getWaiterAt := func(n int) time.Time { return h.getWaiterAt(key.namespaceID, key.key, n) }
+
 	if needStart {
 		opts = append(opts, chasm.WithBusinessIDPolicy(
 			chasm.BusinessIDReusePolicyAllowDuplicate,
@@ -170,7 +177,7 @@ func (h *Handler) applyBatch(
 			},
 			initFn,
 			updateFn,
-			items,
+			chasmReq{items: items, getWaiterAt: getWaiterAt},
 			opts...,
 		)
 		return makeBatchResults(len(items), updateRes.UpdateOutput, err)
@@ -183,7 +190,7 @@ func (h *Handler) applyBatch(
 			BusinessID:  key.key,
 		}),
 		updateFn,
-		items,
+		chasmReq{items: items, getWaiterAt: getWaiterAt},
 		opts...,
 	)
 	return makeBatchResults(len(items), ress, err)
@@ -309,7 +316,7 @@ func (h *Handler) unregisterWaiter(namespaceID, key string, startTime time.Time)
 	}
 }
 
-func (h *Handler) getNextWaiters(namespaceID, key string, n int) time.Time {
+func (h *Handler) getWaiterAt(namespaceID, key string, n int) time.Time {
 	wt := h.getWaiterTreeOrNil(namespaceID, key)
 	if wt == nil {
 		return time.Time{}
