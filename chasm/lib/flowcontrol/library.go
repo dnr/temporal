@@ -10,12 +10,17 @@ import (
 type library struct {
 	chasm.UnimplementedLibrary
 
-	concurrencyHandler *concurrency.Handler
+	concurrencyHandler           *concurrency.Handler
+	concurrencyStagedWakeHandler *concurrency.StagedWakeHandler
 }
 
-func newLibrary(handler *concurrency.Handler) *library {
+func newLibrary(
+	concurrencyHandler *concurrency.Handler,
+	concurrencyStagedWakeHandler *concurrency.StagedWakeHandler,
+) *library {
 	return &library{
-		concurrencyHandler: handler,
+		concurrencyHandler:           concurrencyHandler,
+		concurrencyStagedWakeHandler: concurrencyStagedWakeHandler,
 	}
 }
 
@@ -32,10 +37,15 @@ func (l *library) Components() []*chasm.RegistrableComponent {
 	}
 }
 
-// TODO(fc): add tasks for notification backoff
-// func (l *library) Tasks() []*chasm.RegistrableTask {
-// 	return nil
-// }
+func (l *library) Tasks() []*chasm.RegistrableTask {
+	return []*chasm.RegistrableTask{
+		chasm.NewRegistrablePureTask[*concurrency.Component, *concurrency.StagedWake](
+			"concurrency_staged_wake",
+			l.concurrencyStagedWakeHandler,
+			chasm.WithSingletonTask(chasm.SingletonTaskModeReplace),
+		),
+	}
+}
 
 func (l *library) RegisterServices(s *grpc.Server) {
 	s.RegisterService(&fcpb.ConcurrencyService_ServiceDesc, l.concurrencyHandler)

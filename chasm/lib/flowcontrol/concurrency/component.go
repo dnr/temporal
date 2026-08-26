@@ -12,6 +12,7 @@ import (
 
 // FIXME: move to dynamic config
 const reserveTimeout = 30 * time.Second
+const stagedWakeInterval = time.Second
 
 const initialLimit = int32(1_000_000)
 

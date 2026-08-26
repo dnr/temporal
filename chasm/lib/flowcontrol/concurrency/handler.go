@@ -30,7 +30,7 @@ type batchReq struct {
 
 type chasmReq struct {
 	items       []batchReq
-	getWakeTime func(int32) (int64, bool)
+	getWakeTime func(wantTokens int32) (wakeUpTo int64, wakeAll bool)
 }
 
 type batchRes struct {
@@ -141,11 +141,16 @@ func updateFn(c *Component, cctx chasm.MutableContext, creq chasmReq) ([]*fcpb.C
 		ress[i].Generation = c.Generation
 	}
 
-	// if we have free slots and waiters, then we can wake some waiters
-	if free := max(0, c.Config.ConcurrentTasks) - int32(len(c.Slots)); free > 0 {
-		c.WakeUpTo, c.WakeAll = creq.getWakeTime(free)
+	// if we have wantTokens slots and waiters, then we can wake some waiters
+	if wantTokens := max(0, c.Config.ConcurrentTasks) - int32(len(c.Slots)); wantTokens > 0 {
+		c.WakeUpTo, c.WakeAll = creq.getWakeTime(wantTokens)
 		if c.WakeUpTo > 0 {
-			// FIXME: tasks
+			// doing staged wake, add timer task
+			cctx.AddTask(
+				c,
+				chasm.TaskAttributes{ScheduledTime: cctx.Now(c).Add(stagedWakeInterval)},
+				&StagedWake{foo: "hi"},
+			)
 		}
 	}
 
@@ -174,7 +179,7 @@ func (h *Handler) applyBatch(
 
 	creq := chasmReq{
 		items:       items,
-		getWakeTime: func(n int32) (int64, bool) { return h.getWakeTime(key, n) },
+		getWakeTime: func(wantTokens int32) (int64, bool) { return h.getWakeTime(key, wantTokens) },
 	}
 
 	if needStart {

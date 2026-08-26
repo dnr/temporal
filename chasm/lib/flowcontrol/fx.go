@@ -11,6 +11,7 @@ var HistoryModule = fx.Module(
 	"flowcontrol-history",
 	fx.Provide(
 		concurrency.NewHandler,
+		concurrency.NewStagedWakeHandler,
 		newLibrary,
 		fcpb.NewConcurrencyServiceLayeredClient,
 	),
