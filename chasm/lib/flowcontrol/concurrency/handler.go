@@ -39,8 +39,12 @@ type batchRes struct {
 }
 
 type waiterEntry struct {
-	startTime int64 // unix nanos
-	tokens    int32 // including multiplicity
+	// Waiter start time in unix nanos
+	startTime int64
+	// Number of tokens represented by this entry, including multiplicity of multiple waiters
+	// on one host. Note that the multiplicity only updates when the long-poll retries, once a
+	// minute, so this may be somewhat out of date. But each waiter counts at least once here.
+	tokens int32
 }
 
 type waiterEntries = btree.BTreeG[waiterEntry]
@@ -255,7 +259,7 @@ func (h *Handler) Wait(ctx context.Context, req *fcpb.ConcurrencyWaitRequest) (r
 	defer cancel()
 
 	// TODO(fc): do we actually need to return generation with timeout? if we don't, we'll
-	// return zero and never get the right generation on the client
+	// return zero and never get the right generation on the client, but that works fine?
 	var lastKnownGeneration atomic.Int64
 
 	k := batchKey{namespaceID: req.NamespaceId, key: req.Key}

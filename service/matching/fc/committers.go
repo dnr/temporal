@@ -69,6 +69,9 @@ func (c *concurrencyCommitter) reserve() error {
 		c.cache.reportBlocked(c.nsID, c.lim.tp, c.lim.key, res.Generation)
 		return serviceerrors.NewFlowControlBlocked()
 	}
+	// TODO(fc): we could include a hint for how many slots are _remaining_, and if zero, mark
+	// this limiter as blocked in the cache. but we don't want to immediately Wait on it since
+	// we might not have another waiter yet.
 	c.cache.reportReady(c.nsID, c.lim.tp, c.lim.key, res.Generation)
 	return nil
 }

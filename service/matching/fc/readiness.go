@@ -248,6 +248,8 @@ func (r *Readiness) callWait(ctx context.Context, rn *readinessNS, rkey rcKey, v
 
 			if res.WakeTokens > 0 {
 				rn.reportReady(rkey, res.Generation)
+				// note: If we have satisfied all our waiters, then ctx
+				// will be canceled before we continue this loop.
 			} else {
 				rn.reportBlocked(rkey, res.Generation)
 			}

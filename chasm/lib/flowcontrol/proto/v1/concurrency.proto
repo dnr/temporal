@@ -88,7 +88,7 @@ message ConcurrencyWaitRequest {
   int64 generation = 3;
   // Start time is when this wait operation started, in unix nanos. It's used to order waiters.
   int64 start_time = 4;
-  // How many tasks are known to be waiting for this limiter. The server may take this into
+  // How many queues are known to be waiting for this limiter. The server may take this into
   // account when staging wakes. If this is missing, 1 is assumed.
   int32 requested_wake_tokens = 5;
 }

@@ -314,7 +314,7 @@ type ConcurrencyWaitRequest struct {
 	Generation int64 `protobuf:"varint,3,opt,name=generation,proto3" json:"generation,omitempty"`
 	// Start time is when this wait operation started, in unix nanos. It's used to order waiters.
 	StartTime int64 `protobuf:"varint,4,opt,name=start_time,json=startTime,proto3" json:"start_time,omitempty"`
-	// How many tasks are known to be waiting for this limiter. The server may take this into
+	// How many queues are known to be waiting for this limiter. The server may take this into
 	// account when staging wakes. If this is missing, 1 is assumed.
 	RequestedWakeTokens int32 `protobuf:"varint,5,opt,name=requested_wake_tokens,json=requestedWakeTokens,proto3" json:"requested_wake_tokens,omitempty"`
 	unknownFields       protoimpl.UnknownFields
