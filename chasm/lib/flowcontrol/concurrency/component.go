@@ -67,6 +67,7 @@ func (c *Component) maintainGeneration() func() {
 			c.Generation++
 			c.WakeUpTo = 0
 			c.WakeAll = false
+			c.WakeStage = 0
 		}
 	}
 }
@@ -84,7 +85,7 @@ func (c *Component) reserve(slotID string, now time.Time) bool {
 	if c.find(slotID) >= 0 {
 		return true // already reserved or committed, accept
 	}
-	if int32(len(c.Slots)) >= c.Config.ConcurrentTasks {
+	if c.availableSlots() <= 0 {
 		return false
 	}
 	c.Slots = append(c.Slots, &fcpb.ConcurrencyState_Slot{
@@ -122,6 +123,7 @@ func (c *Component) release(slotID string) {
 
 // pollFreeSlots is called from PollComponent and should not modify the state.
 func (c *Component) pollFreeSlots(now time.Time) int32 {
+	// like c.expire(now) + c.availableSlots(), but without modifying state
 	nowSec := now.Unix()
 	usedSlots := int32(0)
 	for _, slot := range c.Slots {

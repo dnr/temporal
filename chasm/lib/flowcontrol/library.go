@@ -39,7 +39,7 @@ func (l *library) Components() []*chasm.RegistrableComponent {
 
 func (l *library) Tasks() []*chasm.RegistrableTask {
 	return []*chasm.RegistrableTask{
-		chasm.NewRegistrablePureTask[*concurrency.Component, *concurrency.StagedWake](
+		chasm.NewRegistrablePureTask(
 			"concurrency_staged_wake",
 			l.concurrencyStagedWakeHandler,
 			chasm.WithSingletonTask(chasm.SingletonTaskModeReplace),

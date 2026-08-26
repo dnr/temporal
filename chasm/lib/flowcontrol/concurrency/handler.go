@@ -141,18 +141,8 @@ func updateFn(c *Component, cctx chasm.MutableContext, creq chasmReq) ([]*fcpb.C
 		ress[i].Generation = c.Generation
 	}
 
-	// if we have wantTokens slots and waiters, then we can wake some waiters
-	if wantTokens := max(0, c.Config.ConcurrentTasks) - int32(len(c.Slots)); wantTokens > 0 {
-		c.WakeUpTo, c.WakeAll = creq.getWakeTime(wantTokens)
-		if c.WakeUpTo > 0 {
-			// doing staged wake, add timer task
-			cctx.AddTask(
-				c,
-				chasm.TaskAttributes{ScheduledTime: cctx.Now(c).Add(stagedWakeInterval)},
-				&StagedWake{foo: "hi"},
-			)
-		}
-	}
+	// if we have available slots, then we can wake some waiters
+	doWake(cctx, c, creq.getWakeTime)
 
 	return ress, nil
 }
@@ -358,7 +348,8 @@ func (h *Handler) unregisterWaiter(key batchKey, startTime int64, tokens int32) 
 }
 
 // getWakeTime returns t such that waiters representing wantTokens tokens have startTime <= t.
-// If there aren't enough waiters to satisfy all the tokens, then wakeAll is true.
+// If there aren't enough waiters to satisfy all the tokens, then wakeAll will be true.
+// wantTokens must be > 0; if it's zero then wake state should not be modified.
 func (h *Handler) getWakeTime(key batchKey, wantTokens int32) (wakeUpTo int64, wakeAll bool) {
 	h.waiterLock.Lock()
 	defer h.waiterLock.Unlock()
