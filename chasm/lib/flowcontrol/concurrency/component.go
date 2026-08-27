@@ -136,10 +136,9 @@ func (c *Component) pollFreeSlots(now time.Time) int32 {
 
 // poll is called from PollComponent and should not modify the state.
 func (c *Component) poll(now time.Time, reqGeneration int64, reqStartTime int64, reqTokens int32) (int64, int32, bool) {
-	if reqGeneration > c.Generation || // generation is too new
-		reqGeneration == c.Generation && // waiting on this generation
-			!c.WakeAll && // doing staged wake
-			reqStartTime > c.WakeUpTo { // this one isn't ready yet
+	if reqGeneration < c.Generation {
+		return c.Generation, 0, true // old generation, try again with current
+	} else if reqGeneration > c.Generation || !c.WakeAll && reqStartTime > c.WakeUpTo {
 		return 0, 0, false // wait for another transition
 	}
 	// allow as many as we have available
