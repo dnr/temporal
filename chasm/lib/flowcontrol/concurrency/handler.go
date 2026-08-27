@@ -2,6 +2,7 @@ package concurrency
 
 import (
 	"context"
+	"hash/maphash"
 	"sync"
 	"time"
 
@@ -48,16 +49,25 @@ type waiterEntry struct {
 
 type waiterEntries = btree.BTreeG[waiterEntry]
 
+// number of shards in sharded map
+const numWaiterShards = 16
+
+// waiterShard holds the waiters for a subset of batchKeys, protected by its own lock. Each
+// shard's lock also protects the waiterEntries btrees reachable from its map, since those
+// btrees are created with NoLocks and are not otherwise safe for concurrent access.
+type waiterShard struct {
+	lock    sync.Mutex
+	waiters map[batchKey]*waiterEntries
+}
+
 type Handler struct {
 	fcpb.UnimplementedConcurrencyServiceServer
 
 	logger   log.Logger
 	batchers *stream_batcher.KeyedBatcher[batchKey, batchReq, batchRes]
 
-	// waiterLock protects map and entries
-	// TODO(fc): consider sharded map or sync.Map here
-	waiterLock sync.Mutex
-	waiters    map[batchKey]*waiterEntries
+	waiterSeed   maphash.Seed
+	waiterShards [numWaiterShards]waiterShard
 }
 
 func NewHandler(
@@ -65,8 +75,11 @@ func NewHandler(
 	dc *dynamicconfig.Collection,
 ) *Handler {
 	h := &Handler{
-		logger:  logger,
-		waiters: make(map[batchKey]*waiterEntries),
+		logger:     logger,
+		waiterSeed: maphash.MakeSeed(),
+	}
+	for i := range h.waiterShards {
+		h.waiterShards[i].waiters = make(map[batchKey]*waiterEntries)
 	}
 	h.batchers = stream_batcher.NewKeyedBatcherWithPerItemResults(
 		h.applyBatch,
@@ -328,8 +341,18 @@ func (h *Handler) Wait(ctx context.Context, req *fcpb.ConcurrencyWaitRequest) (r
 	}
 }
 
-func (h *Handler) getWaiterEntriesLocked(key batchKey) *waiterEntries {
-	if wt, ok := h.waiters[key]; ok {
+// waiterShardFor returns the shard responsible for key.
+func (h *Handler) waiterShardFor(key batchKey) *waiterShard {
+	h.waiterSeed
+	var hash maphash.Hash
+	hash.SetSeed(h.waiterSeed)
+	hash.WriteString(key.namespaceID)
+	hash.WriteString(key.key)
+	return &h.waiterShards[hash.Sum64()%numWaiterShards]
+}
+
+func (s *waiterShard) getWaiterEntriesLocked(key batchKey) *waiterEntries {
+	if wt, ok := s.waiters[key]; ok {
 		return wt
 	}
 	wt := btree.NewBTreeGOptions(
@@ -337,15 +360,16 @@ func (h *Handler) getWaiterEntriesLocked(key batchKey) *waiterEntries {
 		// degree 3 allows up to 5 values per node without splitting
 		btree.Options{Degree: 3, NoLocks: true},
 	)
-	h.waiters[key] = wt
+	s.waiters[key] = wt
 	return wt
 }
 
 func (h *Handler) registerWaiter(key batchKey, startTime int64, tokens int32) {
-	h.waiterLock.Lock()
-	defer h.waiterLock.Unlock()
+	s := h.waiterShardFor(key)
+	s.lock.Lock()
+	defer s.lock.Unlock()
 
-	wt := h.getWaiterEntriesLocked(key)
+	wt := s.getWaiterEntriesLocked(key)
 	newTokens := tokens
 	var hint btree.PathHint
 	if entry, ok := wt.GetHint(waiterEntry{startTime: startTime}, &hint); ok {
@@ -355,10 +379,11 @@ func (h *Handler) registerWaiter(key batchKey, startTime int64, tokens int32) {
 }
 
 func (h *Handler) unregisterWaiter(key batchKey, startTime int64, tokens int32) {
-	h.waiterLock.Lock()
-	defer h.waiterLock.Unlock()
+	s := h.waiterShardFor(key)
+	s.lock.Lock()
+	defer s.lock.Unlock()
 
-	wt, ok := h.waiters[key]
+	wt, ok := s.waiters[key]
 	if !ok {
 		return
 	}
@@ -372,7 +397,7 @@ func (h *Handler) unregisterWaiter(key batchKey, startTime int64, tokens int32) 
 		}
 	}
 	if wt.Len() == 0 {
-		delete(h.waiters, key)
+		delete(s.waiters, key)
 	}
 }
 
@@ -380,10 +405,11 @@ func (h *Handler) unregisterWaiter(key batchKey, startTime int64, tokens int32) 
 // If there aren't enough waiters to satisfy all the tokens, then wakeAll will be true.
 // wantTokens must be > 0; if it's zero then wake state should not be modified.
 func (h *Handler) getWakeTime(key batchKey, wantTokens int32) (wakeUpTo int64, wakeAll bool) {
-	h.waiterLock.Lock()
-	defer h.waiterLock.Unlock()
+	s := h.waiterShardFor(key)
+	s.lock.Lock()
+	defer s.lock.Unlock()
 
-	wt, ok := h.waiters[key]
+	wt, ok := s.waiters[key]
 	if !ok {
 		return 0, true // no waiters at all
 	}
