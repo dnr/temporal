@@ -18,13 +18,9 @@ func newTestComponent(limit int32) *Component {
 	}
 }
 
-func TestConcurrencySlotLifecycle(t *testing.T) {
+func TestSlotLifecycle(t *testing.T) {
 	now := time.Now().UTC()
-	limiter := &Component{
-		ConcurrencyState: &fcpb.ConcurrencyState{
-			Config: &taskqueuepb.ConcurrencyLimit{ConcurrentTasks: 1},
-		},
-	}
+	limiter := newTestComponent(1)
 
 	require.True(t, limiter.reserve("slot-1", now))
 	require.True(t, limiter.reserve("slot-1", now))
@@ -44,13 +40,9 @@ func TestConcurrencySlotLifecycle(t *testing.T) {
 	require.Empty(t, limiter.Slots)
 }
 
-func TestConcurrencyExpiredSlotIDCanBeReplaced(t *testing.T) {
+func TestExpiredSlotIDCanBeReplaced(t *testing.T) {
 	now := time.Now().UTC()
-	limiter := &Component{
-		ConcurrencyState: &fcpb.ConcurrencyState{
-			Config: &taskqueuepb.ConcurrencyLimit{ConcurrentTasks: 1},
-		},
-	}
+	limiter := newTestComponent(1)
 
 	require.True(t, limiter.reserve("expired-slot", now))
 	limiter.expire(now.Add(reserveTimeout + time.Second))
@@ -59,7 +51,7 @@ func TestConcurrencyExpiredSlotIDCanBeReplaced(t *testing.T) {
 	require.Equal(t, "new-slot", limiter.Slots[0].GetSlotId())
 }
 
-func TestConcurrencyPoll(t *testing.T) {
+func TestPoll(t *testing.T) {
 	now := time.Now().UTC()
 
 	tests := []struct {
@@ -209,7 +201,7 @@ func TestConcurrencyPoll(t *testing.T) {
 	}
 }
 
-func TestConcurrencyIncrementGenerationResetsWakeState(t *testing.T) {
+func TestIncrementGenerationResetsWakeState(t *testing.T) {
 	c := newTestComponent(1)
 	c.Generation = 3
 	c.WakeUpTo = 100
@@ -224,7 +216,7 @@ func TestConcurrencyIncrementGenerationResetsWakeState(t *testing.T) {
 	require.Zero(t, c.WakeStage)
 }
 
-func TestConcurrencyUpdateConfigRequiresNewerVersion(t *testing.T) {
+func TestUpdateConfigRequiresNewerVersion(t *testing.T) {
 	c := newTestComponent(1)
 	c.ConfigVersion = 2
 

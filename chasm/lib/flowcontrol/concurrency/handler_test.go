@@ -10,6 +10,7 @@ import (
 	"go.temporal.io/server/chasm"
 	"go.temporal.io/server/chasm/chasmtest"
 	fcpb "go.temporal.io/server/chasm/lib/flowcontrol/gen/flowcontrolpb/v1"
+	"go.temporal.io/server/common/dynamicconfig"
 	"go.temporal.io/server/common/log"
 	"go.uber.org/mock/gomock"
 	"google.golang.org/protobuf/types/known/timestamppb"
@@ -38,7 +39,7 @@ func newTestMutableContext(now time.Time) *chasm.MockMutableContext {
 }
 
 func TestHandlerWaiterEntries(t *testing.T) {
-	h := &Handler{waiters: make(map[batchKey]*waiterEntries)}
+	h := NewHandler(log.NewTestLogger(), dynamicconfig.NewNoopCollection())
 	key := batchKey{namespaceID: "namespace", key: "limiter"}
 	otherKey := batchKey{namespaceID: "namespace", key: "other"}
 
@@ -74,8 +75,8 @@ func TestHandlerWaiterEntries(t *testing.T) {
 	h.unregisterWaiter(key, 10, 2)
 	h.unregisterWaiter(key, 20, 2)
 	h.unregisterWaiter(key, 30, 1)
-	require.NotContains(t, h.waiters, key)
-	require.Contains(t, h.waiters, otherKey)
+	require.NotContains(t, h.waiterShardFor(key).waiters, key)
+	require.Contains(t, h.waiterShardFor(otherKey).waiters, otherKey)
 
 	wakeUpTo, wakeAll = h.getWakeTime(key, 1)
 	require.Zero(t, wakeUpTo)
@@ -101,7 +102,7 @@ func TestHandlerWaitRetriesWithCurrentGeneration(t *testing.T) {
 		struct{}{},
 	)
 	require.NoError(t, err)
-	h := &Handler{logger: log.NewNoopLogger(), waiters: make(map[batchKey]*waiterEntries)}
+	h := NewHandler(log.NewTestLogger(), dynamicconfig.NewNoopCollection())
 	req := &fcpb.ConcurrencyWaitRequest{
 		NamespaceId: key.NamespaceID,
 		Key:         key.BusinessID,
@@ -115,7 +116,7 @@ func TestHandlerWaitRetriesWithCurrentGeneration(t *testing.T) {
 	require.Equal(t, int64(1), req.Generation)
 	require.Zero(t, req.StartTime)
 	require.Zero(t, req.RequestedWakeTokens)
-	require.Empty(t, h.waiters)
+	require.Empty(t, h.waiterShardFor(batchKey{namespaceID: key.NamespaceID, key: key.BusinessID}).waiters)
 }
 
 func TestHandlerWaitLongPollTimeoutReturnsRequestGeneration(t *testing.T) {
@@ -136,7 +137,7 @@ func TestHandlerWaitLongPollTimeoutReturnsRequestGeneration(t *testing.T) {
 		struct{}{},
 	)
 	require.NoError(t, err)
-	h := &Handler{logger: log.NewNoopLogger(), waiters: make(map[batchKey]*waiterEntries)}
+	h := NewHandler(log.NewTestLogger(), dynamicconfig.NewNoopCollection())
 	ctx, cancel := context.WithCancel(engineCtx)
 	cancel()
 
@@ -149,14 +150,14 @@ func TestHandlerWaitLongPollTimeoutReturnsRequestGeneration(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, int64(2), res.Generation)
 	require.Zero(t, res.WakeTokens)
-	require.Empty(t, h.waiters)
+	require.Empty(t, h.waiterShardFor(batchKey{namespaceID: key.NamespaceID, key: key.BusinessID}).waiters)
 }
 
 func TestHandlerWaitDeadlineExceededReturnsRequestGeneration(t *testing.T) {
 	engine := chasm.NewMockEngine(gomock.NewController(t))
 	engine.EXPECT().PollComponent(gomock.Any(), gomock.Any(), gomock.Any()).
 		Return(nil, context.DeadlineExceeded)
-	h := &Handler{logger: log.NewNoopLogger(), waiters: make(map[batchKey]*waiterEntries)}
+	h := NewHandler(log.NewTestLogger(), dynamicconfig.NewNoopCollection())
 	ctx := chasm.NewEngineContext(context.Background(), engine)
 
 	res, err := h.Wait(ctx, &fcpb.ConcurrencyWaitRequest{
@@ -168,7 +169,7 @@ func TestHandlerWaitDeadlineExceededReturnsRequestGeneration(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, int64(2), res.Generation)
 	require.Zero(t, res.WakeTokens)
-	require.Empty(t, h.waiters)
+	require.Empty(t, h.waiterShardFor(batchKey{namespaceID: "namespace", key: "limiter"}).waiters)
 }
 
 func TestInitFn(t *testing.T) {

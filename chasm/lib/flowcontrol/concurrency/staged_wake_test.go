@@ -7,6 +7,8 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.temporal.io/server/chasm"
 	fcpb "go.temporal.io/server/chasm/lib/flowcontrol/gen/flowcontrolpb/v1"
+	"go.temporal.io/server/common/dynamicconfig"
+	"go.temporal.io/server/common/log"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
@@ -45,7 +47,7 @@ func TestDoWake(t *testing.T) {
 		cctx := newTestMutableContext(now)
 		c := newTestComponent(1)
 		c.WakeStage = 1
-		gotTokens := int32(0)
+		var gotTokens int32
 
 		doWake(cctx, c, func(tokens int32) (int64, bool) {
 			gotTokens = tokens
@@ -133,7 +135,7 @@ func TestStagedWakeHandlerValidate(t *testing.T) {
 func TestStagedWakeHandlerExecuteExpiresAndExpandsWake(t *testing.T) {
 	now := time.Now().UTC()
 	key := batchKey{namespaceID: "namespace", key: "limiter"}
-	h := &Handler{waiters: make(map[batchKey]*waiterEntries)}
+	h := NewHandler(log.NewTestLogger(), dynamicconfig.NewNoopCollection())
 	for startTime := int64(10); startTime <= 50; startTime += 10 {
 		h.registerWaiter(key, startTime, 1)
 	}
