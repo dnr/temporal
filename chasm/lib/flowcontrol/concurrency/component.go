@@ -57,31 +57,22 @@ func (c *Component) availableSlots() int32 {
 	return max(0, c.Config.ConcurrentTasks-int32(len(c.Slots)))
 }
 
-func (c *Component) maintainGeneration() func() {
-	oldPred := c.availableSlots() > 0
-	return func() {
-		newPred := c.availableSlots() > 0
-		if oldPred && !newPred {
-			// Increment Generation on any transition where Wait would have returned
-			// immediately before but would not now.
-			c.Generation++
-			c.WakeUpTo = 0
-			c.WakeAll = false
-			c.WakeStage = 0
-		}
-	}
+func (c *Component) incrementGeneration() {
+	// this causes all polls to block until WakeUpTo or WakeAll advances
+	c.Generation++
+	c.WakeUpTo = 0
+	c.WakeAll = false
+	c.WakeStage = 0
 }
 
 func (c *Component) updateConfig(config *taskqueuepb.ConcurrencyLimit, version int64) {
 	if config != nil && version > c.ConfigVersion {
 		c.Config = config
+		c.ConfigVersion = version
 	}
 }
 
 func (c *Component) reserve(slotID string, now time.Time) bool {
-	// reserve is the only method that can increment generation, when it takes the last slot
-	defer c.maintainGeneration()()
-
 	if c.find(slotID) >= 0 {
 		return true // already reserved or committed, accept
 	}

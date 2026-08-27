@@ -105,8 +105,7 @@ func (rn *readinessNS) getValueLocked(rkey rcKey) *rcValue {
 		return v
 	}
 	v := &rcValue{
-		startTime: time.Now().UnixNano(),
-		waiters:   make(map[readinessCallback]struct{}),
+		waiters: make(map[readinessCallback]struct{}),
 	}
 	rn.cache[rkey] = v
 	return v
@@ -138,6 +137,7 @@ func (rn *readinessNS) readinessState(rkey rcKey, cb readinessCallback) Readines
 		} else {
 			v.waiters[cb] = struct{}{}
 		}
+		v.startTime = time.Now().UnixNano()
 		v.syncGoroLocked(rn, rkey)
 	}
 
@@ -168,6 +168,10 @@ func (rn *readinessNS) reportReady(rkey rcKey, gen int64) {
 	rn.lock.Lock()
 
 	v := rn.getValueLocked(rkey)
+	if gen < v.generation {
+		rn.lock.Unlock()
+		return
+	}
 	v.generation = gen
 	v.state = ReadinessReady
 
@@ -193,6 +197,9 @@ func (rn *readinessNS) reportBlocked(rkey rcKey, gen int64) {
 	defer rn.lock.Unlock()
 
 	v := rn.getValueLocked(rkey)
+	if gen < v.generation {
+		return
+	}
 	v.generation = gen
 	v.state = ReadinessBlocked
 }

@@ -3,7 +3,6 @@ package concurrency
 import (
 	"context"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/tidwall/btree"
@@ -56,6 +55,7 @@ type Handler struct {
 	batchers *stream_batcher.KeyedBatcher[batchKey, batchReq, batchRes]
 
 	// waiterLock protects map and entries
+	// TODO(fc): consider sharded map or sync.Map here
 	waiterLock sync.Mutex
 	waiters    map[batchKey]*waiterEntries
 }
@@ -84,12 +84,13 @@ func initFn(_ chasm.MutableContext, creq chasmReq) (*Component, error) {
 			Config: &taskqueuepb.ConcurrencyLimit{
 				ConcurrentTasks: initialLimit,
 			},
-			WakeAll: true, // start will all slots available in generation 0
 		},
 	}
 	for _, it := range creq.items {
 		c.updateConfig(it.req.GetConfigUpdate(), it.req.GetConfigUpdateVersion())
 	}
+	// if any tasks are allowed at all, then Wait on generation 0 should not block
+	c.WakeAll = c.Config.ConcurrentTasks > 0
 	return c, nil
 }
 
@@ -101,6 +102,8 @@ func updateFn(c *Component, cctx chasm.MutableContext, creq chasmReq) ([]*fcpb.C
 	for i := range ress {
 		ress[i] = &fcpb.ConcurrencyBatchResponse{}
 	}
+
+	prevAvailable := c.availableSlots()
 
 	// expire old reservations
 	c.expire(now)
@@ -140,13 +143,28 @@ func updateFn(c *Component, cctx chasm.MutableContext, creq chasmReq) ([]*fcpb.C
 		}
 	}
 
-	// capture Generation after c.reserve, which may increment it
+	// Increment generation if we took the last slot. Note that we will never batch reserves
+	// and releases together in practice, since they come from different places. So we should
+	// never release the last slot and then take it again in one transaction.
+	if c.availableSlots() == 0 && prevAvailable > 0 {
+		c.incrementGeneration()
+	}
+
+	// If we have additional available slots, then we can wake some waiters. Note that we only
+	// wake on an _increase_ in available slots. If the number is the same or fewer, even if
+	// positive, then the previous transaction's wakes (or the staged wake task started by
+	// that) should handle those. If we just called doWake again here, we might push our task
+	// out later before it got to run.
+	//
+	// Note that we can't do this in the same transaction that we increment generation in.
+	if c.availableSlots() > prevAvailable {
+		doWake(cctx, c, creq.getWakeTime)
+	}
+
+	// capture Generation after maybe incrementing
 	for i := range creq.items {
 		ress[i].Generation = c.Generation
 	}
-
-	// if we have available slots, then we can wake some waiters
-	doWake(cctx, c, creq.getWakeTime)
 
 	return ress, nil
 }
@@ -246,7 +264,7 @@ func (h *Handler) Wait(ctx context.Context, req *fcpb.ConcurrencyWaitRequest) (r
 
 	req = common.CloneProto(req)
 	// assume one token if unset
-	if req.RequestedWakeTokens == 0 {
+	if req.RequestedWakeTokens <= 0 {
 		req.RequestedWakeTokens = 1
 	}
 	// we use time 0 to mean far-future
@@ -257,10 +275,6 @@ func (h *Handler) Wait(ctx context.Context, req *fcpb.ConcurrencyWaitRequest) (r
 	// TODO(fc): move to dynamic config
 	ctx, cancel := contextutil.WithDeadlineBuffer(ctx, time.Minute, time.Second)
 	defer cancel()
-
-	// TODO(fc): do we actually need to return generation with timeout? if we don't, we'll
-	// return zero and never get the right generation on the client, but that works fine?
-	var lastKnownGeneration atomic.Int64
 
 	k := batchKey{namespaceID: req.NamespaceId, key: req.Key}
 	h.registerWaiter(k, req.StartTime, req.RequestedWakeTokens)
@@ -284,22 +298,23 @@ func (h *Handler) Wait(ctx context.Context, req *fcpb.ConcurrencyWaitRequest) (r
 			func(c *Component, cctx chasm.Context, req *fcpb.ConcurrencyWaitRequest) (*fcpb.ConcurrencyWaitResponse, bool, error) {
 				generation, tokens, ready := c.poll(cctx.Now(c), req.Generation, req.StartTime, req.RequestedWakeTokens)
 				if !ready {
-					lastKnownGeneration.Store(generation)
 					return nil, false, nil
 				}
 				return &fcpb.ConcurrencyWaitResponse{Generation: generation, WakeTokens: tokens}, true, nil
 			},
 			req,
 		)
-		if err == nil && res == nil {
+		if err != nil {
+			return nil, err
+		} else if res == nil {
 			// timed out without becoming ready
-			return &fcpb.ConcurrencyWaitResponse{Generation: lastKnownGeneration.Load()}, nil
+			return &fcpb.ConcurrencyWaitResponse{Generation: req.Generation}, nil
 		} else if res.Generation != req.Generation {
 			// try again on server with new generation
 			req.Generation = res.Generation
 			continue
 		}
-		return res, err
+		return res, nil
 	}
 }
 

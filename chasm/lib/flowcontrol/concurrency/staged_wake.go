@@ -37,12 +37,19 @@ func (t *StagedWakeHandler) Execute(cctx chasm.MutableContext, c *Component, _ c
 }
 
 func doWake(cctx chasm.MutableContext, c *Component, getWakeTime func(int32) (int64, bool)) {
-	wantTokens := c.availableSlots() << c.WakeStage
-	if wantTokens <= 0 {
-		return // no slots available, return without modifying wake state
+	if c.WakeStage >= 10 {
+		c.WakeUpTo, c.WakeAll = 0, true
+		return
 	}
 
-	c.WakeUpTo, c.WakeAll = getWakeTime(wantTokens)
+	wantTokens := c.availableSlots() << c.WakeStage
+	if wantTokens <= 0 || c.WakeAll {
+		return // no slots available or done, return without modifying wake state
+	}
+
+	wakeUpTo, wakeAll := getWakeTime(wantTokens)
+	c.WakeUpTo = max(c.WakeUpTo, wakeUpTo)
+	c.WakeAll = wakeAll
 
 	if !c.WakeAll { // not all woken yet, add task for more
 		cctx.AddTask(
