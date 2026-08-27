@@ -30,9 +30,13 @@ func (t *StagedWakeHandler) Execute(cctx chasm.MutableContext, c *Component, _ c
 		}
 		return t.handler.getWakeTime(key, wantTokens)
 	}
+
+	c.expire(cctx.Now(c))
+
 	// double number woken at each stage
 	c.WakeStage++
 	doWake(cctx, c, getWakeTime)
+
 	return nil
 }
 
