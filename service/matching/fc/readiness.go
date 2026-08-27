@@ -137,7 +137,6 @@ func (rn *readinessNS) readinessState(rkey rcKey, cb readinessCallback) Readines
 		} else {
 			v.waiters[cb] = struct{}{}
 		}
-		v.startTime = time.Now().UnixNano()
 		v.syncGoroLocked(rn, rkey)
 	}
 
@@ -223,6 +222,7 @@ func (v *rcValue) syncGoroLocked(rn *readinessNS, rkey rcKey) {
 		"",
 	))
 	ctx, v.goroCancel = context.WithCancel(ctx)
+	v.startTime = time.Now().UnixNano()
 	// Wait result will be reported back through ReportReady/Blocked
 	go rn.r.callWait(ctx, rn, rkey, v)
 }

@@ -103,7 +103,8 @@ func updateFn(c *Component, cctx chasm.MutableContext, creq chasmReq) ([]*fcpb.C
 		ress[i] = &fcpb.ConcurrencyBatchResponse{}
 	}
 
-	prevAvailable := c.availableSlots()
+	prevStoredAvailable := c.availableSlots()
+	prevEffectiveAvailable := c.effectiveAvailableSlots(now)
 
 	// expire old reservations
 	c.expire(now)
@@ -143,10 +144,9 @@ func updateFn(c *Component, cctx chasm.MutableContext, creq chasmReq) ([]*fcpb.C
 		}
 	}
 
-	// Increment generation if we took the last slot. Note that we will never batch reserves
-	// and releases together in practice, since they come from different places. So we should
-	// never release the last slot and then take it again in one transaction.
-	if c.availableSlots() == 0 && prevAvailable > 0 {
+	// Increment generation if we took the last slot. Note that we check prevEffectiveAvailable
+	// so that an expiration plus taking that expired slot increases generation.
+	if c.availableSlots() == 0 && prevEffectiveAvailable > 0 {
 		c.incrementGeneration()
 	}
 
@@ -156,8 +156,9 @@ func updateFn(c *Component, cctx chasm.MutableContext, creq chasmReq) ([]*fcpb.C
 	// that) should handle those. If we just called doWake again here, we might push our task
 	// out later before it got to run.
 	//
-	// Note that we can't do this in the same transaction that we increment generation in.
-	if c.availableSlots() > prevAvailable {
+	// Note that we can't do this in the same transaction that we increment generation in
+	// (availableSlots can't be both 0 and > prevStoredAvailable).
+	if c.availableSlots() > prevStoredAvailable {
 		doWake(cctx, c, creq.getWakeTime)
 	}
 
@@ -267,12 +268,17 @@ func (h *Handler) Wait(ctx context.Context, req *fcpb.ConcurrencyWaitRequest) (r
 	if req.RequestedWakeTokens <= 0 {
 		req.RequestedWakeTokens = 1
 	}
-	// we use time 0 to mean far-future
+	// StartTime 0 is reserved
 	if req.StartTime == 0 {
 		req.StartTime = 1
 	}
 
-	// TODO(fc): move to dynamic config
+	// Note that the maximum timeout here has an effect besides just capping rpc duration:
+	// If a caller has Reserved the last slot, and crashes before Commit, then the reservation
+	// will expire. But expiration is handled lazily, it doesn't cause a state transition of
+	// the component. So a Wait call that's waiting for that expiry will only notice when it
+	// re-enters PollComponent, which is only once per this timeout.
+	// TODO(fc): move constants to dynamic config
 	ctx, cancel := contextutil.WithDeadlineBuffer(ctx, time.Minute, time.Second)
 	defer cancel()
 
@@ -305,9 +311,13 @@ func (h *Handler) Wait(ctx context.Context, req *fcpb.ConcurrencyWaitRequest) (r
 			req,
 		)
 		if err != nil {
+			if common.IsContextDeadlineExceededErr(err) {
+				// timed out without becoming ready
+				return &fcpb.ConcurrencyWaitResponse{Generation: req.Generation}, nil
+			}
 			return nil, err
 		} else if res == nil {
-			// timed out without becoming ready
+			// chasm-imposed timeout
 			return &fcpb.ConcurrencyWaitResponse{Generation: req.Generation}, nil
 		} else if res.Generation != req.Generation {
 			// try again on server with new generation

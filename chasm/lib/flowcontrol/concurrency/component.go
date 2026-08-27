@@ -57,6 +57,19 @@ func (c *Component) availableSlots() int32 {
 	return max(0, c.Config.ConcurrentTasks-int32(len(c.Slots)))
 }
 
+// effectiveAvailableSlots is called from PollComponent and should not modify the state.
+func (c *Component) effectiveAvailableSlots(now time.Time) int32 {
+	// like c.expire(now) + c.availableSlots(), but without modifying state
+	nowSec := now.Unix()
+	usedSlots := int32(0)
+	for _, slot := range c.Slots {
+		if !expiredReservation(slot, nowSec) {
+			usedSlots++
+		}
+	}
+	return max(0, c.Config.ConcurrentTasks-usedSlots)
+}
+
 func (c *Component) incrementGeneration() {
 	// this causes all polls to block until WakeUpTo or WakeAll advances
 	c.Generation++
@@ -112,27 +125,24 @@ func (c *Component) release(slotID string) {
 	})
 }
 
-// pollFreeSlots is called from PollComponent and should not modify the state.
-func (c *Component) pollFreeSlots(now time.Time) int32 {
-	// like c.expire(now) + c.availableSlots(), but without modifying state
-	nowSec := now.Unix()
-	usedSlots := int32(0)
-	for _, slot := range c.Slots {
-		if !expiredReservation(slot, nowSec) {
-			usedSlots++
-		}
-	}
-	return max(0, c.Config.ConcurrentTasks-usedSlots)
-}
-
 // poll is called from PollComponent and should not modify the state.
 func (c *Component) poll(now time.Time, reqGeneration int64, reqStartTime int64, reqTokens int32) (int64, int32, bool) {
 	if reqGeneration < c.Generation {
 		return c.Generation, 0, true // old generation, try again with current
-	} else if reqGeneration > c.Generation || !c.WakeAll && reqStartTime > c.WakeUpTo {
-		return 0, 0, false // wait for another transition
+	} else if reqGeneration > c.Generation {
+		return 0, 0, false // shouldn't happen, but wait to keep things monotonic
 	}
-	// allow as many as we have available
-	tokens := min(c.pollFreeSlots(now), reqTokens)
-	return c.Generation, tokens, true
+
+	wake := c.WakeAll || reqStartTime <= c.WakeUpTo
+	storedAvailable := c.availableSlots()
+	effectiveAvailable := min(c.effectiveAvailableSlots(now), reqTokens)
+	freedByExpiration := storedAvailable == 0 && effectiveAvailable > 0
+
+	if wake || freedByExpiration {
+		// If this waiter is woken, we can return. Also if slots were freed by expiration: we
+		// won't get a state transition to set WakeUpTo/WakeAll, so we just return here.
+		return c.Generation, effectiveAvailable, true
+	}
+
+	return 0, 0, false // wait for another transition
 }
