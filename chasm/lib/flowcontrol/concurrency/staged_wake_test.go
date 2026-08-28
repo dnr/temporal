@@ -12,94 +12,96 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
-func TestDoWake(t *testing.T) {
+func TestDoWakeNoAvailableSlots(t *testing.T) {
 	now := time.Now().UTC()
+	cctx := newTestMutableContext(now)
+	c := newTestComponent(1)
+	c.Slots = []*fcpb.ConcurrencyState_Slot{{SlotId: "committed", Committed: true}}
 
-	t.Run("no available slots", func(t *testing.T) {
-		cctx := newTestMutableContext(now)
-		c := newTestComponent(1)
-		c.Slots = []*fcpb.ConcurrencyState_Slot{{SlotId: "committed", Committed: true}}
-
-		doWake(cctx, c, func(int32) (int64, bool) {
-			t.Fatal("getWakeTime called without capacity")
-			return 0, false
-		})
-
-		require.False(t, c.WakeAll)
-		require.Empty(t, cctx.Tasks)
+	doWake(cctx, c, func(int32) (int64, bool) {
+		t.Fatal("getWakeTime called without capacity")
+		return 0, false
 	})
 
-	t.Run("already waking all", func(t *testing.T) {
-		cctx := newTestMutableContext(now)
-		c := newTestComponent(1)
-		c.WakeAll = true
+	require.False(t, c.WakeAll)
+	require.Empty(t, cctx.Tasks)
+}
 
-		doWake(cctx, c, func(int32) (int64, bool) {
-			t.Fatal("getWakeTime called after wake all")
-			return 0, false
-		})
+func TestDoWakeAlreadyWakingAll(t *testing.T) {
+	now := time.Now().UTC()
+	cctx := newTestMutableContext(now)
+	c := newTestComponent(1)
+	c.WakeAll = true
 
-		require.True(t, c.WakeAll)
-		require.Empty(t, cctx.Tasks)
+	doWake(cctx, c, func(int32) (int64, bool) {
+		t.Fatal("getWakeTime called after wake all")
+		return 0, false
 	})
 
-	t.Run("partial wake advances cutoff and schedules next stage", func(t *testing.T) {
-		cctx := newTestMutableContext(now)
-		c := newTestComponent(1)
-		c.WakeStage = 1
-		var gotTokens int32
+	require.True(t, c.WakeAll)
+	require.Empty(t, cctx.Tasks)
+}
 
-		doWake(cctx, c, func(tokens int32) (int64, bool) {
-			gotTokens = tokens
-			return 100, false
-		})
+func TestDoWakePartialWakeSchedulesNextStage(t *testing.T) {
+	now := time.Now().UTC()
+	cctx := newTestMutableContext(now)
+	c := newTestComponent(1)
+	c.WakeStage = 1
+	var gotTokens int32
 
-		require.Equal(t, int32(2), gotTokens)
-		require.Equal(t, int64(100), c.WakeUpTo)
-		require.False(t, c.WakeAll)
-		require.Len(t, cctx.Tasks, 1)
-		require.Equal(t, now.Add(stagedWakeInterval), cctx.Tasks[0].Attributes.ScheduledTime)
-		require.IsType(t, &stagedWake{}, cctx.Tasks[0].Payload)
+	doWake(cctx, c, func(tokens int32) (int64, bool) {
+		gotTokens = tokens
+		return 100, false
 	})
 
-	t.Run("partial wake never moves cutoff backward", func(t *testing.T) {
-		cctx := newTestMutableContext(now)
-		c := newTestComponent(1)
-		c.WakeUpTo = 100
+	require.Equal(t, int32(2), gotTokens)
+	require.Equal(t, int64(100), c.WakeUpTo)
+	require.False(t, c.WakeAll)
+	require.Len(t, cctx.Tasks, 1)
+	require.Equal(t, now.Add(stagedWakeInterval), cctx.Tasks[0].Attributes.ScheduledTime)
+	require.IsType(t, &stagedWake{}, cctx.Tasks[0].Payload)
+}
 
-		doWake(cctx, c, func(int32) (int64, bool) { return 50, false })
+func TestDoWakeDoesNotMoveCutoffBackward(t *testing.T) {
+	now := time.Now().UTC()
+	cctx := newTestMutableContext(now)
+	c := newTestComponent(1)
+	c.WakeUpTo = 100
 
-		require.Equal(t, int64(100), c.WakeUpTo)
-		require.False(t, c.WakeAll)
-		require.Len(t, cctx.Tasks, 1)
+	doWake(cctx, c, func(int32) (int64, bool) { return 50, false })
+
+	require.Equal(t, int64(100), c.WakeUpTo)
+	require.False(t, c.WakeAll)
+	require.Len(t, cctx.Tasks, 1)
+}
+
+func TestDoWakeAllDoesNotScheduleNextStage(t *testing.T) {
+	now := time.Now().UTC()
+	cctx := newTestMutableContext(now)
+	c := newTestComponent(1)
+
+	doWake(cctx, c, func(int32) (int64, bool) { return 0, true })
+
+	require.Zero(t, c.WakeUpTo)
+	require.True(t, c.WakeAll)
+	require.Empty(t, cctx.Tasks)
+}
+
+func TestDoWakeStageCapWakesAll(t *testing.T) {
+	now := time.Now().UTC()
+	cctx := newTestMutableContext(now)
+	c := newTestComponent(1)
+	c.WakeStage = maxStagedWakeStage
+	c.WakeUpTo = 100
+
+	doWake(cctx, c, func(int32) (int64, bool) {
+		t.Fatal("getWakeTime called at stage cap")
+		return 0, false
 	})
 
-	t.Run("wake all does not schedule another stage", func(t *testing.T) {
-		cctx := newTestMutableContext(now)
-		c := newTestComponent(1)
-
-		doWake(cctx, c, func(int32) (int64, bool) { return 0, true })
-
-		require.Zero(t, c.WakeUpTo)
-		require.True(t, c.WakeAll)
-		require.Empty(t, cctx.Tasks)
-	})
-
-	t.Run("stage cap wakes all", func(t *testing.T) {
-		cctx := newTestMutableContext(now)
-		c := newTestComponent(1)
-		c.WakeStage = 10
-		c.WakeUpTo = 100
-
-		doWake(cctx, c, func(int32) (int64, bool) {
-			t.Fatal("getWakeTime called at stage cap")
-			return 0, false
-		})
-
-		require.Zero(t, c.WakeUpTo)
-		require.True(t, c.WakeAll)
-		require.Empty(t, cctx.Tasks)
-	})
+	require.Zero(t, c.WakeUpTo)
+	require.True(t, c.WakeAll)
+	require.Empty(t, cctx.Tasks)
 }
 
 func TestStagedWakeHandlerValidate(t *testing.T) {

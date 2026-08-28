@@ -2,6 +2,8 @@ package concurrency
 
 import "go.temporal.io/server/chasm"
 
+const maxStagedWakeStage = 10
+
 type StagedWakeHandler struct {
 	chasm.PureTaskHandlerBase
 
@@ -41,7 +43,7 @@ func (t *StagedWakeHandler) Execute(cctx chasm.MutableContext, c *Component, _ c
 }
 
 func doWake(cctx chasm.MutableContext, c *Component, getWakeTime func(int32) (int64, bool)) {
-	if c.WakeStage >= 10 {
+	if c.WakeStage >= maxStagedWakeStage {
 		c.WakeUpTo, c.WakeAll = 0, true
 		return
 	}
