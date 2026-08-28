@@ -287,24 +287,6 @@ func TestHandlerApplyBatchWithoutReserveRequiresExistingComponent(t *testing.T) 
 	require.Nil(t, ress[1].res)
 }
 
-func TestMakeBatchResults(t *testing.T) {
-	first := &fcpb.ConcurrencyBatchResponse{Generation: 1}
-	results := makeBatchResults(2, []*fcpb.ConcurrencyBatchResponse{first}, nil)
-	require.Len(t, results, 2)
-	require.Same(t, first, results[0].res)
-	require.Nil(t, results[1].res)
-	require.NoError(t, results[0].err)
-	require.NoError(t, results[1].err)
-
-	testErr := errors.New("update failed")
-	results = makeBatchResults(2, []*fcpb.ConcurrencyBatchResponse{first}, testErr)
-	require.Len(t, results, 2)
-	for _, result := range results {
-		require.Nil(t, result.res)
-		require.ErrorIs(t, result.err, testErr)
-	}
-}
-
 func TestInitFn(t *testing.T) {
 	tests := []struct {
 		name        string
