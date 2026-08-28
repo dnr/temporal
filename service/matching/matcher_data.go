@@ -450,14 +450,18 @@ func (d *matcherData) findMatch(allowForwarding bool, now int64) (
 	hitConcurrencyLimit bool,
 ) {
 	// TODO(pri): optimize so it's not O(d*n) worst case
-	// Scan keeps its callback on the stack, so this walk does not allocate; the equivalent
-	// tree.Iter() cursor escapes to the heap.
+
+	// Check this before flow control/rate limits so that we avoid timers/callbacks if we have
+	// nothing to match.
+	if d.tasks.Len() == 0 || d.pollers.Len() == 0 {
+		return
+	}
 
 	// Check whole-queue concurrency limit.
 	// TODO(fc): This single check only works for a whole-queue limit. For per-task limits this
 	// needs to move this into the loop below, or a larger refactor.
 	wholeQueueLikely := d.fcManager.WholeQueueLikely(d)
-	if !wholeQueueLikely { // FIXME: only if tasks>0&&polls>0?
+	if !wholeQueueLikely {
 		return nil, nil, 0, true
 	}
 
@@ -468,7 +472,7 @@ func (d *matcherData) findMatch(allowForwarding bool, now int64) (
 	// TODO: reaching into the rate limiter's state like this breaks its encapsulation;
 	// refactor the rate limit logic so findMatch doesn't need to know about it.
 	wholeQueueReady, perKeyLimited := d.rateLimitManager.rateLimitState()
-	if !perKeyLimited && d.tasks.Len() > 0 && d.pollers.Len() > 0 {
+	if !perKeyLimited {
 		if delay := wholeQueueReady.delay(now); delay > 0 {
 			return nil, nil, delay, false
 		}
