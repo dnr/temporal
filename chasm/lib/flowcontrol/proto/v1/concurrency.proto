@@ -23,10 +23,9 @@ message ConcurrencyState {
 
   // Generation is used to ensure Wait is monotonic. See comment in Wait for details.
   int64 generation = 4;
-  // WakeUpTo is used to select and stage wakeups. Unix nanos.
+  // WakeUpTo is used to select and stage wakeups by priority.
   int64 wake_up_to = 5;
-  // WakeAll == true means "WakeUpTo == end of time" (without having to worry about the
-  // maximum representable time).
+  // WakeAll means wake up to maximum priority.
   bool wake_all = 6;
   // WakeStage is the number of staged wakeups we've done since the first one.
   int32 wake_stage = 7;
@@ -38,7 +37,6 @@ message ConcurrencyState {
     // Committed slots don't expire, they must be Released.
     bool committed = 2;
     // Expiry time for reserved slot.
-    // TODO(fc): make this into int64 unix nanos too?
     google.protobuf.Timestamp expires = 3;
   }
 }
@@ -86,8 +84,10 @@ message ConcurrencyWaitRequest {
   // generation, and return a newer one. Before context timeout, the server should return
   // success with zero wake_tokens and the current generation.
   int64 generation = 3;
-  // Start time is when this wait operation started, in unix nanos. It's used to order waiters.
-  int64 start_time = 4;
+  // WakePriority is used to order waiters. It should be a value that is meaningful at
+  // namespace scope, and is usually different for different tasks. Currently we use a
+  // combination of task priority and create time.
+  int64 wake_priority = 4;
   // How many queues are known to be waiting for this limiter. The server may take this into
   // account when staging wakes. If this is missing, 1 is assumed.
   int32 requested_wake_tokens = 5;

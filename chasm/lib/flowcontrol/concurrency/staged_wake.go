@@ -25,19 +25,19 @@ func (t *StagedWakeHandler) Validate(ctx chasm.Context, c *Component, _ chasm.Ta
 }
 
 func (t *StagedWakeHandler) Execute(cctx chasm.MutableContext, c *Component, _ chasm.TaskAttributes, _ *stagedWake) error {
-	getWakeTime := func(wantTokens int32) (int64, bool) {
+	getWakeLevel := func(wantTokens int32) (int64, bool) {
 		key := batchKey{
 			namespaceID: cctx.ExecutionKey().NamespaceID,
 			key:         cctx.ExecutionKey().BusinessID,
 		}
-		return t.handler.getWakeTime(key, wantTokens)
+		return t.handler.getWakeLevel(key, wantTokens)
 	}
 
 	c.expire(cctx.Now(c))
 
 	// double number woken at each stage
 	c.WakeStage++
-	doWake(cctx, c, getWakeTime)
+	doWake(cctx, c, getWakeLevel)
 
 	return nil
 }

@@ -2,6 +2,7 @@ package fc
 
 import (
 	"slices"
+	"time"
 
 	enumsspb "go.temporal.io/server/api/enums/v1"
 	"go.temporal.io/server/common/namespace"
@@ -48,9 +49,9 @@ func NewManager(
 	}
 }
 
-func (m *Manager) WholeQueueLikely(cb readinessCallback) bool {
+func (m *Manager) WholeQueueLikely(pri int32, age time.Time, cb readinessCallback) bool {
 	nsID := namespace.ID(m.partition.NamespaceId())
-	state := m.readiness.ReadinessState(nsID, enumsspb.LIMITER_TYPE_CONCURRENCY, m.wholeQueueLimiter, cb)
+	state := m.readiness.ReadinessState(nsID, enumsspb.LIMITER_TYPE_CONCURRENCY, m.wholeQueueLimiter, pri, age, cb)
 	return state.Likely()
 }
 

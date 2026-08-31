@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"fmt"
 	"slices"
+	"time"
 
 	enumspb "go.temporal.io/api/enums/v1"
 	"go.temporal.io/server/common/util"
@@ -14,6 +15,7 @@ import (
 const maxLimiters = 3
 
 type limiterSource int32
+type wakePriority int64
 
 const (
 	// not valid limiter
@@ -44,4 +46,10 @@ func canonicalLimiters(task fcTask) []limiter {
 		return cmp.Compare(a.key, b.key)
 	})
 	return out
+}
+
+func makeWakePriority(pri int32, age time.Time) wakePriority {
+	// pri is [1-60] (matching.maxPriorityLevels), so we can fit pri and age into 63 bits:
+	// 00000000[--pri-][----------------------age---------------------]
+	return wakePriority(max(pri, 0))<<48 | wakePriority(age.UnixMilli())
 }

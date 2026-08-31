@@ -36,11 +36,10 @@ type rcKey struct {
 
 type rcValue struct {
 	generation int64
-	startTime  int64
 	state      ReadinessState
 	// invariant: {len(waiters) > 0} == {Wait goroutine is running} == {goroCancel != nil}
 	// (for now, until we add eviction)
-	waiters    map[readinessCallback]struct{}
+	waiters    map[readinessCallback]wakePriority
 	goroCancel context.CancelFunc
 	// TODO(fc): cache some limiter-specific state, e.g. slots free so that we can change to
 	// not ready after taking last slot
@@ -105,7 +104,7 @@ func (rn *readinessNS) getValueLocked(rkey rcKey) *rcValue {
 		return v
 	}
 	v := &rcValue{
-		waiters: make(map[readinessCallback]struct{}),
+		waiters: make(map[readinessCallback]wakePriority),
 	}
 	rn.cache[rkey] = v
 	return v
@@ -117,16 +116,30 @@ func (rn *readinessNS) getValueLocked(rkey rcKey) *rcValue {
 //
 // If we have too many subscriptions, we may drop some. In that case, we'll set a timer to call
 // cb.OnReady with some backoff.
-func (r *Readiness) ReadinessState(nsID namespace.ID, tp enumsspb.LimiterType, key string, cb readinessCallback) ReadinessState {
-	return r.getNS(nsID).readinessState(rcKey{tp: tp, key: key}, cb)
+func (r *Readiness) ReadinessState(
+	nsID namespace.ID,
+	tp enumsspb.LimiterType,
+	key string,
+	pri int32,
+	age time.Time,
+	cb readinessCallback,
+) ReadinessState {
+	return r.getNS(nsID).readinessState(rcKey{tp: tp, key: key}, pri, age, cb)
 }
 
-func (rn *readinessNS) readinessState(rkey rcKey, cb readinessCallback) ReadinessState {
+func (rn *readinessNS) readinessState(
+	rkey rcKey,
+	pri int32,
+	age time.Time,
+	cb readinessCallback,
+) ReadinessState {
 	rn.lock.Lock()
 	defer rn.lock.Unlock()
 
 	v, ok := rn.cache[rkey]
 	if !ok {
+		// if missing from cache, return unknown. matching will probably try to Reserve and
+		// based on success/failure, call either reportReady or reportBlocked.
 		return ReadinessUnknown
 	}
 
@@ -135,7 +148,7 @@ func (rn *readinessNS) readinessState(rkey rcKey, cb readinessCallback) Readines
 		if v.state.Likely() {
 			delete(v.waiters, cb)
 		} else {
-			v.waiters[cb] = struct{}{}
+			v.waiters[cb] = makeWakePriority(pri, age)
 		}
 		v.syncGoroLocked(rn, rkey)
 	}
@@ -176,7 +189,7 @@ func (rn *readinessNS) reportReady(rkey rcKey, gen int64) {
 
 	// TODO(fc): do staged wakeup similar to the distributed case
 	waiters := v.waiters
-	v.waiters = make(map[readinessCallback]struct{})
+	v.waiters = make(map[readinessCallback]wakePriority)
 	v.syncGoroLocked(rn, rkey)
 
 	rn.lock.Unlock()
@@ -222,9 +235,15 @@ func (v *rcValue) syncGoroLocked(rn *readinessNS, rkey rcKey) {
 		"",
 	))
 	ctx, v.goroCancel = context.WithCancel(ctx)
-	v.startTime = time.Now().UnixNano()
 	// Wait result will be reported back through ReportReady/Blocked
 	go rn.r.callWait(ctx, rn, rkey, v)
+}
+
+func (v *rcValue) minPriorityLocked() (minPriority wakePriority) {
+	for _, p := range v.waiters {
+		minPriority = min(minPriority, p)
+	}
+	return
 }
 
 func (r *Readiness) callWait(ctx context.Context, rn *readinessNS, rkey rcKey, v *rcValue) {
@@ -241,11 +260,13 @@ func (r *Readiness) callWait(ctx context.Context, rn *readinessNS, rkey rcKey, v
 				NamespaceId:         rn.nsID.String(),
 				Key:                 rkey.key,
 				Generation:          v.generation,
-				StartTime:           v.startTime,
+				WakePriority:        int64(v.minPriorityLocked()),
 				RequestedWakeTokens: int32(len(v.waiters)),
 			}
 			rn.lock.Unlock()
 
+			// TODO(fc): if minPriority decreases during this call, interrupt and restart it.
+			// increasing minPriority should not interrupt
 			res, err := r.concurrencyServiceClient.Wait(ctx, req)
 			if err != nil {
 				util.InterruptibleSleep(ctx, retrier.NextBackOff(err))

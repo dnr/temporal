@@ -29,8 +29,8 @@ type batchReq struct {
 }
 
 type chasmReq struct {
-	items       []batchReq
-	getWakeTime func(wantTokens int32) (wakeUpTo int64, wakeAll bool)
+	items        []batchReq
+	getWakeLevel func(wantTokens int32) (wakeUpTo int64, wakeAll bool)
 }
 
 type batchRes struct {
@@ -39,8 +39,8 @@ type batchRes struct {
 }
 
 type waiterEntry struct {
-	// Waiter start time in unix nanos
-	startTime int64
+	// Waiter priority
+	wakePriority int64
 	// Number of tokens represented by this entry, including multiplicity of multiple waiters
 	// on one host. Note that the multiplicity only updates when the long-poll retries, once a
 	// minute, so this may be somewhat out of date. But each waiter counts at least once here.
@@ -172,7 +172,7 @@ func updateFn(c *Component, cctx chasm.MutableContext, creq chasmReq) ([]*fcpb.C
 	// Note that we can't do this in the same transaction that we increment generation in
 	// (availableSlots can't be both 0 and > prevStoredAvailable).
 	if c.availableSlots() > prevStoredAvailable {
-		doWake(cctx, c, creq.getWakeTime)
+		doWake(cctx, c, creq.getWakeLevel)
 	}
 
 	// capture Generation after maybe incrementing
@@ -204,8 +204,8 @@ func (h *Handler) applyBatch(
 	}
 
 	creq := chasmReq{
-		items:       items,
-		getWakeTime: func(wantTokens int32) (int64, bool) { return h.getWakeTime(key, wantTokens) },
+		items:        items,
+		getWakeLevel: func(wantTokens int32) (int64, bool) { return h.getWakeLevel(key, wantTokens) },
 	}
 
 	if needStart {
@@ -277,14 +277,8 @@ func (h *Handler) Wait(ctx context.Context, req *fcpb.ConcurrencyWaitRequest) (r
 	defer log.CapturePanic(h.logger, &retErr)
 
 	req = common.CloneProto(req)
-	// assume one token if unset
-	if req.RequestedWakeTokens <= 0 {
-		req.RequestedWakeTokens = 1
-	}
-	// StartTime 0 is reserved
-	if req.StartTime == 0 {
-		req.StartTime = 1
-	}
+	req.RequestedWakeTokens = max(req.RequestedWakeTokens, 1) // assume one token if unset
+	req.WakePriority = max(req.WakePriority, 1)               // must be positive since 0 means no wakes yet
 
 	// Note that the maximum timeout here has an effect besides just capping rpc duration:
 	// If a caller has Reserved the last slot, and crashes before Commit, then the reservation
@@ -296,8 +290,8 @@ func (h *Handler) Wait(ctx context.Context, req *fcpb.ConcurrencyWaitRequest) (r
 	defer cancel()
 
 	k := batchKey{namespaceID: req.NamespaceId, key: req.Key}
-	h.registerWaiter(k, req.StartTime, req.RequestedWakeTokens)
-	defer h.unregisterWaiter(k, req.StartTime, req.RequestedWakeTokens)
+	h.registerWaiter(k, req.WakePriority, req.RequestedWakeTokens)
+	defer h.unregisterWaiter(k, req.WakePriority, req.RequestedWakeTokens)
 
 	// loop to do internal retries with increased generation
 	for {
@@ -315,7 +309,7 @@ func (h *Handler) Wait(ctx context.Context, req *fcpb.ConcurrencyWaitRequest) (r
 				BusinessID:  req.Key,
 			}),
 			func(c *Component, cctx chasm.Context, req *fcpb.ConcurrencyWaitRequest) (*fcpb.ConcurrencyWaitResponse, bool, error) {
-				generation, tokens, ready := c.poll(cctx.Now(c), req.Generation, req.StartTime, req.RequestedWakeTokens)
+				generation, tokens, ready := c.poll(cctx.Now(c), req.Generation, req.WakePriority, req.RequestedWakeTokens)
 				if !ready {
 					return nil, false, nil
 				}
@@ -355,7 +349,7 @@ func (s *waiterShard) getWaiterEntriesLocked(key batchKey) *waiterEntries {
 		return wt
 	}
 	wt := btree.NewBTreeGOptions(
-		func(a, b waiterEntry) bool { return a.startTime < b.startTime },
+		func(a, b waiterEntry) bool { return a.wakePriority < b.wakePriority },
 		// degree 3 allows up to 5 values per node without splitting
 		btree.Options{Degree: 3, NoLocks: true},
 	)
@@ -363,7 +357,7 @@ func (s *waiterShard) getWaiterEntriesLocked(key batchKey) *waiterEntries {
 	return wt
 }
 
-func (h *Handler) registerWaiter(key batchKey, startTime int64, tokens int32) {
+func (h *Handler) registerWaiter(key batchKey, wakePriority int64, tokens int32) {
 	s := h.waiterShardFor(key)
 	s.lock.Lock()
 	defer s.lock.Unlock()
@@ -371,13 +365,13 @@ func (h *Handler) registerWaiter(key batchKey, startTime int64, tokens int32) {
 	wt := s.getWaiterEntriesLocked(key)
 	newTokens := tokens
 	var hint btree.PathHint
-	if entry, ok := wt.GetHint(waiterEntry{startTime: startTime}, &hint); ok {
+	if entry, ok := wt.GetHint(waiterEntry{wakePriority: wakePriority}, &hint); ok {
 		newTokens += entry.tokens
 	}
-	wt.SetHint(waiterEntry{startTime: startTime, tokens: newTokens}, &hint)
+	wt.SetHint(waiterEntry{wakePriority: wakePriority, tokens: newTokens}, &hint)
 }
 
-func (h *Handler) unregisterWaiter(key batchKey, startTime int64, tokens int32) {
+func (h *Handler) unregisterWaiter(key batchKey, wakePriority int64, tokens int32) {
 	s := h.waiterShardFor(key)
 	s.lock.Lock()
 	defer s.lock.Unlock()
@@ -387,12 +381,12 @@ func (h *Handler) unregisterWaiter(key batchKey, startTime int64, tokens int32) 
 		return
 	}
 	var hint btree.PathHint
-	if entry, ok := wt.GetHint(waiterEntry{startTime: startTime}, &hint); ok {
+	if entry, ok := wt.GetHint(waiterEntry{wakePriority: wakePriority}, &hint); ok {
 		newTokens := max(0, entry.tokens-tokens)
 		if newTokens == 0 {
-			wt.DeleteHint(waiterEntry{startTime: startTime}, &hint)
+			wt.DeleteHint(waiterEntry{wakePriority: wakePriority}, &hint)
 		} else {
-			wt.SetHint(waiterEntry{startTime: startTime, tokens: newTokens}, &hint)
+			wt.SetHint(waiterEntry{wakePriority: wakePriority, tokens: newTokens}, &hint)
 		}
 	}
 	if wt.Len() == 0 {
@@ -400,10 +394,10 @@ func (h *Handler) unregisterWaiter(key batchKey, startTime int64, tokens int32) 
 	}
 }
 
-// getWakeTime returns t such that waiters representing wantTokens tokens have startTime <= t.
+// getWakeLevel returns t such that waiters representing wantTokens tokens have wakePriority <= t.
 // If there aren't enough waiters to satisfy all the tokens, then wakeAll will be true.
 // wantTokens must be > 0; if it's zero then wake state should not be modified.
-func (h *Handler) getWakeTime(key batchKey, wantTokens int32) (wakeUpTo int64, wakeAll bool) {
+func (h *Handler) getWakeLevel(key batchKey, wantTokens int32) (wakeUpTo int64, wakeAll bool) {
 	s := h.waiterShardFor(key)
 	s.lock.Lock()
 	defer s.lock.Unlock()
@@ -423,7 +417,7 @@ func (h *Handler) getWakeTime(key batchKey, wantTokens int32) (wakeUpTo int64, w
 		if wantTokens -= entry.tokens; wantTokens <= 0 {
 			// satisfied all tokens. set wakeUpTo but keep scanning to see
 			// if there are more waiters.
-			wakeUpTo = entry.startTime
+			wakeUpTo = entry.wakePriority
 		}
 		return true
 	})

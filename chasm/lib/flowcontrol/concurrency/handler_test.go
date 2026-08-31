@@ -112,13 +112,13 @@ func TestHandlerWaiterEntries(t *testing.T) {
 		{wantTokens: 7, wantWakeAll: true},
 	}
 	for _, tt := range tests {
-		wakeUpTo, wakeAll := h.getWakeTime(key, tt.wantTokens)
+		wakeUpTo, wakeAll := h.getWakeLevel(key, tt.wantTokens)
 		require.Equal(t, tt.wantWakeUpTo, wakeUpTo)
 		require.Equal(t, tt.wantWakeAll, wakeAll)
 	}
 
 	h.unregisterWaiter(key, 20, 1)
-	wakeUpTo, wakeAll := h.getWakeTime(key, 5)
+	wakeUpTo, wakeAll := h.getWakeLevel(key, 5)
 	require.Zero(t, wakeUpTo)
 	require.True(t, wakeAll)
 
@@ -128,7 +128,7 @@ func TestHandlerWaiterEntries(t *testing.T) {
 	require.NotContains(t, h.waiterShardFor(key).waiters, key)
 	require.Contains(t, h.waiterShardFor(otherKey).waiters, otherKey)
 
-	wakeUpTo, wakeAll = h.getWakeTime(key, 1)
+	wakeUpTo, wakeAll = h.getWakeLevel(key, 1)
 	require.Zero(t, wakeUpTo)
 	require.True(t, wakeAll)
 }
@@ -154,7 +154,7 @@ func TestHandlerWaitRetriesWithCurrentGeneration(t *testing.T) {
 	require.Equal(t, int64(1), waitRes.Generation)
 	require.Equal(t, int32(1), waitRes.WakeTokens)
 	require.Zero(t, req.Generation)
-	require.Zero(t, req.StartTime)
+	require.Zero(t, req.WakePriority)
 	require.Zero(t, req.RequestedWakeTokens)
 	require.Empty(t, tc.handler.waiterShardFor(tc.key).waiters)
 }
@@ -166,9 +166,9 @@ func TestHandlerWaitLongPollTimeoutReturnsRequestGeneration(t *testing.T) {
 	cancel()
 
 	res, err := tc.handler.Wait(ctx, &fcpb.ConcurrencyWaitRequest{
-		NamespaceId: tc.key.namespaceID,
-		Key:         tc.key.key,
-		StartTime:   100,
+		NamespaceId:  tc.key.namespaceID,
+		Key:          tc.key.key,
+		WakePriority: 100,
 	})
 	require.NoError(t, err)
 	require.Zero(t, res.Generation)
@@ -184,10 +184,10 @@ func TestHandlerWaitDeadlineExceededReturnsRequestGeneration(t *testing.T) {
 	ctx := chasm.NewEngineContext(context.Background(), engine)
 
 	res, err := h.Wait(ctx, &fcpb.ConcurrencyWaitRequest{
-		NamespaceId: "namespace",
-		Key:         "limiter",
-		Generation:  2,
-		StartTime:   100,
+		NamespaceId:  "namespace",
+		Key:          "limiter",
+		Generation:   2,
+		WakePriority: 100,
 	})
 	require.NoError(t, err)
 	require.Equal(t, int64(2), res.Generation)
@@ -205,10 +205,10 @@ func TestHandlerWaitPropagatesPollError(t *testing.T) {
 	key := batchKey{namespaceID: "namespace", key: "limiter"}
 
 	res, err := h.Wait(ctx, &fcpb.ConcurrencyWaitRequest{
-		NamespaceId: key.namespaceID,
-		Key:         key.key,
-		Generation:  2,
-		StartTime:   100,
+		NamespaceId:  key.namespaceID,
+		Key:          key.key,
+		Generation:   2,
+		WakePriority: 100,
 	})
 	require.ErrorIs(t, err, testErr)
 	require.Nil(t, res)
@@ -507,14 +507,14 @@ func TestUpdateFnConfigDecreaseDoesNotEvictSlots(t *testing.T) {
 		{SlotId: "second", Committed: true},
 		{SlotId: "third", Committed: true},
 	}
-	getWakeTime := func(int32) (int64, bool) { return 0, true }
+	getWakeLevel := func(int32) (int64, bool) { return 0, true }
 
 	ress, err := updateFn(c, newTestMutableContext(now), chasmReq{
 		items: []batchReq{{req: &fcpb.ConcurrencyBatchRequest{
 			ConfigUpdate:        &taskqueuepb.ConcurrencyLimit{ConcurrentTasks: 1},
 			ConfigUpdateVersion: 2,
 		}}},
-		getWakeTime: getWakeTime,
+		getWakeLevel: getWakeLevel,
 	})
 	require.NoError(t, err)
 	require.Equal(t, int64(1), ress[0].Generation)
@@ -523,16 +523,16 @@ func TestUpdateFnConfigDecreaseDoesNotEvictSlots(t *testing.T) {
 
 	for _, slotID := range []string{"first", "second"} {
 		_, err = updateFn(c, newTestMutableContext(now), chasmReq{
-			items:       []batchReq{{req: &fcpb.ConcurrencyBatchRequest{ReleaseSlots: []string{slotID}}}},
-			getWakeTime: getWakeTime,
+			items:        []batchReq{{req: &fcpb.ConcurrencyBatchRequest{ReleaseSlots: []string{slotID}}}},
+			getWakeLevel: getWakeLevel,
 		})
 		require.NoError(t, err)
 		require.Zero(t, c.availableSlots())
 	}
 
 	_, err = updateFn(c, newTestMutableContext(now), chasmReq{
-		items:       []batchReq{{req: &fcpb.ConcurrencyBatchRequest{ReleaseSlots: []string{"third"}}}},
-		getWakeTime: getWakeTime,
+		items:        []batchReq{{req: &fcpb.ConcurrencyBatchRequest{ReleaseSlots: []string{"third"}}}},
+		getWakeLevel: getWakeLevel,
 	})
 	require.NoError(t, err)
 	require.Equal(t, int32(1), c.availableSlots())
@@ -553,7 +553,7 @@ func TestUpdateFnConfigIncreaseWakesWaiters(t *testing.T) {
 			ConfigUpdate:        &taskqueuepb.ConcurrencyLimit{ConcurrentTasks: 3},
 			ConfigUpdateVersion: 2,
 		}}},
-		getWakeTime: func(tokens int32) (int64, bool) {
+		getWakeLevel: func(tokens int32) (int64, bool) {
 			wantTokens = tokens
 			return 0, true
 		},
@@ -576,7 +576,7 @@ func TestUpdateFnAvailabilityIncreaseStartsWake(t *testing.T) {
 
 	ress, err := updateFn(c, cctx, chasmReq{
 		items: []batchReq{{req: &fcpb.ConcurrencyBatchRequest{ReleaseSlots: []string{"existing"}}}},
-		getWakeTime: func(tokens int32) (int64, bool) {
+		getWakeLevel: func(tokens int32) (int64, bool) {
 			wantTokens = tokens
 			return 100, false
 		},
@@ -601,8 +601,8 @@ func TestUpdateFnNoAvailabilityIncreaseDoesNotRestartWake(t *testing.T) {
 
 	ress, err := updateFn(c, cctx, chasmReq{
 		items: []batchReq{{req: &fcpb.ConcurrencyBatchRequest{ReleaseSlots: []string{"missing"}}}},
-		getWakeTime: func(int32) (int64, bool) {
-			t.Fatal("getWakeTime called without an availability increase")
+		getWakeLevel: func(int32) (int64, bool) {
+			t.Fatal("getWakeLevel called without an availability increase")
 			return 0, false
 		},
 	})
@@ -631,7 +631,7 @@ func TestUpdateFnExpirationStartsWake(t *testing.T) {
 
 	ress, err := updateFn(c, cctx, chasmReq{
 		items: []batchReq{{req: &fcpb.ConcurrencyBatchRequest{CommitSlots: []string{"active"}}}},
-		getWakeTime: func(tokens int32) (int64, bool) {
+		getWakeLevel: func(tokens int32) (int64, bool) {
 			wantTokens = tokens
 			return 0, true
 		},

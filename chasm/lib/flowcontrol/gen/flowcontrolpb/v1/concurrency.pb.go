@@ -39,10 +39,9 @@ type ConcurrencyState struct {
 	Slots []*ConcurrencyState_Slot `protobuf:"bytes,3,rep,name=slots,proto3" json:"slots,omitempty"`
 	// Generation is used to ensure Wait is monotonic. See comment in Wait for details.
 	Generation int64 `protobuf:"varint,4,opt,name=generation,proto3" json:"generation,omitempty"`
-	// WakeUpTo is used to select and stage wakeups. Unix nanos.
+	// WakeUpTo is used to select and stage wakeups by priority.
 	WakeUpTo int64 `protobuf:"varint,5,opt,name=wake_up_to,json=wakeUpTo,proto3" json:"wake_up_to,omitempty"`
-	// WakeAll == true means "WakeUpTo == end of time" (without having to worry about the
-	// maximum representable time).
+	// WakeAll means wake up to maximum priority.
 	WakeAll bool `protobuf:"varint,6,opt,name=wake_all,json=wakeAll,proto3" json:"wake_all,omitempty"`
 	// WakeStage is the number of staged wakeups we've done since the first one.
 	WakeStage     int32 `protobuf:"varint,7,opt,name=wake_stage,json=wakeStage,proto3" json:"wake_stage,omitempty"`
@@ -312,8 +311,10 @@ type ConcurrencyWaitRequest struct {
 	// generation, and return a newer one. Before context timeout, the server should return
 	// success with zero wake_tokens and the current generation.
 	Generation int64 `protobuf:"varint,3,opt,name=generation,proto3" json:"generation,omitempty"`
-	// Start time is when this wait operation started, in unix nanos. It's used to order waiters.
-	StartTime int64 `protobuf:"varint,4,opt,name=start_time,json=startTime,proto3" json:"start_time,omitempty"`
+	// WakePriority is used to order waiters. It should be a value that is meaningful at
+	// namespace scope, and is usually different for different tasks. Currently we use a
+	// combination of task priority and create time.
+	WakePriority int64 `protobuf:"varint,4,opt,name=wake_priority,json=wakePriority,proto3" json:"wake_priority,omitempty"`
 	// How many queues are known to be waiting for this limiter. The server may take this into
 	// account when staging wakes. If this is missing, 1 is assumed.
 	RequestedWakeTokens int32 `protobuf:"varint,5,opt,name=requested_wake_tokens,json=requestedWakeTokens,proto3" json:"requested_wake_tokens,omitempty"`
@@ -372,9 +373,9 @@ func (x *ConcurrencyWaitRequest) GetGeneration() int64 {
 	return 0
 }
 
-func (x *ConcurrencyWaitRequest) GetStartTime() int64 {
+func (x *ConcurrencyWaitRequest) GetWakePriority() int64 {
 	if x != nil {
-		return x.StartTime
+		return x.WakePriority
 	}
 	return 0
 }
@@ -451,7 +452,6 @@ type ConcurrencyState_Slot struct {
 	// Committed slots don't expire, they must be Released.
 	Committed bool `protobuf:"varint,2,opt,name=committed,proto3" json:"committed,omitempty"`
 	// Expiry time for reserved slot.
-	// TODO(fc): make this into int64 unix nanos too?
 	Expires       *timestamppb.Timestamp `protobuf:"bytes,3,opt,name=expires,proto3" json:"expires,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -543,15 +543,14 @@ const file_temporal_server_chasm_lib_flowcontrol_proto_v1_concurrency_proto_rawD
 	"generation\x18\x01 \x01(\x03R\n" +
 	"generation\x12'\n" +
 	"\x0freserve_success\x18\x02 \x03(\bR\x0ereserveSuccess\x12%\n" +
-	"\x0ecommit_success\x18\x03 \x03(\bR\rcommitSuccess\"\xc0\x01\n" +
+	"\x0ecommit_success\x18\x03 \x03(\bR\rcommitSuccess\"\xc6\x01\n" +
 	"\x16ConcurrencyWaitRequest\x12!\n" +
 	"\fnamespace_id\x18\x01 \x01(\tR\vnamespaceId\x12\x10\n" +
 	"\x03key\x18\x02 \x01(\tR\x03key\x12\x1e\n" +
 	"\n" +
 	"generation\x18\x03 \x01(\x03R\n" +
-	"generation\x12\x1d\n" +
-	"\n" +
-	"start_time\x18\x04 \x01(\x03R\tstartTime\x122\n" +
+	"generation\x12#\n" +
+	"\rwake_priority\x18\x04 \x01(\x03R\fwakePriority\x122\n" +
 	"\x15requested_wake_tokens\x18\x05 \x01(\x05R\x13requestedWakeTokens\"Z\n" +
 	"\x17ConcurrencyWaitResponse\x12\x1e\n" +
 	"\n" +
