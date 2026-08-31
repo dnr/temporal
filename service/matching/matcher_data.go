@@ -440,24 +440,16 @@ func (d *matcherData) ReprocessTasks(pred func(*internalTask) bool) []*internalT
 }
 
 // findMatch returns the highest-priority task+poller pair that is not rate-limited or
-// concurrency-limited. If the minimum wait until any rate-limited task (that has a compatible
-// poller) becomes ready.
+// concurrency-limited, or if none, a reason that some task was blocked by. (Different tasks
+// may be blocked for different reasons.)
 // call with lock held
 // nolint:revive // will improve later
 func (d *matcherData) findMatch(allowForwarding bool, now int64) (
 	matchedTask *internalTask,
 	matchedPoller *waitingPoller,
-	minDelay time.Duration,
-	hitConcurrencyLimit bool,
+	blockedBy syncMatchOutcome,
 ) {
 	// TODO(fc): optimize this with different data structures
-
-	// Without a per-key limit the whole-queue ready time is the same for every task,
-	// so one check suffices and we avoid per-task overhead in the scan below.
-	// TODO: reaching into the rate limiter's state like this breaks its encapsulation;
-	// refactor the rate limit logic so findMatch doesn't need to know about it.
-	wholeQueueReady, perKeyLimited := d.rateLimitManager.rateLimitState()
-
 	d.tasks.tree.Scan(func(task *internalTask) bool {
 		// disallow normal poll forwarding when allowForwarding is false, but allow the
 		// "priority backlog poll forwarders".
@@ -493,40 +485,48 @@ func (d *matcherData) findMatch(allowForwarding bool, now int64) (
 			return true
 		}
 
-		// skip per-key rate-limited tasks but allow matching later tasks, tracking the minimum
-		// delay so the caller knows when the soonest one becomes ready. note that this
-		// incorporates the wholeQueueReady check.
-		if perKeyLimited {
-			if delay := d.rateLimitManager.readyTimeForTask(task).delay(now); delay > 0 {
-				if minDelay == 0 || delay < minDelay {
-					minDelay = delay
-				}
-				return true
-			}
-		}
-
 		// we have a possible match, check limiters:
-
-		// whole-queue concurrency limit
-		pri := cmp.Or(task.getPriority().GetPriorityKey(), int32(d.config.DefaultPriorityKey))
-		createTime := task.getCreateTime().AsTime()
-		if !d.fcManager.WholeQueueLikely(pri, createTime, d) {
-			minDelay, hitConcurrencyLimit = 0, true
-			return false
-		}
-
-		// whole-queue rate limit. note that the per-key check incorporates this,
-		// so if we didn't hit that then this is the only delay.
-		if delay := wholeQueueReady.delay(now); delay > 0 {
-			minDelay, hitConcurrencyLimit = delay, false
-			return false
+		if ready, taskBlockedBy, canContinue := d.taskReady(task, now); !ready {
+			blockedBy = taskBlockedBy
+			return canContinue
 		}
 
 		// no limiters apply, we can match
-		matchedTask, matchedPoller, minDelay = task, poller, 0
+		matchedTask, matchedPoller = task, poller
 		return false
 	})
 	return
+}
+
+// taskReady determines if a task can run now due to a flow control limiter or rate limiter.
+// If it returns ready==false, it also arranges for d.OnReady to be called later when the task
+// may be able to run. canContinue is an optimization: it should be false if all tasks on this
+// matcher will have the same outcome, so the caller can skip the rest.
+// call with lock held
+func (d *matcherData) taskReady(task *internalTask, now int64) (ready bool, blockedBy syncMatchOutcome, canContinue bool) {
+	// try whole-queue concurrency limit first
+	pri := cmp.Or(task.getPriority().GetPriorityKey(), int32(d.config.DefaultPriorityKey))
+	createTime := task.getCreateTime().AsTime()
+	if !d.fcManager.WholeQueueLikely(pri, createTime, d) {
+		// stop rate limit timer if running
+		d.rateLimitTimer.unset()
+		return false, syncMatchConcurrencyLimited, false
+	}
+
+	// skip per-key rate-limited tasks but allow matching later tasks, tracking the minimum
+	// delay so the caller knows when the soonest one becomes ready. note that this
+	// incorporates the wholeQueueReady check.
+	sl, perKeyLimited := d.rateLimitManager.readyTimeForTask(task)
+	if delay := sl.delay(now); delay > 0 {
+		// FIXME: min??
+		d.rateLimitTimer.set(d.timeSource, d.OnReady, delay)
+		// cancel concurrency limit callback if set
+		d.fcManager.CancelWholeQueueCallback(d)
+		return false, syncMatchRateLimited, perKeyLimited
+	}
+	d.rateLimitTimer.unset()
+
+	return true, syncMatchUnspecified, false
 }
 
 // call with lock held
@@ -570,19 +570,9 @@ func (d *matcherData) findAndWakeMatches() syncMatchOutcome {
 
 	for {
 		// search for highest-priority ready match; skip per-key rate-limited tasks
-		task, poller, minDelay, hitConcurrencyLimit := d.findMatch(allowForwarding, now)
+		task, poller, outcome := d.findMatch(allowForwarding, now)
 		if task == nil || poller == nil {
-			if minDelay > 0 {
-				d.rateLimitTimer.set(d.timeSource, d.OnReady, minDelay)
-				d.onRateLimited()
-				return syncMatchRateLimited
-			}
-			// not rate limited, stop rate limit timer if was running
-			d.rateLimitTimer.unset()
-			if hitConcurrencyLimit {
-				return syncMatchConcurrencyLimited
-			}
-			return syncMatchNoPoller
+			return outcome
 		}
 
 		// ready to signal match

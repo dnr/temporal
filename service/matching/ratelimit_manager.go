@@ -137,7 +137,6 @@ func (r *rateLimitManager) computeEffectiveRPSAndSource() {
 // - Else if a worker-level RPS is configured, effectiveRPS = min(system default RPS, worker-configured RPS)
 // - Otherwise, fall back to the system default RPS from dynamic config.
 func (r *rateLimitManager) computeEffectiveRPSAndSourceLocked() {
-
 	var (
 		effectiveRPS    = math.Inf(1)
 		rateLimitSource enumspb.RateLimitSource
@@ -326,14 +325,7 @@ func (r *rateLimitManager) clearPerKeyRateLimitsLocked() {
 	r.perKeyLimit = simpleLimiterParams{}
 }
 
-// rateLimitState returns the whole-queue ready time and whether a per-key limit is in effect.
-func (r *rateLimitManager) rateLimitState() (wholeQueueReady simpleLimiter, perKeyLimited bool) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	return r.wholeQueueReady, r.perKeyLimit.limited()
-}
-
-func (r *rateLimitManager) readyTimeForTask(task *internalTask) simpleLimiter {
+func (r *rateLimitManager) readyTimeForTask(task *internalTask) (simpleLimiter, bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	// TODO(pri): after we have task-specific ready time, we can re-enable this
@@ -342,15 +334,19 @@ func (r *rateLimitManager) readyTimeForTask(task *internalTask) simpleLimiter {
 	// 	return 0
 	// }
 	ready := r.wholeQueueReady
+	perKeyLimited := false
 
 	if r.perKeyLimit.limited() {
 		key := task.getPriority().GetFairnessKey()
 		if v := r.perKeyReady.Get(key); v != nil {
-			ready = max(ready, v.(simpleLimiter))
+			if sl := v.(simpleLimiter); sl > ready {
+				perKeyLimited = true
+				ready = sl
+			}
 		}
 	}
 
-	return ready
+	return ready, perKeyLimited
 }
 
 func (r *rateLimitManager) consumeTokens(now int64, task *internalTask, tokens int64) {
