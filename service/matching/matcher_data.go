@@ -1,6 +1,7 @@
 package matching
 
 import (
+	"cmp"
 	"context"
 	"sync"
 	"time"
@@ -449,34 +450,13 @@ func (d *matcherData) findMatch(allowForwarding bool, now int64) (
 	minDelay time.Duration,
 	hitConcurrencyLimit bool,
 ) {
-	// TODO(pri): optimize so it's not O(d*n) worst case
+	// TODO(fc): optimize this with different data structures
 
-	// Check this before flow control/rate limits so that we avoid timers/callbacks if we have
-	// nothing to match.
-	if d.tasks.Len() == 0 || d.pollers.Len() == 0 {
-		return
-	}
-
-	// Check whole-queue concurrency limit.
-	// TODO(fc): This single check only works for a whole-queue limit. For per-task limits this
-	// needs to move this into the loop below, or a larger refactor.
-	wholeQueueLikely := d.fcManager.WholeQueueLikely(d)
-	if !wholeQueueLikely {
-		return nil, nil, 0, true
-	}
-
-	// Without a per-key limit the whole-queue ready time is the same for every task, so one
-	// check suffices and we avoid locking readyTimeForTask per task in the scan below. Only
-	// short-circuit when a match is actually possible (tasks and pollers both present) so we
-	// don't arm the rate-limit timer in cases where the full scan would have found nothing.
+	// Without a per-key limit the whole-queue ready time is the same for every task,
+	// so one check suffices and we avoid per-task overhead in the scan below.
 	// TODO: reaching into the rate limiter's state like this breaks its encapsulation;
 	// refactor the rate limit logic so findMatch doesn't need to know about it.
 	wholeQueueReady, perKeyLimited := d.rateLimitManager.rateLimitState()
-	if !perKeyLimited {
-		if delay := wholeQueueReady.delay(now); delay > 0 {
-			return nil, nil, delay, false
-		}
-	}
 
 	d.tasks.tree.Scan(func(task *internalTask) bool {
 		// disallow normal poll forwarding when allowForwarding is false, but allow the
@@ -485,8 +465,8 @@ func (d *matcherData) findMatch(allowForwarding bool, now int64) (
 			return true
 		}
 
-		var matched *waitingPoller
-		for poller := d.pollers.head; poller != nil; poller = poller.next {
+		var poller *waitingPoller
+		for poller = d.pollers.head; poller != nil; poller = poller.next {
 			// can't match cases:
 			if poller.queryOnly && !task.isQuery() && !task.isPollForwarder() {
 				// query-only poll only matches with query (but can match poll forwarder)
@@ -506,19 +486,18 @@ func (d *matcherData) findMatch(allowForwarding bool, now int64) (
 				// their priority above "1". that's inaccurate but it's just a temporary situation.
 				continue
 			}
-			matched = poller
-			break
+			break // use this poller
 		}
-		if matched == nil {
+		if poller == nil {
 			// no compatible poller for this task; keep scanning later tasks
 			return true
 		}
 
-		// skip per-key rate-limited tasks, tracking the minimum delay so the caller
-		// knows when the soonest one becomes ready
+		// skip per-key rate-limited tasks but allow matching later tasks, tracking the minimum
+		// delay so the caller knows when the soonest one becomes ready. note that this
+		// incorporates the wholeQueueReady check.
 		if perKeyLimited {
-			delay := d.rateLimitManager.readyTimeForTask(task).delay(now)
-			if delay > 0 {
+			if delay := d.rateLimitManager.readyTimeForTask(task).delay(now); delay > 0 {
 				if minDelay == 0 || delay < minDelay {
 					minDelay = delay
 				}
@@ -526,7 +505,25 @@ func (d *matcherData) findMatch(allowForwarding bool, now int64) (
 			}
 		}
 
-		matchedTask, matchedPoller = task, matched
+		// we have a possible match, check limiters:
+
+		// whole-queue concurrency limit
+		pri := cmp.Or(task.getPriority().GetPriorityKey(), int32(d.config.DefaultPriorityKey))
+		createTime := task.getCreateTime().AsTime()
+		if !d.fcManager.WholeQueueLikely(pri, createTime, d) {
+			minDelay, hitConcurrencyLimit = 0, true
+			return false
+		}
+
+		// whole-queue rate limit. note that the per-key check incorporates this,
+		// so if we didn't hit that then this is the only delay.
+		if delay := wholeQueueReady.delay(now); delay > 0 {
+			minDelay, hitConcurrencyLimit = delay, false
+			return false
+		}
+
+		// no limiters apply, we can match
+		matchedTask, matchedPoller, minDelay = task, poller, 0
 		return false
 	})
 	return
