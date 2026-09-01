@@ -74,7 +74,7 @@ type (
 		// pollerScalingDecision is assigned when the queue has advice to give to the poller about whether
 		// it should adjust its poller count
 		pollerScalingDecision *taskqueuepb.PollerScalingDecision
-		recycleToken          func(*internalTask)
+		recycleToken          func(*internalTask) // FIXME: can remove
 		removeFromMatcher     atomic.Pointer[func()]
 		// taskDispatchRevisionNumber represents the revision number used by the task and is
 		// max(taskDirectiveRevisionNumber, routingConfigRevisionNumber) for the task.
@@ -299,7 +299,7 @@ func (task *internalTask) Limiters() *fc.Limiters {
 }
 
 func (task *internalTask) updateLimitersFromConfig(manager *fcManager) {
-	task.limiters = manager.UpdateLimitersFromConfig(task.limiters, task.getPriority())
+	task.limiters = manager.UpdateLimitersFromConfig(task.limiters, task)
 }
 
 // pollWorkflowTaskQueueResponse returns the poll response for a workflow task that is

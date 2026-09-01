@@ -60,7 +60,7 @@ func (s *MatcherDataSuite) SetupTest() {
 		s.ts,
 		true,
 		rateLimitManager,
-		newTestFCManager(taskQueue.RootPartition(), userDataManager),
+		newFCManager(taskQueue.RootPartition(), cfg, userDataManager, rateLimitManager, fc.NewReadiness(nil)),
 		func() { s.rateLimitedCount.Add(1) },
 	)
 }
@@ -992,7 +992,7 @@ func (s *MatcherDataSuite) TestFindMatch() {
 			// Call findMatch
 			s.md.lock.Lock()
 			now := s.ts.Now().UnixNano()
-			foundTask, foundPoller, _, _ := s.md.findMatch(tc.allowForwarding, now)
+			foundTask, foundPoller, _ := s.md.findMatch(tc.allowForwarding, now)
 			s.md.lock.Unlock()
 
 			if tc.shouldMatch {
@@ -1031,7 +1031,7 @@ func FuzzMatcherData(f *testing.F) {
 			ts,
 			true,
 			rateLimitManager,
-			newTestFCManager(taskQueue.RootPartition(), userDataManager),
+			newFCManager(taskQueue.RootPartition(), cfg, userDataManager, rateLimitManager, fc.NewReadiness(nil)),
 			func() {},
 		)
 
@@ -1149,10 +1149,6 @@ func FuzzMatcherData(f *testing.F) {
 			gosched(3)
 		}
 	})
-}
-
-func newTestFCManager(partition tqid.Partition, userDataManager *mockUserDataManager) *fc.Manager {
-	return fc.NewManager(partition, userDataManager, fc.NewReadiness(nil))
 }
 
 func gosched(n int) {

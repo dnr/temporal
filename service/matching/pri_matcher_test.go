@@ -20,6 +20,7 @@ import (
 	"go.temporal.io/server/common/testing/testhooks"
 	"go.temporal.io/server/common/testing/testlogger"
 	"go.temporal.io/server/common/tqid"
+	"go.temporal.io/server/service/matching/fc"
 	"go.uber.org/mock/gomock"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
@@ -79,7 +80,7 @@ func (s *PriMatcherSuite) TestValidatorWorksOnRoot() {
 		s.logger,
 		metrics.NoopMetricsHandler,
 		rateLimitManager,
-		newTestFCManager(partition, userDataManager),
+		newFCManager(partition, cfg, userDataManager, rateLimitManager, fc.NewReadiness(nil)),
 		func() {}, // onRateLimited
 		func() {}, // markAlive
 	)
@@ -176,7 +177,7 @@ func (s *PriMatcherSuite) TestForwardPollRetriesOnResourceExhausted() {
 			s.logger,
 			metrics.NoopMetricsHandler,
 			rateLimitManager,
-			newTestFCManager(childPartition, userDataManager),
+			newFCManager(childPartition, cfg, userDataManager, rateLimitManager, fc.NewReadiness(nil)),
 			func() {},
 			func() {},
 		)
@@ -246,7 +247,7 @@ func (s *PriMatcherSuite) TestValidatorDrop_SetsDropReason() {
 				s.logger,
 				metrics.NoopMetricsHandler,
 				rateLimitManager,
-				newTestFCManager(partition, userDataManager),
+				newFCManager(partition, cfg, userDataManager, rateLimitManager, fc.NewReadiness(nil)),
 				func() {},
 				func() {},
 			)
