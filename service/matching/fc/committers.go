@@ -24,6 +24,8 @@ type readinessCacheInterface interface {
 	reportBlocked(namespace.ID, enumsspb.LimiterType, string, int64)
 }
 
+// concurrency limits
+
 type concurrencyCommitter struct {
 	ctx    context.Context
 	client fcpb.ConcurrencyServiceClient
@@ -91,9 +93,42 @@ func (c *concurrencyCommitter) commit() error {
 }
 
 func (c *concurrencyCommitter) cancelReservations() {
-	_, _ = c.client.Batch(c.ctx, &fcpb.ConcurrencyBatchRequest{
+	// call in new goroutine, don't block here, we don't care about the result
+	go c.client.Batch(c.ctx, &fcpb.ConcurrencyBatchRequest{
 		NamespaceId:            c.nsID.String(),
 		Key:                    c.lim.key,
 		CancelReservationSlots: []string{c.slotID},
 	})
+}
+
+// local rate limits
+
+type localRateLimitCommitter struct {
+	lim limiter
+}
+
+func newLocalRateLimitCommitter(
+	lim limiter,
+) *concurrencyCommitter {
+	return &concurrencyCommitter{
+		lim: lim,
+	}
+}
+
+func (c *localRateLimitCommitter) reserve() error {
+	// if config is missing or wrong type, just leave it out
+	config, _ := c.lim.config.(*taskqueuepb.RateLimit)
+
+	if FIXMEblocked {
+		return serviceerrors.NewFlowControlBlocked()
+	}
+	return nil
+}
+
+func (c *localRateLimitCommitter) commit() error {
+	return nil
+}
+
+func (c *localRateLimitCommitter) cancelReservations() {
+	// FIXME: recycle token
 }

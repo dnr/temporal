@@ -6,6 +6,9 @@ type userDataManager interface {
 	GetUserData() (*persistencespb.VersionedTaskQueueUserData, chan struct{}, error)
 }
 
+type rateLimitManager interface {
+}
+
 type fcTask interface {
 	Limiters() *Limiters
 }

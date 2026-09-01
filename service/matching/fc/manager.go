@@ -4,6 +4,7 @@ import (
 	"slices"
 	"time"
 
+	taskqueuepb "go.temporal.io/api/taskqueue/v1"
 	enumsspb "go.temporal.io/server/api/enums/v1"
 	"go.temporal.io/server/common/namespace"
 	"go.temporal.io/server/common/tqid"
@@ -30,6 +31,7 @@ type Limiters struct {
 type Manager struct {
 	partition         tqid.Partition
 	userDataManager   userDataManager
+	rateLimitManager  rateLimitManager
 	readiness         *Readiness
 	wholeQueueLimiter string
 }
@@ -37,6 +39,7 @@ type Manager struct {
 func NewManager(
 	partition tqid.Partition,
 	userDataManager userDataManager,
+	rateLimitManager rateLimitManager,
 	readiness *Readiness,
 ) *Manager {
 	tqName := partition.TaskQueue().Name()
@@ -44,6 +47,7 @@ func NewManager(
 	return &Manager{
 		partition:         partition,
 		userDataManager:   userDataManager,
+		rateLimitManager:  rateLimitManager,
 		readiness:         readiness,
 		wholeQueueLimiter: wholeQueueLimiterName(tqName, tqType),
 	}
@@ -66,13 +70,21 @@ func (m *Manager) UpdateLimitersFromConfig(limiters *Limiters) *Limiters {
 		return nil
 	}
 	tqType := m.partition.TaskType()
-	limit := userData.GetData().GetPerType()[int32(tqType)].GetConfig().GetQueueConcurrencyLimit().GetConcurrencyLimit()
+	cfg := userData.GetData().GetPerType()[int32(tqType)].GetConfig()
+	cfgVersion := userData.GetVersion()
+	limiters = m.updateWholeQueueConcurrencyLimiter(cfg, cfgVersion, limiters)
+	return limiters
+}
+
+func (m *Manager) updateWholeQueueConcurrencyLimiter(cfg *taskqueuepb.TaskQueueConfig, cfgVersion int64, limiters *Limiters) *Limiters {
+	ours := func(lim limiter) bool {
+		return lim.source == limiterSourceConfig_WholeQueue && lim.tp == enumsspb.LIMITER_TYPE_CONCURRENCY
+	}
+	limit := cfg.GetQueueConcurrencyLimit().GetConcurrencyLimit()
 	if limit == nil {
 		// there is no limit. clear if it was set already.
 		if limiters != nil {
-			_ = slices.DeleteFunc(limiters.limiters[:], func(lim limiter) bool {
-				return lim.source == limiterSourceConfig_WholeQueue
-			})
+			_ = slices.DeleteFunc(limiters.limiters[:], ours)
 		}
 		return limiters
 	}
@@ -88,13 +100,13 @@ func (m *Manager) UpdateLimitersFromConfig(limiters *Limiters) *Limiters {
 				tp:            enumsspb.LIMITER_TYPE_CONCURRENCY,
 				source:        limiterSourceConfig_WholeQueue,
 				config:        limit,
-				configVersion: userData.GetVersion(),
+				configVersion: cfgVersion,
 			}
 			return limiters
-		} else if lim.source == limiterSourceConfig_WholeQueue {
-			// we found one we previously set, update config
+		} else if ours(lim) {
+			// we found the one we previously set, update config
 			lim.config = limit
-			lim.configVersion = userData.GetVersion()
+			lim.configVersion = cfgVersion
 			return limiters
 		}
 	}

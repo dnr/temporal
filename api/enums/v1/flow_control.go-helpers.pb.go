@@ -7,8 +7,9 @@ import (
 
 var (
 	LimiterType_shorthandValue = map[string]int32{
-		"Unspecified": 0,
-		"Concurrency": 1,
+		"Unspecified":    0,
+		"Concurrency":    1,
+		"LocalRateLimit": 2,
 	}
 )
 

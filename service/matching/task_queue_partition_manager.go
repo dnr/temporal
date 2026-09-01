@@ -147,6 +147,7 @@ func newTaskQueuePartitionManager(
 	fcManager := fc.NewManager(
 		partition,
 		userDataManager,
+		rateLimitManager,
 		e.fcReadiness,
 	)
 

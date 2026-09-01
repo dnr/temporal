@@ -15,6 +15,7 @@ import (
 	"go.temporal.io/server/common/headers"
 	"go.temporal.io/server/common/namespace"
 	"go.temporal.io/server/common/util"
+	"go.temporal.io/server/service/matching/simplelimiter"
 )
 
 type ReadinessState int32
@@ -29,12 +30,7 @@ func (s ReadinessState) Likely() bool {
 	return s == ReadinessUnknown || s == ReadinessReady
 }
 
-type rcKey struct {
-	tp  enumsspb.LimiterType
-	key string
-}
-
-type rcValue struct {
+type concurrencyLimiter struct {
 	generation int64
 	state      ReadinessState
 	// invariant: {len(waiters) > 0} == {Wait goroutine is running} == {goroCancel != nil}
@@ -45,12 +41,24 @@ type rcValue struct {
 	// not ready after taking last slot
 }
 
+type localRateLimiter struct {
+	params simplelimiter.Params
+	lim    simplelimiter.Limiter
+	// local rate limiters are partition-specific so we only need one waiter
+	// FIXME: ???
+	waiter readinessCallback
+}
+
 type readinessNS struct {
 	r    *Readiness
 	nsID namespace.ID
 
-	lock  sync.Mutex
-	cache map[rcKey]*rcValue
+	lock sync.Mutex
+	// LIMITER_TYPE_CONCURRENCY. key is concurrency limiter key (within ns)
+	concurrencyLimiters map[string]*concurrencyLimiter
+	// LIMITER_TYPE_LOCAL_RATE_LIMIT. key is empty string (whole queue) or fairness key.
+	localRateLimites map[string]*localRateLimiter
+	// TODO(fc): clean up cache if entries are unused
 	// TODO(fc): gauges for size of cache
 }
 
@@ -79,7 +87,7 @@ func (rn *readinessNS) Stop() {
 	rn.lock.Lock()
 	defer rn.lock.Unlock()
 
-	for rkey, v := range rn.cache {
+	for rkey, v := range rn.concurrencyLimiters {
 		v.waiters = nil
 		v.syncGoroLocked(rn, rkey)
 	}
@@ -91,22 +99,22 @@ func (r *Readiness) getNS(nsID namespace.ID) *readinessNS {
 		return v.(*readinessNS) // nolint:revive
 	}
 	newFcrn := &readinessNS{
-		r:     r,
-		nsID:  nsID,
-		cache: make(map[rcKey]*rcValue),
+		r:                   r,
+		nsID:                nsID,
+		concurrencyLimiters: make(map[string]*concurrencyLimiter),
 	}
 	fcrn, _ := r.caches.LoadOrStore(nsID, newFcrn)
 	return fcrn.(*readinessNS) // nolint:revive
 }
 
-func (rn *readinessNS) getValueLocked(rkey rcKey) *rcValue {
-	if v, ok := rn.cache[rkey]; ok {
+func (rn *readinessNS) getConcurrencyLimiterLocked(key string) *concurrencyLimiter {
+	if v, ok := rn.concurrencyLimiters[key]; ok {
 		return v
 	}
-	v := &rcValue{
+	v := &concurrencyLimiter{
 		waiters: make(map[readinessCallback]wakePriority),
 	}
-	rn.cache[rkey] = v
+	rn.concurrencyLimiters[key] = v
 	return v
 }
 
@@ -124,11 +132,16 @@ func (r *Readiness) ReadinessState(
 	age time.Time,
 	cb readinessCallback,
 ) ReadinessState {
-	return r.getNS(nsID).readinessState(rcKey{tp: tp, key: key}, pri, age, cb)
+	switch tp {
+	case enumsspb.LIMITER_TYPE_CONCURRENCY:
+		return r.getNS(nsID).concurrencyReadinessState(key, pri, age, cb)
+	default:
+		return ReadinessUnknown
+	}
 }
 
-func (rn *readinessNS) readinessState(
-	rkey rcKey,
+func (rn *readinessNS) concurrencyReadinessState(
+	key string,
 	pri int32,
 	age time.Time,
 	cb readinessCallback,
@@ -136,10 +149,10 @@ func (rn *readinessNS) readinessState(
 	rn.lock.Lock()
 	defer rn.lock.Unlock()
 
-	v, ok := rn.cache[rkey]
+	v, ok := rn.concurrencyLimiters[key]
 	if !ok {
 		// if missing from cache, return unknown. matching will probably try to Reserve and
-		// based on success/failure, call either reportReady or reportBlocked.
+		// based on success/failure, call either reportReady or reportConcurrencyBlocked.
 		return ReadinessUnknown
 	}
 
@@ -150,7 +163,7 @@ func (rn *readinessNS) readinessState(
 		} else {
 			v.waiters[cb] = makeWakePriority(pri, age)
 		}
-		v.syncGoroLocked(rn, rkey)
+		v.syncGoroLocked(rn, key)
 	}
 
 	return v.state
@@ -158,28 +171,34 @@ func (rn *readinessNS) readinessState(
 
 // CancelCallback cancels any future calls to cb.OnReady.
 func (r *Readiness) CancelCallback(nsID namespace.ID, tp enumsspb.LimiterType, key string, cb readinessCallback) {
-	r.getNS(nsID).cancelCallback(rcKey{tp: tp, key: key}, cb)
+	switch tp {
+	case enumsspb.LIMITER_TYPE_CONCURRENCY:
+		r.getNS(nsID).cancelConcurrencyCallback(key, cb)
+	}
 }
 
-func (rn *readinessNS) cancelCallback(rkey rcKey, cb readinessCallback) {
+func (rn *readinessNS) cancelConcurrencyCallback(key string, cb readinessCallback) {
 	rn.lock.Lock()
 	defer rn.lock.Unlock()
 
-	if v, ok := rn.cache[rkey]; ok {
+	if v, ok := rn.concurrencyLimiters[key]; ok {
 		delete(v.waiters, cb)
-		v.syncGoroLocked(rn, rkey)
+		v.syncGoroLocked(rn, key)
 	}
 }
 
 func (r *Readiness) reportReady(nsID namespace.ID, tp enumsspb.LimiterType, key string, gen int64) {
-	r.getNS(nsID).reportReady(rcKey{tp: tp, key: key}, gen)
+	switch tp {
+	case enumsspb.LIMITER_TYPE_CONCURRENCY:
+		r.getNS(nsID).reportConcurrencyReady(key, gen)
+	}
 }
 
 // reportReady is called when a Reserve or Wait call succeeds.
-func (rn *readinessNS) reportReady(rkey rcKey, gen int64) {
+func (rn *readinessNS) reportConcurrencyReady(key string, gen int64) {
 	rn.lock.Lock()
 
-	v := rn.getValueLocked(rkey)
+	v := rn.getConcurrencyLimiterLocked(key)
 	if gen < v.generation {
 		rn.lock.Unlock()
 		return
@@ -190,7 +209,7 @@ func (rn *readinessNS) reportReady(rkey rcKey, gen int64) {
 	// TODO(fc): do staged wakeup similar to the distributed case
 	waiters := v.waiters
 	v.waiters = make(map[readinessCallback]wakePriority)
-	v.syncGoroLocked(rn, rkey)
+	v.syncGoroLocked(rn, key)
 
 	rn.lock.Unlock()
 
@@ -201,14 +220,17 @@ func (rn *readinessNS) reportReady(rkey rcKey, gen int64) {
 
 // reportBlocked is called when a Reserve or Wait call fails.
 func (r *Readiness) reportBlocked(nsID namespace.ID, tp enumsspb.LimiterType, key string, gen int64) {
-	r.getNS(nsID).reportBlocked(rcKey{tp: tp, key: key}, gen)
+	switch tp {
+	case enumsspb.LIMITER_TYPE_CONCURRENCY:
+		r.getNS(nsID).reportConcurrencyBlocked(key, gen)
+	}
 }
 
-func (rn *readinessNS) reportBlocked(rkey rcKey, gen int64) {
+func (rn *readinessNS) reportConcurrencyBlocked(key string, gen int64) {
 	rn.lock.Lock()
 	defer rn.lock.Unlock()
 
-	v := rn.getValueLocked(rkey)
+	v := rn.getConcurrencyLimiterLocked(key)
 	if gen < v.generation {
 		return
 	}
@@ -216,7 +238,7 @@ func (rn *readinessNS) reportBlocked(rkey rcKey, gen int64) {
 	v.state = ReadinessBlocked
 }
 
-func (v *rcValue) syncGoroLocked(rn *readinessNS, rkey rcKey) {
+func (v *concurrencyLimiter) syncGoroLocked(rn *readinessNS, key string) {
 	haveWaiters := len(v.waiters) > 0
 	if (v.goroCancel != nil) == haveWaiters {
 		return
@@ -236,55 +258,48 @@ func (v *rcValue) syncGoroLocked(rn *readinessNS, rkey rcKey) {
 	))
 	ctx, v.goroCancel = context.WithCancel(ctx)
 	// Wait result will be reported back through ReportReady/Blocked
-	go rn.r.callWait(ctx, rn, rkey, v)
+	go v.callWait(ctx, rn, key)
 }
 
-func (v *rcValue) minPriorityLocked() (minPriority wakePriority) {
+func (v *concurrencyLimiter) minPriorityLocked() (minPriority wakePriority) {
 	for _, p := range v.waiters {
 		minPriority = min(minPriority, p)
 	}
 	return
 }
 
-func (r *Readiness) callWait(ctx context.Context, rn *readinessNS, rkey rcKey, v *rcValue) {
+func (v *concurrencyLimiter) callWait(ctx context.Context, rn *readinessNS, key string) {
 	policy := backoff.NewExponentialRetryPolicy(time.Second).
 		WithExpirationInterval(backoff.NoInterval).
 		WithMaximumInterval(time.Minute)
 	retrier := backoff.NewRetrier(policy, clock.NewRealTimeSource())
 
 	for ctx.Err() == nil {
-		switch rkey.tp {
-		case enumsspb.LIMITER_TYPE_CONCURRENCY:
-			rn.lock.Lock()
-			req := &fcpb.ConcurrencyWaitRequest{
-				NamespaceId:         rn.nsID.String(),
-				Key:                 rkey.key,
-				Generation:          v.generation,
-				WakePriority:        int64(v.minPriorityLocked()),
-				RequestedWakeTokens: int32(len(v.waiters)),
-			}
-			rn.lock.Unlock()
+		rn.lock.Lock()
+		req := &fcpb.ConcurrencyWaitRequest{
+			NamespaceId:         rn.nsID.String(),
+			Key:                 key,
+			Generation:          v.generation,
+			WakePriority:        int64(v.minPriorityLocked()),
+			RequestedWakeTokens: int32(len(v.waiters)),
+		}
+		rn.lock.Unlock()
 
-			// TODO(fc): if minPriority decreases during this call, interrupt and restart it.
-			// increasing minPriority should not interrupt
-			res, err := r.concurrencyServiceClient.Wait(ctx, req)
-			if err != nil {
-				util.InterruptibleSleep(ctx, retrier.NextBackOff(err))
-				continue
-			}
-			retrier.Reset()
+		// TODO(fc): if minPriority decreases during this call, interrupt and restart it.
+		// increasing minPriority should not interrupt
+		res, err := rn.r.concurrencyServiceClient.Wait(ctx, req)
+		if err != nil {
+			util.InterruptibleSleep(ctx, retrier.NextBackOff(err))
+			continue
+		}
+		retrier.Reset()
 
-			if res.WakeTokens > 0 {
-				rn.reportReady(rkey, res.Generation)
-				// note: If we have satisfied all our waiters, then ctx
-				// will be canceled before we continue this loop.
-			} else {
-				rn.reportBlocked(rkey, res.Generation)
-			}
-
-		default:
-			// TODO(fc): log error
-			return
+		if res.WakeTokens > 0 {
+			rn.reportConcurrencyReady(key, res.Generation)
+			// note: If we have satisfied all our waiters, then ctx
+			// will be canceled before we continue this loop.
+		} else {
+			rn.reportConcurrencyBlocked(key, res.Generation)
 		}
 	}
 }
@@ -296,13 +311,15 @@ func (r *Readiness) NewTx(ctx context.Context, nsID namespace.ID, task fcTask) (
 	}
 
 	committers := make([]committer, len(lims))
-	refs := make([]*taskqueuespb.LimiterRef, len(lims))
+	var refs []*taskqueuespb.LimiterRef
 	for i, lim := range lims {
 		switch lim.tp {
 		case enumsspb.LIMITER_TYPE_CONCURRENCY:
 			slotID := uuid.NewString()
 			committers[i] = newConcurrencyCommitter(ctx, r.concurrencyServiceClient, r, nsID, slotID, lim)
-			refs[i] = &taskqueuespb.LimiterRef{LimiterType: lim.tp, Key: lim.key, SlotId: slotID}
+			refs = append(refs, &taskqueuespb.LimiterRef{LimiterType: lim.tp, Key: lim.key, SlotId: slotID})
+		case enumsspb.LIMITER_TYPE_LOCAL_RATE_LIMIT:
+			committers[i] = newLocalRateLimitCommitter(lim)
 		default:
 			return nil, errors.New("invalid limiter type")
 		}
@@ -391,8 +408,7 @@ func (tx *tx) CancelReservations() {
 	}
 	for i, com := range tx.committers {
 		if tx.state[i] == txStateReserved {
-			// call in new goroutine, don't block here, we don't care about the result
-			go com.cancelReservations()
+			com.cancelReservations()
 			tx.state[i] = txStateCanceled
 		}
 	}

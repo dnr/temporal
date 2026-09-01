@@ -27,7 +27,11 @@ type LimiterType int32
 
 const (
 	LIMITER_TYPE_UNSPECIFIED LimiterType = 0
+	// External (chasm) concurrency limiter.
 	LIMITER_TYPE_CONCURRENCY LimiterType = 1
+	// Local (per-partition) ephemeral rate limit. This includes both whole-queue and
+	// per-fairness-key limiters.
+	LIMITER_TYPE_LOCAL_RATE_LIMIT LimiterType = 2
 )
 
 // Enum value maps for LimiterType.
@@ -35,10 +39,12 @@ var (
 	LimiterType_name = map[int32]string{
 		0: "LIMITER_TYPE_UNSPECIFIED",
 		1: "LIMITER_TYPE_CONCURRENCY",
+		2: "LIMITER_TYPE_LOCAL_RATE_LIMIT",
 	}
 	LimiterType_value = map[string]int32{
-		"LIMITER_TYPE_UNSPECIFIED": 0,
-		"LIMITER_TYPE_CONCURRENCY": 1,
+		"LIMITER_TYPE_UNSPECIFIED":      0,
+		"LIMITER_TYPE_CONCURRENCY":      1,
+		"LIMITER_TYPE_LOCAL_RATE_LIMIT": 2,
 	}
 )
 
@@ -54,6 +60,8 @@ func (x LimiterType) String() string {
 		return "Unspecified"
 	case LIMITER_TYPE_CONCURRENCY:
 		return "Concurrency"
+	case LIMITER_TYPE_LOCAL_RATE_LIMIT:
+		return "LocalRateLimit"
 	default:
 		return strconv.Itoa(int(x))
 	}
@@ -81,10 +89,11 @@ var File_temporal_server_api_enums_v1_flow_control_proto protoreflect.FileDescri
 
 const file_temporal_server_api_enums_v1_flow_control_proto_rawDesc = "" +
 	"\n" +
-	"/temporal/server/api/enums/v1/flow_control.proto\x12\x1ctemporal.server.api.enums.v1*I\n" +
+	"/temporal/server/api/enums/v1/flow_control.proto\x12\x1ctemporal.server.api.enums.v1*l\n" +
 	"\vLimiterType\x12\x1c\n" +
 	"\x18LIMITER_TYPE_UNSPECIFIED\x10\x00\x12\x1c\n" +
-	"\x18LIMITER_TYPE_CONCURRENCY\x10\x01B*Z(go.temporal.io/server/api/enums/v1;enumsb\x06proto3"
+	"\x18LIMITER_TYPE_CONCURRENCY\x10\x01\x12!\n" +
+	"\x1dLIMITER_TYPE_LOCAL_RATE_LIMIT\x10\x02B*Z(go.temporal.io/server/api/enums/v1;enumsb\x06proto3"
 
 var (
 	file_temporal_server_api_enums_v1_flow_control_proto_rawDescOnce sync.Once
