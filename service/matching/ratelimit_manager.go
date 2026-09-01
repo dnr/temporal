@@ -206,17 +206,22 @@ func (r *rateLimitManager) GetEffectiveRPSAndSource() (float64, enumspb.RateLimi
 	return r.effectiveRPS * float64(r.numReadPartitions), r.rateLimitSource
 }
 
-func (r *rateLimitManager) GetPerPartitionRPS() float64 {
+func (r *rateLimitManager) GetPerPartitionRPS() (float64, float64) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	return r.effectiveRPS
+	fkeyRPS := math.Inf(1)
+	if r.fairnessKeyRateLimitDefault != nil {
+		fkeyRPS = *r.fairnessKeyRateLimitDefault
+	}
+	return r.effectiveRPS, fkeyRPS
 }
 
-func (r *rateLimitManager) GetPerPartitionFairnessKeyRPS() (*float64, fairnessWeightOverrides) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	return r.fairnessKeyRateLimitDefault, r.perKeyOverrides
-}
+// FIXME
+// func (r *rateLimitManager) GetPerPartitionFairnessKeyRPS() (*float64, fairnessWeightOverrides) {
+// 	r.mu.Lock()
+// 	defer r.mu.Unlock()
+// 	return r.fairnessKeyRateLimitDefault, r.perKeyOverrides
+// }
 
 func (r *rateLimitManager) GetRateLimiter() quotas.RateLimiter {
 	return r.dynamicRateLimiter
@@ -338,28 +343,26 @@ func (r *rateLimitManager) clearPerKeyRateLimitsLocked() {
 	r.perKeyLimit = simplelimiter.Params{}
 }
 
-func (r *rateLimitManager) readyTimeForTask(task *internalTask) (simplelimiter.Limiter, bool) {
+func (r *rateLimitManager) readyTimeForTask(task *internalTask) simplelimiter.Limiter {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	// TODO(pri): after we have task-specific ready time, we can re-enable this
-	// if task.isForwarded() {
-	// 	// don't count any rate limit for forwarded tasks, it was counted on the child
-	// 	return 0
-	// }
+
+	// FIXME: ok to do now?
+	if task.isForwarded() {
+		// don't count any rate limit for forwarded tasks, it was counted on the child
+		return 0
+	}
+
 	ready := r.wholeQueueReady
-	perKeyLimited := false
 
 	if r.perKeyLimit.Limited() {
 		key := task.getPriority().GetFairnessKey()
 		if v := r.perKeyReady.Get(key); v != nil {
-			if sl := v.(simplelimiter.Limiter); sl > ready {
-				perKeyLimited = true
-				ready = sl
-			}
+			ready = max(ready, v.(simplelimiter.Limiter))
 		}
 	}
 
-	return ready, perKeyLimited
+	return ready
 }
 
 func (r *rateLimitManager) consumeTokens(now int64, task *internalTask, tokens int64) {

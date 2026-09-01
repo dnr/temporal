@@ -2,20 +2,16 @@ package fc
 
 import (
 	"context"
-	"errors"
 	"sync"
 	"time"
 
-	"github.com/google/uuid"
 	enumsspb "go.temporal.io/server/api/enums/v1"
-	taskqueuespb "go.temporal.io/server/api/taskqueue/v1"
 	fcpb "go.temporal.io/server/chasm/lib/flowcontrol/gen/flowcontrolpb/v1"
 	"go.temporal.io/server/common/backoff"
 	"go.temporal.io/server/common/clock"
 	"go.temporal.io/server/common/headers"
 	"go.temporal.io/server/common/namespace"
 	"go.temporal.io/server/common/util"
-	"go.temporal.io/server/service/matching/simplelimiter"
 )
 
 type ReadinessState int32
@@ -41,12 +37,9 @@ type concurrencyLimiter struct {
 	// not ready after taking last slot
 }
 
-type localRateLimiter struct {
-	params simplelimiter.Params
-	lim    simplelimiter.Limiter
-	// local rate limiters are partition-specific so we only need one waiter
-	// FIXME: ???
-	waiter ReadinessCallback
+type rlTimer struct {
+	// FIXME: consolidate with matching.resettableTimer
+	t *time.Timer
 }
 
 type readinessNS struct {
@@ -58,8 +51,8 @@ type readinessNS struct {
 	// LIMITER_TYPE_CONCURRENCY: key is concurrency limiter key (within ns)
 	concurrencyLimiters map[string]*concurrencyLimiter
 
-	// LIMITER_TYPE_LOCAL_RATE_LIMIT: key is rate limiter key (within ns)
-	localRateLimiters map[string]*localRateLimiter
+	// LIMITER_TYPE_LOCAL_RATE_LIMIT
+	rltimers map[ReadinessCallback]*rlTimer
 
 	// TODO(fc): clean up cache if entries are unused
 	// TODO(fc): gauges for size of cache
@@ -105,6 +98,7 @@ func (r *Readiness) getNS(nsID namespace.ID) *readinessNS {
 		r:                   r,
 		nsID:                nsID,
 		concurrencyLimiters: make(map[string]*concurrencyLimiter),
+		rltimers:            make(map[ReadinessCallback]*rlTimer),
 	}
 	fcrn, _ := r.caches.LoadOrStore(nsID, newFcrn)
 	return fcrn.(*readinessNS) // nolint:revive
@@ -129,15 +123,16 @@ func (rn *readinessNS) getConcurrencyLimiterLocked(key string) *concurrencyLimit
 // cb.OnReady with some backoff.
 func (r *Readiness) ReadinessState(
 	nsID namespace.ID,
-	tp enumsspb.LimiterType,
-	key string,
+	lim Limiter,
 	pri int32,
 	age time.Time,
 	cb ReadinessCallback,
 ) ReadinessState {
-	switch tp {
+	switch lim.Type {
 	case enumsspb.LIMITER_TYPE_CONCURRENCY:
-		return r.getNS(nsID).concurrencyReadinessState(key, pri, age, cb)
+		return r.getNS(nsID).concurrencyReadinessState(lim.Key, pri, age, cb)
+	case enumsspb.LIMITER_TYPE_LOCAL_RATE_LIMIT:
+		return r.getNS(nsID).localLimiterReadiness(lim.Config, cb)
 	default:
 		return ReadinessUnknown
 	}
@@ -155,7 +150,7 @@ func (rn *readinessNS) concurrencyReadinessState(
 	v, ok := rn.concurrencyLimiters[key]
 	if !ok {
 		// if missing from cache, return unknown. matching will probably try to Reserve and
-		// based on success/failure, call either reportReady or reportConcurrencyBlocked.
+		// based on result, call either reportConcurrencyReady or reportConcurrencyBlocked.
 		return ReadinessUnknown
 	}
 
@@ -173,10 +168,13 @@ func (rn *readinessNS) concurrencyReadinessState(
 }
 
 // CancelCallback cancels any future calls to cb.OnReady.
-func (r *Readiness) CancelCallback(nsID namespace.ID, tp enumsspb.LimiterType, key string, cb ReadinessCallback) {
-	switch tp {
+func (r *Readiness) CancelCallback(nsID namespace.ID, lim Limiter, cb ReadinessCallback) {
+	switch lim.Type {
 	case enumsspb.LIMITER_TYPE_CONCURRENCY:
-		r.getNS(nsID).cancelConcurrencyCallback(key, cb)
+		r.getNS(nsID).cancelConcurrencyCallback(lim.Key, cb)
+	case enumsspb.LIMITER_TYPE_LOCAL_RATE_LIMIT:
+		r.getNS(nsID).cancelLocalLimiterCallback(cb)
+	default:
 	}
 }
 
@@ -190,14 +188,11 @@ func (rn *readinessNS) cancelConcurrencyCallback(key string, cb ReadinessCallbac
 	}
 }
 
-func (r *Readiness) reportReady(nsID namespace.ID, tp enumsspb.LimiterType, key string, gen int64) {
-	switch tp {
-	case enumsspb.LIMITER_TYPE_CONCURRENCY:
-		r.getNS(nsID).reportConcurrencyReady(key, gen)
-	}
+func (r *Readiness) reportConcurrencyReady(nsID namespace.ID, key string, gen int64) {
+	r.getNS(nsID).reportConcurrencyReady(key, gen)
 }
 
-// reportReady is called when a Reserve or Wait call succeeds.
+// reportConcurrencyReady is called when a Reserve or Wait call succeeds.
 func (rn *readinessNS) reportConcurrencyReady(key string, gen int64) {
 	rn.lock.Lock()
 
@@ -221,12 +216,9 @@ func (rn *readinessNS) reportConcurrencyReady(key string, gen int64) {
 	}
 }
 
-// reportBlocked is called when a Reserve or Wait call fails.
-func (r *Readiness) reportBlocked(nsID namespace.ID, tp enumsspb.LimiterType, key string, gen int64) {
-	switch tp {
-	case enumsspb.LIMITER_TYPE_CONCURRENCY:
-		r.getNS(nsID).reportConcurrencyBlocked(key, gen)
-	}
+// reportConcurrencyBlocked is called when a Reserve or Wait call fails.
+func (r *Readiness) reportConcurrencyBlocked(nsID namespace.ID, key string, gen int64) {
+	r.getNS(nsID).reportConcurrencyBlocked(key, gen)
 }
 
 func (rn *readinessNS) reportConcurrencyBlocked(key string, gen int64) {
@@ -307,112 +299,82 @@ func (v *concurrencyLimiter) callWait(ctx context.Context, rn *readinessNS, key 
 	}
 }
 
-func (r *Readiness) NewTx(ctx context.Context, nsID namespace.ID, task fcTask) (*tx, error) {
-	lims := canonicalLimiters(task)
-	if len(lims) == 0 {
-		return nil, nil
-	}
+// rate limit
 
-	committers := make([]committer, len(lims))
-	var refs []*taskqueuespb.LimiterRef
-	for i, lim := range lims {
-		switch lim.Type {
-		case enumsspb.LIMITER_TYPE_CONCURRENCY:
-			slotID := uuid.NewString()
-			committers[i] = newConcurrencyCommitter(ctx, r.concurrencyServiceClient, r, nsID, slotID, lim)
-			refs = append(refs, &taskqueuespb.LimiterRef{LimiterType: lim.Type, Key: lim.Key, SlotId: slotID})
-		case enumsspb.LIMITER_TYPE_LOCAL_RATE_LIMIT:
-			committers[i] = newLocalRateLimitCommitter(lim)
-		default:
-			return nil, errors.New("invalid limiter type")
+// // FIXME: share with matching code
+// type resettableTimer struct {
+// 	timer clock.Timer // AfterFunc timer
+// }
+
+// // set sets rt to call f after delay. set to <= 0 stops the timer.
+// func (rt *resettableTimer) set(ts clock.TimeSource, f func(), delay time.Duration) {
+// 	if delay <= 0 {
+// 		rt.unset()
+// 	} else if rt.timer == nil {
+// 		rt.timer = ts.AfterFunc(delay, f)
+// 	} else {
+// 		rt.timer.Reset(delay)
+// 	}
+// }
+
+// // unset stops the timer.
+// func (rt *resettableTimer) unset() {
+// 	if rt.timer != nil {
+// 		rt.timer.Stop()
+// 		rt.timer = nil
+// 	}
+// }
+
+func (rn *readinessNS) localLimiterReadiness(config any, cb ReadinessCallback) ReadinessState {
+	ll, ok := config.(LocalLimiter)
+	if !ok {
+		return ReadinessUnknown
+	}
+	delay := ll.Delay()
+
+	rn.lock.Lock()
+	defer rn.lock.Unlock()
+
+	if delay > 0 {
+		// set timer
+		tmr, ok := rn.rltimers[cb]
+		if !ok {
+			tmr = &rlTimer{}
 		}
-	}
-
-	return &tx{
-		readiness:  r,
-		committers: committers,
-		refs:       refs,
-	}, nil
-}
-
-type tx struct {
-	readiness  *Readiness
-	committers []committer
-	refs       []*taskqueuespb.LimiterRef
-	state      [MaxLimiters]txState
-}
-
-type txState int8 // just so we can pack these in an array
-
-const (
-	txStateInit txState = iota
-	txStateReserved
-	txStateCommitted
-	txStateCommitFailed
-	txStateCanceled
-)
-
-func (tx *tx) LimiterRefs() []*taskqueuespb.LimiterRef {
-	if tx == nil {
-		return nil
-	}
-	return tx.refs
-}
-
-func (tx *tx) Reserve() error {
-	if tx == nil {
-		return nil // no limiters
-	}
-	// reserve must be sequential
-	for i, com := range tx.committers {
-		if err := com.reserve(); err != nil {
-			return err
-		}
-		tx.state[i] = txStateReserved
-	}
-	return nil
-}
-
-func (tx *tx) Commit() error {
-	if tx == nil {
-		return nil // no limiters
-	}
-
-	n := len(tx.committers)
-
-	errC := make(chan error, n)
-	commit := func(i int) {
-		err := tx.committers[i].commit()
-		if err != nil {
-			tx.state[i] = txStateCommitFailed
+		if tmr.t == nil {
+			tmr.t = time.AfterFunc(delay, func() {
+				rn.lock.Lock()
+				delete(rn.rltimers, cb)
+				rn.lock.Unlock()
+				cb.OnReady()
+			})
 		} else {
-			tx.state[i] = txStateCommitted
+			// FIXME: should we do min? max? hmm...
+			tmr.t.Reset(delay)
 		}
-		errC <- err
+
+		return ReadinessBlocked
 	}
 
-	// commit all concurrently and record success/failures
-	for i := range n - 1 {
-		go commit(i + 1)
+	// clear timer
+	if tmr, ok := rn.rltimers[cb]; ok {
+		if tmr.t != nil {
+			tmr.t.Stop()
+		}
+		delete(rn.rltimers, cb)
 	}
-	commit(0)
 
-	errs := make([]error, n)
-	for i := range n {
-		errs[i] = <-errC
-	}
-	return errors.Join(errs...)
+	return ReadinessReady
 }
 
-func (tx *tx) CancelReservations() {
-	// this is best-effort, reservations have timeouts so it's okay if we fail to cancel
-	if tx == nil {
-		return // no limiters
-	}
-	for i, com := range tx.committers {
-		if tx.state[i] == txStateReserved {
-			com.cancelReservations()
-			tx.state[i] = txStateCanceled
+func (rn *readinessNS) cancelLocalLimiterCallback(cb ReadinessCallback) {
+	rn.lock.Lock()
+	defer rn.lock.Unlock()
+
+	if tmr, ok := rn.rltimers[cb]; ok {
+		if tmr.t != nil {
+			tmr.t.Stop()
 		}
+		delete(rn.rltimers, cb)
 	}
 }

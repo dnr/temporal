@@ -494,6 +494,8 @@ func (d *matcherData) findMatch(allowForwarding bool, now int64) (
 		matchedTask, matchedPoller = task, poller
 		return false
 	})
+
+	blockedBy = syncMatchNoPoller
 	return
 }
 
@@ -579,9 +581,10 @@ func (d *matcherData) findAndWakeMatches() syncMatchOutcome {
 		d.tasks.Remove(task)
 		d.pollers.Remove(poller)
 
-		// TODO(pri): maybe we can allow tasks to have costs other than 1
-		d.rateLimitManager.consumeTokens(now, task, 1)
-		task.recycleToken = d.recycleToken
+		// FIXME: this moves tofc
+		// // TODO(pri): maybe we can allow tasks to have costs other than 1
+		// d.rateLimitManager.consumeTokens(now, task, 1)
+		// task.recycleToken = d.recycleToken
 
 		res := &matchResult{task: task, poller: poller}
 		task.wake(d.logger, res)
@@ -596,14 +599,15 @@ func (d *matcherData) findAndWakeMatches() syncMatchOutcome {
 	}
 }
 
-func (d *matcherData) recycleToken(task *internalTask) {
-	d.lock.Lock()
-	defer d.lock.Unlock()
+// FIXME: delete
+// func (d *matcherData) recycleToken(task *internalTask) {
+// 	d.lock.Lock()
+// 	defer d.lock.Unlock()
 
-	now := d.timeSource.Now().UnixNano()
-	d.rateLimitManager.consumeTokens(now, task, -1)
-	d.findAndWakeMatches() // another task may be ready to match now
-}
+// 	now := d.timeSource.Now().UnixNano()
+// 	d.rateLimitManager.consumeTokens(now, task, -1)
+// 	d.findAndWakeMatches() // another task may be ready to match now
+// }
 
 // called from timer and flow control readiness callback
 func (d *matcherData) OnReady() {

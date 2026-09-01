@@ -5,7 +5,6 @@ import (
 
 	"go.temporal.io/api/serviceerror"
 	taskqueuepb "go.temporal.io/api/taskqueue/v1"
-	enumsspb "go.temporal.io/server/api/enums/v1"
 	fcpb "go.temporal.io/server/chasm/lib/flowcontrol/gen/flowcontrolpb/v1"
 	"go.temporal.io/server/common/namespace"
 	serviceerrors "go.temporal.io/server/common/serviceerror"
@@ -19,9 +18,9 @@ type committer interface {
 	cancelReservations()
 }
 
-type readinessCacheInterface interface {
-	reportReady(namespace.ID, enumsspb.LimiterType, string, int64)
-	reportBlocked(namespace.ID, enumsspb.LimiterType, string, int64)
+type readinessCacheConcurrencyInterface interface {
+	reportConcurrencyReady(namespace.ID, string, int64)
+	reportConcurrencyBlocked(namespace.ID, string, int64)
 }
 
 // concurrency limits
@@ -29,7 +28,7 @@ type readinessCacheInterface interface {
 type concurrencyCommitter struct {
 	ctx    context.Context
 	client fcpb.ConcurrencyServiceClient
-	cache  readinessCacheInterface
+	cache  readinessCacheConcurrencyInterface
 	nsID   namespace.ID
 	slotID string
 	lim    Limiter
@@ -38,7 +37,7 @@ type concurrencyCommitter struct {
 func newConcurrencyCommitter(
 	ctx context.Context,
 	client fcpb.ConcurrencyServiceClient,
-	cache readinessCacheInterface,
+	cache readinessCacheConcurrencyInterface,
 	nsID namespace.ID,
 	slotID string,
 	lim Limiter,
@@ -68,13 +67,13 @@ func (c *concurrencyCommitter) reserve() error {
 		return err // don't update cache on rpc error
 	}
 	if !res.ReserveSuccess[0] {
-		c.cache.reportBlocked(c.nsID, c.lim.Type, c.lim.Key, res.Generation)
+		c.cache.reportConcurrencyBlocked(c.nsID, c.lim.Key, res.Generation)
 		return serviceerrors.NewFlowControlBlocked()
 	}
 	// TODO(fc): we could include a hint for how many slots are _remaining_, and if zero, mark
 	// this limiter as blocked in the cache. but we don't want to immediately Wait on it since
 	// we might not have another waiter yet.
-	c.cache.reportReady(c.nsID, c.lim.Type, c.lim.Key, res.Generation)
+	c.cache.reportConcurrencyReady(c.nsID, c.lim.Key, res.Generation)
 	return nil
 }
 
@@ -103,34 +102,37 @@ func (c *concurrencyCommitter) cancelReservations() {
 
 // local rate limits
 
-type localRateLimitCommitter struct {
-	lim Limiter
+type localLimiterCommitter struct {
+	ll   LocalLimiter
+	task any
 }
 
-func newLocalRateLimitCommitter(
+func newLocalLimiterCommitter(
 	lim Limiter,
-) *concurrencyCommitter {
-	return &concurrencyCommitter{
-		lim: lim,
+) *localLimiterCommitter {
+	ll, _ := lim.Config.(LocalLimiter)
+	return &localLimiterCommitter{
+		ll: ll,
 	}
 }
 
-func (c *localRateLimitCommitter) reserve() error {
-	// if config is missing or wrong type, just leave it out
-	config, _ := c.lim.Config.(*taskqueuepb.RateLimit)
-	_ = config
-
-	// FIXME
-	if false {
-		return serviceerrors.NewFlowControlBlocked()
+func (c *localLimiterCommitter) reserve() error {
+	if c.ll == nil {
+		return serviceerror.NewInternal("localRateLimitCommitter lim wrong type")
 	}
+	// by the time we get here, we already checked and allowed the right number of tasks to
+	// match in the matcher, so just deduct the tokens.
+	c.ll.Consume(1)
 	return nil
 }
 
-func (c *localRateLimitCommitter) commit() error {
+func (c *localLimiterCommitter) commit() error {
 	return nil
 }
 
-func (c *localRateLimitCommitter) cancelReservations() {
-	// FIXME: recycle token
+func (c *localLimiterCommitter) cancelReservations() {
+	if c.ll == nil {
+		return
+	}
+	c.ll.Consume(-1)
 }
