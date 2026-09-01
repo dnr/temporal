@@ -9,6 +9,7 @@ import (
 	"go.temporal.io/server/common/cache"
 	"go.temporal.io/server/common/clock"
 	"go.temporal.io/server/common/quotas"
+	"go.temporal.io/server/service/matching/simplelimiter"
 )
 
 type (
@@ -39,8 +40,8 @@ type (
 		// dynamicRateLimiter is the dynamic rate limiter that can be used to force refresh on new rates.
 		dynamicRateLimiter *quotas.DynamicRateLimiterImpl
 		// Fairness tasks rate limiter.
-		wholeQueueLimit simpleLimiterParams
-		wholeQueueReady simpleLimiter
+		wholeQueueLimit simplelimiter.Params
+		wholeQueueReady simplelimiter.Limiter
 		// Rate limiter for individual fairness keys.
 		// Note that we currently have only one limit for all keys, which is scaled by the key's
 		// weight. If we do this, we can assume that all keys are either at or below their rate
@@ -48,7 +49,7 @@ type (
 		// must also be, and so we don't have to "skip over" the head of the queue due to rate
 		// limits. This isn't true in situations where weights have changed in between writing and
 		// reading. We'll handle that situation better in the future.
-		perKeyLimit     simpleLimiterParams
+		perKeyLimit     simplelimiter.Params
 		perKeyReady     cache.Cache
 		perKeyOverrides fairnessWeightOverrides // TODO(fairness): get this from config
 		cancels         []func()
@@ -272,12 +273,12 @@ func (r *rateLimitManager) updateRatelimitLocked() {
 // UpdateSimpleRateLimit updates the overall queue rate limits for the simpleRateLimiter implementation
 func (r *rateLimitManager) updateSimpleRateLimitWithBurstLocked(burstDuration time.Duration) {
 	newRPS := r.effectiveRPS
-	r.wholeQueueLimit = makeSimpleLimiterParams(newRPS, burstDuration)
+	r.wholeQueueLimit = simplelimiter.MakeParams(newRPS, burstDuration)
 
 	// Clip to handle the case where we have increased from a zero or very low limit and had
 	// ready times in the far future.
 	now := r.timeSource.Now().UnixNano()
-	r.wholeQueueReady = r.wholeQueueReady.clip(r.wholeQueueLimit, now, maxTokens)
+	r.wholeQueueReady = r.wholeQueueReady.Clip(r.wholeQueueLimit, now, maxTokens)
 }
 
 // UpdatePerKeySimpleRateLimit updates the per-key rate limit for the simpleRateLimit implementation
@@ -288,7 +289,7 @@ func (r *rateLimitManager) updatePerKeySimpleRateLimitWithBurstLocked(burstDurat
 		return
 	}
 	rate := *r.fairnessKeyRateLimitDefault
-	slp := makeSimpleLimiterParams(rate, burstDuration)
+	slp := simplelimiter.MakeParams(rate, burstDuration)
 	if slp == r.perKeyLimit {
 		// No change in per-key rate limit, no need to update.
 		return
@@ -297,15 +298,15 @@ func (r *rateLimitManager) updatePerKeySimpleRateLimitWithBurstLocked(burstDurat
 
 	// Clip to handle the case where we have increased from a zero or very low limit and had
 	// ready times in the far future.
-	var updates map[string]simpleLimiter
+	var updates map[string]simplelimiter.Limiter
 	now := r.timeSource.Now().UnixNano()
 	it := r.perKeyReady.Iterator()
 	for it.HasNext() {
 		e := it.Next()
-		sl := e.Value().(simpleLimiter) //nolint:revive
-		if clipped := sl.clip(r.perKeyLimit, now, maxTokens); clipped != sl {
+		sl := e.Value().(simplelimiter.Limiter) //nolint:revive
+		if clipped := sl.Clip(r.perKeyLimit, now, maxTokens); clipped != sl {
 			if updates == nil {
-				updates = make(map[string]simpleLimiter)
+				updates = make(map[string]simplelimiter.Limiter)
 			}
 			updates[e.Key().(string)] = clipped
 		}
@@ -322,10 +323,10 @@ func (r *rateLimitManager) updatePerKeySimpleRateLimitWithBurstLocked(burstDurat
 // clearPerKeyRateLimitsLocked removes all fairness per-key rate limits.
 func (r *rateLimitManager) clearPerKeyRateLimitsLocked() {
 	r.perKeyReady = cache.New(r.config.FairnessKeyRateLimitCacheSize(), nil)
-	r.perKeyLimit = simpleLimiterParams{}
+	r.perKeyLimit = simplelimiter.Params{}
 }
 
-func (r *rateLimitManager) readyTimeForTask(task *internalTask) (simpleLimiter, bool) {
+func (r *rateLimitManager) readyTimeForTask(task *internalTask) (simplelimiter.Limiter, bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	// TODO(pri): after we have task-specific ready time, we can re-enable this
@@ -336,10 +337,10 @@ func (r *rateLimitManager) readyTimeForTask(task *internalTask) (simpleLimiter, 
 	ready := r.wholeQueueReady
 	perKeyLimited := false
 
-	if r.perKeyLimit.limited() {
+	if r.perKeyLimit.Limited() {
 		key := task.getPriority().GetFairnessKey()
 		if v := r.perKeyReady.Get(key); v != nil {
-			if sl := v.(simpleLimiter); sl > ready {
+			if sl := v.(simplelimiter.Limiter); sl > ready {
 				perKeyLimited = true
 				ready = sl
 			}
@@ -357,19 +358,19 @@ func (r *rateLimitManager) consumeTokens(now int64, task *internalTask, tokens i
 		return
 	}
 
-	r.wholeQueueReady = r.wholeQueueReady.consume(r.wholeQueueLimit, now, tokens)
+	r.wholeQueueReady = r.wholeQueueReady.Consume(r.wholeQueueLimit, now, tokens)
 
-	if r.perKeyLimit.limited() {
+	if r.perKeyLimit.Limited() {
 		pri := task.getPriority()
 		key := pri.GetFairnessKey()
 		weight := getEffectiveWeight(r.perKeyOverrides, pri)
 		p := r.perKeyLimit
-		p.interval = time.Duration(float32(p.interval) / weight) // scale by weight
-		var sl simpleLimiter
+		p.Interval = time.Duration(float32(p.Interval) / weight) // scale by weight
+		var sl simplelimiter.Limiter
 		if v := r.perKeyReady.Get(key); v != nil {
-			sl = v.(simpleLimiter) // nolint:revive
+			sl = v.(simplelimiter.Limiter) // nolint:revive
 		}
-		r.perKeyReady.Put(key, sl.consume(p, now, tokens))
+		r.perKeyReady.Put(key, sl.Consume(p, now, tokens))
 	}
 }
 
