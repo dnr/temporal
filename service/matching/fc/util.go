@@ -10,35 +10,22 @@ import (
 
 // Maximum total limiters that can apply to any task. (Currently this includes whole-queue
 // limiters, in the future we may allow whole-queue limiters to be separate from this limit.)
-const maxLimiters = 3
+const MaxLimiters = 3
 
-type limiterSource int32
 type wakePriority int64
 
-const (
-	// not valid limiter
-	limiterSourceInvalid limiterSource = iota
-	// limiter came from task queue config, applies to the whole queue
-	limiterSourceConfig_WholeQueue
-	// limiter came from task queue config, per-fairness-key limit
-	limiterSourceConfig_Fairness
-	// limiter came from task itself
-	limiterSourceTask
-	// future: namespace policy, etc.
-)
-
-func canonicalLimiters(task fcTask) []limiter {
+func canonicalLimiters(task fcTask) []Limiter {
 	limiters := task.Limiters()
 	if limiters == nil {
 		return nil
 	}
-	out := util.FilterSlice(limiters.limiters[:], limiter.valid)
+	out := util.FilterSlice(limiters.Limiters[:], Limiter.Valid)
 	// we must reserve limiters in a consistent canonical order to avoid quasi-deadlock
-	slices.SortFunc(out, func(a, b limiter) int {
-		if v := cmp.Compare(a.tp, b.tp); v != 0 {
+	slices.SortFunc(out, func(a, b Limiter) int {
+		if v := cmp.Compare(a.Type, b.Type); v != 0 {
 			return v
 		}
-		return cmp.Compare(a.key, b.key)
+		return cmp.Compare(a.Key, b.Key)
 	})
 	return out
 }

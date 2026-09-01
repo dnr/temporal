@@ -13,7 +13,6 @@ import (
 	"go.temporal.io/server/common/log"
 	"go.temporal.io/server/common/softassert"
 	"go.temporal.io/server/common/util"
-	"go.temporal.io/server/service/matching/fc"
 )
 
 const (
@@ -219,7 +218,7 @@ type matcherData struct {
 	timeSource       clock.TimeSource
 	canForward       bool
 	rateLimitManager *rateLimitManager
-	fcManager        *fc.Manager
+	fcManager        *fcManager
 	// onRateLimited is called when a dispatch is blocked by the rate limiter.
 	onRateLimited func()
 
@@ -246,7 +245,7 @@ func newMatcherData(
 	timeSource clock.TimeSource,
 	canForward bool,
 	rateLimitManager *rateLimitManager,
-	fcManager *fc.Manager,
+	fcManager *fcManager,
 	onRateLimited func(),
 ) matcherData {
 	return matcherData{

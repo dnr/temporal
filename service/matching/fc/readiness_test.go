@@ -25,15 +25,15 @@ func TestNilTxLimiterRefs(t *testing.T) {
 
 func TestNewTxGeneratesSlotIDs(t *testing.T) {
 	limiters := &Limiters{}
-	limiters.limiters[0] = limiter{
-		key:    "limiter-b",
-		tp:     enumsspb.LIMITER_TYPE_CONCURRENCY,
-		source: limiterSourceTask,
+	limiters.Limiters[0] = Limiter{
+		Key:    "limiter-b",
+		Type:   enumsspb.LIMITER_TYPE_CONCURRENCY,
+		Source: limiterSourceTask,
 	}
-	limiters.limiters[1] = limiter{
-		key:    "limiter-a",
-		tp:     enumsspb.LIMITER_TYPE_CONCURRENCY,
-		source: limiterSourceTask,
+	limiters.Limiters[1] = Limiter{
+		Key:    "limiter-a",
+		Type:   enumsspb.LIMITER_TYPE_CONCURRENCY,
+		Source: limiterSourceTask,
 	}
 
 	tx, err := NewReadiness(nil).NewTx(

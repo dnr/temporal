@@ -32,7 +32,7 @@ type concurrencyCommitter struct {
 	cache  readinessCacheInterface
 	nsID   namespace.ID
 	slotID string
-	lim    limiter
+	lim    Limiter
 }
 
 func newConcurrencyCommitter(
@@ -41,7 +41,7 @@ func newConcurrencyCommitter(
 	cache readinessCacheInterface,
 	nsID namespace.ID,
 	slotID string,
-	lim limiter,
+	lim Limiter,
 ) *concurrencyCommitter {
 	return &concurrencyCommitter{
 		ctx:    ctx,
@@ -55,33 +55,33 @@ func newConcurrencyCommitter(
 
 func (c *concurrencyCommitter) reserve() error {
 	// if config is missing or wrong type, just leave it out
-	configUpdate, _ := c.lim.config.(*taskqueuepb.ConcurrencyLimit)
+	configUpdate, _ := c.lim.Config.(*taskqueuepb.ConcurrencyLimit)
 
 	res, err := c.client.Batch(c.ctx, &fcpb.ConcurrencyBatchRequest{
 		NamespaceId:         c.nsID.String(),
-		Key:                 c.lim.key,
+		Key:                 c.lim.Key,
 		ReserveSlots:        []string{c.slotID},
 		ConfigUpdate:        configUpdate,
-		ConfigUpdateVersion: c.lim.configVersion,
+		ConfigUpdateVersion: c.lim.ConfigVersion,
 	})
 	if err != nil {
 		return err // don't update cache on rpc error
 	}
 	if !res.ReserveSuccess[0] {
-		c.cache.reportBlocked(c.nsID, c.lim.tp, c.lim.key, res.Generation)
+		c.cache.reportBlocked(c.nsID, c.lim.Type, c.lim.Key, res.Generation)
 		return serviceerrors.NewFlowControlBlocked()
 	}
 	// TODO(fc): we could include a hint for how many slots are _remaining_, and if zero, mark
 	// this limiter as blocked in the cache. but we don't want to immediately Wait on it since
 	// we might not have another waiter yet.
-	c.cache.reportReady(c.nsID, c.lim.tp, c.lim.key, res.Generation)
+	c.cache.reportReady(c.nsID, c.lim.Type, c.lim.Key, res.Generation)
 	return nil
 }
 
 func (c *concurrencyCommitter) commit() error {
 	res, err := c.client.Batch(c.ctx, &fcpb.ConcurrencyBatchRequest{
 		NamespaceId: c.nsID.String(),
-		Key:         c.lim.key,
+		Key:         c.lim.Key,
 		CommitSlots: []string{c.slotID},
 	})
 	if err != nil {
@@ -96,7 +96,7 @@ func (c *concurrencyCommitter) cancelReservations() {
 	// call in new goroutine, don't block here, we don't care about the result
 	go c.client.Batch(c.ctx, &fcpb.ConcurrencyBatchRequest{
 		NamespaceId:            c.nsID.String(),
-		Key:                    c.lim.key,
+		Key:                    c.lim.Key,
 		CancelReservationSlots: []string{c.slotID},
 	})
 }
@@ -104,11 +104,11 @@ func (c *concurrencyCommitter) cancelReservations() {
 // local rate limits
 
 type localRateLimitCommitter struct {
-	lim limiter
+	lim Limiter
 }
 
 func newLocalRateLimitCommitter(
-	lim limiter,
+	lim Limiter,
 ) *concurrencyCommitter {
 	return &concurrencyCommitter{
 		lim: lim,
@@ -117,9 +117,11 @@ func newLocalRateLimitCommitter(
 
 func (c *localRateLimitCommitter) reserve() error {
 	// if config is missing or wrong type, just leave it out
-	config, _ := c.lim.config.(*taskqueuepb.RateLimit)
+	config, _ := c.lim.Config.(*taskqueuepb.RateLimit)
+	_ = config
 
-	if FIXMEblocked {
+	// FIXME
+	if false {
 		return serviceerrors.NewFlowControlBlocked()
 	}
 	return nil
