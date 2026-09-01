@@ -2,11 +2,9 @@ package fc
 
 import (
 	"cmp"
-	"fmt"
 	"slices"
 	"time"
 
-	enumspb "go.temporal.io/api/enums/v1"
 	"go.temporal.io/server/common/util"
 )
 
@@ -22,15 +20,12 @@ const (
 	limiterSourceInvalid limiterSource = iota
 	// limiter came from task queue config, applies to the whole queue
 	limiterSourceConfig_WholeQueue
+	// limiter came from task queue config, per-fairness-key limit
+	limiterSourceConfig_Fairness
 	// limiter came from task itself
 	limiterSourceTask
 	// future: namespace policy, etc.
 )
-
-func wholeQueueLimiterName(tqName string, tqType enumspb.TaskQueueType) string {
-	// the "/0" at the end is for future extension for partitioning limiters
-	return fmt.Sprintf("wholequeue/%s/%d/0", tqName, tqType)
-}
 
 func canonicalLimiters(task fcTask) []limiter {
 	limiters := task.Limiters()

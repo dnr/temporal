@@ -54,10 +54,13 @@ type readinessNS struct {
 	nsID namespace.ID
 
 	lock sync.Mutex
-	// LIMITER_TYPE_CONCURRENCY. key is concurrency limiter key (within ns)
+
+	// LIMITER_TYPE_CONCURRENCY: key is concurrency limiter key (within ns)
 	concurrencyLimiters map[string]*concurrencyLimiter
-	// LIMITER_TYPE_LOCAL_RATE_LIMIT. key is empty string (whole queue) or fairness key.
-	localRateLimites map[string]*localRateLimiter
+
+	// LIMITER_TYPE_LOCAL_RATE_LIMIT: key is rate limiter key (within ns)
+	localRateLimiters map[string]*localRateLimiter
+
 	// TODO(fc): clean up cache if entries are unused
 	// TODO(fc): gauges for size of cache
 }
