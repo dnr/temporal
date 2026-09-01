@@ -16,7 +16,7 @@ type Limiter struct {
 	Key    string
 	Type   enumsspb.LimiterType
 	Source LimiterSource
-	// for limiters set from Config, we need to pass through to Reserve
+	// for limiters set from config, we need to pass through to Reserve
 	Config        any
 	ConfigVersion int64
 }
