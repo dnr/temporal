@@ -13,6 +13,6 @@ type fcTask interface {
 	Limiters() *Limiters
 }
 
-type readinessCallback interface {
+type ReadinessCallback interface {
 	OnReady()
 }

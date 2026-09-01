@@ -35,7 +35,7 @@ type concurrencyLimiter struct {
 	state      ReadinessState
 	// invariant: {len(waiters) > 0} == {Wait goroutine is running} == {goroCancel != nil}
 	// (for now, until we add eviction)
-	waiters    map[readinessCallback]wakePriority
+	waiters    map[ReadinessCallback]wakePriority
 	goroCancel context.CancelFunc
 	// TODO(fc): cache some limiter-specific state, e.g. slots free so that we can change to
 	// not ready after taking last slot
@@ -46,7 +46,7 @@ type localRateLimiter struct {
 	lim    simplelimiter.Limiter
 	// local rate limiters are partition-specific so we only need one waiter
 	// FIXME: ???
-	waiter readinessCallback
+	waiter ReadinessCallback
 }
 
 type readinessNS struct {
@@ -115,7 +115,7 @@ func (rn *readinessNS) getConcurrencyLimiterLocked(key string) *concurrencyLimit
 		return v
 	}
 	v := &concurrencyLimiter{
-		waiters: make(map[readinessCallback]wakePriority),
+		waiters: make(map[ReadinessCallback]wakePriority),
 	}
 	rn.concurrencyLimiters[key] = v
 	return v
@@ -133,7 +133,7 @@ func (r *Readiness) ReadinessState(
 	key string,
 	pri int32,
 	age time.Time,
-	cb readinessCallback,
+	cb ReadinessCallback,
 ) ReadinessState {
 	switch tp {
 	case enumsspb.LIMITER_TYPE_CONCURRENCY:
@@ -147,7 +147,7 @@ func (rn *readinessNS) concurrencyReadinessState(
 	key string,
 	pri int32,
 	age time.Time,
-	cb readinessCallback,
+	cb ReadinessCallback,
 ) ReadinessState {
 	rn.lock.Lock()
 	defer rn.lock.Unlock()
@@ -173,14 +173,14 @@ func (rn *readinessNS) concurrencyReadinessState(
 }
 
 // CancelCallback cancels any future calls to cb.OnReady.
-func (r *Readiness) CancelCallback(nsID namespace.ID, tp enumsspb.LimiterType, key string, cb readinessCallback) {
+func (r *Readiness) CancelCallback(nsID namespace.ID, tp enumsspb.LimiterType, key string, cb ReadinessCallback) {
 	switch tp {
 	case enumsspb.LIMITER_TYPE_CONCURRENCY:
 		r.getNS(nsID).cancelConcurrencyCallback(key, cb)
 	}
 }
 
-func (rn *readinessNS) cancelConcurrencyCallback(key string, cb readinessCallback) {
+func (rn *readinessNS) cancelConcurrencyCallback(key string, cb ReadinessCallback) {
 	rn.lock.Lock()
 	defer rn.lock.Unlock()
 
@@ -211,7 +211,7 @@ func (rn *readinessNS) reportConcurrencyReady(key string, gen int64) {
 
 	// TODO(fc): do staged wakeup similar to the distributed case
 	waiters := v.waiters
-	v.waiters = make(map[readinessCallback]wakePriority)
+	v.waiters = make(map[ReadinessCallback]wakePriority)
 	v.syncGoroLocked(rn, key)
 
 	rn.lock.Unlock()
@@ -316,11 +316,11 @@ func (r *Readiness) NewTx(ctx context.Context, nsID namespace.ID, task fcTask) (
 	committers := make([]committer, len(lims))
 	var refs []*taskqueuespb.LimiterRef
 	for i, lim := range lims {
-		switch lim.tp {
+		switch lim.Type {
 		case enumsspb.LIMITER_TYPE_CONCURRENCY:
 			slotID := uuid.NewString()
 			committers[i] = newConcurrencyCommitter(ctx, r.concurrencyServiceClient, r, nsID, slotID, lim)
-			refs = append(refs, &taskqueuespb.LimiterRef{LimiterType: lim.tp, Key: lim.key, SlotId: slotID})
+			refs = append(refs, &taskqueuespb.LimiterRef{LimiterType: lim.Type, Key: lim.Key, SlotId: slotID})
 		case enumsspb.LIMITER_TYPE_LOCAL_RATE_LIMIT:
 			committers[i] = newLocalRateLimitCommitter(lim)
 		default:
@@ -339,7 +339,7 @@ type tx struct {
 	readiness  *Readiness
 	committers []committer
 	refs       []*taskqueuespb.LimiterRef
-	state      [maxLimiters]txState
+	state      [MaxLimiters]txState
 }
 
 type txState int8 // just so we can pack these in an array
