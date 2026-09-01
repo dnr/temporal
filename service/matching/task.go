@@ -299,7 +299,7 @@ func (task *internalTask) Limiters() *fc.Limiters {
 }
 
 func (task *internalTask) updateLimitersFromConfig(manager *fcManager) {
-	task.limiters = manager.UpdateLimitersFromConfig(task.limiters, task.getPriority().GetFairnessKey())
+	task.limiters = manager.UpdateLimitersFromConfig(task.limiters, task.getPriority())
 }
 
 // pollWorkflowTaskQueueResponse returns the poll response for a workflow task that is

@@ -2,9 +2,11 @@ package matching
 
 import (
 	"fmt"
+	"math"
 	"slices"
 	"time"
 
+	commonpb "go.temporal.io/api/common/v1"
 	taskqueuepb "go.temporal.io/api/taskqueue/v1"
 	enumsspb "go.temporal.io/server/api/enums/v1"
 	"go.temporal.io/server/common/namespace"
@@ -46,7 +48,7 @@ func (m *fcManager) CancelWholeQueueCallback(cb fc.ReadinessCallback) {
 	m.readiness.CancelCallback(nsID, enumsspb.LIMITER_TYPE_CONCURRENCY, key, cb)
 }
 
-func (m *fcManager) UpdateLimitersFromConfig(limiters *fc.Limiters, fkey string) *fc.Limiters {
+func (m *fcManager) UpdateLimitersFromConfig(limiters *fc.Limiters, pri *commonpb.Priority) *fc.Limiters {
 	userData, _, err := m.userDataManager.GetUserData()
 	if err != nil {
 		return nil
@@ -56,7 +58,7 @@ func (m *fcManager) UpdateLimitersFromConfig(limiters *fc.Limiters, fkey string)
 	cfgVersion := userData.GetVersion()
 	limiters = m.updateWholeQueueConcurrencyLimiter(cfg, cfgVersion, limiters)
 	limiters = m.updateLocalRateLimiter(cfg, cfgVersion, limiters)
-	limiters = m.updateLocalFKeyRateLimiter(cfg, cfgVersion, limiters, fkey)
+	limiters = m.updateLocalFKeyRateLimiter(cfg, cfgVersion, limiters, pri)
 	return limiters
 }
 
@@ -64,7 +66,7 @@ func (m *fcManager) updateWholeQueueConcurrencyLimiter(cfg *taskqueuepb.TaskQueu
 	lim := fc.Limiter{
 		Type:   enumsspb.LIMITER_TYPE_CONCURRENCY,
 		Key:    m.wholeQueueLimiterName(),
-		Source: fc.LimiterSourceConfig_WholeQueue,
+		Source: fc.LimiterSourceConfig,
 	}
 	if limit := cfg.GetQueueConcurrencyLimit().GetConcurrencyLimit(); limit != nil {
 		lim.Config = limit
@@ -78,25 +80,26 @@ func (m *fcManager) updateLocalRateLimiter(cfg *taskqueuepb.TaskQueueConfig, cfg
 	lim := fc.Limiter{
 		Type:   enumsspb.LIMITER_TYPE_LOCAL_RATE_LIMIT,
 		Key:    m.localRateLimiterName(),
-		Source: fc.LimiterSourceConfig_WholeQueue,
+		Source: fc.LimiterSourceConfig,
 	}
-	if limit := cfg.GetQueueRateLimit().GetRateLimit(); limit != nil {
+	if limit := m.rateLimitManager.GetPerPartitionRPS(); limit < math.Inf(1) {
 		lim.Config = limit
-		lim.ConfigVersion = cfgVersion
+		lim.ConfigVersion = time.Now().UnixNano()
 		return m.addOrUpdateLimiter(lim, limiters)
 	}
 	return m.removeLimiter(lim, limiters)
 }
 
-func (m *fcManager) updateLocalFKeyRateLimiter(cfg *taskqueuepb.TaskQueueConfig, cfgVersion int64, limiters *fc.Limiters, fkey string) *fc.Limiters {
+func (m *fcManager) updateLocalFKeyRateLimiter(cfg *taskqueuepb.TaskQueueConfig, cfgVersion int64, limiters *fc.Limiters, pri *commonpb.Priority) *fc.Limiters {
 	lim := fc.Limiter{
 		Type:   enumsspb.LIMITER_TYPE_LOCAL_RATE_LIMIT,
-		Key:    m.localFKeyRateLimiterName(fkey),
-		Source: fc.LimiterSourceConfig_WholeQueue,
+		Key:    m.localFKeyRateLimiterName(pri.GetFairnessKey()),
+		Source: fc.LimiterSourceConfig,
 	}
-	if limit := cfg.GetFairnessKeysRateLimitDefault().GetRateLimit(); limit != nil {
-		lim.Config = limit
-		lim.ConfigVersion = cfgVersion
+	if fkeyLimit, overrides := m.rateLimitManager.GetPerPartitionFairnessKeyRPS(); fkeyLimit != nil {
+		weight := getEffectiveWeight(overrides, pri)
+		lim.Config = *fkeyLimit * float64(weight) // scale by weight
+		lim.ConfigVersion = time.Now().UnixNano()
 		return m.addOrUpdateLimiter(lim, limiters)
 	}
 	return m.removeLimiter(lim, limiters)
