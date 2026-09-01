@@ -61,59 +61,51 @@ func (m *fcManager) UpdateLimitersFromConfig(limiters *fc.Limiters, fkey string)
 }
 
 func (m *fcManager) updateWholeQueueConcurrencyLimiter(cfg *taskqueuepb.TaskQueueConfig, cfgVersion int64, limiters *fc.Limiters) *fc.Limiters {
-	var lim fc.Limiter
-	if limit := cfg.GetQueueConcurrencyLimit().GetConcurrencyLimit(); limit != nil {
-		lim = fc.Limiter{
-			Key:           m.wholeQueueLimiterName(),
-			Type:          enumsspb.LIMITER_TYPE_CONCURRENCY,
-			Source:        fc.LimiterSourceConfig_WholeQueue,
-			Config:        limit,
-			ConfigVersion: cfgVersion,
-		}
+	lim := fc.Limiter{
+		Type:   enumsspb.LIMITER_TYPE_CONCURRENCY,
+		Key:    m.wholeQueueLimiterName(),
+		Source: fc.LimiterSourceConfig_WholeQueue,
 	}
-	return m.addOrUpdateLimiter(lim, limiters)
+	if limit := cfg.GetQueueConcurrencyLimit().GetConcurrencyLimit(); limit != nil {
+		lim.Config = limit
+		lim.ConfigVersion = cfgVersion
+		return m.addOrUpdateLimiter(lim, limiters)
+	}
+	return m.removeLimiter(lim, limiters)
 }
 
 func (m *fcManager) updateLocalRateLimiter(cfg *taskqueuepb.TaskQueueConfig, cfgVersion int64, limiters *fc.Limiters) *fc.Limiters {
-	var lim fc.Limiter
-	if limit := cfg.GetQueueRateLimit().GetRateLimit(); limit != nil {
-		lim = fc.Limiter{
-			Key:           m.localRateLimiterName(),
-			Type:          enumsspb.LIMITER_TYPE_LOCAL_RATE_LIMIT,
-			Source:        fc.LimiterSourceConfig_WholeQueue,
-			Config:        limit,
-			ConfigVersion: cfgVersion,
-		}
+	lim := fc.Limiter{
+		Type:   enumsspb.LIMITER_TYPE_LOCAL_RATE_LIMIT,
+		Key:    m.localRateLimiterName(),
+		Source: fc.LimiterSourceConfig_WholeQueue,
 	}
-	return m.addOrUpdateLimiter(lim, limiters)
+	if limit := cfg.GetQueueRateLimit().GetRateLimit(); limit != nil {
+		lim.Config = limit
+		lim.ConfigVersion = cfgVersion
+		return m.addOrUpdateLimiter(lim, limiters)
+	}
+	return m.removeLimiter(lim, limiters)
 }
 
 func (m *fcManager) updateLocalFKeyRateLimiter(cfg *taskqueuepb.TaskQueueConfig, cfgVersion int64, limiters *fc.Limiters, fkey string) *fc.Limiters {
-	var lim fc.Limiter
-	if limit := cfg.GetFairnessKeysRateLimitDefault().GetRateLimit(); limit != nil {
-		lim = fc.Limiter{
-			Key:           m.localFKeyRateLimiterName(fkey),
-			Type:          enumsspb.LIMITER_TYPE_LOCAL_RATE_LIMIT,
-			Source:        fc.LimiterSourceConfig_WholeQueue,
-			Config:        limit,
-			ConfigVersion: cfgVersion,
-		}
+	lim := fc.Limiter{
+		Type:   enumsspb.LIMITER_TYPE_LOCAL_RATE_LIMIT,
+		Key:    m.localFKeyRateLimiterName(fkey),
+		Source: fc.LimiterSourceConfig_WholeQueue,
 	}
-	return m.addOrUpdateLimiter(lim, limiters)
+	if limit := cfg.GetFairnessKeysRateLimitDefault().GetRateLimit(); limit != nil {
+		lim.Config = limit
+		lim.ConfigVersion = cfgVersion
+		return m.addOrUpdateLimiter(lim, limiters)
+	}
+	return m.removeLimiter(lim, limiters)
 }
 
 func (*fcManager) addOrUpdateLimiter(newLim fc.Limiter, limiters *fc.Limiters) *fc.Limiters {
 	match := func(l fc.Limiter) bool {
 		return l.Key == newLim.Key && l.Type == newLim.Type && l.Source == newLim.Source
 	}
-	if !newLim.Valid() {
-		// need to remove
-		if limiters != nil {
-			_ = slices.DeleteFunc(limiters.Limiters[:], match)
-		}
-		return limiters
-	}
-	// need to add
 	if limiters == nil {
 		limiters = &fc.Limiters{}
 	}
@@ -136,6 +128,16 @@ func (*fcManager) addOrUpdateLimiter(newLim fc.Limiter, limiters *fc.Limiters) *
 	// detect and surface this at a higher level. For now, at this level, we just ignore the
 	// whole-queue limiter.
 	// TODO(fc): surface this error at a higher level somehow
+	return limiters
+}
+
+func (*fcManager) removeLimiter(oldLim fc.Limiter, limiters *fc.Limiters) *fc.Limiters {
+	match := func(l fc.Limiter) bool {
+		return l.Key == oldLim.Key && l.Type == oldLim.Type && l.Source == oldLim.Source
+	}
+	if limiters != nil {
+		_ = slices.DeleteFunc(limiters.Limiters[:], match)
+	}
 	return limiters
 }
 
