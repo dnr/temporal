@@ -51,7 +51,7 @@ type (
 		// reading. We'll handle that situation better in the future.
 		perKeyLimit     simplelimiter.Params
 		perKeyReady     cache.Cache
-		perKeyOverrides fairnessWeightOverrides // TODO(fairness): get this from config
+		perKeyOverrides fairnessWeightOverrides
 		cancels         []func()
 	}
 )
@@ -204,6 +204,18 @@ func (r *rateLimitManager) GetEffectiveRPSAndSource() (float64, enumspb.RateLimi
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return r.effectiveRPS * float64(r.numReadPartitions), r.rateLimitSource
+}
+
+func (r *rateLimitManager) GetPerPartitionRPS() float64 {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.effectiveRPS
+}
+
+func (r *rateLimitManager) GetPerPartitionFairnessKeyRPS() (*float64, fairnessWeightOverrides) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.fairnessKeyRateLimitDefault, r.perKeyOverrides
 }
 
 func (r *rateLimitManager) GetRateLimiter() quotas.RateLimiter {

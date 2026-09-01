@@ -7,11 +7,9 @@ type LimiterSource int32
 const (
 	// not valid limiter
 	LimiterSourceInvalid LimiterSource = iota
-	// limiter came from task queue config, applies to the whole queue
-	LimiterSourceConfig_WholeQueue
-	// limiter came from task queue config, per-fairness-key limit
-	LimiterSourceConfig_Fairness
-	// future: namespace policy, etc.
+	// limiter came from task queue config
+	LimiterSourceConfig
+	// future: per-task, namespace policy, etc.
 )
 
 type Limiter struct {
