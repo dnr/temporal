@@ -145,6 +145,7 @@ func newTaskQueuePartitionManager(
 	)
 	fcManager := newFCManager(
 		partition,
+		tqConfig,
 		userDataManager,
 		rateLimitManager,
 		e.fcReadiness,

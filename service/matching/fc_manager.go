@@ -1,6 +1,7 @@
 package matching
 
 import (
+	"cmp"
 	"fmt"
 	"math"
 	"slices"
@@ -16,6 +17,7 @@ import (
 
 type fcManager struct {
 	partition        tqid.Partition
+	config           *taskQueueConfig
 	userDataManager  userDataManager
 	rateLimitManager *rateLimitManager
 	readiness        *fc.Readiness
@@ -23,30 +25,73 @@ type fcManager struct {
 
 func newFCManager(
 	partition tqid.Partition,
+	config *taskQueueConfig,
 	userDataManager userDataManager,
 	rateLimitManager *rateLimitManager,
 	readiness *fc.Readiness,
 ) *fcManager {
 	return &fcManager{
 		partition:        partition,
+		config:           config,
 		userDataManager:  userDataManager,
 		rateLimitManager: rateLimitManager,
 		readiness:        readiness,
 	}
 }
 
-func (m *fcManager) WholeQueueLikely(pri int32, age time.Time, cb fc.ReadinessCallback) bool {
+func (m *fcManager) TaskReady(task *internalTask, cb fc.ReadinessCallback) (ready bool, blockedBy syncMatchOutcome, canContinue bool) {
+	ready = true
+	limiters := task.Limiters()
+	if limiters == nil {
+		return
+	}
+
 	nsID := namespace.ID(m.partition.NamespaceId())
-	key := m.wholeQueueLimiterName()
-	state := m.readiness.ReadinessState(nsID, enumsspb.LIMITER_TYPE_CONCURRENCY, key, pri, age, cb)
-	return state.Likely()
+	pri := cmp.Or(task.getPriority().GetPriorityKey(), int32(m.config.DefaultPriorityKey))
+	createTime := task.getCreateTime().AsTime()
+
+	for i, lim := range limiters.Limiters[:] {
+		if !lim.Valid() {
+			continue
+		}
+
+		state := m.readiness.ReadinessState(nsID, lim.Type, lim.Key, pri, createTime, cb)
+		if state.Likely() {
+			continue
+		}
+
+		ready = false
+		switch lim.Type {
+		case enumsspb.LIMITER_TYPE_CONCURRENCY:
+			blockedBy = syncMatchConcurrencyLimited
+		case enumsspb.LIMITER_TYPE_LOCAL_RATE_LIMIT:
+			blockedBy = syncMatchRateLimited
+		}
+		// FIXME: set this based on "whole queue" scope
+		canContinue = true
+		// unsubscribe from rest
+		for _, nlim := range limiters.Limiters[i+1:] {
+			m.readiness.CancelCallback(nsID, nlim.Type, nlim.Key, cb)
+		}
+		return
+	}
+
+	return
 }
 
-func (m *fcManager) CancelWholeQueueCallback(cb fc.ReadinessCallback) {
-	nsID := namespace.ID(m.partition.NamespaceId())
-	key := m.wholeQueueLimiterName()
-	m.readiness.CancelCallback(nsID, enumsspb.LIMITER_TYPE_CONCURRENCY, key, cb)
-}
+// FIXME
+// func (m *fcManager) WholeQueueLikely(pri int32, age time.Time, cb fc.ReadinessCallback) bool {
+// 	nsID := namespace.ID(m.partition.NamespaceId())
+// 	key := m.wholeQueueLimiterName()
+// 	state := m.readiness.ReadinessState(nsID, enumsspb.LIMITER_TYPE_CONCURRENCY, key, pri, age, cb)
+// 	return state.Likely()
+// }
+
+// func (m *fcManager) CancelWholeQueueCallback(cb fc.ReadinessCallback) {
+// 	nsID := namespace.ID(m.partition.NamespaceId())
+// 	key := m.wholeQueueLimiterName()
+// 	m.readiness.CancelCallback(nsID, enumsspb.LIMITER_TYPE_CONCURRENCY, key, cb)
+// }
 
 func (m *fcManager) UpdateLimitersFromConfig(limiters *fc.Limiters, pri *commonpb.Priority) *fc.Limiters {
 	userData, _, err := m.userDataManager.GetUserData()
