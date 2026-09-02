@@ -216,13 +216,6 @@ func (r *rateLimitManager) GetPerPartitionRPS() (float64, float64) {
 	return r.effectiveRPS, fkeyRPS
 }
 
-// FIXME
-// func (r *rateLimitManager) GetPerPartitionFairnessKeyRPS() (*float64, fairnessWeightOverrides) {
-// 	r.mu.Lock()
-// 	defer r.mu.Unlock()
-// 	return r.fairnessKeyRateLimitDefault, r.perKeyOverrides
-// }
-
 func (r *rateLimitManager) GetRateLimiter() quotas.RateLimiter {
 	return r.dynamicRateLimiter
 }

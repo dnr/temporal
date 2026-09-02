@@ -120,11 +120,6 @@ func (tm *TaskMatcher) Offer(ctx context.Context, task *internalTask) (bool, err
 			metrics.SyncThrottlePerTaskQueueCounter.With(tm.metricsHandler).Record(1)
 			return false, err
 		}
-		// because we waited on the rate limiter to offer this task,
-		// attach the rate limiter's RecycleToken func to the task
-		// so that if the task is later determined to be invalid,
-		// we can recycle the token it used.
-		task.recycleToken = tm.recycleToken
 	}
 
 	select {
@@ -279,7 +274,7 @@ func (tm *TaskMatcher) MustOffer(ctx context.Context, task *internalTask, interr
 	// attach the rate limiter's RecycleToken func to the task
 	// so that if the task is later determined to be invalid,
 	// we can recycle the token it used.
-	task.recycleToken = tm.recycleToken
+	// task.recycleToken = tm.recycleToken
 
 	// attempt a match with local poller first. When that
 	// doesn't succeed, try both local match and remote match

@@ -264,8 +264,7 @@ func (d *matcherData) Stop() {
 	d.lock.Lock()
 	defer d.lock.Unlock()
 
-	// FIXME: cancel all callbacks??
-	// d.fcManager.CancelWholeQueueCallback(d)
+	// d.fcManager.CancelAllCallbacks(d) // FIXME: do this
 	d.stopped = true
 }
 
@@ -499,38 +498,6 @@ func (d *matcherData) findMatch(allowForwarding bool, now int64) (
 	return
 }
 
-// FIXME
-// // taskReady determines if a task can run now due to a flow control limiter or rate limiter.
-// // If it returns ready==false, it also arranges for d.OnReady to be called later when the task
-// // may be able to run. canContinue is an optimization: it should be false if all tasks on this
-// // matcher will have the same outcome, so the caller can skip the rest.
-// // call with lock held
-// func (d *matcherData) taskReady(task *internalTask, now int64) (ready bool, blockedBy syncMatchOutcome, canContinue bool) {
-// 	// try whole-queue concurrency limit first
-// 	pri := cmp.Or(task.getPriority().GetPriorityKey(), int32(d.config.DefaultPriorityKey))
-// 	createTime := task.getCreateTime().AsTime()
-// 	if !d.fcManager.WholeQueueLikely(pri, createTime, d) {
-// 		// stop rate limit timer if running
-// 		d.rateLimitTimer.unset()
-// 		return false, syncMatchConcurrencyLimited, false
-// 	}
-
-// 	// skip per-key rate-limited tasks but allow matching later tasks, tracking the minimum
-// 	// delay so the caller knows when the soonest one becomes ready. note that this
-// 	// incorporates the wholeQueueReady check.
-// 	sl, perKeyLimited := d.rateLimitManager.readyTimeForTask(task)
-// 	if delay := sl.Delay(now); delay > 0 {
-// 		// FIXME: min??
-// 		d.rateLimitTimer.set(d.timeSource, d.OnReady, delay)
-// 		// cancel concurrency limit callback if set
-// 		d.fcManager.CancelWholeQueueCallback(d)
-// 		return false, syncMatchRateLimited, perKeyLimited
-// 	}
-// 	d.rateLimitTimer.unset()
-
-// 	return true, syncMatchUnspecified, false
-// }
-
 // call with lock held
 func (d *matcherData) allowForwarding() (allowForwarding bool) {
 	// If there is a non-negligible backlog, we pause forwarding to make sure
@@ -564,27 +531,25 @@ func (d *matcherData) allowForwarding() (allowForwarding bool) {
 	return delayToForwardingAllowed <= 0
 }
 
-// call with lock held. Returns true if a match was found but blocked by rate limiting.
+// call with lock held
 func (d *matcherData) findAndWakeMatches() syncMatchOutcome {
 	allowForwarding := d.canForward && d.allowForwarding()
 
 	now := d.timeSource.Now().UnixNano()
 
 	for {
-		// search for highest-priority ready match; skip per-key rate-limited tasks
-		task, poller, outcome := d.findMatch(allowForwarding, now)
+		// find one match. findMatch does not return matches that are blocked by flow control.
+		task, poller, blockedBy := d.findMatch(allowForwarding, now)
 		if task == nil || poller == nil {
-			return outcome
+			if blockedBy == syncMatchRateLimited {
+				d.onRateLimited()
+			}
+			return blockedBy
 		}
 
 		// ready to signal match
 		d.tasks.Remove(task)
 		d.pollers.Remove(poller)
-
-		// FIXME: this moves tofc
-		// // TODO(pri): maybe we can allow tasks to have costs other than 1
-		// d.rateLimitManager.consumeTokens(now, task, 1)
-		// task.recycleToken = d.recycleToken
 
 		res := &matchResult{task: task, poller: poller}
 		task.wake(d.logger, res)
@@ -598,16 +563,6 @@ func (d *matcherData) findAndWakeMatches() syncMatchOutcome {
 		// allow them to be matched locally while forwarded (and then cancel the forward)?
 	}
 }
-
-// FIXME: delete
-// func (d *matcherData) recycleToken(task *internalTask) {
-// 	d.lock.Lock()
-// 	defer d.lock.Unlock()
-
-// 	now := d.timeSource.Now().UnixNano()
-// 	d.rateLimitManager.consumeTokens(now, task, -1)
-// 	d.findAndWakeMatches() // another task may be ready to match now
-// }
 
 // called from timer and flow control readiness callback
 func (d *matcherData) OnReady() {
