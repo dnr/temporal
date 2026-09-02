@@ -14,6 +14,7 @@ import (
 	"go.temporal.io/server/api/matchingservice/v1"
 	"go.temporal.io/server/api/matchingservicemock/v1"
 	persistencespb "go.temporal.io/server/api/persistence/v1"
+	"go.temporal.io/server/common/clock"
 	"go.temporal.io/server/common/dynamicconfig"
 	"go.temporal.io/server/common/log"
 	"go.temporal.io/server/common/metrics"
@@ -67,7 +68,8 @@ func (s *PriMatcherSuite) TestValidatorWorksOnRoot() {
 	})
 
 	userDataManager := &mockUserDataManager{}
-	rateLimitManager := newRateLimitManager(userDataManager, cfg, enumspb.TASK_QUEUE_TYPE_WORKFLOW)
+	ts := clock.NewRealTimeSource()
+	rateLimitManager := newRateLimitManager(ts, userDataManager, cfg, enumspb.TASK_QUEUE_TYPE_WORKFLOW)
 	rateLimitManager.Start()
 
 	tm := newPriTaskMatcher(
@@ -80,7 +82,7 @@ func (s *PriMatcherSuite) TestValidatorWorksOnRoot() {
 		s.logger,
 		metrics.NoopMetricsHandler,
 		rateLimitManager,
-		newFCManager(partition, cfg, userDataManager, rateLimitManager, fc.NewReadiness(nil)),
+		newFCManager(partition, cfg, userDataManager, rateLimitManager, fc.NewReadiness(ts, nil)),
 		func() {}, // onRateLimited
 		func() {}, // markAlive
 	)
@@ -164,7 +166,8 @@ func (s *PriMatcherSuite) TestForwardPollRetriesOnResourceExhausted() {
 		require.NoError(t, err)
 
 		userDataManager := &mockUserDataManager{}
-		rateLimitManager := newRateLimitManager(userDataManager, cfg, enumspb.TASK_QUEUE_TYPE_WORKFLOW)
+		ts := clock.NewRealTimeSource()
+		rateLimitManager := newRateLimitManager(ts, userDataManager, cfg, enumspb.TASK_QUEUE_TYPE_WORKFLOW)
 		rateLimitManager.Start()
 
 		tm := newPriTaskMatcher(
@@ -177,7 +180,7 @@ func (s *PriMatcherSuite) TestForwardPollRetriesOnResourceExhausted() {
 			s.logger,
 			metrics.NoopMetricsHandler,
 			rateLimitManager,
-			newFCManager(childPartition, cfg, userDataManager, rateLimitManager, fc.NewReadiness(nil)),
+			newFCManager(childPartition, cfg, userDataManager, rateLimitManager, fc.NewReadiness(ts, nil)),
 			func() {},
 			func() {},
 		)
@@ -235,7 +238,8 @@ func (s *PriMatcherSuite) TestValidatorDrop_SetsDropReason() {
 			mockValidator.EXPECT().maybeValidate(gomock.Any(), gomock.Any()).Return(false).AnyTimes()
 
 			userDataManager := &mockUserDataManager{}
-			rateLimitManager := newRateLimitManager(userDataManager, cfg, enumspb.TASK_QUEUE_TYPE_WORKFLOW)
+			ts := clock.NewRealTimeSource()
+			rateLimitManager := newRateLimitManager(ts, userDataManager, cfg, enumspb.TASK_QUEUE_TYPE_WORKFLOW)
 			rateLimitManager.Start()
 			tm := newPriTaskMatcher(
 				ctx,
@@ -247,7 +251,7 @@ func (s *PriMatcherSuite) TestValidatorDrop_SetsDropReason() {
 				s.logger,
 				metrics.NoopMetricsHandler,
 				rateLimitManager,
-				newFCManager(partition, cfg, userDataManager, rateLimitManager, fc.NewReadiness(nil)),
+				newFCManager(partition, cfg, userDataManager, rateLimitManager, fc.NewReadiness(ts, nil)),
 				func() {},
 				func() {},
 			)

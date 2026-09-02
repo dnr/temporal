@@ -32,6 +32,8 @@ type MatcherDataSuite struct {
 	suite.Suite
 	ts               *clock.EventTimeSource
 	md               matcherData
+	fcReadiness      *fc.Readiness
+	fcManager        *fcManager
 	rateLimitedCount atomic.Int32
 }
 
@@ -51,16 +53,18 @@ func (s *MatcherDataSuite) SetupTest() {
 	s.ts = clock.NewEventTimeSource().Update(time.Now())
 	s.ts.UseAsyncTimers(true)
 	userDataManager := &mockUserDataManager{}
-	rateLimitManager := newRateLimitManager(userDataManager, cfg, enumspb.TASK_QUEUE_TYPE_ACTIVITY)
+	rateLimitManager := newRateLimitManager(s.ts, userDataManager, cfg, enumspb.TASK_QUEUE_TYPE_ACTIVITY)
 	rateLimitManager.Start()
 	s.rateLimitedCount.Store(0)
+	s.fcReadiness = fc.NewReadiness(s.ts, nil)
+	s.fcManager = newFCManager(taskQueue.RootPartition(), cfg, userDataManager, rateLimitManager, s.fcReadiness)
 	s.md = newMatcherData(
 		cfg,
 		logger,
 		s.ts,
 		true,
 		rateLimitManager,
-		newFCManager(taskQueue.RootPartition(), cfg, userDataManager, rateLimitManager, fc.NewReadiness(nil)),
+		s.fcManager,
 		func() { s.rateLimitedCount.Add(1) },
 	)
 }
@@ -104,6 +108,13 @@ func (s *MatcherDataSuite) pollImmediately(meta *pollMetadata) *matchResult {
 		startTime:    s.now(),
 		pollMetadata: cmp.Or(meta, &pollMetadata{}),
 	})
+}
+
+func (s *MatcherDataSuite) doFlowControl(pres *matchResult) {
+	tx, err := s.fcReadiness.NewTx(context.Background(), "nsid", pres.task)
+	s.NoError(err)
+	s.NoError(tx.Reserve())
+	s.NoError(tx.Commit())
 }
 
 func (s *MatcherDataSuite) queryFakeTime(duration time.Duration, respC chan<- taskResponse) {
@@ -422,6 +433,8 @@ func (s *MatcherDataSuite) TestRateLimitedBacklog() {
 			for {
 				if pres := s.pollFakeTime(time.Second); pres.ctxErr != nil {
 					return
+				} else {
+					s.doFlowControl(pres)
 				}
 				lastTask.Store(s.now().UnixNano())
 			}
@@ -464,6 +477,8 @@ func (s *MatcherDataSuite) TestPerKeyRateLimit() {
 			for {
 				if pres := s.pollFakeTime(time.Second); pres.ctxErr != nil {
 					return
+				} else {
+					s.doFlowControl(pres)
 				}
 				lastTask.Store(s.now().UnixNano())
 			}
@@ -1023,7 +1038,7 @@ func FuzzMatcherData(f *testing.F) {
 		ts.UseAsyncTimers(true)
 		logger := log.NewNoopLogger()
 		userDataManager := &mockUserDataManager{}
-		rateLimitManager := newRateLimitManager(userDataManager, cfg, enumspb.TASK_QUEUE_TYPE_ACTIVITY)
+		rateLimitManager := newRateLimitManager(ts, userDataManager, cfg, enumspb.TASK_QUEUE_TYPE_ACTIVITY)
 		rateLimitManager.Start()
 		md := newMatcherData(
 			cfg,
@@ -1031,7 +1046,7 @@ func FuzzMatcherData(f *testing.F) {
 			ts,
 			true,
 			rateLimitManager,
-			newFCManager(taskQueue.RootPartition(), cfg, userDataManager, rateLimitManager, fc.NewReadiness(nil)),
+			newFCManager(taskQueue.RootPartition(), cfg, userDataManager, rateLimitManager, fc.NewReadiness(ts, nil)),
 			func() {},
 		)
 

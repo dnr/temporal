@@ -139,6 +139,7 @@ func newTaskQueuePartitionManager(
 	userDataManager userDataManager,
 ) (*taskQueuePartitionManagerImpl, error) {
 	rateLimitManager := newRateLimitManager(
+		e.timeSource,
 		userDataManager,
 		tqConfig,
 		partition.TaskQueue().TaskType(),
