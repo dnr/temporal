@@ -301,30 +301,6 @@ func (v *concurrencyLimiter) callWait(ctx context.Context, rn *readinessNS, key 
 
 // rate limit
 
-// // FIXME: share with matching code
-// type resettableTimer struct {
-// 	timer clock.Timer // AfterFunc timer
-// }
-
-// // set sets rt to call f after delay. set to <= 0 stops the timer.
-// func (rt *resettableTimer) set(ts clock.TimeSource, f func(), delay time.Duration) {
-// 	if delay <= 0 {
-// 		rt.unset()
-// 	} else if rt.timer == nil {
-// 		rt.timer = ts.AfterFunc(delay, f)
-// 	} else {
-// 		rt.timer.Reset(delay)
-// 	}
-// }
-
-// // unset stops the timer.
-// func (rt *resettableTimer) unset() {
-// 	if rt.timer != nil {
-// 		rt.timer.Stop()
-// 		rt.timer = nil
-// 	}
-// }
-
 func (rn *readinessNS) localLimiterReadiness(config any, cb ReadinessCallback) ReadinessState {
 	ll, ok := config.(LocalLimiter)
 	if !ok {
