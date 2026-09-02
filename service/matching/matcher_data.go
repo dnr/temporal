@@ -447,6 +447,9 @@ func (d *matcherData) findMatch(allowForwarding bool, now int64) (
 	matchedPoller *waitingPoller,
 	blockedBy syncMatchOutcome,
 ) {
+	// default if no potential matches
+	blockedBy = syncMatchNoPoller
+
 	// TODO(fc): optimize this with different data structures
 	d.tasks.tree.Scan(func(task *internalTask) bool {
 		// disallow normal poll forwarding when allowForwarding is false, but allow the
@@ -490,11 +493,10 @@ func (d *matcherData) findMatch(allowForwarding bool, now int64) (
 		}
 
 		// no limiters apply, we can match
-		matchedTask, matchedPoller = task, poller
+		matchedTask, matchedPoller, blockedBy = task, poller, syncMatchSuccess
 		return false
 	})
 
-	blockedBy = syncMatchNoPoller
 	return
 }
 
@@ -531,6 +533,9 @@ func (d *matcherData) allowForwarding() (allowForwarding bool) {
 	return delayToForwardingAllowed <= 0
 }
 
+// findAndWakeMatches tries to match and wake all matches that are possible and not blocked.
+// After matching as many as possible, it returns a possible reason why the next match didn't
+// happen.
 // call with lock held
 func (d *matcherData) findAndWakeMatches() syncMatchOutcome {
 	allowForwarding := d.canForward && d.allowForwarding()

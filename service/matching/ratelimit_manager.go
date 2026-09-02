@@ -17,10 +17,10 @@ type (
 		mu sync.Mutex
 
 		// Dependencies
+		timeSource      clock.TimeSource
 		userDataManager userDataManager       // User data manager to fetch user data for task queue configurations.
 		config          *taskQueueConfig      // Dynamic configuration for task queues set by system.
 		taskQueueType   enumspb.TaskQueueType // Task queue type
-		timeSource      clock.TimeSource
 
 		// Sources of the effective RPS.
 		workerRPS                   *float64 // RPS set by worker at the time of polling, if available.
@@ -67,16 +67,17 @@ const (
 // dynamic config subscriptions are registered in Start, so an unstarted manager holds
 // no external references and can simply be garbage collected.
 func newRateLimitManager(
+	timeSource clock.TimeSource,
 	userDataManager userDataManager,
 	config *taskQueueConfig,
 	taskQueueType enumspb.TaskQueueType,
 ) *rateLimitManager {
 	r := &rateLimitManager{
+		timeSource:      timeSource,
 		userDataManager: userDataManager,
 		config:          config,
 		taskQueueType:   taskQueueType,
 		perKeyReady:     cache.New(config.FairnessKeyRateLimitCacheSize(), nil),
-		timeSource:      clock.NewRealTimeSource(),
 	}
 	r.dynamicRateBurst = quotas.NewMutableRateBurst(
 		defaultTaskDispatchRPS,

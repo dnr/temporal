@@ -185,11 +185,11 @@ var _ fc.LocalLimiter = (*rateLimiterBridge)(nil)
 
 func (b *rateLimiterBridge) Delay() time.Duration {
 	sl := b.rlm.readyTimeForTask(b.task)
-	now := time.Now().UnixNano() // TODO(fc): timesource
+	now := b.rlm.timeSource.Now().UnixNano()
 	return sl.Delay(now)
 }
 
 func (b *rateLimiterBridge) Consume(tokens int) {
-	now := time.Now().UnixNano() // TODO(fc): timesource
+	now := b.rlm.timeSource.Now().UnixNano()
 	b.rlm.consumeTokens(now, b.task, int64(tokens))
 }

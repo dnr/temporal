@@ -293,6 +293,7 @@ func NewEngine(
 	concurrencyServiceClient fcpb.ConcurrencyServiceClient,
 ) Engine {
 	scopedMetricsHandler := metricsHandler.WithTags(metrics.OperationTag(metrics.MatchingEngineScope))
+	timeSource := clock.NewRealTimeSource() // No need to mock this at the moment
 	e := &matchingEngineImpl{
 		status:                 common.DaemonStatusInitialized,
 		taskManager:            taskManager,
@@ -309,7 +310,7 @@ func NewEngine(
 		serviceResolver:        resolver,
 		membershipChangedCh:    make(chan *membership.ChangedEvent, 1), // allow one signal to be buffered while we're working
 		clusterMeta:            clusterMeta,
-		timeSource:             clock.NewRealTimeSource(), // No need to mock this at the moment
+		timeSource:             timeSource,
 		visibilityManager:      visibilityManager,
 		nexusEndpointClient:    newEndpointClient(config.NexusEndpointsRefreshInterval, nexusEndpointManager),
 		// nexusEndpointsOwnershipLostCh initialized below
@@ -335,11 +336,14 @@ func NewEngine(
 		rateLimiter:               rateLimiter,
 		taskHookFactories:         taskHookFactories,
 		partitionScalerFactory:    partitionScalerFactory,
-		fcReadiness: fc.NewReadiness(concurrency.NewBatchingClient(
-			concurrencyServiceClient,
-			config.FlowControlClientBatcherOptions(),
-			clock.NewRealTimeSource(),
-		)),
+		fcReadiness: fc.NewReadiness(
+			timeSource,
+			concurrency.NewBatchingClient(
+				concurrencyServiceClient,
+				config.FlowControlClientBatcherOptions(),
+				clock.NewRealTimeSource(),
+			),
+		),
 	}
 	e.userDataUpdateBatcher = stream_batcher.NewKeyedBatcher(
 		e.applyUserDataUpdateBatch,

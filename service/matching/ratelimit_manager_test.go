@@ -9,6 +9,7 @@ import (
 	enumspb "go.temporal.io/api/enums/v1"
 	taskqueuepb "go.temporal.io/api/taskqueue/v1"
 	persistencespb "go.temporal.io/server/api/persistence/v1"
+	"go.temporal.io/server/common/clock"
 	"go.temporal.io/server/common/dynamicconfig"
 	"go.temporal.io/server/common/namespace"
 	"go.temporal.io/server/common/tqid"
@@ -35,7 +36,8 @@ func (s *RateLimitManagerSuite) TestUpdatePerKeySimpleRateLimitLocked_WhenFairne
 		NewConfig(dynamicconfig.NewNoopCollection()),
 		"test-namespace",
 	)
-	rateLimitManager := newRateLimitManager(mockUserDataManager, config, enumspb.TASK_QUEUE_TYPE_ACTIVITY)
+	ts := clock.NewRealTimeSource()
+	rateLimitManager := newRateLimitManager(ts, mockUserDataManager, config, enumspb.TASK_QUEUE_TYPE_ACTIVITY)
 	rateLimitManager.Start()
 	rateLimitManager.mu.Lock()
 	// Simulate the condition where fairnessKeyRateLimitDefault is nil
@@ -145,7 +147,8 @@ func (s *RateLimitManagerSuite) TestFractionScaling_ApiConfigRPS() {
 		tqid.UnsafeTaskQueueFamily("test-ns", "test-tq").TaskQueue(enumspb.TASK_QUEUE_TYPE_WORKFLOW),
 		cfg, "test-ns",
 	)
-	rlm := newRateLimitManager(&mockUserDataManager{}, config, enumspb.TASK_QUEUE_TYPE_WORKFLOW)
+	ts := clock.NewRealTimeSource()
+	rlm := newRateLimitManager(ts, &mockUserDataManager{}, config, enumspb.TASK_QUEUE_TYPE_WORKFLOW)
 	rlm.Start()
 	defer rlm.Stop()
 
@@ -164,7 +167,8 @@ func (s *RateLimitManagerSuite) TestFractionScaling_WorkerRPS() {
 		tqid.UnsafeTaskQueueFamily("test-ns", "test-tq").TaskQueue(enumspb.TASK_QUEUE_TYPE_WORKFLOW),
 		cfg, "test-ns",
 	)
-	rlm := newRateLimitManager(&mockUserDataManager{}, config, enumspb.TASK_QUEUE_TYPE_WORKFLOW)
+	ts := clock.NewRealTimeSource()
+	rlm := newRateLimitManager(ts, &mockUserDataManager{}, config, enumspb.TASK_QUEUE_TYPE_WORKFLOW)
 	rlm.Start()
 	defer rlm.Stop()
 
@@ -200,7 +204,8 @@ func (s *RateLimitManagerSuite) TestFractionScaling_FairnessKeyRateLimitDefault(
 			},
 		},
 	}
-	rlm := newRateLimitManager(udm, config, enumspb.TASK_QUEUE_TYPE_WORKFLOW)
+	ts := clock.NewRealTimeSource()
+	rlm := newRateLimitManager(ts, udm, config, enumspb.TASK_QUEUE_TYPE_WORKFLOW)
 	rlm.Start()
 	defer rlm.Stop()
 
@@ -222,7 +227,8 @@ func (s *RateLimitManagerSuite) TestFractionScaling_ZeroFraction() {
 		tqid.UnsafeTaskQueueFamily("test-ns", "test-tq").TaskQueue(enumspb.TASK_QUEUE_TYPE_WORKFLOW),
 		cfg, "test-ns",
 	)
-	rlm := newRateLimitManager(&mockUserDataManager{}, config, enumspb.TASK_QUEUE_TYPE_WORKFLOW)
+	ts := clock.NewRealTimeSource()
+	rlm := newRateLimitManager(ts, &mockUserDataManager{}, config, enumspb.TASK_QUEUE_TYPE_WORKFLOW)
 	rlm.Start()
 	defer rlm.Stop()
 
