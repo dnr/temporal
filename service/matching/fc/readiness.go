@@ -39,7 +39,7 @@ type concurrencyLimiter struct {
 
 type rlTimer struct {
 	// FIXME: consolidate with matching.resettableTimer
-	t *time.Timer
+	t clock.Timer
 }
 
 type readinessNS struct {
@@ -59,15 +59,18 @@ type readinessNS struct {
 }
 
 type Readiness struct {
+	timeSource               clock.TimeSource
 	concurrencyServiceClient fcpb.ConcurrencyServiceClient
 
 	caches sync.Map // namespaceID -> *readinessNS
 }
 
 func NewReadiness(
+	timeSource clock.TimeSource,
 	concurrencyServiceClient fcpb.ConcurrencyServiceClient,
 ) *Readiness {
 	return &Readiness{
+		timeSource:               timeSource,
 		concurrencyServiceClient: concurrencyServiceClient,
 	}
 }
@@ -318,7 +321,7 @@ func (rn *readinessNS) localLimiterReadiness(config any, cb ReadinessCallback) R
 			tmr = &rlTimer{}
 		}
 		if tmr.t == nil {
-			tmr.t = time.AfterFunc(delay, func() {
+			tmr.t = rn.r.timeSource.AfterFunc(delay, func() {
 				rn.lock.Lock()
 				delete(rn.rltimers, cb)
 				rn.lock.Unlock()
