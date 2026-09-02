@@ -68,26 +68,12 @@ func (m *fcManager) TaskReady(task *internalTask, cb fc.ReadinessCallback) (read
 
 		ready = false
 		blockedBy = limiterTypeToSyncMatchOutcome(lim.Type)
-		canContinue = true // FIXME: set this based on "whole queue" scope
+		canContinue = false // FIXME: set this based on "whole queue" scope, but allow fkey skipping
 		return
 	}
 
 	return
 }
-
-// FIXME
-// func (m *fcManager) WholeQueueLikely(pri int32, age time.Time, cb fc.ReadinessCallback) bool {
-// 	nsID := namespace.ID(m.partition.NamespaceId())
-// 	key := m.wholeQueueLimiterName()
-// 	state := m.readiness.ReadinessState(nsID, enumsspb.LIMITER_TYPE_CONCURRENCY, key, pri, age, cb)
-// 	return state.Likely()
-// }
-
-// func (m *fcManager) CancelWholeQueueCallback(cb fc.ReadinessCallback) {
-// 	nsID := namespace.ID(m.partition.NamespaceId())
-// 	key := m.wholeQueueLimiterName()
-// 	m.readiness.CancelCallback(nsID, enumsspb.LIMITER_TYPE_CONCURRENCY, key, cb)
-// }
 
 func (m *fcManager) UpdateLimitersFromConfig(limiters *fc.Limiters, task *internalTask) *fc.Limiters {
 	userData, _, err := m.userDataManager.GetUserData()
@@ -99,7 +85,6 @@ func (m *fcManager) UpdateLimitersFromConfig(limiters *fc.Limiters, task *intern
 	cfgVersion := userData.GetVersion()
 	limiters = m.updateWholeQueueConcurrencyLimiter(cfg, cfgVersion, limiters)
 	limiters = m.updateLocalRateLimiter(cfg, cfgVersion, limiters, task)
-	// limiters = m.updateLocalFKeyRateLimiter(cfg, cfgVersion, limiters, pri) // FIXME
 	return limiters
 }
 
@@ -119,15 +104,12 @@ func (m *fcManager) updateWholeQueueConcurrencyLimiter(cfg *taskqueuepb.TaskQueu
 
 func (m *fcManager) updateLocalRateLimiter(cfg *taskqueuepb.TaskQueueConfig, cfgVersion int64, limiters *fc.Limiters, task *internalTask) *fc.Limiters {
 	lim := fc.Limiter{
-		Type: enumsspb.LIMITER_TYPE_LOCAL_RATE_LIMIT,
-		// Key:    m.localRateLimiterName(), // FIXME
+		Type:   enumsspb.LIMITER_TYPE_LOCAL_RATE_LIMIT,
 		Source: fc.LimiterSourceConfig,
 	}
 	partitionRPS, fkeyRPS := m.rateLimitManager.GetPerPartitionRPS()
 	// currently this condition is always true
 	if partitionRPS < math.Inf(1) || fkeyRPS < math.Inf(1) {
-		// lim.Config = limit
-		// lim.ConfigVersion = time.Now().UnixNano()
 		lim.Config = &rateLimiterBridge{
 			rlm:  m.rateLimitManager,
 			task: task,
@@ -136,23 +118,6 @@ func (m *fcManager) updateLocalRateLimiter(cfg *taskqueuepb.TaskQueueConfig, cfg
 	}
 	return m.removeLimiter(lim, limiters)
 }
-
-// FIXME
-// func (m *fcManager) updateLocalFKeyRateLimiter(cfg *taskqueuepb.TaskQueueConfig, cfgVersion int64, limiters *fc.Limiters, pri *commonpb.Priority) *fc.Limiters {
-// 	lim := fc.Limiter{
-// 		Type:   enumsspb.LIMITER_TYPE_LOCAL_RATE_LIMIT,
-// 		Key:    m.localFKeyRateLimiterName(pri.GetFairnessKey()),
-// 		Source: fc.LimiterSourceConfig,
-// 	}
-// 	if fkeyLimit, overrides := m.rateLimitManager.GetPerPartitionFairnessKeyRPS(); fkeyLimit != nil {
-// 		// weight := getEffectiveWeight(overrides, pri)
-// 		// lim.Config = *fkeyLimit * float64(weight) // scale by weight
-// 		// lim.ConfigVersion = time.Now().UnixNano()
-// 		lim.Config = m.rateLimitManager // FIXME: try passing whole rlm?
-// 		return m.addOrUpdateLimiter(lim, limiters)
-// 	}
-// 	return m.removeLimiter(lim, limiters)
-// }
 
 func (*fcManager) addOrUpdateLimiter(newLim fc.Limiter, limiters *fc.Limiters) *fc.Limiters {
 	match := func(l fc.Limiter) bool {
@@ -199,27 +164,6 @@ func (m *fcManager) wholeQueueLimiterName() string {
 	tqType := m.partition.TaskType()
 	return fmt.Sprintf("wholequeue/%s/%d/0", tqName, tqType)
 }
-
-// FIXME
-// func (m *fcManager) localRateLimiterName() string {
-// 	tqName := m.partition.TaskQueue().Name()
-// 	tqType := m.partition.TaskType()
-// 	partitionId := 0
-// 	if normal, ok := m.partition.(*tqid.NormalPartition); ok {
-// 		partitionId = normal.PartitionId()
-// 	}
-// 	return fmt.Sprintf("tq/%s/%d/%d", tqName, tqType, partitionId)
-// }
-
-// func (m *fcManager) localFKeyRateLimiterName(fkey string) string {
-// 	tqName := m.partition.TaskQueue().Name()
-// 	tqType := m.partition.TaskType()
-// 	partitionId := 0
-// 	if normal, ok := m.partition.(*tqid.NormalPartition); ok {
-// 		partitionId = normal.PartitionId()
-// 	}
-// 	return fmt.Sprintf("fkey/%s/%d/%d/%s", tqName, tqType, partitionId, fkey)
-// }
 
 func limiterTypeToSyncMatchOutcome(tp enumsspb.LimiterType) syncMatchOutcome {
 	switch tp {

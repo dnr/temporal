@@ -74,7 +74,6 @@ type (
 		// pollerScalingDecision is assigned when the queue has advice to give to the poller about whether
 		// it should adjust its poller count
 		pollerScalingDecision *taskqueuepb.PollerScalingDecision
-		recycleToken          func(*internalTask) // FIXME: can remove
 		removeFromMatcher     atomic.Pointer[func()]
 		// taskDispatchRevisionNumber represents the revision number used by the task and is
 		// max(taskDirectiveRevisionNumber, routingConfigRevisionNumber) for the task.
@@ -396,11 +395,8 @@ func (task *internalTask) finishForward(forwardRes any, forwardErr error, consum
 	task.finishInternal(taskResponse{forwarded: true, forwardRes: forwardRes, forwardErr: forwardErr}, consumedToken)
 }
 
+// TODO(fc): remove consumedToken from here
 func (task *internalTask) finishInternal(res taskResponse, consumedToken bool) {
-	if !consumedToken && task.recycleToken != nil {
-		task.recycleToken(task)
-	}
-
 	switch {
 	case task.responseC != nil:
 		task.responseC <- res
