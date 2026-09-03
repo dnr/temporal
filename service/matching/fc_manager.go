@@ -91,7 +91,7 @@ func (m *fcManager) UpdateLimitersFromConfig(limiters *fc.Limiters, task *intern
 func (m *fcManager) updateWholeQueueConcurrencyLimiter(cfg *taskqueuepb.TaskQueueConfig, cfgVersion int64, limiters *fc.Limiters) *fc.Limiters {
 	lim := fc.Limiter{
 		Type:   enumsspb.LIMITER_TYPE_CONCURRENCY,
-		Key:    m.wholeQueueLimiterName(),
+		Key:    m.wholeQueueConcurrencyLimiterKey(),
 		Source: fc.LimiterSourceConfig,
 	}
 	if limit := cfg.GetQueueConcurrencyLimit().GetConcurrencyLimit(); limit != nil {
@@ -105,6 +105,7 @@ func (m *fcManager) updateWholeQueueConcurrencyLimiter(cfg *taskqueuepb.TaskQueu
 func (m *fcManager) updateLocalRateLimiter(cfg *taskqueuepb.TaskQueueConfig, cfgVersion int64, limiters *fc.Limiters, task *internalTask) *fc.Limiters {
 	lim := fc.Limiter{
 		Type:   enumsspb.LIMITER_TYPE_LOCAL_RATE_LIMIT,
+		Key:    m.localLimiterKey(),
 		Source: fc.LimiterSourceConfig,
 	}
 	partitionRPS, fkeyRPS := m.rateLimitManager.GetPerPartitionRPS()
@@ -158,11 +159,16 @@ func (*fcManager) removeLimiter(oldLim fc.Limiter, limiters *fc.Limiters) *fc.Li
 	return limiters
 }
 
-func (m *fcManager) wholeQueueLimiterName() string {
+func (m *fcManager) wholeQueueConcurrencyLimiterKey() string {
 	// the "/0" at the end is for future extension for partitioning limiters
 	tqName := m.partition.TaskQueue().Name()
 	tqType := m.partition.TaskType()
 	return fmt.Sprintf("wholequeue/%s/%d/0", tqName, tqType)
+}
+
+func (m *fcManager) localLimiterKey() string {
+	key, _ := m.partition.RoutingKey(0)
+	return key
 }
 
 func limiterTypeToSyncMatchOutcome(tp enumsspb.LimiterType) syncMatchOutcome {

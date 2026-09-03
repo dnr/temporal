@@ -23,6 +23,10 @@ type readinessCacheConcurrencyInterface interface {
 	reportConcurrencyBlocked(namespace.ID, string, int64)
 }
 
+type readinessCacheLocalLimiterInterface interface {
+	reportLocalLimiterReady(namespace.ID, string)
+}
+
 // concurrency limits
 
 type concurrencyCommitter struct {
@@ -103,16 +107,23 @@ func (c *concurrencyCommitter) cancelReservations() {
 // local rate limits
 
 type localLimiterCommitter struct {
-	ll   LocalLimiter
-	task any
+	cache readinessCacheLocalLimiterInterface
+	nsID  namespace.ID
+	key   string
+	ll    LocalLimiter
 }
 
 func newLocalLimiterCommitter(
+	cache readinessCacheLocalLimiterInterface,
+	nsID namespace.ID,
 	lim Limiter,
 ) *localLimiterCommitter {
 	ll, _ := lim.Config.(LocalLimiter)
 	return &localLimiterCommitter{
-		ll: ll,
+		cache: cache,
+		nsID:  nsID,
+		key:   lim.Key,
+		ll:    ll,
 	}
 }
 
@@ -135,4 +146,6 @@ func (c *localLimiterCommitter) cancelReservations() {
 		return
 	}
 	c.ll.Consume(-1)
+	// since we returned tokens, a waiter might be ready to go now
+	c.cache.reportLocalLimiterReady(c.nsID, c.key)
 }
