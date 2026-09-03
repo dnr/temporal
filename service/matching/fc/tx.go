@@ -5,12 +5,22 @@ import (
 	"errors"
 
 	"github.com/google/uuid"
+	"go.temporal.io/api/serviceerror"
 	enumsspb "go.temporal.io/server/api/enums/v1"
 	taskqueuespb "go.temporal.io/server/api/taskqueue/v1"
 	"go.temporal.io/server/common/namespace"
 )
 
-func (r *Readiness) NewTx(ctx context.Context, nsID namespace.ID, task fcTask) (*tx, error) {
+var errCommitFailure = serviceerror.NewFailedPrecondition("commit failed")
+
+// A client of the flow control system (e.g. matchingEngine) should call NewTx when it wants to
+// perform the flow control commit protocol. It should then call:
+// - tx.Reserve() -> on error call tx.CancelReservations() and retry the task
+// - tx.LimiterRefs() to get refs to pass to history (for releasing later)
+// - history.RecordTaskStarted(refs) -> on error call tx.CancelReservations()
+// - tx.Commit() -> on error call tx.CancelReservations() and DROP the task
+// Methods on Tx must not be called concurrently.
+func (r *Readiness) NewTx(ctx context.Context, nsID namespace.ID, task fcTask) (*Tx, error) {
 	lims := canonicalLimiters(task)
 	if len(lims) == 0 {
 		return nil, nil
@@ -32,18 +42,25 @@ func (r *Readiness) NewTx(ctx context.Context, nsID namespace.ID, task fcTask) (
 		}
 	}
 
-	return &tx{
+	return &Tx{
 		readiness:  r,
 		committers: committers,
 		refs:       refs,
 	}, nil
 }
 
-type tx struct {
+// Holds state for an invocation of the flow control commit protocol. See Readiness.NewTx.
+type Tx struct {
 	readiness  *Readiness
 	committers []committer
 	refs       []*taskqueuespb.LimiterRef
 	state      [MaxLimiters]txState
+}
+
+type committer interface {
+	reserve() error
+	commit() error
+	cancelReservations()
 }
 
 type txState int8 // just so we can pack these in an array
@@ -56,14 +73,17 @@ const (
 	txStateCanceled
 )
 
-func (tx *tx) LimiterRefs() []*taskqueuespb.LimiterRef {
+// LimiterRefs returns references to limiters that should be passed to history and stored with
+// activity/workflow task state.
+func (tx *Tx) LimiterRefs() []*taskqueuespb.LimiterRef {
 	if tx == nil {
 		return nil
 	}
 	return tx.refs
 }
 
-func (tx *tx) Reserve() error {
+// Reserve checks that all limiters can be satisfied now.
+func (tx *Tx) Reserve() error {
 	if tx == nil {
 		return nil // no limiters
 	}
@@ -77,7 +97,8 @@ func (tx *tx) Reserve() error {
 	return nil
 }
 
-func (tx *tx) Commit() error {
+// Commit turns reservations into committed slots.
+func (tx *Tx) Commit() error {
 	if tx == nil {
 		return nil // no limiters
 	}
@@ -108,7 +129,9 @@ func (tx *tx) Commit() error {
 	return errors.Join(errs...)
 }
 
-func (tx *tx) CancelReservations() {
+// CancelReservations cancels reservations on any limiters that have been made and not
+// committed so far.
+func (tx *Tx) CancelReservations() {
 	// this is best-effort, reservations have timeouts so it's okay if we fail to cancel
 	if tx == nil {
 		return // no limiters
