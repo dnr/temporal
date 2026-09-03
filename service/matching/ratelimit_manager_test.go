@@ -87,11 +87,10 @@ func (r *rateLimitManager) SetEffectiveRPSAndSourceForTesting(rps float64, sourc
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.effectiveRPS = rps
-	r.fairnessKeyRateLimitDefault = &rps
 	r.rateLimitSource = source
 }
 
-func (r *rateLimitManager) SetFairnessKeyRateLimitDefaultForTesting(rps float64, source enumspb.RateLimitSource) {
+func (r *rateLimitManager) SetFairnessKeyRateLimitDefaultForTesting(rps float64) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.fairnessKeyRateLimitDefault = &rps
