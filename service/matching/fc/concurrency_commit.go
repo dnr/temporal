@@ -3,31 +3,17 @@ package fc
 import (
 	"context"
 
-	"go.temporal.io/api/serviceerror"
 	taskqueuepb "go.temporal.io/api/taskqueue/v1"
 	fcpb "go.temporal.io/server/chasm/lib/flowcontrol/gen/flowcontrolpb/v1"
 	"go.temporal.io/server/common/namespace"
 	serviceerrors "go.temporal.io/server/common/serviceerror"
 )
 
-var errCommitFailure = serviceerror.NewFailedPrecondition("commit failed")
-
-type committer interface {
-	reserve() error
-	commit() error
-	cancelReservations()
-}
-
+// subset of Readiness
 type readinessCacheConcurrencyInterface interface {
 	reportConcurrencyReady(namespace.ID, string, int64)
 	reportConcurrencyBlocked(namespace.ID, string, int64)
 }
-
-type readinessCacheLocalLimiterInterface interface {
-	reportLocalLimiterReady(namespace.ID, string)
-}
-
-// concurrency limits
 
 type concurrencyCommitter struct {
 	ctx    context.Context
@@ -102,50 +88,4 @@ func (c *concurrencyCommitter) cancelReservations() {
 		Key:                    c.lim.Key,
 		CancelReservationSlots: []string{c.slotID},
 	})
-}
-
-// local rate limits
-
-type localLimiterCommitter struct {
-	cache readinessCacheLocalLimiterInterface
-	nsID  namespace.ID
-	key   string
-	ll    LocalLimiter
-}
-
-func newLocalLimiterCommitter(
-	cache readinessCacheLocalLimiterInterface,
-	nsID namespace.ID,
-	lim Limiter,
-) *localLimiterCommitter {
-	ll, _ := lim.Config.(LocalLimiter)
-	return &localLimiterCommitter{
-		cache: cache,
-		nsID:  nsID,
-		key:   lim.Key,
-		ll:    ll,
-	}
-}
-
-func (c *localLimiterCommitter) reserve() error {
-	if c.ll == nil {
-		return serviceerror.NewInternal("localRateLimitCommitter lim wrong type")
-	}
-	// by the time we get here, we already checked and allowed the right number of tasks to
-	// match in the matcher, so just deduct the tokens.
-	c.ll.Consume(1)
-	return nil
-}
-
-func (c *localLimiterCommitter) commit() error {
-	return nil
-}
-
-func (c *localLimiterCommitter) cancelReservations() {
-	if c.ll == nil {
-		return
-	}
-	c.ll.Consume(-1)
-	// since we returned tokens, a waiter might be ready to go now
-	c.cache.reportLocalLimiterReady(c.nsID, c.key)
 }
