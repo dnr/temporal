@@ -60,6 +60,8 @@ func (s ReadinessState) Likely() bool {
 
 // ReadinessCallback is something we can notify when we think the readiness state of a limiter
 // may have changed.
+// Note: because of how we store callbacks, the concrete type implementing ReadinessCallback
+// _must_ be a pointer type. Currently it's always *matcherData (except in tests).
 type ReadinessCallback interface {
 	OnReady()
 }
