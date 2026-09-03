@@ -20,6 +20,14 @@ func (n *nsReadiness) getLocalLimiterLocked(key string) *localLimiterState {
 	return lls
 }
 
+func (n *nsReadiness) stopLocalLimitersLocked() {
+	for _, lls := range n.localLimiters {
+		for _, tmr := range lls.timers {
+			tmr.Stop()
+		}
+	}
+}
+
 func (n *nsReadiness) localLimiterReadiness(key string, config any, cb ReadinessCallback) ReadinessState {
 	ll, ok := config.(LocalLimiter)
 	if !ok {
@@ -74,6 +82,16 @@ func (n *nsReadiness) cancelLocalLimiterCallback(key string, cb ReadinessCallbac
 	}
 }
 
+func (n *nsReadiness) cancelAllLocalLimiterCallbacksLocked(cb ReadinessCallback) {
+	// TODO(fc): this is unfortunate, maybe we should optimize this
+	for _, lls := range n.localLimiters {
+		if tmr, ok := lls.timers[cb]; ok {
+			delete(lls.timers, cb)
+			tmr.Stop()
+		}
+	}
+}
+
 // reportLocalLimiterReady is called after recycling tokens: the local limiter might be ready
 // now so wake waiters.
 func (r *Readiness) reportLocalLimiterReady(nsID namespace.ID, key string) {
@@ -82,6 +100,7 @@ func (r *Readiness) reportLocalLimiterReady(nsID namespace.ID, key string) {
 
 // reportLocalLimiterReady is called after recycling tokens: the local limiter might be ready
 // now so wake waiters.
+// TODO(fc): optimization: we could wake only one here instead of all
 func (n *nsReadiness) reportLocalLimiterReady(key string) {
 	n.lock.Lock()
 
