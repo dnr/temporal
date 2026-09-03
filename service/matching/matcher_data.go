@@ -264,7 +264,7 @@ func (d *matcherData) Stop() {
 	d.lock.Lock()
 	defer d.lock.Unlock()
 
-	// d.fcManager.CancelAllCallbacks(d) // FIXME: do this
+	d.fcManager.CancelAllCallbacks(d)
 	d.stopped = true
 }
 

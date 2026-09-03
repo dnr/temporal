@@ -69,6 +69,10 @@ func (r *Readiness) CancelCallback(nsID namespace.ID, lim Limiter, cb ReadinessC
 	}
 }
 
+func (r *Readiness) CancelAllCallbacks(nsID namespace.ID, cb ReadinessCallback) {
+	r.getNS(nsID).cancelAllCallbacks(cb)
+}
+
 // per-ns state
 
 type nsReadiness struct {
@@ -107,8 +111,14 @@ func (n *nsReadiness) stop() {
 	n.lock.Lock()
 	defer n.lock.Unlock()
 
-	for rkey, cs := range n.concurrencyLimiters {
-		cs.waiters = nil
-		cs.syncGoroLocked(n, rkey)
-	}
+	n.stopConcurrencyLocked()
+	n.stopLocalLimitersLocked()
+}
+
+func (n *nsReadiness) cancelAllCallbacks(cb ReadinessCallback) {
+	n.lock.Lock()
+	defer n.lock.Unlock()
+
+	n.cancelAllConcurrencyCallbacksLocked(cb)
+	n.cancelAllLocalLimiterCallbacksLocked(cb)
 }

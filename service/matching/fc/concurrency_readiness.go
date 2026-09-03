@@ -34,6 +34,13 @@ func (n *nsReadiness) getConcurrencyLimiterLocked(key string) *concurrencyState 
 	return cs
 }
 
+func (n *nsReadiness) stopConcurrencyLocked() {
+	for rkey, cs := range n.concurrencyLimiters {
+		cs.waiters = nil
+		cs.syncGoroLocked(n, rkey)
+	}
+}
+
 func (n *nsReadiness) concurrencyReadinessState(
 	key string,
 	pri int32,
@@ -70,6 +77,16 @@ func (n *nsReadiness) cancelConcurrencyCallback(key string, cb ReadinessCallback
 	if cs, ok := n.concurrencyLimiters[key]; ok {
 		delete(cs.waiters, cb)
 		cs.syncGoroLocked(n, key)
+	}
+}
+
+func (n *nsReadiness) cancelAllConcurrencyCallbacksLocked(cb ReadinessCallback) {
+	// TODO(fc): this is unfortunate, maybe we should optimize this
+	for key, cs := range n.concurrencyLimiters {
+		if _, ok := cs.waiters[cb]; ok {
+			delete(cs.waiters, cb)
+			cs.syncGoroLocked(n, key)
+		}
 	}
 }
 
@@ -183,4 +200,3 @@ func (cs *concurrencyState) callWait(ctx context.Context, rn *nsReadiness, key s
 		}
 	}
 }
-

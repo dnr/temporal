@@ -75,6 +75,11 @@ func (m *fcManager) TaskReady(task *internalTask, cb fc.ReadinessCallback) (read
 	return
 }
 
+func (m *fcManager) CancelAllCallbacks(cb fc.ReadinessCallback) {
+	nsID := namespace.ID(m.partition.NamespaceId())
+	m.readiness.CancelAllCallbacks(nsID, cb)
+}
+
 func (m *fcManager) UpdateLimitersFromConfig(limiters *fc.Limiters, task *internalTask) *fc.Limiters {
 	userData, _, err := m.userDataManager.GetUserData()
 	if err != nil {
