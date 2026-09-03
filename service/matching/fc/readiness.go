@@ -26,38 +26,6 @@ func (s ReadinessState) Likely() bool {
 	return s == ReadinessUnknown || s == ReadinessReady
 }
 
-type concurrencyLimiter struct {
-	generation int64
-	state      ReadinessState
-	// invariant: {len(waiters) > 0} == {Wait goroutine is running} == {goroCancel != nil}
-	// (for now, until we add eviction)
-	waiters    map[ReadinessCallback]wakePriority
-	goroCancel context.CancelFunc
-	// TODO(fc): cache some limiter-specific state, e.g. slots free so that we can change to
-	// not ready after taking last slot
-}
-
-type rlTimer struct {
-	// FIXME: consolidate with matching.resettableTimer
-	t clock.Timer
-}
-
-type readinessNS struct {
-	r    *Readiness
-	nsID namespace.ID
-
-	lock sync.Mutex
-
-	// LIMITER_TYPE_CONCURRENCY: key is concurrency limiter key (within ns)
-	concurrencyLimiters map[string]*concurrencyLimiter
-
-	// LIMITER_TYPE_LOCAL_RATE_LIMIT
-	rltimers map[ReadinessCallback]*rlTimer
-
-	// TODO(fc): clean up cache if entries are unused
-	// TODO(fc): gauges for size of cache
-}
-
 type Readiness struct {
 	timeSource               clock.TimeSource
 	concurrencyServiceClient fcpb.ConcurrencyServiceClient
@@ -77,45 +45,10 @@ func NewReadiness(
 
 func (r *Readiness) Stop() {
 	r.caches.Range(func(k, v any) bool {
-		v.(*readinessNS).Stop() // nolint:revive
+		v.(*nsReadiness).stop() // nolint:revive
 		return true
 	})
-}
-
-func (rn *readinessNS) Stop() {
-	rn.lock.Lock()
-	defer rn.lock.Unlock()
-
-	for rkey, v := range rn.concurrencyLimiters {
-		v.waiters = nil
-		v.syncGoroLocked(rn, rkey)
-	}
-}
-
-func (r *Readiness) getNS(nsID namespace.ID) *readinessNS {
-	v, ok := r.caches.Load(nsID)
-	if ok {
-		return v.(*readinessNS) // nolint:revive
-	}
-	newFcrn := &readinessNS{
-		r:                   r,
-		nsID:                nsID,
-		concurrencyLimiters: make(map[string]*concurrencyLimiter),
-		rltimers:            make(map[ReadinessCallback]*rlTimer),
-	}
-	fcrn, _ := r.caches.LoadOrStore(nsID, newFcrn)
-	return fcrn.(*readinessNS) // nolint:revive
-}
-
-func (rn *readinessNS) getConcurrencyLimiterLocked(key string) *concurrencyLimiter {
-	if v, ok := rn.concurrencyLimiters[key]; ok {
-		return v
-	}
-	v := &concurrencyLimiter{
-		waiters: make(map[ReadinessCallback]wakePriority),
-	}
-	rn.concurrencyLimiters[key] = v
-	return v
+	r.caches.Clear()
 }
 
 // ReadinessState gets the readiness state of a limiter. If it's blocked and cb is not nil,
@@ -135,22 +68,100 @@ func (r *Readiness) ReadinessState(
 	case enumsspb.LIMITER_TYPE_CONCURRENCY:
 		return r.getNS(nsID).concurrencyReadinessState(lim.Key, pri, age, cb)
 	case enumsspb.LIMITER_TYPE_LOCAL_RATE_LIMIT:
-		return r.getNS(nsID).localLimiterReadiness(lim.Config, cb)
+		return r.getNS(nsID).localLimiterReadiness(lim.Key, lim.Config, cb)
 	default:
 		return ReadinessUnknown
 	}
 }
 
-func (rn *readinessNS) concurrencyReadinessState(
+// CancelCallback cancels any future calls to cb.OnReady.
+func (r *Readiness) CancelCallback(nsID namespace.ID, lim Limiter, cb ReadinessCallback) {
+	switch lim.Type {
+	case enumsspb.LIMITER_TYPE_CONCURRENCY:
+		r.getNS(nsID).cancelConcurrencyCallback(lim.Key, cb)
+	case enumsspb.LIMITER_TYPE_LOCAL_RATE_LIMIT:
+		r.getNS(nsID).cancelLocalLimiterCallback(lim.Key, cb)
+	default:
+	}
+}
+
+// per-ns state
+
+type nsReadiness struct {
+	r    *Readiness
+	nsID namespace.ID
+
+	lock sync.Mutex
+
+	// LIMITER_TYPE_CONCURRENCY: key is concurrency limiter key (within ns)
+	concurrencyLimiters map[string]*concurrencyState
+
+	// LIMITER_TYPE_LOCAL_RATE_LIMIT: key is task queue name + type + partition
+	localLimiters map[string]*localLimiterState
+
+	// TODO(fc): clean up cache if entries are unused
+	// TODO(fc): gauges for size of cache
+}
+
+func (r *Readiness) getNS(nsID namespace.ID) *nsReadiness {
+	v, ok := r.caches.Load(nsID)
+	if ok {
+		return v.(*nsReadiness) // nolint:revive
+	}
+	newFcrn := &nsReadiness{
+		r:                   r,
+		nsID:                nsID,
+		concurrencyLimiters: make(map[string]*concurrencyState),
+		localLimiters:       make(map[string]*localLimiterState),
+	}
+	fcrn, _ := r.caches.LoadOrStore(nsID, newFcrn)
+	return fcrn.(*nsReadiness) // nolint:revive
+}
+
+func (n *nsReadiness) stop() {
+	n.lock.Lock()
+	defer n.lock.Unlock()
+
+	for rkey, v := range n.concurrencyLimiters {
+		v.waiters = nil
+		v.syncGoroLocked(n, rkey)
+	}
+}
+
+// concurrency limiter readiness
+
+type concurrencyState struct {
+	state      ReadinessState
+	generation int64
+	// invariant: {len(waiters) > 0} == {Wait goroutine is running} == {goroCancel != nil}
+	// (for now, until we add eviction)
+	waiters    map[ReadinessCallback]wakePriority
+	goroCancel context.CancelFunc
+	// TODO(fc): cache some limiter-specific state, e.g. slots free so that we can change to
+	// not ready after taking last slot
+}
+
+func (n *nsReadiness) getConcurrencyLimiterLocked(key string) *concurrencyState {
+	if v, ok := n.concurrencyLimiters[key]; ok {
+		return v
+	}
+	v := &concurrencyState{
+		waiters: make(map[ReadinessCallback]wakePriority),
+	}
+	n.concurrencyLimiters[key] = v
+	return v
+}
+
+func (n *nsReadiness) concurrencyReadinessState(
 	key string,
 	pri int32,
 	age time.Time,
 	cb ReadinessCallback,
 ) ReadinessState {
-	rn.lock.Lock()
-	defer rn.lock.Unlock()
+	n.lock.Lock()
+	defer n.lock.Unlock()
 
-	v, ok := rn.concurrencyLimiters[key]
+	v, ok := n.concurrencyLimiters[key]
 	if !ok {
 		// if missing from cache, return unknown. matching will probably try to Reserve and
 		// based on result, call either reportConcurrencyReady or reportConcurrencyBlocked.
@@ -164,30 +175,19 @@ func (rn *readinessNS) concurrencyReadinessState(
 		} else {
 			v.waiters[cb] = makeWakePriority(pri, age)
 		}
-		v.syncGoroLocked(rn, key)
+		v.syncGoroLocked(n, key)
 	}
 
 	return v.state
 }
 
-// CancelCallback cancels any future calls to cb.OnReady.
-func (r *Readiness) CancelCallback(nsID namespace.ID, lim Limiter, cb ReadinessCallback) {
-	switch lim.Type {
-	case enumsspb.LIMITER_TYPE_CONCURRENCY:
-		r.getNS(nsID).cancelConcurrencyCallback(lim.Key, cb)
-	case enumsspb.LIMITER_TYPE_LOCAL_RATE_LIMIT:
-		r.getNS(nsID).cancelLocalLimiterCallback(cb)
-	default:
-	}
-}
+func (n *nsReadiness) cancelConcurrencyCallback(key string, cb ReadinessCallback) {
+	n.lock.Lock()
+	defer n.lock.Unlock()
 
-func (rn *readinessNS) cancelConcurrencyCallback(key string, cb ReadinessCallback) {
-	rn.lock.Lock()
-	defer rn.lock.Unlock()
-
-	if v, ok := rn.concurrencyLimiters[key]; ok {
+	if v, ok := n.concurrencyLimiters[key]; ok {
 		delete(v.waiters, cb)
-		v.syncGoroLocked(rn, key)
+		v.syncGoroLocked(n, key)
 	}
 }
 
@@ -196,12 +196,12 @@ func (r *Readiness) reportConcurrencyReady(nsID namespace.ID, key string, gen in
 }
 
 // reportConcurrencyReady is called when a Reserve or Wait call succeeds.
-func (rn *readinessNS) reportConcurrencyReady(key string, gen int64) {
-	rn.lock.Lock()
+func (n *nsReadiness) reportConcurrencyReady(key string, gen int64) {
+	n.lock.Lock()
 
-	v := rn.getConcurrencyLimiterLocked(key)
+	v := n.getConcurrencyLimiterLocked(key)
 	if gen < v.generation {
-		rn.lock.Unlock()
+		n.lock.Unlock()
 		return
 	}
 	v.generation = gen
@@ -210,9 +210,9 @@ func (rn *readinessNS) reportConcurrencyReady(key string, gen int64) {
 	// TODO(fc): do staged wakeup similar to the distributed case
 	waiters := v.waiters
 	v.waiters = make(map[ReadinessCallback]wakePriority)
-	v.syncGoroLocked(rn, key)
+	v.syncGoroLocked(n, key)
 
-	rn.lock.Unlock()
+	n.lock.Unlock()
 
 	for w := range waiters {
 		w.OnReady()
@@ -224,11 +224,11 @@ func (r *Readiness) reportConcurrencyBlocked(nsID namespace.ID, key string, gen 
 	r.getNS(nsID).reportConcurrencyBlocked(key, gen)
 }
 
-func (rn *readinessNS) reportConcurrencyBlocked(key string, gen int64) {
-	rn.lock.Lock()
-	defer rn.lock.Unlock()
+func (n *nsReadiness) reportConcurrencyBlocked(key string, gen int64) {
+	n.lock.Lock()
+	defer n.lock.Unlock()
 
-	v := rn.getConcurrencyLimiterLocked(key)
+	v := n.getConcurrencyLimiterLocked(key)
 	if gen < v.generation {
 		return
 	}
@@ -236,7 +236,7 @@ func (rn *readinessNS) reportConcurrencyBlocked(key string, gen int64) {
 	v.state = ReadinessBlocked
 }
 
-func (v *concurrencyLimiter) syncGoroLocked(rn *readinessNS, key string) {
+func (v *concurrencyState) syncGoroLocked(rn *nsReadiness, key string) {
 	haveWaiters := len(v.waiters) > 0
 	if (v.goroCancel != nil) == haveWaiters {
 		return
@@ -259,14 +259,14 @@ func (v *concurrencyLimiter) syncGoroLocked(rn *readinessNS, key string) {
 	go v.callWait(ctx, rn, key)
 }
 
-func (v *concurrencyLimiter) minPriorityLocked() (minPriority wakePriority) {
+func (v *concurrencyState) minPriorityLocked() (minPriority wakePriority) {
 	for _, p := range v.waiters {
 		minPriority = min(minPriority, p)
 	}
 	return
 }
 
-func (v *concurrencyLimiter) callWait(ctx context.Context, rn *readinessNS, key string) {
+func (v *concurrencyState) callWait(ctx context.Context, rn *nsReadiness, key string) {
 	policy := backoff.NewExponentialRetryPolicy(time.Second).
 		WithExpirationInterval(backoff.NoInterval).
 		WithMaximumInterval(time.Minute)
@@ -302,58 +302,104 @@ func (v *concurrencyLimiter) callWait(ctx context.Context, rn *readinessNS, key 
 	}
 }
 
-// rate limit
+// local limiter readiness
 
-func (rn *readinessNS) localLimiterReadiness(config any, cb ReadinessCallback) ReadinessState {
+type localLimiterState struct {
+	timers map[ReadinessCallback]clock.Timer
+}
+
+func (n *nsReadiness) getLocalLimiterLocked(key string) *localLimiterState {
+	if v, ok := n.localLimiters[key]; ok {
+		return v
+	}
+	v := &localLimiterState{
+		timers: make(map[ReadinessCallback]clock.Timer),
+	}
+	n.localLimiters[key] = v
+	return v
+}
+
+func (n *nsReadiness) localLimiterReadiness(key string, config any, cb ReadinessCallback) ReadinessState {
 	ll, ok := config.(LocalLimiter)
 	if !ok {
 		return ReadinessUnknown
 	}
 	delay := ll.Delay()
 
-	rn.lock.Lock()
-	defer rn.lock.Unlock()
+	n.lock.Lock()
+	defer n.lock.Unlock()
+
+	state := n.getLocalLimiterLocked(key)
 
 	if delay > 0 {
 		// set timer
-		tmr, ok := rn.rltimers[cb]
+		tmr, ok := state.timers[cb]
 		if !ok {
-			tmr = &rlTimer{}
-		}
-		if tmr.t == nil {
-			tmr.t = rn.r.timeSource.AfterFunc(delay, func() {
-				rn.lock.Lock()
-				delete(rn.rltimers, cb)
-				rn.lock.Unlock()
+			state.timers[cb] = n.r.timeSource.AfterFunc(delay, func() {
+				n.lock.Lock()
+				delete(state.timers, cb)
+				n.lock.Unlock()
 				cb.OnReady()
 			})
 		} else {
-			// FIXME: should we do min? max? hmm...
-			tmr.t.Reset(delay)
+			// FIXME: should we do min? max? all? (per-key limit skips over priority)
+			tmr.Reset(delay)
 		}
 
 		return ReadinessBlocked
 	}
 
 	// clear timer
-	if tmr, ok := rn.rltimers[cb]; ok {
-		if tmr.t != nil {
-			tmr.t.Stop()
-		}
-		delete(rn.rltimers, cb)
+	if tmr, ok := state.timers[cb]; ok {
+		tmr.Stop()
+		delete(state.timers, cb)
 	}
 
 	return ReadinessReady
 }
 
-func (rn *readinessNS) cancelLocalLimiterCallback(cb ReadinessCallback) {
-	rn.lock.Lock()
-	defer rn.lock.Unlock()
+func (n *nsReadiness) cancelLocalLimiterCallback(key string, cb ReadinessCallback) {
+	n.lock.Lock()
+	defer n.lock.Unlock()
 
-	if tmr, ok := rn.rltimers[cb]; ok {
-		if tmr.t != nil {
-			tmr.t.Stop()
-		}
-		delete(rn.rltimers, cb)
+	state, ok := n.localLimiters[key]
+	if !ok {
+		return
+	}
+
+	if tmr, ok := state.timers[cb]; ok {
+		tmr.Stop()
+		delete(state.timers, cb)
+	}
+}
+
+// reportLocalLimiterReady is called after recycling tokens: the local limiter might be ready
+// now so wake waiters.
+func (r *Readiness) reportLocalLimiterReady(nsID namespace.ID, key string) {
+	r.getNS(nsID).reportLocalLimiterReady(key)
+}
+
+// reportLocalLimiterReady is called after recycling tokens: the local limiter might be ready
+// now so wake waiters.
+func (n *nsReadiness) reportLocalLimiterReady(key string) {
+	n.lock.Lock()
+
+	state, ok := n.localLimiters[key]
+	if !ok || len(state.timers) == 0 {
+		n.lock.Unlock()
+		return
+	}
+
+	timers := state.timers
+	state.timers = make(map[ReadinessCallback]clock.Timer)
+
+	for _, tmr := range timers {
+		tmr.Stop()
+	}
+
+	n.lock.Unlock()
+
+	for cb, _ := range timers {
+		cb.OnReady()
 	}
 }
