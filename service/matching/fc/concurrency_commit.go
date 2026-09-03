@@ -11,7 +11,7 @@ import (
 
 // subset of Readiness
 type readinessCacheConcurrencyInterface interface {
-	reportConcurrencyReady(namespace.ID, string, int64)
+	reportConcurrencyReady(namespace.ID, string, int64, int32)
 	reportConcurrencyBlocked(namespace.ID, string, int64)
 }
 
@@ -63,7 +63,7 @@ func (c *concurrencyCommitter) reserve() error {
 	// TODO(fc): we could include a hint for how many slots are _remaining_, and if zero, mark
 	// this limiter as blocked in the cache. but we don't want to immediately Wait on it since
 	// we might not have another waiter yet.
-	c.cache.reportConcurrencyReady(c.nsID, c.lim.Key, res.Generation)
+	c.cache.reportConcurrencyReady(c.nsID, c.lim.Key, res.Generation, 0) // FIXME: 0?
 	return nil
 }
 

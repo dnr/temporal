@@ -17,7 +17,7 @@ type concurrencyState struct {
 	generation int64
 	// invariant: {len(waiters) > 0} == {Wait goroutine is running} == {goroCancel != nil}
 	// (for now, until we add eviction)
-	waiters    map[ReadinessCallback]wakePriority
+	waiters    waiterEntries
 	goroCancel context.CancelFunc
 	// TODO(fc): cache some limiter-specific state, e.g. slots free so that we can change to
 	// not ready after taking last slot
@@ -28,7 +28,7 @@ func (n *nsReadiness) getConcurrencyLimiterLocked(key string) *concurrencyState 
 		return cs
 	}
 	cs := &concurrencyState{
-		waiters: make(map[ReadinessCallback]wakePriority),
+		waiters: *newWaiterEntries(),
 	}
 	n.concurrencyLimiters[key] = cs
 	return cs
@@ -36,7 +36,7 @@ func (n *nsReadiness) getConcurrencyLimiterLocked(key string) *concurrencyState 
 
 func (n *nsReadiness) stopConcurrencyLocked() {
 	for rkey, cs := range n.concurrencyLimiters {
-		cs.waiters = nil
+		cs.waiters.clear()
 		cs.syncGoroLocked(n, rkey)
 	}
 }
@@ -60,9 +60,9 @@ func (n *nsReadiness) concurrencyReadinessState(
 	if cb != nil {
 		// add callback if blocked, remove if unblocked
 		if cs.state.Likely() {
-			delete(cs.waiters, cb)
+			cs.waiters.remove(cb)
 		} else {
-			cs.waiters[cb] = makeWakePriority(pri, age)
+			cs.waiters.add(cb, pri, age)
 		}
 		cs.syncGoroLocked(n, key)
 	}
@@ -75,7 +75,7 @@ func (n *nsReadiness) cancelConcurrencyCallback(key string, cb ReadinessCallback
 	defer n.lock.Unlock()
 
 	if cs, ok := n.concurrencyLimiters[key]; ok {
-		delete(cs.waiters, cb)
+		cs.waiters.remove(cb)
 		cs.syncGoroLocked(n, key)
 	}
 }
@@ -83,19 +83,17 @@ func (n *nsReadiness) cancelConcurrencyCallback(key string, cb ReadinessCallback
 func (n *nsReadiness) cancelAllConcurrencyCallbacksLocked(cb ReadinessCallback) {
 	// TODO(fc): this is unfortunate, maybe we should optimize this
 	for key, cs := range n.concurrencyLimiters {
-		if _, ok := cs.waiters[cb]; ok {
-			delete(cs.waiters, cb)
-			cs.syncGoroLocked(n, key)
-		}
+		cs.waiters.remove(cb)
+		cs.syncGoroLocked(n, key)
 	}
 }
 
-func (r *Readiness) reportConcurrencyReady(nsID namespace.ID, key string, gen int64) {
-	r.getNS(nsID).reportConcurrencyReady(key, gen)
+func (r *Readiness) reportConcurrencyReady(nsID namespace.ID, key string, gen int64, tokens int32) {
+	r.getNS(nsID).reportConcurrencyReady(key, gen, tokens)
 }
 
 // reportConcurrencyReady is called when a Reserve or Wait call succeeds.
-func (n *nsReadiness) reportConcurrencyReady(key string, gen int64) {
+func (n *nsReadiness) reportConcurrencyReady(key string, gen int64, tokens int32) {
 	n.lock.Lock()
 
 	cs := n.getConcurrencyLimiterLocked(key)
@@ -106,15 +104,13 @@ func (n *nsReadiness) reportConcurrencyReady(key string, gen int64) {
 	cs.generation = gen
 	cs.state = ReadinessReady
 
-	// TODO(fc): do staged wakeup similar to the distributed case
-	waiters := cs.waiters
-	cs.waiters = make(map[ReadinessCallback]wakePriority)
+	cbs := cs.waiters.take(tokens)
 	cs.syncGoroLocked(n, key)
 
 	n.lock.Unlock()
 
-	for w := range waiters {
-		w.OnReady()
+	for _, cb := range cbs {
+		cb.OnReady()
 	}
 }
 
@@ -136,7 +132,7 @@ func (n *nsReadiness) reportConcurrencyBlocked(key string, gen int64) {
 }
 
 func (cs *concurrencyState) syncGoroLocked(rn *nsReadiness, key string) {
-	haveWaiters := len(cs.waiters) > 0
+	haveWaiters := cs.waiters.len() > 0
 	if (cs.goroCancel != nil) == haveWaiters {
 		return
 	}
@@ -158,13 +154,6 @@ func (cs *concurrencyState) syncGoroLocked(rn *nsReadiness, key string) {
 	go cs.callWait(ctx, rn, key)
 }
 
-func (cs *concurrencyState) minPriorityLocked() (minPriority wakePriority) {
-	for _, p := range cs.waiters {
-		minPriority = min(minPriority, p)
-	}
-	return
-}
-
 func (cs *concurrencyState) callWait(ctx context.Context, rn *nsReadiness, key string) {
 	policy := backoff.NewExponentialRetryPolicy(time.Second).
 		WithExpirationInterval(backoff.NoInterval).
@@ -177,8 +166,8 @@ func (cs *concurrencyState) callWait(ctx context.Context, rn *nsReadiness, key s
 			NamespaceId:         rn.nsID.String(),
 			Key:                 key,
 			Generation:          cs.generation,
-			WakePriority:        int64(cs.minPriorityLocked()),
-			RequestedWakeTokens: int32(len(cs.waiters)),
+			WakePriority:        int64(cs.waiters.minPriority()),
+			RequestedWakeTokens: int32(cs.waiters.len()),
 		}
 		rn.lock.Unlock()
 
@@ -192,7 +181,7 @@ func (cs *concurrencyState) callWait(ctx context.Context, rn *nsReadiness, key s
 		retrier.Reset()
 
 		if res.WakeTokens > 0 {
-			rn.reportConcurrencyReady(key, res.Generation)
+			rn.reportConcurrencyReady(key, res.Generation, res.WakeTokens)
 			// note: If we have satisfied all our waiters, then ctx
 			// will be canceled before we continue this loop.
 		} else {
