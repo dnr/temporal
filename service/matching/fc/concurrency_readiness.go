@@ -13,8 +13,8 @@ import (
 )
 
 type concurrencyState struct {
-	state      ReadinessState
 	generation int64
+	tokens     int32
 	// invariant: {len(waiters) > 0} == {Wait goroutine is running} == {goroCancel != nil}
 	// (for now, until we add eviction)
 	waiters    waiterEntries
@@ -41,45 +41,6 @@ func (n *nsReadiness) stopConcurrencyLocked() {
 	}
 }
 
-func (n *nsReadiness) concurrencyReadinessState(
-	key string,
-	pri int32,
-	age time.Time,
-	cb ReadinessCallback,
-) ReadinessState {
-	n.lock.Lock()
-	defer n.lock.Unlock()
-
-	cs, ok := n.concurrencyLimiters[key]
-	if !ok {
-		// if missing from cache, return unknown. matching will probably try to Reserve and
-		// based on result, call either reportConcurrencyReady or reportConcurrencyBlocked.
-		return ReadinessUnknown
-	}
-
-	if cb != nil {
-		// add callback if blocked, remove if unblocked
-		if cs.state.Likely() {
-			cs.waiters.remove(cb)
-		} else {
-			cs.waiters.add(cb, pri, age)
-		}
-		cs.syncGoroLocked(n, key)
-	}
-
-	return cs.state
-}
-
-func (n *nsReadiness) cancelConcurrencyCallback(key string, cb ReadinessCallback) {
-	n.lock.Lock()
-	defer n.lock.Unlock()
-
-	if cs, ok := n.concurrencyLimiters[key]; ok {
-		cs.waiters.remove(cb)
-		cs.syncGoroLocked(n, key)
-	}
-}
-
 func (n *nsReadiness) cancelAllConcurrencyCallbacksLocked(cb ReadinessCallback) {
 	// TODO(fc): this is unfortunate, maybe we should optimize this
 	for key, cs := range n.concurrencyLimiters {
@@ -102,7 +63,7 @@ func (n *nsReadiness) reportConcurrencyReady(key string, gen int64, tokens int32
 		return
 	}
 	cs.generation = gen
-	cs.state = ReadinessReady
+	cs.tokens = tokens
 
 	cbs := cs.waiters.take(tokens)
 	cs.syncGoroLocked(n, key)
@@ -128,7 +89,7 @@ func (n *nsReadiness) reportConcurrencyBlocked(key string, gen int64) {
 		return
 	}
 	cs.generation = gen
-	cs.state = ReadinessBlocked
+	cs.tokens = 0
 }
 
 func (cs *concurrencyState) syncGoroLocked(rn *nsReadiness, key string) {

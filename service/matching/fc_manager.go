@@ -1,7 +1,7 @@
 package matching
 
 import (
-	"cmp"
+	"errors"
 	"fmt"
 	"math"
 	"slices"
@@ -39,39 +39,14 @@ func newFCManager(
 }
 
 func (m *fcManager) TaskReady(task *internalTask, cb fc.ReadinessCallback) (ready bool, blockedBy syncMatchOutcome, canContinue bool) {
-	ready = true
-	limiters := task.Limiters()
-	if limiters == nil {
-		return
-	}
-
 	nsID := namespace.ID(m.partition.NamespaceId())
-	pri := cmp.Or(task.getPriority().GetPriorityKey(), int32(m.config.DefaultPriorityKey))
-	createTime := task.getCreateTime().AsTime()
+	tx := m.readiness.NewTx(nsID, task, cb)
+	task.fcTx = tx // attach to task so we can use it in matching engine
 
-	for i, lim := range limiters.Limiters[:] {
-		if !lim.Valid() {
-			continue
-		}
-
-		state := m.readiness.ReadinessState(nsID, lim, pri, createTime, cb)
-		if state.Likely() {
-			continue
-		}
-
-		// We're blocked here. The ones before this one are ready and ReadinessState
-		// unsubscribed from them already. This one isn't and ReadinessState subscribed to it.
-		// We need to unsubscribe from the following ones, in case we were already subscribed:
-		for _, nlim := range limiters.Limiters[i+1:] {
-			m.readiness.CancelCallback(nsID, nlim, cb)
-		}
-
-		ready = false
-		blockedBy = limiterTypeToSyncMatchOutcome(lim.Type)
-		canContinue = false // FIXME: set this based on "whole queue" scope, but allow fkey skipping
-		return
-	}
-
+	err := tx.Check()
+	ready = err == nil
+	blockedBy = limiterErrorToSyncMatchOutcome(err)
+	canContinue = false // FIXME: set this based on "whole queue" scope, but allow fkey skipping
 	return
 }
 
@@ -176,11 +151,11 @@ func (m *fcManager) localLimiterKey() string {
 	return key
 }
 
-func limiterTypeToSyncMatchOutcome(tp enumsspb.LimiterType) syncMatchOutcome {
-	switch tp {
-	case enumsspb.LIMITER_TYPE_CONCURRENCY:
+func limiterErrorToSyncMatchOutcome(err error) syncMatchOutcome {
+	switch {
+	case errors.Is(err, fc.ErrConcurrencyBlocked):
 		return syncMatchConcurrencyLimited
-	case enumsspb.LIMITER_TYPE_LOCAL_RATE_LIMIT:
+	case errors.Is(err, fc.ErrLocalLimiterBlocked):
 		return syncMatchRateLimited
 	default:
 		return syncMatchUnspecified

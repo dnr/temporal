@@ -794,16 +794,7 @@ pollLoop:
 
 		// The task returned by pollTask is likely to be allowed by flow control.
 		// We need to run the flow control commit protocol.
-		fctx, err := e.fcReadiness.NewTx(ctx, namespaceID, task)
-		if err != nil {
-			e.nonRetryableErrorsDropTask(task, taskQueueName, enumspb.TASK_QUEUE_TYPE_WORKFLOW, err)
-			// drop the task as otherwise task would be stuck in a retry-loop
-			task.finish(taskFinishResult{dropReason: dropReasonInternalError})
-			continue pollLoop
-		}
-		// After this point, we must `fctx.CancelReservations()` before any `continue pollLoop`.
-		if err = fctx.Reserve(); err != nil {
-			fctx.CancelReservations()
+		if err = task.fcTx.Reserve(ctx); err != nil {
 			task.finish(taskFinishResult{err: err})
 			continue pollLoop
 		}
@@ -816,9 +807,10 @@ pollLoop:
 			requestClone = common.CloneProto(request)
 			requestClone.WorkerVersionCapabilities.BuildId = ""
 		}
-		resp, err := e.recordWorkflowTaskStarted(ctx, requestClone, task, fctx.LimiterRefs())
+		resp, err := e.recordWorkflowTaskStarted(ctx, requestClone, task, task.fcTx.LimiterRefs())
 		if err != nil {
-			fctx.CancelReservations()
+			task.fcTx.Rollback(ctx)
+
 			switch err := err.(type) {
 			case *serviceerror.Internal:
 				e.nonRetryableErrorsDropTask(task, taskQueueName, enumspb.TASK_QUEUE_TYPE_WORKFLOW, err)
@@ -894,9 +886,8 @@ pollLoop:
 			continue pollLoop
 		}
 
-		if err = fctx.Commit(); err != nil {
+		if err = task.fcTx.Commit(ctx); err != nil {
 			e.flowControlCommitFailed(task, taskQueueName, enumspb.TASK_QUEUE_TYPE_WORKFLOW, err)
-			fctx.CancelReservations()
 			// we must drop the task here!
 			task.finish(taskFinishResult{dropReason: dropReasonFlowControlCommitFailed})
 			continue pollLoop
@@ -1067,16 +1058,7 @@ pollLoop:
 
 		// The task returned by pollTask is likely to be allowed by flow control.
 		// We need to run the flow control commit protocol.
-		fctx, err := e.fcReadiness.NewTx(ctx, namespace.ID(req.NamespaceId), task)
-		if err != nil {
-			e.nonRetryableErrorsDropTask(task, taskQueueName, enumspb.TASK_QUEUE_TYPE_ACTIVITY, err)
-			// drop the task as otherwise task would be stuck in a retry-loop
-			task.finish(taskFinishResult{dropReason: dropReasonInternalError})
-			continue pollLoop
-		}
-		// After this point, we must `fctx.CancelReservations()` before any `continue pollLoop`.
-		if err = fctx.Reserve(); err != nil {
-			fctx.CancelReservations()
+		if err = task.fcTx.Reserve(ctx); err != nil {
 			task.finish(taskFinishResult{err: err})
 			continue pollLoop
 		}
@@ -1089,9 +1071,10 @@ pollLoop:
 			requestClone = common.CloneProto(request)
 			requestClone.WorkerVersionCapabilities.BuildId = ""
 		}
-		resp, err := e.recordActivityTaskStarted(ctx, requestClone, task, fctx.LimiterRefs())
+		resp, err := e.recordActivityTaskStarted(ctx, requestClone, task, task.fcTx.LimiterRefs())
 		if err != nil {
-			fctx.CancelReservations()
+			task.fcTx.Rollback(ctx)
+
 			switch err := err.(type) {
 			case *serviceerror.Internal:
 				e.nonRetryableErrorsDropTask(task, taskQueueName, enumspb.TASK_QUEUE_TYPE_ACTIVITY, err)
@@ -1184,9 +1167,8 @@ pollLoop:
 			continue pollLoop
 		}
 
-		if err = fctx.Commit(); err != nil {
+		if err = task.fcTx.Commit(ctx); err != nil {
 			e.flowControlCommitFailed(task, taskQueueName, enumspb.TASK_QUEUE_TYPE_ACTIVITY, err)
-			fctx.CancelReservations()
 			// we must drop the task here!
 			task.finish(taskFinishResult{dropReason: dropReasonFlowControlCommitFailed})
 			continue pollLoop

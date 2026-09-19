@@ -37,25 +37,10 @@ type Limiters struct {
 	Limiters [MaxLimiters]Limiter
 }
 
-// fcTask is the interface that flow control needs from a task (just get its limiters).
+// fcTask is the interface that flow control needs from a task.
 type fcTask interface {
 	Limiters() *Limiters
-}
-
-// ReadinessState is our best guess at whether a limiter will return success to a Reserve call.
-type ReadinessState int32
-
-const (
-	ReadinessUnknown ReadinessState = iota
-	ReadinessBlocked
-	ReadinessReady
-)
-
-// Likely indicats whether we should treat a state as "likely for Reserve to succeed": we
-// optimistically try to Reserve limiters that we don't have cached state for, so we learn
-// whether they're ready.
-func (s ReadinessState) Likely() bool {
-	return s == ReadinessUnknown || s == ReadinessReady
+	PriorityAndAge() (int32, time.Time)
 }
 
 // ReadinessCallback is something we can notify when we think the readiness state of a limiter

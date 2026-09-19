@@ -2,51 +2,87 @@ package fc
 
 import (
 	"context"
+	"time"
 
+	"go.temporal.io/api/serviceerror"
 	taskqueuepb "go.temporal.io/api/taskqueue/v1"
 	fcpb "go.temporal.io/server/chasm/lib/flowcontrol/gen/flowcontrolpb/v1"
 	"go.temporal.io/server/common/namespace"
 	serviceerrors "go.temporal.io/server/common/serviceerror"
 )
 
-// subset of Readiness
-type readinessCacheConcurrencyInterface interface {
-	reportConcurrencyReady(namespace.ID, string, int64, int32)
-	reportConcurrencyBlocked(namespace.ID, string, int64)
-}
+var ErrConcurrencyBlocked = serviceerror.NewFailedPrecondition("blocked by concurrency limit")
 
-type concurrencyCommitter struct {
-	ctx    context.Context
+type concurrencyTx struct {
 	client fcpb.ConcurrencyServiceClient
-	cache  readinessCacheConcurrencyInterface
+	r      *Readiness
 	nsID   namespace.ID
 	slotID string
 	lim    Limiter
+	pri    int32
+	age    time.Time
 }
 
-func newConcurrencyCommitter(
-	ctx context.Context,
+func newConcurrencyTx(
 	client fcpb.ConcurrencyServiceClient,
-	cache readinessCacheConcurrencyInterface,
+	r *Readiness, // FIXME: whole thing?
 	nsID namespace.ID,
 	slotID string,
 	lim Limiter,
-) *concurrencyCommitter {
-	return &concurrencyCommitter{
-		ctx:    ctx,
+	pri int32,
+	age time.Time,
+) *concurrencyTx {
+	return &concurrencyTx{
 		client: client,
-		cache:  cache,
+		r:      r,
 		nsID:   nsID,
 		slotID: slotID,
 		lim:    lim,
+		pri:    pri,
+		age:    age,
 	}
 }
 
-func (c *concurrencyCommitter) reserve() error {
+func (c *concurrencyTx) check(cb ReadinessCallback) error {
+	n := c.r.getNS(c.nsID)
+
+	n.lock.Lock()
+	defer n.lock.Unlock()
+
+	cs, ok := n.concurrencyLimiters[c.lim.Key]
+	if !ok {
+		// if missing from cache, pass check. matching will probably try to Reserve and
+		// based on result, call either reportConcurrencyReady or reportConcurrencyBlocked.
+		return nil
+	}
+
+	blocked := cs.tokens == 0
+	if cb != nil {
+		// add callback if blocked, remove if unblocked
+		if blocked {
+			cs.waiters.add(cb, c.pri, c.age)
+		} else {
+			cs.waiters.remove(cb)
+		}
+		cs.syncGoroLocked(n, c.lim.Key)
+	}
+
+	if blocked {
+		return ErrConcurrencyBlocked
+	}
+	return nil
+}
+
+func (c *concurrencyTx) cancelCheck(cb ReadinessCallback) {
+	// FIXME
+	return
+}
+
+func (c *concurrencyTx) reserve(ctx context.Context) error {
 	// if config is missing or wrong type, just leave it out
 	configUpdate, _ := c.lim.Config.(*taskqueuepb.ConcurrencyLimit)
 
-	res, err := c.client.Batch(c.ctx, &fcpb.ConcurrencyBatchRequest{
+	res, err := c.client.Batch(ctx, &fcpb.ConcurrencyBatchRequest{
 		NamespaceId:         c.nsID.String(),
 		Key:                 c.lim.Key,
 		ReserveSlots:        []string{c.slotID},
@@ -57,18 +93,18 @@ func (c *concurrencyCommitter) reserve() error {
 		return err // don't update cache on rpc error
 	}
 	if !res.ReserveSuccess[0] {
-		c.cache.reportConcurrencyBlocked(c.nsID, c.lim.Key, res.Generation)
+		c.r.reportConcurrencyBlocked(c.nsID, c.lim.Key, res.Generation)
 		return serviceerrors.NewFlowControlBlocked()
 	}
 	// TODO(fc): we could include a hint for how many slots are _remaining_, and if zero, mark
 	// this limiter as blocked in the cache. but we don't want to immediately Wait on it since
 	// we might not have another waiter yet.
-	c.cache.reportConcurrencyReady(c.nsID, c.lim.Key, res.Generation, 0) // FIXME: 0?
+	c.r.reportConcurrencyReady(c.nsID, c.lim.Key, res.Generation, 0) // FIXME: 0?
 	return nil
 }
 
-func (c *concurrencyCommitter) commit() error {
-	res, err := c.client.Batch(c.ctx, &fcpb.ConcurrencyBatchRequest{
+func (c *concurrencyTx) commit(ctx context.Context) error {
+	res, err := c.client.Batch(ctx, &fcpb.ConcurrencyBatchRequest{
 		NamespaceId: c.nsID.String(),
 		Key:         c.lim.Key,
 		CommitSlots: []string{c.slotID},
@@ -81,9 +117,9 @@ func (c *concurrencyCommitter) commit() error {
 	return err
 }
 
-func (c *concurrencyCommitter) cancelReservations() {
+func (c *concurrencyTx) cancelReserve(ctx context.Context) {
 	// call in new goroutine, don't block here, we don't care about the result
-	go c.client.Batch(c.ctx, &fcpb.ConcurrencyBatchRequest{
+	go c.client.Batch(ctx, &fcpb.ConcurrencyBatchRequest{
 		NamespaceId:            c.nsID.String(),
 		Key:                    c.lim.Key,
 		CancelReservationSlots: []string{c.slotID},

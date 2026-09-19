@@ -1,6 +1,7 @@
 package matching
 
 import (
+	"cmp"
 	"context"
 	"sync/atomic"
 	"time"
@@ -83,6 +84,7 @@ type (
 		// Flow control fields:
 		// After construction, limiters should only be accessed under matcherData lock.
 		limiters *fc.Limiters
+		fcTx     *fc.Tx
 
 		// The following fields are for use by priMatcher/matcherData:
 		waitableMatchResult
@@ -295,6 +297,14 @@ func (task *internalTask) workflowExecution() *commonpb.WorkflowExecution {
 // Limiters implements fc.fcTask interface.
 func (task *internalTask) Limiters() *fc.Limiters {
 	return task.limiters
+}
+
+// PriorityAndAge implements fc.fcTask interface.
+func (task *internalTask) PriorityAndAge() (int32, time.Time) {
+	def := int32(3) // FIXME: ugh, have to get this here
+	pri := cmp.Or(task.getPriority().GetPriorityKey(), def)
+	createTime := task.getCreateTime().AsTime()
+	return pri, createTime
 }
 
 func (task *internalTask) updateLimitersFromConfig(manager *fcManager) {
