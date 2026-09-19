@@ -111,10 +111,9 @@ func (s *MatcherDataSuite) pollImmediately(meta *pollMetadata) *matchResult {
 }
 
 func (s *MatcherDataSuite) doFlowControl(pres *matchResult) {
-	tx, err := s.fcReadiness.NewTx(context.Background(), "nsid", pres.task)
-	s.NoError(err)
-	s.NoError(tx.Reserve())
-	s.NoError(tx.Commit())
+	tx := s.fcReadiness.NewTx("nsid", pres.task, &s.md)
+	s.NoError(tx.Reserve(context.Background()))
+	s.NoError(tx.Commit(context.Background()))
 }
 
 func (s *MatcherDataSuite) queryFakeTime(duration time.Duration, respC chan<- taskResponse) {
@@ -542,9 +541,8 @@ func (s *MatcherDataSuite) TestPerKeyRateLimitCancelWakesBlockedMatch() {
 	res := s.pollFakeTime(time.Second)
 	s.Require().Equal(task1a, res.task)
 
-	tx, err := s.fcReadiness.NewTx(context.Background(), "nsid", res.task)
-	s.NoError(err)
-	s.NoError(tx.Reserve())
+	tx := s.fcReadiness.NewTx("nsid", res.task, &s.md)
+	s.NoError(tx.Reserve(context.Background()))
 
 	// Enqueue a second key1 task. key1 is now rate-limited, so it cannot match yet.
 	task1b := s.newBacklogTaskWithPriority(2, 0, nil, key1)
@@ -561,7 +559,7 @@ func (s *MatcherDataSuite) TestPerKeyRateLimitCancelWakesBlockedMatch() {
 	s.waitForPollers(1)
 
 	// Cancel the flow control reservation, which should return the token and unblock task1b.
-	tx.CancelReservations()
+	tx.Rollback(context.Background())
 
 	// The parked poller should now match task1b without any fake-time advancement.
 	select {
@@ -588,9 +586,8 @@ func (s *MatcherDataSuite) TestRateLimitCancelWakesBlockedMatch() {
 	res := s.pollFakeTime(time.Second)
 	s.Require().Equal(task1, res.task)
 
-	tx, err := s.fcReadiness.NewTx(context.Background(), "nsid", res.task)
-	s.NoError(err)
-	s.NoError(tx.Reserve())
+	tx := s.fcReadiness.NewTx("nsid", res.task, &s.md)
+	s.NoError(tx.Reserve(context.Background()))
 
 	// Enqueue a second key1 task. The partition is now rate-limited, so it cannot match yet.
 	task2 := s.newBacklogTask(2, 0, nil)
@@ -607,7 +604,7 @@ func (s *MatcherDataSuite) TestRateLimitCancelWakesBlockedMatch() {
 	s.waitForPollers(1)
 
 	// Cancel the flow control reservation, which should return the token and unblock task2.
-	tx.CancelReservations()
+	tx.Rollback(context.Background())
 
 	// The parked poller should now match task2 without any fake-time advancement.
 	select {
