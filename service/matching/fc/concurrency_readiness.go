@@ -53,24 +53,23 @@ func (r *Readiness) reportConcurrencyReady(nsID namespace.ID, key string, gen in
 
 // reportConcurrencyReady is called when a Reserve or Wait call succeeds.
 func (n *nsReadiness) reportConcurrencyReady(key string, gen int64, tokens int32) {
+	var waiters []ReadinessCallback
+	defer func() { notifyWaiters(waiters) }()
+
 	n.lock.Lock()
+	defer n.lock.Unlock()
 
 	cs := n.getConcurrencyLimiterLocked(key)
 	if gen < cs.generation {
 		n.lock.Unlock()
 		return
 	}
+	// FIXME: should not set tokens multiple times from the same batch call
 	cs.generation = gen
 	cs.tokens = tokens
 
-	cbs := cs.waiters.take(tokens)
+	waiters = cs.waiters.take(cs.tokens)
 	cs.syncGoroLocked(n, key)
-
-	n.lock.Unlock()
-
-	for _, cb := range cbs {
-		cb.OnReady()
-	}
 }
 
 // reportConcurrencyBlocked is called when a Reserve or Wait call fails.

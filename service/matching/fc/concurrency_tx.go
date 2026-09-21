@@ -74,8 +74,22 @@ func (c *concurrencyTx) check(cb ReadinessCallback) error {
 }
 
 func (c *concurrencyTx) cancelCheck(cb ReadinessCallback) {
-	// FIXME
-	return
+	var waiters []ReadinessCallback
+	defer func() { notifyWaiters(waiters) }()
+
+	n := c.r.getNS(c.nsID)
+
+	n.lock.Lock()
+	defer n.lock.Unlock()
+
+	cs, ok := n.concurrencyLimiters[c.lim.Key]
+	if !ok {
+		return
+	}
+
+	cs.tokens++
+	waiters = cs.waiters.take(cs.tokens)
+	cs.syncGoroLocked(n, c.lim.Key)
 }
 
 func (c *concurrencyTx) reserve(ctx context.Context) error {
