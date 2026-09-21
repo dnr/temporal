@@ -1,80 +1,132 @@
 package fc
 
 import (
+	"sync"
+	"time"
+
+	"go.temporal.io/api/serviceerror"
 	"go.temporal.io/server/common/clock"
+	"go.temporal.io/server/common/namespace"
+	"go.temporal.io/server/service/matching/simplelimiter"
 )
 
+var ErrLocalLimiterBlocked = serviceerror.NewFailedPrecondition("blocked by local limiter")
+
 type localLimiterState struct {
-	timers map[ReadinessCallback]clock.Timer
+	r *Readiness
+
+	lock   sync.Mutex
+	params simplelimiter.Params
+	lim    simplelimiter.Limiter
+	// invariant: lim.Delay() < 0 -> len(waiters) == 0
+	// invariant: {len(waiters) > 0} == {tmr != nil}
+	waiters waiterEntries
+	tmr     clock.Timer
 }
 
-func (n *nsReadiness) getLocalLimiterLocked(key string) *localLimiterState {
-	if lls, ok := n.localLimiters[key]; ok {
-		return lls
+func (r *Readiness) getLocalLimiter(nsID namespace.ID, key string) *localLimiterState {
+	if lls, ok := r.localLimiters.Load(nsID + key); ok {
+		return lls.(*localLimiterState) // nolint:revive
 	}
-	lls := &localLimiterState{
-		timers: make(map[ReadinessCallback]clock.Timer),
-	}
-	n.localLimiters[key] = lls
-	return lls
+	lls, _ = r.localLimiters.LoadOrStore(nsID+key, &localLimiterState{
+		r:       r,
+		params:  simplelimiter.NoLimitParams(),
+		waiters: *newWaiterEntries(),
+	})
+	return lls.(*localLimiterState) // nolint:revive
 }
 
-func (n *nsReadiness) stopLocalLimitersLocked() {
-	for _, lls := range n.localLimiters {
-		for _, tmr := range lls.timers {
-			tmr.Stop()
-		}
-	}
-}
+func (lls *localLimiterState) stop() {
+	lls.lock.Lock()
+	defer lls.lock.Unlock()
 
-func (n *nsReadiness) cancelAllLocalLimiterCallbacksLocked(cb ReadinessCallback) {
-	// TODO(fc): this is unfortunate, maybe we should optimize this
-	for _, lls := range n.localLimiters {
-		if tmr, ok := lls.timers[cb]; ok {
-			delete(lls.timers, cb)
-			tmr.Stop()
-		}
+	if lls.tmr != nil {
+		lls.tmr.Stop()
+		lls.tmr = nil
 	}
 }
 
-// stopAndWakeLocalLimiter cancels one local limiter callback and calls one or more of the
-// other ones registered for that limiter, if any. This is called after recycling tokens.
-func (n *nsReadiness) stopAndWakeLocalLimiter(key string, cancelCb ReadinessCallback) {
-	n.lock.Lock()
+func (lls *localLimiterState) check(config any, cb ReadinessCallback, pri int32, age time.Time) error {
+	// we may have to wake other waiters in check because we can install parameters with a
+	// faster rate or higher burst.
+	var waiters []ReadinessCallback
+	defer func() { notifyWaiters(waiters) }()
 
-	lls, ok := n.localLimiters[key]
-	if !ok || len(lls.timers) == 0 {
-		n.lock.Unlock()
-		return
+	lls.lock.Lock()
+	defer lls.lock.Unlock()
+
+	// install new params if available
+	if params, ok := config.(simplelimiter.Params); ok {
+		lls.params = params
 	}
+
+	now := lls.r.timeSource.Now().UnixNano()
+	defer func() { waiters = lls.wakeAndSyncTimerLocked(now) }()
+
+	if delay := lls.lim.Delay(); delay > 0 {
+		lls.waiters.add(cb, pri, age)
+		return ErrLocalLimiterBlocked
+	}
+
+	// remove in case it was present before
+	lls.waiters.remove(cb)
+	// now we can take the token
+	lls.lim = lls.lim.Consume(lls.params, now, 1)
+	return nil
+}
+
+func (lls *localLimiterState) cancelCheck(cb ReadinessCallback) {
+	var waiters []ReadinessCallback
+	defer func() { notifyWaiters(waiters) }()
+
+	lls.lock.Lock()
+	defer lls.lock.Unlock()
+
+	// return the token
+	now := lls.r.timeSource.Now().UnixNano()
+	lls.lim = lls.lim.Consume(lls.params, now, -1)
 
 	// remove the one we don't want anymore
-	lls.stopLocked(cancelCb)
+	lls.waiters.remove(cancelCb)
 
-	if len(lls.timers) == 0 {
-		n.lock.Unlock()
+	// since we returned tokens, a waiter might be ready to go now
+	waiters = lls.wakeAndSyncTimerLocked(now)
+}
+
+func (lls *localLimiterState) wakeAndSyncTimerLocked(now int64) (out []ReadinessCallback) {
+	// use a local copy to figure out how many we can wake. note that we do not consume from
+	// the actual limiter here, since the waiter will do that after it wakes up.
+	lim := lls.lim
+	for lim.Delay(now) <= 0 && lls.waiters.len() > 0 {
+		if cb, ok := lls.waiters.takeOne(); ok {
+			out = append(out, cb)
+			lim = lim.Consume(lls.params, now, 1)
+		}
+	}
+
+	if lls.waiters.len() == 0 {
+		if lls.tmr != nil {
+			lls.tmr.Stop()
+			lls.tmr = nil
+		}
 		return
 	}
 
-	// if there are any others, wake them all
-	// TODO(fc): optimization: we could wake only one here instead of all
-	timers := lls.timers
-	lls.timers = make(map[ReadinessCallback]clock.Timer)
-
-	for _, tmr := range timers {
-		tmr.Stop()
-	}
-
-	n.lock.Unlock()
-
-	for cb := range timers {
-		cb.OnReady()
+	delay := lim.Delay(now)
+	if lls.tmr != nil {
+		lls.tmr.Reset(delay)
+	} else {
+		lls.tmr = lls.r.timeSource.AfterFunc(delay, lls.onTimer)
 	}
 }
 
-func (lls *localLimiterState) stopLocked(cb ReadinessCallback) {
-	if tmr, ok := lls.timers[cb]; ok {
-		tmr.Stop()
-		delete(lls.timers, cb)
-	}
+func (lls *localLimiterState) onTimer() {
+	var waiters []ReadinessCallback
+	defer func() { notifyWaiters(waiters) }()
+
+	lls.lock.Lock()
+	defer lls.lock.Unlock()
+
+	now := lls.r.timeSource.Now().UnixNano()
+	waiters = lls.wakeAndSyncTimerLocked()
 }

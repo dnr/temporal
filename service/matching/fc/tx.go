@@ -30,6 +30,7 @@ func (r *Readiness) NewTx(nsID namespace.ID, task fcTask, cb ReadinessCallback) 
 	if len(lims) == 0 {
 		return nil
 	}
+	pri, age := task.PriorityAndAge()
 
 	limiterTxs := make([]limiterTx, len(lims))
 	var refs []*taskqueuespb.LimiterRef
@@ -38,11 +39,12 @@ func (r *Readiness) NewTx(nsID namespace.ID, task fcTask, cb ReadinessCallback) 
 		case enumsspb.LIMITER_TYPE_CONCURRENCY:
 			// TODO(fc): consider deriving from task to fix some nongraceful failover situations
 			slotID := uuid.NewString()
-			pri, age := task.PriorityAndAge()
-			limiterTxs[i] = newConcurrencyTx(r.concurrencyServiceClient, r, nsID, slotID, lim, pri, age)
+			cs := r.getConcurrencyLimiter(nsID, lim.key)
+			limiterTxs[i] = newConcurrencyTx(cs, slotID, lim, pri, age)
 			refs = append(refs, &taskqueuespb.LimiterRef{LimiterType: lim.Type, Key: lim.Key, SlotId: slotID})
 		case enumsspb.LIMITER_TYPE_LOCAL_RATE_LIMIT:
-			limiterTxs[i] = newLocalLimiterTx(r, nsID, lim)
+			lls := r.getLocalLimiter(nsID, lim.ey)
+			limiterTxs[i] = newLocalLimiterTx(lls, lim.config, pri, age)
 		default:
 			// TODO(fc): log or notify here
 			limiterTxs[i] = noopLimiterTx{}
