@@ -37,67 +37,63 @@ func (r *Readiness) getLocalLimiter(nsID namespace.ID, key string) *localLimiter
 }
 
 func (lls *localLimiterState) stop() {
-	lls.lock.Lock()
-	defer lls.lock.Unlock()
-
-	if lls.tmr != nil {
-		lls.tmr.Stop()
-		lls.tmr = nil
-	}
+	lls.update(func(now int64) error {
+		lls.waiters.clear()
+		// FIXME: lls.r.unregisterWaiter on each one
+		return nil
+	})
 }
 
 func (lls *localLimiterState) cancelWaiter(cb ReadinessCallback) {
-	lls.lock.Lock()
-	defer lls.lock.Unlock()
-
-	lls.waiters.remove(cb)
+	lls.update(func(now int64) error {
+		lls.waiters.remove(cb)
+		return nil
+	})
 }
 
 func (lls *localLimiterState) check(config simplelimiter.Params, cb ReadinessCallback, pri int32, age time.Time) error {
-	// we may have to wake other waiters in check because we can install parameters with a
-	// faster rate or higher burst.
-	var waiters []ReadinessCallback
-	defer func() { notifyWaiters(waiters) }()
+	return lls.update(func(now int64) error {
 
-	lls.lock.Lock()
-	defer lls.lock.Unlock()
+		// install new params
+		lls.params = config
 
-	// install new params
-	lls.params = config
+		if delay := lls.lim.Delay(now); delay > 0 {
+			lls.waiters.add(cb, pri, age)
+			lls.r.registerWaiter(lls, cb)
+			return ErrLocalLimiterBlocked
+		}
 
-	now := lls.r.timeSource.Now().UnixNano()
-	defer func() { waiters = lls.wakeAndSyncTimerLocked(now) }()
-
-	if delay := lls.lim.Delay(now); delay > 0 {
-		lls.waiters.add(cb, pri, age)
-		lls.r.registerWaiter(lls, cb)
-		return ErrLocalLimiterBlocked
-	}
-
-	// remove in case it was present before
-	lls.waiters.remove(cb)
-	lls.r.unregisterWaiter(lls, cb)
-	// now we can take the token
-	lls.lim = lls.lim.Consume(lls.params, now, 1)
-	return nil
+		// remove in case it was present before
+		lls.waiters.remove(cb)
+		lls.r.unregisterWaiter(lls, cb)
+		// now we can take the token
+		lls.lim = lls.lim.Consume(lls.params, now, 1)
+		return nil
+	})
 }
 
 func (lls *localLimiterState) cancelCheck() {
+	lls.update(func(now int64) error {
+		// return the token
+		lls.lim = lls.lim.Consume(lls.params, now, -1)
+		return nil
+	})
+}
+
+func (lls *localLimiterState) update(f func(now int64) error) error {
 	var waiters []ReadinessCallback
 	defer func() { notifyWaiters(waiters) }()
 
 	lls.lock.Lock()
 	defer lls.lock.Unlock()
 
-	// return the token
 	now := lls.r.timeSource.Now().UnixNano()
-	lls.lim = lls.lim.Consume(lls.params, now, -1)
+	defer func() { waiters = lls.syncTimerLocked(now) }()
 
-	// since we returned tokens, a waiter might be ready to go now
-	waiters = lls.wakeAndSyncTimerLocked(now)
+	return f(now)
 }
 
-func (lls *localLimiterState) wakeAndSyncTimerLocked(now int64) (out []ReadinessCallback) {
+func (lls *localLimiterState) syncTimerLocked(now int64) (out []ReadinessCallback) {
 	// use a local copy to figure out how many we can wake. note that we do not consume from
 	// the actual limiter here, since the waiter will do that after it wakes up.
 	lim := lls.lim
@@ -126,12 +122,5 @@ func (lls *localLimiterState) wakeAndSyncTimerLocked(now int64) (out []Readiness
 }
 
 func (lls *localLimiterState) onTimer() {
-	var waiters []ReadinessCallback
-	defer func() { notifyWaiters(waiters) }()
-
-	lls.lock.Lock()
-	defer lls.lock.Unlock()
-
-	now := lls.r.timeSource.Now().UnixNano()
-	waiters = lls.wakeAndSyncTimerLocked(now)
+	lls.update(func(int64) error { return nil })
 }
