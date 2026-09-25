@@ -46,6 +46,13 @@ func (lls *localLimiterState) stop() {
 	}
 }
 
+func (lls *localLimiterState) cancelWaiter(cb ReadinessCallback) {
+	lls.lock.Lock()
+	defer lls.lock.Unlock()
+
+	lls.waiters.remove(cb)
+}
+
 func (lls *localLimiterState) check(config simplelimiter.Params, cb ReadinessCallback, pri int32, age time.Time) error {
 	// we may have to wake other waiters in check because we can install parameters with a
 	// faster rate or higher burst.
@@ -63,11 +70,13 @@ func (lls *localLimiterState) check(config simplelimiter.Params, cb ReadinessCal
 
 	if delay := lls.lim.Delay(now); delay > 0 {
 		lls.waiters.add(cb, pri, age)
+		lls.r.registerWaiter(lls, cb)
 		return ErrLocalLimiterBlocked
 	}
 
 	// remove in case it was present before
 	lls.waiters.remove(cb)
+	lls.r.unregisterWaiter(lls, cb)
 	// now we can take the token
 	lls.lim = lls.lim.Consume(lls.params, now, 1)
 	return nil
