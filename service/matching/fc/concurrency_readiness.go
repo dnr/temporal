@@ -53,17 +53,13 @@ func (cs *concurrencyState) stop() {
 	cs.syncGoroLocked()
 }
 
-// func (n *nsReadiness) cancelAllConcurrencyCallbacksLocked(cb ReadinessCallback) {
-// 	// TODO(fc): this is unfortunate, maybe we should optimize this
-// 	for key, cs := range n.concurrencyLimiters {
-// 		cs.waiters.remove(cb)
-// 		cs.syncGoroLocked(n, key)
-// 	}
-// }
+func (cs *concurrencyState) cancelWaiter(cb ReadinessCallback) {
+	cs.lock.Lock()
+	defer cs.lock.Unlock()
+	defer cs.syncGoroLocked()
 
-// func (r *Readiness) reportConcurrencyReady(nsID namespace.ID, key string, gen int64, tokens int32) {
-// 	r.getNS(nsID).reportConcurrencyReady(key, gen, tokens)
-// }
+	cs.waiters.remove(cb)
+}
 
 func (cs *concurrencyState) check(cb ReadinessCallback, pri int32, age time.Time) error {
 	cs.lock.Lock()
@@ -72,11 +68,13 @@ func (cs *concurrencyState) check(cb ReadinessCallback, pri int32, age time.Time
 
 	if cs.tokens == 0 {
 		cs.waiters.add(cb, pri, age)
+		cs.r.registerWaiter(cs, cb)
 		return ErrConcurrencyBlocked
 	}
 
 	// remove in case it was present before
 	cs.waiters.remove(cb)
+	cs.r.unregisterWaiter(cs, cb)
 	// take one check token
 	cs.tokens--
 	return nil
