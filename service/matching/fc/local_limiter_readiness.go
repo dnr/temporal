@@ -25,10 +25,10 @@ type localLimiterState struct {
 }
 
 func (r *Readiness) getLocalLimiter(nsID namespace.ID, key string) *localLimiterState {
-	if lls, ok := r.localLimiters.Load(nsID + key); ok {
+	if lls, ok := r.localLimiters.Load(nsID.String() + key); ok {
 		return lls.(*localLimiterState) // nolint:revive
 	}
-	lls, _ := r.localLimiters.LoadOrStore(nsID+key, &localLimiterState{
+	lls, _ := r.localLimiters.LoadOrStore(nsID.String()+key, &localLimiterState{
 		r:       r,
 		params:  simplelimiter.NoLimitParams(),
 		waiters: *newWaiterEntries(),
@@ -46,7 +46,7 @@ func (lls *localLimiterState) stop() {
 	}
 }
 
-func (lls *localLimiterState) check(config any, cb ReadinessCallback, pri int32, age time.Time) error {
+func (lls *localLimiterState) check(config simplelimiter.Params, cb ReadinessCallback, pri int32, age time.Time) error {
 	// we may have to wake other waiters in check because we can install parameters with a
 	// faster rate or higher burst.
 	var waiters []ReadinessCallback
@@ -55,10 +55,8 @@ func (lls *localLimiterState) check(config any, cb ReadinessCallback, pri int32,
 	lls.lock.Lock()
 	defer lls.lock.Unlock()
 
-	// install new params if available
-	if params, ok := config.(simplelimiter.Params); ok {
-		lls.params = params
-	}
+	// install new params
+	lls.params = config
 
 	now := lls.r.timeSource.Now().UnixNano()
 	defer func() { waiters = lls.wakeAndSyncTimerLocked(now) }()
