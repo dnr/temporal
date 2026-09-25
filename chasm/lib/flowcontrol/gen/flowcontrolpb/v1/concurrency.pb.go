@@ -243,10 +243,16 @@ func (x *ConcurrencyBatchRequest) GetConfigUpdateVersion() int64 {
 type ConcurrencyBatchResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Generation of limiter state.
-	Generation     int64  `protobuf:"varint,1,opt,name=generation,proto3" json:"generation,omitempty"`
-	ReserveSuccess []bool `protobuf:"varint,2,rep,packed,name=reserve_success,json=reserveSuccess,proto3" json:"reserve_success,omitempty"`
-	// Note: we don't need a cancel_success, it's always considered successful.
-	CommitSuccess []bool `protobuf:"varint,3,rep,packed,name=commit_success,json=commitSuccess,proto3" json:"commit_success,omitempty"` // Note: we don't need a release_success, it's always considered successful.
+	Generation int64 `protobuf:"varint,1,opt,name=generation,proto3" json:"generation,omitempty"`
+	// Hint for how many more slots are available after processing a batch of updates.
+	// Callers may use this to decide whether to optimistically call Reserve or call Wait first.
+	// Zero means no more slots are available, -1 means don't update cached state.
+	AvailableSlotsHint int32 `protobuf:"varint,2,opt,name=available_slots_hint,json=availableSlotsHint,proto3" json:"available_slots_hint,omitempty"`
+	// Corresponds 1:1 with ConcurrencyBatchRequest.reserve_slots.
+	ReserveSuccess []bool `protobuf:"varint,3,rep,packed,name=reserve_success,json=reserveSuccess,proto3" json:"reserve_success,omitempty"`
+	// Note: we don't need a cancel_reservation_success, it's always considered successful.
+	// Corresponds 1:1 with ConcurrencyBatchRequest.commit_slots.
+	CommitSuccess []bool `protobuf:"varint,4,rep,packed,name=commit_success,json=commitSuccess,proto3" json:"commit_success,omitempty"` // Note: we don't need a release_success, it's always considered successful.
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -284,6 +290,13 @@ func (*ConcurrencyBatchResponse) Descriptor() ([]byte, []int) {
 func (x *ConcurrencyBatchResponse) GetGeneration() int64 {
 	if x != nil {
 		return x.Generation
+	}
+	return 0
+}
+
+func (x *ConcurrencyBatchResponse) GetAvailableSlotsHint() int32 {
+	if x != nil {
+		return x.AvailableSlotsHint
 	}
 	return 0
 }
@@ -537,13 +550,14 @@ const file_temporal_server_chasm_lib_flowcontrol_proto_v1_concurrency_proto_rawD
 	"\fcommit_slots\x18\x05 \x03(\tR\vcommitSlots\x12#\n" +
 	"\rrelease_slots\x18\x06 \x03(\tR\freleaseSlots\x12P\n" +
 	"\rconfig_update\x18\a \x01(\v2+.temporal.api.taskqueue.v1.ConcurrencyLimitR\fconfigUpdate\x122\n" +
-	"\x15config_update_version\x18\b \x01(\x03R\x13configUpdateVersion\"\x8a\x01\n" +
+	"\x15config_update_version\x18\b \x01(\x03R\x13configUpdateVersion\"\xbc\x01\n" +
 	"\x18ConcurrencyBatchResponse\x12\x1e\n" +
 	"\n" +
 	"generation\x18\x01 \x01(\x03R\n" +
-	"generation\x12'\n" +
-	"\x0freserve_success\x18\x02 \x03(\bR\x0ereserveSuccess\x12%\n" +
-	"\x0ecommit_success\x18\x03 \x03(\bR\rcommitSuccess\"\xc6\x01\n" +
+	"generation\x120\n" +
+	"\x14available_slots_hint\x18\x02 \x01(\x05R\x12availableSlotsHint\x12'\n" +
+	"\x0freserve_success\x18\x03 \x03(\bR\x0ereserveSuccess\x12%\n" +
+	"\x0ecommit_success\x18\x04 \x03(\bR\rcommitSuccess\"\xc6\x01\n" +
 	"\x16ConcurrencyWaitRequest\x12!\n" +
 	"\fnamespace_id\x18\x01 \x01(\tR\vnamespaceId\x12\x10\n" +
 	"\x03key\x18\x02 \x01(\tR\x03key\x12\x1e\n" +

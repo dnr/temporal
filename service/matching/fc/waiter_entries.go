@@ -96,9 +96,10 @@ func (we *waiterEntries) take(n int32) (out []ReadinessCallback) {
 }
 
 // removes up to the first callback and returns it
-func (we *waiterEntries) takeOne(n int32) (cb ReadinessCallback, ok bool) {
-	if cb, ok = we.entries.PopMin(); ok {
-		delete(we.byCB, cb)
+func (we *waiterEntries) takeOne() (cb ReadinessCallback, ok bool) {
+	if e, ok := we.entries.PopMin(); ok {
+		delete(we.byCB, e.cb)
+		return e.cb, true
 	}
-	return
+	return nil, false
 }

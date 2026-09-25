@@ -29,9 +29,9 @@ type concurrencyState struct {
 
 func (r *Readiness) getConcurrencyLimiter(nsID namespace.ID, key string) *concurrencyState {
 	if cs, ok := r.concurrencyLimiters.Load(nsID + key); ok {
-		return cs.(*localLimiterState) // nolint:revive
+		return cs.(*concurrencyState) // nolint:revive
 	}
-	cs, _ = r.concurrencyLimiters.LoadOrStore(nsID+key, &concurrencyState{
+	cs, _ := r.concurrencyLimiters.LoadOrStore(nsID+key, &concurrencyState{
 		r:       r,
 		nsID:    nsID,
 		key:     key,
@@ -45,7 +45,7 @@ func (cs *concurrencyState) stop() {
 	defer cs.lock.Unlock()
 
 	cs.waiters.clear()
-	cs.syncGoroLocked(n, rkey)
+	cs.syncGoroLocked()
 }
 
 // func (n *nsReadiness) cancelAllConcurrencyCallbacksLocked(cb ReadinessCallback) {
@@ -60,20 +60,20 @@ func (cs *concurrencyState) stop() {
 // 	r.getNS(nsID).reportConcurrencyReady(key, gen, tokens)
 // }
 
-func (cs *concurrencyState) check() error {
-	ct.cs.lock.Lock()
-	defer ct.cs.lock.Unlock()
-	defer ct.cs.syncGoroLocked()
+func (cs *concurrencyState) check(cb ReadinessCallback, pri int32, age time.Time) error {
+	cs.lock.Lock()
+	defer cs.lock.Unlock()
+	defer cs.syncGoroLocked()
 
-	if ct.cs.tokens == 0 {
-		cs.waiters.add(cb, ct.pri, ct.age)
+	if cs.tokens == 0 {
+		cs.waiters.add(cb, pri, age)
 		return ErrConcurrencyBlocked
 	}
 
 	// remove in case it was present before
 	cs.waiters.remove(cb)
 	// take one check token
-	ct.cs.tokens--
+	cs.tokens--
 	return nil
 }
 
@@ -81,43 +81,35 @@ func (cs *concurrencyState) cancelCheck() {
 	var waiters []ReadinessCallback
 	defer func() { notifyWaiters(waiters) }()
 
-	ct.cs.lock.Lock()
-	defer ct.cs.lock.Unock()
-	defer ct.cs.syncGoroLocked()
+	cs.lock.Lock()
+	defer cs.lock.Unlock()
+	defer cs.syncGoroLocked()
 
 	// this could theoretically go over the limit but it doesn't matter here
-	ct.cs.tokens++
-	waiters = ct.cs.waiters.take(cs.tokens)
+	cs.tokens++
+	waiters = cs.waiters.take(cs.tokens)
 }
 
-func (cs *concurrencyState) reportWaitResponse(gen int64, tokens int32) {
+func (cs *concurrencyState) reportSlotsHint(gen int64, slots int32) {
 	var waiters []ReadinessCallback
 	defer func() { notifyWaiters(waiters) }()
 
 	cs.lock.Lock()
 	defer cs.lock.Unlock()
+	defer cs.syncGoroLocked()
 
 	if gen < cs.generation {
 		return
 	}
 
-	// FIXME: should not set tokens multiple times from the same batch call
 	cs.generation = gen
-	cs.tokens = tokens
 
-	waiters = cs.waiters.take(cs.tokens)
-	cs.syncGoroLocked(n, key)
-}
-
-func (cs *concurrencyState) reportReserveFailed(gen int64) {
-	cs.lock.Lock()
-	defer cs.lock.Unlock()
-
-	if gen < cs.generation {
-		return
+	// the first batched response will get the actual slots hint, the rest will be given -1 so
+	// that we don't resupply tokens after a waiter that we wake takes them
+	if slots >= 0 {
+		cs.tokens = slots
+		waiters = cs.waiters.take(cs.tokens)
 	}
-	cs.generation = gen
-	cs.tokens = 0
 }
 
 func (cs *concurrencyState) syncGoroLocked() {
@@ -172,7 +164,7 @@ func (cs *concurrencyState) callWait(ctx context.Context) {
 		}
 		retrier.Reset()
 
-		cs.reportWaitResponse(res.Generation, res.WakeTokens)
+		cs.reportSlotsHint(res.Generation, res.WakeTokens)
 		// note: If we have satisfied all our waiters, then ctx
 		// will be canceled before we continue this loop.
 	}

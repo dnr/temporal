@@ -28,7 +28,7 @@ func (r *Readiness) getLocalLimiter(nsID namespace.ID, key string) *localLimiter
 	if lls, ok := r.localLimiters.Load(nsID + key); ok {
 		return lls.(*localLimiterState) // nolint:revive
 	}
-	lls, _ = r.localLimiters.LoadOrStore(nsID+key, &localLimiterState{
+	lls, _ := r.localLimiters.LoadOrStore(nsID+key, &localLimiterState{
 		r:       r,
 		params:  simplelimiter.NoLimitParams(),
 		waiters: *newWaiterEntries(),
@@ -63,7 +63,7 @@ func (lls *localLimiterState) check(config any, cb ReadinessCallback, pri int32,
 	now := lls.r.timeSource.Now().UnixNano()
 	defer func() { waiters = lls.wakeAndSyncTimerLocked(now) }()
 
-	if delay := lls.lim.Delay(); delay > 0 {
+	if delay := lls.lim.Delay(now); delay > 0 {
 		lls.waiters.add(cb, pri, age)
 		return ErrLocalLimiterBlocked
 	}
@@ -75,7 +75,7 @@ func (lls *localLimiterState) check(config any, cb ReadinessCallback, pri int32,
 	return nil
 }
 
-func (lls *localLimiterState) cancelCheck(cb ReadinessCallback) {
+func (lls *localLimiterState) cancelCheck() {
 	var waiters []ReadinessCallback
 	defer func() { notifyWaiters(waiters) }()
 
@@ -85,9 +85,6 @@ func (lls *localLimiterState) cancelCheck(cb ReadinessCallback) {
 	// return the token
 	now := lls.r.timeSource.Now().UnixNano()
 	lls.lim = lls.lim.Consume(lls.params, now, -1)
-
-	// remove the one we don't want anymore
-	lls.waiters.remove(cancelCb)
 
 	// since we returned tokens, a waiter might be ready to go now
 	waiters = lls.wakeAndSyncTimerLocked(now)
@@ -118,6 +115,7 @@ func (lls *localLimiterState) wakeAndSyncTimerLocked(now int64) (out []Readiness
 	} else {
 		lls.tmr = lls.r.timeSource.AfterFunc(delay, lls.onTimer)
 	}
+	return
 }
 
 func (lls *localLimiterState) onTimer() {
@@ -128,5 +126,5 @@ func (lls *localLimiterState) onTimer() {
 	defer lls.lock.Unlock()
 
 	now := lls.r.timeSource.Now().UnixNano()
-	waiters = lls.wakeAndSyncTimerLocked()
+	waiters = lls.wakeAndSyncTimerLocked(now)
 }

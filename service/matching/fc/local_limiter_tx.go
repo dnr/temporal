@@ -30,8 +30,8 @@ func (llt *localLimiterTx) check(cb ReadinessCallback) error {
 	return llt.lls.check(llt.config, cb, llt.pri, llt.age)
 }
 
-func (llt *localLimiterTx) cancelCheck(cb ReadinessCallback) {
-	return llt.lls.cancelCheck(cb)
+func (llt *localLimiterTx) cancelCheck() {
+	llt.lls.cancelCheck()
 }
 
 func (llt *localLimiterTx) reserve(context.Context) error {
