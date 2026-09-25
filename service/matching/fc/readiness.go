@@ -32,11 +32,6 @@ func NewReadiness(
 	}
 }
 
-// FIXME
-// type limiterState interface {
-// 	stop()
-// }
-
 func (r *Readiness) Stop() {
 	r.concurrencyLimiters.Range(func(_, v any) bool {
 		v.(*concurrencyState).stop() // nolint:revive

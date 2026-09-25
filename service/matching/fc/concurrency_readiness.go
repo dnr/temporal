@@ -5,13 +5,18 @@ import (
 	"sync"
 	"time"
 
+	"go.temporal.io/api/serviceerror"
+	taskqueuepb "go.temporal.io/api/taskqueue/v1"
 	fcpb "go.temporal.io/server/chasm/lib/flowcontrol/gen/flowcontrolpb/v1"
 	"go.temporal.io/server/common/backoff"
 	"go.temporal.io/server/common/clock"
 	"go.temporal.io/server/common/headers"
 	"go.temporal.io/server/common/namespace"
+	serviceerrors "go.temporal.io/server/common/serviceerror"
 	"go.temporal.io/server/common/util"
 )
+
+var ErrConcurrencyBlocked = serviceerror.NewFailedPrecondition("blocked by concurrency limit")
 
 type concurrencyState struct {
 	r    *Readiness
@@ -28,10 +33,10 @@ type concurrencyState struct {
 }
 
 func (r *Readiness) getConcurrencyLimiter(nsID namespace.ID, key string) *concurrencyState {
-	if cs, ok := r.concurrencyLimiters.Load(nsID + key); ok {
+	if cs, ok := r.concurrencyLimiters.Load(nsID.String() + key); ok {
 		return cs.(*concurrencyState) // nolint:revive
 	}
-	cs, _ := r.concurrencyLimiters.LoadOrStore(nsID+key, &concurrencyState{
+	cs, _ := r.concurrencyLimiters.LoadOrStore(nsID.String()+key, &concurrencyState{
 		r:       r,
 		nsID:    nsID,
 		key:     key,
@@ -88,6 +93,59 @@ func (cs *concurrencyState) cancelCheck() {
 	// this could theoretically go over the limit but it doesn't matter here
 	cs.tokens++
 	waiters = cs.waiters.take(cs.tokens)
+}
+
+func (cs *concurrencyState) reserve(
+	ctx context.Context,
+	slotID string,
+	configUpdate *taskqueuepb.ConcurrencyLimit,
+	configUpdateVersion int64,
+) error {
+	res, err := cs.r.concurrencyServiceClient.Batch(ctx, &fcpb.ConcurrencyBatchRequest{
+		NamespaceId:         cs.nsID.String(),
+		Key:                 cs.key,
+		ReserveSlots:        []string{slotID},
+		ConfigUpdate:        configUpdate,
+		ConfigUpdateVersion: configUpdateVersion,
+	})
+	if err != nil {
+		return err // don't update cache on rpc error
+	}
+	cs.reportSlotsHint(res.Generation, res.AvailableSlotsHint)
+	if !res.ReserveSuccess[0] {
+		return serviceerrors.NewFlowControlBlocked()
+	}
+	return nil
+}
+
+func (cs *concurrencyState) commit(ctx context.Context, slotID string) error {
+	res, err := cs.r.concurrencyServiceClient.Batch(ctx, &fcpb.ConcurrencyBatchRequest{
+		NamespaceId: cs.nsID.String(),
+		Key:         cs.key,
+		CommitSlots: []string{slotID},
+	})
+	if err != nil {
+		return err
+	}
+	cs.reportSlotsHint(res.Generation, res.AvailableSlotsHint)
+	if !res.CommitSuccess[0] {
+		return errCommitFailure
+	}
+	return nil
+}
+
+func (cs *concurrencyState) cancelReserve(ctx context.Context, slotID string) {
+	// call in new goroutine, don't block here
+	go func() {
+		res, err := cs.r.concurrencyServiceClient.Batch(ctx, &fcpb.ConcurrencyBatchRequest{
+			NamespaceId:            cs.nsID.String(),
+			Key:                    cs.key,
+			CancelReservationSlots: []string{slotID},
+		})
+		if err == nil {
+			cs.reportSlotsHint(res.Generation, res.AvailableSlotsHint)
+		}
+	}()
 }
 
 func (cs *concurrencyState) reportSlotsHint(gen int64, slots int32) {

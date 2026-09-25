@@ -7,9 +7,11 @@ import (
 
 	"github.com/google/uuid"
 	"go.temporal.io/api/serviceerror"
+	taskqueuepb "go.temporal.io/api/taskqueue/v1"
 	enumsspb "go.temporal.io/server/api/enums/v1"
 	taskqueuespb "go.temporal.io/server/api/taskqueue/v1"
 	"go.temporal.io/server/common/namespace"
+	"go.temporal.io/server/service/matching/simplelimiter"
 )
 
 var errCommitFailure = serviceerror.NewFailedPrecondition("commit failed")
@@ -30,24 +32,14 @@ func (r *Readiness) NewTx(nsID namespace.ID, task fcTask, cb ReadinessCallback) 
 	if len(lims) == 0 {
 		return nil
 	}
-	pri, age := task.PriorityAndAge()
 
 	limiterTxs := make([]limiterTx, len(lims))
-	var refs []*taskqueuespb.LimiterRef
+	refs := make([]*taskqueuespb.LimiterRef, 0, len(lims))
 	for i, lim := range lims {
-		switch lim.Type {
-		case enumsspb.LIMITER_TYPE_CONCURRENCY:
-			// TODO(fc): consider deriving from task to fix some nongraceful failover situations
-			slotID := uuid.NewString()
-			cs := r.getConcurrencyLimiter(nsID, lim.Key)
-			limiterTxs[i] = newConcurrencyTx(cs, slotID, lim, pri, age)
-			refs = append(refs, &taskqueuespb.LimiterRef{LimiterType: lim.Type, Key: lim.Key, SlotId: slotID})
-		case enumsspb.LIMITER_TYPE_LOCAL_RATE_LIMIT:
-			lls := r.getLocalLimiter(nsID, lim.Key)
-			limiterTxs[i] = newLocalLimiterTx(lls, lim.Config, pri, age)
-		default:
-			// TODO(fc): log or notify here
-			limiterTxs[i] = noopLimiterTx{}
+		ltx, ref := r.makeLimiterTx(nsID, task, lim)
+		limiterTxs[i] = ltx
+		if ref != nil {
+			refs = append(refs, ref)
 		}
 	}
 
@@ -56,6 +48,37 @@ func (r *Readiness) NewTx(nsID namespace.ID, task fcTask, cb ReadinessCallback) 
 		limiters:  limiterTxs,
 		refs:      refs,
 		cb:        cb,
+	}
+}
+
+func (r *Readiness) makeLimiterTx(nsID namespace.ID, task fcTask, lim Limiter) (limiterTx, *taskqueuespb.LimiterRef) {
+	switch lim.Type {
+	case enumsspb.LIMITER_TYPE_CONCURRENCY:
+		// TODO(fc): consider deriving slot id from task to fix some nongraceful failover situations
+		slotID := uuid.NewString()
+
+		cs := r.getConcurrencyLimiter(nsID, lim.Key)
+
+		// if config is missing or wrong type, just leave it out
+		config, _ := lim.Config.(*taskqueuepb.ConcurrencyLimit)
+		pri, age := task.PriorityAndAge()
+
+		tx := newConcurrencyTx(cs, slotID, config, lim.ConfigVersion, pri, age)
+		ref := &taskqueuespb.LimiterRef{LimiterType: lim.Type, Key: lim.Key, SlotId: slotID}
+		return tx, ref
+
+	case enumsspb.LIMITER_TYPE_LOCAL_RATE_LIMIT:
+		lls := r.getLocalLimiter(nsID, lim.Key)
+
+		// if config is missing or wrong type, zero params means "no limit"
+		config, _ := lim.Config.(simplelimiter.Params)
+		pri, age := task.PriorityAndAge()
+
+		return newLocalLimiterTx(lls, config, pri, age), nil
+
+	default:
+		// TODO(fc): log or notify here
+		return noopLimiterTx{}, nil
 	}
 }
 
