@@ -50,6 +50,7 @@ func (cs *concurrencyState) stop() {
 	defer cs.lock.Unlock()
 
 	cs.waiters.clear()
+	// FIXME: cs.r.unregisterWaiter on each one
 	cs.syncGoroLocked()
 }
 
