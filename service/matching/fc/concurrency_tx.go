@@ -41,11 +41,11 @@ func newConcurrencyTx(
 }
 
 func (ct *concurrencyTx) check(cb ReadinessCallback) error {
-	return ct.cs.check(cb)
+	return ct.cs.check(cb, ct.pri, ct.age)
 }
 
-func (ct *concurrencyTx) cancelCheck(cb ReadinessCallback) {
-	ct.cs.cancelCheck(cb)
+func (ct *concurrencyTx) cancelCheck() {
+	ct.cs.cancelCheck()
 }
 
 func (ct *concurrencyTx) reserve(ctx context.Context) error {
@@ -53,8 +53,8 @@ func (ct *concurrencyTx) reserve(ctx context.Context) error {
 	configUpdate, _ := ct.lim.Config.(*taskqueuepb.ConcurrencyLimit)
 
 	res, err := ct.cs.r.concurrencyServiceClient.Batch(ctx, &fcpb.ConcurrencyBatchRequest{
-		NamespaceId:         ct.nsID.String(),
-		Key:                 ct.lim.Key,
+		NamespaceId:         ct.cs.nsID.String(),
+		Key:                 ct.cs.key,
 		ReserveSlots:        []string{ct.slotID},
 		ConfigUpdate:        configUpdate,
 		ConfigUpdateVersion: ct.lim.ConfigVersion,
@@ -62,36 +62,39 @@ func (ct *concurrencyTx) reserve(ctx context.Context) error {
 	if err != nil {
 		return err // don't update cache on rpc error
 	}
+	ct.cs.reportSlotsHint(res.Generation, res.AvailableSlotsHint)
 	if !res.ReserveSuccess[0] {
-		ct.cs.reportReserveFailed(res.Generation)
 		return serviceerrors.NewFlowControlBlocked()
 	}
-	// TODO(fc): we could include a hint for how many slots are _remaining_, and if zero, mark
-	// this limiter as blocked in the cache. but we don't want to immediately Wait on it since
-	// we might not have another waiter yet.
-	ct.r.reportReserveHint(ct.nsID, ct.lim.Key, res.Generation, 0) // FIXME: 0?
 	return nil
 }
 
 func (ct *concurrencyTx) commit(ctx context.Context) error {
 	res, err := ct.cs.r.concurrencyServiceClient.Batch(ctx, &fcpb.ConcurrencyBatchRequest{
-		NamespaceId: ct.nsID.String(),
-		Key:         ct.lim.Key,
+		NamespaceId: ct.cs.nsID.String(),
+		Key:         ct.cs.key,
 		CommitSlots: []string{ct.slotID},
 	})
 	if err != nil {
 		return err
-	} else if !res.CommitSuccess[0] {
+	}
+	ct.cs.reportSlotsHint(res.Generation, res.AvailableSlotsHint)
+	if !res.CommitSuccess[0] {
 		return errCommitFailure
 	}
-	return err
+	return nil
 }
 
 func (ct *concurrencyTx) cancelReserve(ctx context.Context) {
-	// call in new goroutine, don't block here, we don't care about the result
-	go ct.cs.r.concurrencyServiceClient.Batch(ctx, &fcpb.ConcurrencyBatchRequest{
-		NamespaceId:            ct.nsID.String(),
-		Key:                    ct.lim.Key,
-		CancelReservationSlots: []string{ct.slotID},
-	})
+	// call in new goroutine, don't block here
+	go func() {
+		res, err := ct.cs.r.concurrencyServiceClient.Batch(ctx, &fcpb.ConcurrencyBatchRequest{
+			NamespaceId:            ct.cs.nsID.String(),
+			Key:                    ct.cs.key,
+			CancelReservationSlots: []string{ct.slotID},
+		})
+		if err == nil {
+			ct.cs.reportSlotsHint(res.Generation, res.AvailableSlotsHint)
+		}
+	}()
 }

@@ -115,30 +115,28 @@ func (c *BatchingClient) applyBatch(key clientBatchKey, items []clientBatchItem)
 		err = serviceerror.NewInternal("invalid concurrency batch response")
 	}
 	if err != nil {
-		return clientBatchResults(len(items), nil, err)
+		return slices.Repeat([]clientBatchResult{{err: err}}, len(items))
 	}
 
 	results := make([]clientBatchResult, len(items))
-	reserveOffset := 0
-	commitOffset := 0
+	reserveOff := 0
+	commitOff := 0
 	for i, item := range items {
-		itemReserveCount := len(item.req.GetReserveSlots())
-		itemCommitCount := len(item.req.GetCommitSlots())
-		results[i].res = &fcpb.ConcurrencyBatchResponse{
-			ReserveSuccess: slices.Clone(res.ReserveSuccess[reserveOffset : reserveOffset+itemReserveCount]),
-			CommitSuccess:  slices.Clone(res.CommitSuccess[commitOffset : commitOffset+itemCommitCount]),
-			Generation:     res.Generation,
+		reserveLen := len(item.req.GetReserveSlots())
+		commitLen := len(item.req.GetCommitSlots())
+		slotsHint := int32(-1)
+		if i == 0 {
+			// pass hint to first batch result only so we don't refill tokens multiple times
+			slotsHint = res.AvailableSlotsHint
 		}
-		reserveOffset += itemReserveCount
-		commitOffset += itemCommitCount
-	}
-	return results
-}
-
-func clientBatchResults(size int, res *fcpb.ConcurrencyBatchResponse, err error) []clientBatchResult {
-	results := make([]clientBatchResult, size)
-	for i := range results {
-		results[i] = clientBatchResult{res: res, err: err}
+		results[i].res = &fcpb.ConcurrencyBatchResponse{
+			Generation:         res.Generation,
+			AvailableSlotsHint: slotsHint,
+			ReserveSuccess:     res.ReserveSuccess[reserveOff : reserveOff+reserveLen],
+			CommitSuccess:      res.CommitSuccess[commitOff : commitOff+commitLen],
+		}
+		reserveOff += reserveLen
+		commitOff += commitLen
 	}
 	return results
 }

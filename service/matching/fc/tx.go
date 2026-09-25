@@ -39,12 +39,12 @@ func (r *Readiness) NewTx(nsID namespace.ID, task fcTask, cb ReadinessCallback) 
 		case enumsspb.LIMITER_TYPE_CONCURRENCY:
 			// TODO(fc): consider deriving from task to fix some nongraceful failover situations
 			slotID := uuid.NewString()
-			cs := r.getConcurrencyLimiter(nsID, lim.key)
+			cs := r.getConcurrencyLimiter(nsID, lim.Key)
 			limiterTxs[i] = newConcurrencyTx(cs, slotID, lim, pri, age)
 			refs = append(refs, &taskqueuespb.LimiterRef{LimiterType: lim.Type, Key: lim.Key, SlotId: slotID})
 		case enumsspb.LIMITER_TYPE_LOCAL_RATE_LIMIT:
-			lls := r.getLocalLimiter(nsID, lim.ey)
-			limiterTxs[i] = newLocalLimiterTx(lls, lim.config, pri, age)
+			lls := r.getLocalLimiter(nsID, lim.Key)
+			limiterTxs[i] = newLocalLimiterTx(lls, lim.Config, pri, age)
 		default:
 			// TODO(fc): log or notify here
 			limiterTxs[i] = noopLimiterTx{}
@@ -70,7 +70,7 @@ type Tx struct {
 
 type limiterTx interface {
 	check(ReadinessCallback) error
-	cancelCheck(ReadinessCallback)
+	cancelCheck()
 	reserve(context.Context) error
 	commit(context.Context) error
 	cancelReserve(context.Context)
@@ -191,7 +191,7 @@ func (tx *Tx) Rollback(ctx context.Context) {
 			lim.cancelReserve(ctx)
 			fallthrough
 		case txStateChecked:
-			lim.cancelCheck(tx.cb)
+			lim.cancelCheck()
 			tx.state[i] = txStateCanceled
 		}
 	}
@@ -200,7 +200,7 @@ func (tx *Tx) Rollback(ctx context.Context) {
 type noopLimiterTx struct{}
 
 func (noopLimiterTx) check(cb ReadinessCallback) error { return nil }
-func (noopLimiterTx) cancelCheck(cb ReadinessCallback) {}
+func (noopLimiterTx) cancelCheck()                     {}
 func (noopLimiterTx) reserve(context.Context) error    { return nil }
 func (noopLimiterTx) commit(context.Context) error     { return nil }
 func (noopLimiterTx) cancelReserve(context.Context)    {}
