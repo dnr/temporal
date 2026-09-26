@@ -60,10 +60,10 @@ func (cs *concurrencyState) cancelWaiter(cb ReadinessCallback) {
 	})
 }
 
-func (cs *concurrencyState) check(cb ReadinessCallback, pri int32, age time.Time) error {
+func (cs *concurrencyState) check(cb ReadinessCallback, pri wakePriority) error {
 	return cs.update(func() error {
 		if cs.tokens == 0 {
-			cs.waiters.add(cb, pri, age)
+			cs.waiters.add(cb, pri)
 			cs.r.registerWaiter(cs, cb)
 			return ErrConcurrencyBlocked
 		}

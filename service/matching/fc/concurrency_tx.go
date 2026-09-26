@@ -2,7 +2,6 @@ package fc
 
 import (
 	"context"
-	"time"
 
 	taskqueuepb "go.temporal.io/api/taskqueue/v1"
 )
@@ -12,8 +11,7 @@ type concurrencyTx struct {
 	slotID              string
 	configUpdate        *taskqueuepb.ConcurrencyLimit
 	configUpdateVersion int64
-	pri                 int32
-	age                 time.Time
+	pri                 wakePriority
 }
 
 func newConcurrencyTx(
@@ -21,8 +19,7 @@ func newConcurrencyTx(
 	slotID string,
 	configUpdate *taskqueuepb.ConcurrencyLimit,
 	configUpdateVersion int64,
-	pri int32,
-	age time.Time,
+	pri wakePriority,
 ) *concurrencyTx {
 	return &concurrencyTx{
 		cs:                  cs,
@@ -30,12 +27,11 @@ func newConcurrencyTx(
 		configUpdate:        configUpdate,
 		configUpdateVersion: configUpdateVersion,
 		pri:                 pri,
-		age:                 age,
 	}
 }
 
 func (ct *concurrencyTx) check(cb ReadinessCallback) error {
-	return ct.cs.check(cb, ct.pri, ct.age)
+	return ct.cs.check(cb, ct.pri)
 }
 
 func (ct *concurrencyTx) cancelCheck() {

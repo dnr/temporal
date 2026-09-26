@@ -2,7 +2,6 @@ package fc
 
 import (
 	"sync"
-	"time"
 
 	"go.temporal.io/api/serviceerror"
 	"go.temporal.io/server/common/clock"
@@ -51,14 +50,13 @@ func (lls *localLimiterState) cancelWaiter(cb ReadinessCallback) {
 	})
 }
 
-func (lls *localLimiterState) check(config simplelimiter.Params, cb ReadinessCallback, pri int32, age time.Time) error {
+func (lls *localLimiterState) check(config simplelimiter.Params, cb ReadinessCallback, pri wakePriority) error {
 	return lls.update(func(now int64) error {
-
 		// install new params
 		lls.params = config
 
 		if delay := lls.lim.Delay(now); delay > 0 {
-			lls.waiters.add(cb, pri, age)
+			lls.waiters.add(cb, pri)
 			lls.r.registerWaiter(lls, cb)
 			return ErrLocalLimiterBlocked
 		}

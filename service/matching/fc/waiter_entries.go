@@ -3,7 +3,6 @@ package fc
 import (
 	"math"
 	"reflect"
-	"time"
 
 	"github.com/tidwall/btree"
 )
@@ -53,10 +52,10 @@ func (we *waiterEntries) len() int {
 }
 
 // adds a callback, or updates the wake priority of an existing callback
-func (we *waiterEntries) add(cb ReadinessCallback, pri int32, age time.Time) {
+func (we *waiterEntries) add(cb ReadinessCallback, pri wakePriority) {
 	we.remove(cb)
 	e := waiterEntry{
-		pri: makeWakePriority(pri, age),
+		pri: pri,
 		cb:  cb,
 	}
 	we.entries.Set(e)
