@@ -45,10 +45,9 @@ func (r *Readiness) NewTx(nsID namespace.ID, task fcTask, cb ReadinessCallback) 
 	}
 
 	return &Tx{
-		readiness: r,
-		limiters:  limiterTxs,
-		refs:      refs,
-		cb:        cb,
+		limiters: limiterTxs,
+		refs:     refs,
+		cb:       cb,
 	}
 }
 
@@ -84,11 +83,10 @@ func (r *Readiness) makeLimiterTx(nsID namespace.ID, task fcTask, lim Limiter) (
 
 // Holds state for an invocation of the flow control commit protocol. See Readiness.NewTx.
 type Tx struct {
-	readiness *Readiness
-	limiters  []limiterTx
-	refs      []*taskqueuespb.LimiterRef
-	cb        ReadinessCallback
-	state     [MaxLimiters]txState
+	limiters []limiterTx
+	refs     []*taskqueuespb.LimiterRef
+	cb       ReadinessCallback
+	state    [MaxLimiters]txState
 }
 
 type limiterTx interface {
