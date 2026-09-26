@@ -38,6 +38,8 @@ func newFCManager(
 }
 
 func (m *fcManager) TaskReady(task *internalTask, cb fc.ReadinessCallback) (ready bool, blockedBy syncMatchOutcome, canContinue bool) {
+	// FIXME: consider what we should do for forwarded tasks
+
 	nsID := namespace.ID(m.partition.NamespaceId())
 	tx := m.readiness.NewTx(nsID, task, cb)
 	task.fcTx = tx // attach to task so we can use it in matching engine
@@ -151,9 +153,7 @@ func (*fcManager) removeLimiter(oldLim fc.Limiter, limiters *fc.Limiters) *fc.Li
 
 func (m *fcManager) wholeQueueConcurrencyLimiterKey() string {
 	// the "/0" at the end is for future extension for partitioning limiters
-	tqName := m.partition.TaskQueue().Name()
-	tqType := m.partition.TaskType()
-	return fmt.Sprintf("wholequeue/%s/%d/0", tqName, tqType)
+	return fmt.Sprintf("wholequeue/%s/%d/0", m.partition.TaskQueue().Name(), m.partition.TaskType())
 }
 
 func (m *fcManager) localLimiterKey() string {
