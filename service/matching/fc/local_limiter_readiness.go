@@ -9,6 +9,14 @@ import (
 	"go.temporal.io/server/service/matching/simplelimiter"
 )
 
+// maxLocalLimiterTokens is the maximum number of tokens we might consume at a time for
+// simplelimiter.Limiter. This is used to update ready times after a rate is changed from very
+// low (or zero) to higher: we may have set a ready time far in the future and need to clip it
+// to something reasonable so we can dispatch again.
+//
+// Currently we only use 1 token at a time.
+const maxLocalLimiterTokens = 1
+
 var ErrLocalLimiterBlocked = serviceerror.NewFailedPrecondition("blocked by local limiter")
 
 type localLimiterState struct {
@@ -54,6 +62,9 @@ func (lls *localLimiterState) check(config simplelimiter.Params, cb ReadinessCal
 	return lls.update(func(now int64) error {
 		// install new params
 		lls.params = config
+		// Clip to handle the case where we have increased from a zero or very low limit and had
+		// ready times in the far future.
+		lls.lim = lls.lim.Clip(lls.params, now, maxLocalLimiterTokens)
 
 		if delay := lls.lim.Delay(now); delay > 0 {
 			lls.waiters.add(cb, pri)

@@ -54,13 +54,14 @@ const (
 	validatorTaskForwarder                   // validates tasks on root partition
 )
 
-// maxTokens is the maximum number of tokens we might consume at a time for
-// simplelimiter.Limiter. This is used to update ready times after a rate is changed from very
-// low (or zero) to higher: we may have set a ready time far in the future and need to clip it
-// to something reasonable so we can dispatch again.
-//
-// Currently we only use 1 token at a time.
-const maxTokens = 1
+// DELETE
+// // maxTokens is the maximum number of tokens we might consume at a time for
+// // simplelimiter.Limiter. This is used to update ready times after a rate is changed from very
+// // low (or zero) to higher: we may have set a ready time far in the future and need to clip it
+// // to something reasonable so we can dispatch again.
+// //
+// // Currently we only use 1 token at a time.
+// const maxTokens = 1
 
 // pollerList is an intrusive doubly-linked list of waiting pollers. Pollers are matched
 // by walking from the head, so the list is kept in the order we want to match them:
