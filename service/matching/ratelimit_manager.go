@@ -41,7 +41,6 @@ type (
 		dynamicRateLimiter *quotas.DynamicRateLimiterImpl
 		// Fairness tasks rate limiter.
 		wholeQueueLimit simplelimiter.Params
-		// DELETE wholeQueueReady simplelimiter.Limiter
 		// Rate limiter for individual fairness keys.
 		// Note that we currently have only one limit for all keys, which is scaled by the key's
 		// weight. If we do this, we can assume that all keys are either at or below their rate
@@ -49,8 +48,7 @@ type (
 		// must also be, and so we don't have to "skip over" the head of the queue due to rate
 		// limits. This isn't true in situations where weights have changed in between writing and
 		// reading. We'll handle that situation better in the future.
-		perKeyLimit simplelimiter.Params
-		// DELETE perKeyReady     cache.Cache
+		perKeyLimit     simplelimiter.Params
 		perKeyOverrides fairnessWeightOverrides
 		cancels         []func()
 	}
@@ -77,7 +75,6 @@ func newRateLimitManager(
 		userDataManager: userDataManager,
 		config:          config,
 		taskQueueType:   taskQueueType,
-		// DELETE perKeyReady:     cache.New(config.FairnessKeyRateLimitCacheSize(), nil),
 	}
 	r.dynamicRateBurst = quotas.NewMutableRateBurst(
 		defaultTaskDispatchRPS,
@@ -207,21 +204,9 @@ func (r *rateLimitManager) GetEffectiveRPSAndSource() (float64, enumspb.RateLimi
 	return r.effectiveRPS * float64(r.numReadPartitions), r.rateLimitSource
 }
 
-// DELETE
-// func (r *rateLimitManager) GetPerPartitionRPS() (float64, float64) {
-// 	r.mu.Lock()
-// 	defer r.mu.Unlock()
-// 	fkeyRPS := math.Inf(1)
-// 	if r.fairnessKeyRateLimitDefault != nil {
-// 		fkeyRPS = *r.fairnessKeyRateLimitDefault
-// 	}
-// 	return r.effectiveRPS, fkeyRPS
-// }
-
 func (r *rateLimitManager) GetWholeQueueLimit() simplelimiter.Params {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	// FIXME: add fraction thing here
 	return r.wholeQueueLimit
 }
 
@@ -307,12 +292,6 @@ func (r *rateLimitManager) updateRatelimitLocked() {
 func (r *rateLimitManager) updateSimpleRateLimitWithBurstLocked(burstDuration time.Duration) {
 	newRPS := r.effectiveRPS
 	r.wholeQueueLimit = simplelimiter.MakeParams(newRPS, burstDuration)
-
-	// DELETE
-	// // Clip to handle the case where we have increased from a zero or very low limit and had
-	// // ready times in the far future.
-	// now := r.timeSource.Now().UnixNano()
-	// r.wholeQueueReady = r.wholeQueueReady.Clip(r.wholeQueueLimit, now, maxTokens)
 }
 
 // UpdatePerKeySimpleRateLimit updates the per-key rate limit for the simpleRateLimit implementation
@@ -329,86 +308,12 @@ func (r *rateLimitManager) updatePerKeySimpleRateLimitWithBurstLocked(burstDurat
 		return
 	}
 	r.perKeyLimit = slp
-
-	// DELETE
-	// // Clip to handle the case where we have increased from a zero or very low limit and had
-	// // ready times in the far future.
-	// var updates map[string]simplelimiter.Limiter
-	// now := r.timeSource.Now().UnixNano()
-	// it := r.perKeyReady.Iterator()
-	// for it.HasNext() {
-	// 	e := it.Next()
-	// 	sl := e.Value().(simplelimiter.Limiter) //nolint:revive
-	// 	if clipped := sl.Clip(r.perKeyLimit, now, maxTokens); clipped != sl {
-	// 		if updates == nil {
-	// 			updates = make(map[string]simplelimiter.Limiter)
-	// 		}
-	// 		updates[e.Key().(string)] = clipped
-	// 	}
-	// }
-	// it.Close()
-
-	// DELETE
-	// // This messes up the LRU order, but we can't avoid that here without adding new
-	// // functionality to Cache.
-	// for key, clipped := range updates {
-	// 	r.perKeyReady.Put(key, clipped)
-	// }
 }
 
 // clearPerKeyRateLimitsLocked removes all fairness per-key rate limits.
 func (r *rateLimitManager) clearPerKeyRateLimitsLocked() {
-	// DELETE r.perKeyReady = cache.New(r.config.FairnessKeyRateLimitCacheSize(), nil)
 	r.perKeyLimit = simplelimiter.Params{}
 }
-
-// DELETE
-// func (r *rateLimitManager) readyTimeForTask(task *internalTask) simplelimiter.Limiter {
-// 	r.mu.Lock()
-// 	defer r.mu.Unlock()
-
-// 	// FIXME: ok to do now?
-// 	if task.isForwarded() {
-// 		// don't count any rate limit for forwarded tasks, it was counted on the child
-// 		return 0
-// 	}
-
-// 	ready := r.wholeQueueReady
-
-// 	if r.perKeyLimit.Limited() {
-// 		key := task.getPriority().GetFairnessKey()
-// 		if v := r.perKeyReady.Get(key); v != nil {
-// 			ready = max(ready, v.(simplelimiter.Limiter))
-// 		}
-// 	}
-
-// 	return ready
-// }
-
-// DELETE
-// func (r *rateLimitManager) consumeTokens(now int64, task *internalTask, tokens int64) {
-// 	r.mu.Lock()
-// 	defer r.mu.Unlock()
-// 	if task.isForwarded() {
-// 		// don't count any rate limit for forwarded tasks, it was counted on the child
-// 		return
-// 	}
-
-// 	r.wholeQueueReady = r.wholeQueueReady.Consume(r.wholeQueueLimit, now, tokens)
-
-// 	if r.perKeyLimit.Limited() {
-// 		pri := task.getPriority()
-// 		key := pri.GetFairnessKey()
-// 		weight := getEffectiveWeight(r.perKeyOverrides, pri)
-// 		p := r.perKeyLimit
-// 		p.Interval = time.Duration(float32(p.Interval) / weight) // scale by weight
-// 		var sl simplelimiter.Limiter
-// 		if v := r.perKeyReady.Get(key); v != nil {
-// 			sl = v.(simplelimiter.Limiter) // nolint:revive
-// 		}
-// 		r.perKeyReady.Put(key, sl.Consume(p, now, tokens))
-// 	}
-// }
 
 // GetFairnessWeightOverrides returns the current fairness weight overrides.
 func (r *rateLimitManager) GetFairnessWeightOverrides() fairnessWeightOverrides {
