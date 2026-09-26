@@ -3,10 +3,9 @@ package matching
 import (
 	"errors"
 	"fmt"
-	"math"
 	"slices"
-	"time"
 
+	commonpb "go.temporal.io/api/common/v1"
 	taskqueuepb "go.temporal.io/api/taskqueue/v1"
 	enumsspb "go.temporal.io/server/api/enums/v1"
 	"go.temporal.io/server/common/namespace"
@@ -51,8 +50,7 @@ func (m *fcManager) TaskReady(task *internalTask, cb fc.ReadinessCallback) (read
 }
 
 func (m *fcManager) CancelAllCallbacks(cb fc.ReadinessCallback) {
-	nsID := namespace.ID(m.partition.NamespaceId())
-	m.readiness.CancelAllCallbacks(nsID, cb)
+	m.readiness.CancelAllCallbacks(cb)
 }
 
 func (m *fcManager) UpdateLimitersFromConfig(limiters *fc.Limiters, task *internalTask) *fc.Limiters {
@@ -64,7 +62,8 @@ func (m *fcManager) UpdateLimitersFromConfig(limiters *fc.Limiters, task *intern
 	cfg := userData.GetData().GetPerType()[int32(tqType)].GetConfig()
 	cfgVersion := userData.GetVersion()
 	limiters = m.updateWholeQueueConcurrencyLimiter(cfg, cfgVersion, limiters)
-	limiters = m.updateLocalRateLimiter(cfg, cfgVersion, limiters, task)
+	limiters = m.updateLocalRateLimiter(limiters)
+	limiters = m.updateFairnessRateLimiter(limiters, task.getPriority())
 	return limiters
 }
 
@@ -82,22 +81,33 @@ func (m *fcManager) updateWholeQueueConcurrencyLimiter(cfg *taskqueuepb.TaskQueu
 	return m.removeLimiter(lim, limiters)
 }
 
-func (m *fcManager) updateLocalRateLimiter(cfg *taskqueuepb.TaskQueueConfig, cfgVersion int64, limiters *fc.Limiters, task *internalTask) *fc.Limiters {
+func (m *fcManager) updateLocalRateLimiter(limiters *fc.Limiters) *fc.Limiters {
 	lim := fc.Limiter{
 		Type:   enumsspb.LIMITER_TYPE_LOCAL_RATE_LIMIT,
 		Key:    m.localLimiterKey(),
 		Source: fc.LimiterSourceConfig,
 	}
-	partitionRPS, fkeyRPS := m.rateLimitManager.GetPerPartitionRPS()
-	// currently this condition is always true
-	if partitionRPS < math.Inf(1) || fkeyRPS < math.Inf(1) {
-		lim.Config = &rateLimiterBridge{
-			rlm:  m.rateLimitManager,
-			task: task,
-		}
-		return m.addOrUpdateLimiter(lim, limiters)
+	wholeQueueLimit := m.rateLimitManager.GetWholeQueueLimit()
+	if !wholeQueueLimit.Limited() && !wholeQueueLimit.Never() {
+		// currently there is always some whole queue limit, so this is unreachable
+		return m.removeLimiter(lim, limiters)
 	}
-	return m.removeLimiter(lim, limiters)
+	lim.Config = wholeQueueLimit
+	return m.addOrUpdateLimiter(lim, limiters)
+}
+
+func (m *fcManager) updateFairnessRateLimiter(limiters *fc.Limiters, pri *commonpb.Priority) *fc.Limiters {
+	lim := fc.Limiter{
+		Type:   enumsspb.LIMITER_TYPE_LOCAL_RATE_LIMIT,
+		Key:    m.localLimiterFairnessKey(pri.GetFairnessKey()),
+		Source: fc.LimiterSourceConfig,
+	}
+	fkeyLimit := m.rateLimitManager.GetPerKeyLimit(pri)
+	if !fkeyLimit.Limited() && !fkeyLimit.Never() {
+		return m.removeLimiter(lim, limiters)
+	}
+	lim.Config = fkeyLimit
+	return m.addOrUpdateLimiter(lim, limiters)
 }
 
 func (*fcManager) addOrUpdateLimiter(newLim fc.Limiter, limiters *fc.Limiters) *fc.Limiters {
@@ -147,8 +157,19 @@ func (m *fcManager) wholeQueueConcurrencyLimiterKey() string {
 }
 
 func (m *fcManager) localLimiterKey() string {
-	key, _ := m.partition.RoutingKey(0)
-	return key
+	partition := 0
+	if normal, ok := m.partition.(*tqid.NormalPartition); ok {
+		partition = normal.PartitionId()
+	}
+	return fmt.Sprintf("lim/%s/%d/%d", m.partition.TaskQueue().Name(), partition, m.partition.TaskType())
+}
+
+func (m *fcManager) localLimiterFairnessKey(fkey string) string {
+	partition := 0
+	if normal, ok := m.partition.(*tqid.NormalPartition); ok {
+		partition = normal.PartitionId()
+	}
+	return fmt.Sprintf("fklim/%s/%d/%d/%s", m.partition.TaskQueue().Name(), partition, m.partition.TaskType(), fkey)
 }
 
 func limiterErrorToSyncMatchOutcome(err error) syncMatchOutcome {
@@ -160,22 +181,4 @@ func limiterErrorToSyncMatchOutcome(err error) syncMatchOutcome {
 	default:
 		return syncMatchUnspecified
 	}
-}
-
-type rateLimiterBridge struct {
-	rlm  *rateLimitManager
-	task *internalTask
-}
-
-var _ fc.LocalLimiter = (*rateLimiterBridge)(nil)
-
-func (b *rateLimiterBridge) Delay() time.Duration {
-	sl := b.rlm.readyTimeForTask(b.task)
-	now := b.rlm.timeSource.Now().UnixNano()
-	return sl.Delay(now)
-}
-
-func (b *rateLimiterBridge) Consume(tokens int) {
-	now := b.rlm.timeSource.Now().UnixNano()
-	b.rlm.consumeTokens(now, b.task, int64(tokens))
 }
