@@ -2,7 +2,6 @@ package fc
 
 import (
 	"context"
-	"time"
 
 	"go.temporal.io/server/service/matching/simplelimiter"
 )
@@ -10,16 +9,15 @@ import (
 type localLimiterTx struct {
 	lls    *localLimiterState
 	config simplelimiter.Params
-	pri    int32
-	age    time.Time
+	pri    wakePriority
 }
 
-func newLocalLimiterTx(lls *localLimiterState, config simplelimiter.Params, pri int32, age time.Time) *localLimiterTx {
-	return &localLimiterTx{lls: lls, config: config, pri: pri, age: age}
+func newLocalLimiterTx(lls *localLimiterState, config simplelimiter.Params, pri wakePriority) *localLimiterTx {
+	return &localLimiterTx{lls: lls, config: config, pri: pri}
 }
 
 func (llt *localLimiterTx) check(cb ReadinessCallback) error {
-	return llt.lls.check(llt.config, cb, llt.pri, llt.age)
+	return llt.lls.check(llt.config, cb, llt.pri)
 }
 
 func (llt *localLimiterTx) cancelCheck() {

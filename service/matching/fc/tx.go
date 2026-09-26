@@ -26,6 +26,7 @@ var errInvalidTxState = serviceerror.NewInternal("invalid fc tx state")
 //   - history.RecordTaskStarted(refs) -> on error call tx.Rollback()
 //   - tx.Commit(ctx) -> on error DROP the task
 //
+// A nil *Tx is valid and all operations are no-ops.
 // Tx is not safe for concurrent use.
 func (r *Readiness) NewTx(nsID namespace.ID, task fcTask, cb ReadinessCallback) *Tx {
 	lims := canonicalLimiters(task)
@@ -54,16 +55,15 @@ func (r *Readiness) NewTx(nsID namespace.ID, task fcTask, cb ReadinessCallback) 
 func (r *Readiness) makeLimiterTx(nsID namespace.ID, task fcTask, lim Limiter) (limiterTx, *taskqueuespb.LimiterRef) {
 	switch lim.Type {
 	case enumsspb.LIMITER_TYPE_CONCURRENCY:
-		// TODO(fc): consider deriving slot id from task to fix some nongraceful failover situations
-		slotID := uuid.NewString()
-
 		cs := r.getConcurrencyLimiter(nsID, lim.Key)
 
 		// if config is missing or wrong type, just leave it out
 		config, _ := lim.Config.(*taskqueuepb.ConcurrencyLimit)
-		pri, age := task.PriorityAndAge()
+		pri := makeWakePriority(task.PriorityAndAge())
+		// TODO(fc): consider deriving slot id from task to fix some nongraceful failover situations
+		slotID := uuid.NewString()
 
-		tx := newConcurrencyTx(cs, slotID, config, lim.ConfigVersion, pri, age)
+		tx := newConcurrencyTx(cs, slotID, config, lim.ConfigVersion, pri)
 		ref := &taskqueuespb.LimiterRef{LimiterType: lim.Type, Key: lim.Key, SlotId: slotID}
 		return tx, ref
 
@@ -72,9 +72,9 @@ func (r *Readiness) makeLimiterTx(nsID namespace.ID, task fcTask, lim Limiter) (
 
 		// if config is missing or wrong type, zero params means "no limit"
 		config, _ := lim.Config.(simplelimiter.Params)
-		pri, age := task.PriorityAndAge()
+		pri := makeWakePriority(task.PriorityAndAge())
 
-		return newLocalLimiterTx(lls, config, pri, age), nil
+		return newLocalLimiterTx(lls, config, pri), nil
 
 	default:
 		// TODO(fc): log or notify here
