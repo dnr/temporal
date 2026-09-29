@@ -1,2 +1,4 @@
 *.old
+*.bin
 states/
+*_TTrace_*.tla

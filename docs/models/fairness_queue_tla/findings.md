@@ -87,6 +87,59 @@ Notes:
 - Related: the readLevel lowering in step 4 is the same mechanism as
   finding #1.
 
+## 4. Stale owner's GC deletes the new owner's tasks (confirmed; found by unit test)
+
+Status: **confirmed** (found first by a unit test; reproduced by
+`FairQueueOwners.tla`, TLC finds it in ~2s at depth 11). Not reachable in
+`FairQueue.tla`, which has a single owner.
+
+Sequence (TLC's trace, levels as integers):
+
+1. Owner A owns range 1; persisted ack level 0; task 3 in the db.
+2. Owner B takes over (range 2), starting from persisted ack level 0.
+3. B writes task 1 (pass at its base, below A's tasks' passes). Committed.
+4. A, not yet aware it lost ownership, reads and acks task 3: A's
+   in-memory ack level is 3.
+5. A GCs `<= 3`. `CompleteTasksLessThan` is not fenced by range id, so it
+   deletes B's undispatched task 1. `GCOnlyAcked` violated.
+
+The pri (FIFO) queues are immune because task ids increase across range
+ids; fair passes don't.
+
+### Candidate fixes checked (`GcMode`, `TakeoverCAS`; see run_owners.sh)
+
+- `"verified"` (check range id, then GC): **broken**, TOCTOU: B takes over
+  between A's check and A's delete.
+- `"persisted"` (GC only up to the ack level this owner persisted with a
+  successful range-fenced LWT): **broken** by the takeover's
+  read-then-LWT window. `takeOverTaskQueueLocked` reads the metadata, then
+  does an LWT conditional *only on the range id* that writes the metadata
+  back as read. A's `SyncState` between B's read and B's LWT doesn't change
+  the range id, so both LWTs succeed: A believes it persisted ack level 2
+  and GCs up to it, while B's LWT overwrote it with 0 and B writes at 1.
+- `"persisted"` + `TakeoverCAS` (the takeover LWT also fails if the
+  persisted ack level changed since its read; equivalently, the takeover
+  bumps only the range id and uses the ack level read after that): **passes**
+  safety (MaxLevel=3, 6.3M states; and MaxLevel=2 with read/write timeouts
+  and expiry) and liveness (MaxLevel=2).
+- `"fenced"` (the delete itself is conditional on the range id): **passes**
+  safety (MaxLevel=3, 8.1M states; MaxLevel=2 with read/write timeouts and
+  expiry) and liveness (MaxLevel=2).
+
+No other violations were found with either passing fix.
+
+Notes:
+
+- Whether a range-conditional range delete is expressible is store-
+  dependent (easy in a SQL transaction; for Cassandra it'd need a
+  conditional batch on the partition). The persisted+CAS variant needs only
+  row LWTs, at the cost of GC lagging the in-memory ack level by up to one
+  ack-persist interval.
+- Model caveat: integer levels let a later owner's task land anywhere above
+  its pinned ack level; in reality, for equal passes the later owner's
+  (higher) ids sort after. The bug only needs a pass strictly below the
+  stale owner's in-memory ack pass, which is real.
+
 ## 2. Spec clarifications surfaced by M4 (not bugs)
 
 Two things the model checker forced us to make precise; both match

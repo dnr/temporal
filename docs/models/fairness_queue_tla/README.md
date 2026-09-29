@@ -17,6 +17,16 @@ milestones, `findings.md` for issues surfaced by the model.
 - `run.sh` — translate + check the real model, then check every mutation
   and verify TLC catches it, then reproduce the confirmed findings.
 - `Trivial.tla/.cfg` — toolchain smoke test.
+- `FairQueueOwners.tla` — copy of the model extended with partition
+  ownership changes (see "Ownership model" below).
+- `FairQueueOwners.cfg` — ownership model, safety only (with a VIEW that
+  collapses dead owners' state); as checked in, current code, which
+  VIOLATES GCOnlyAcked (findings.md #4).
+- `FairQueueOwners_live.cfg` — ownership model, safety + liveness at
+  MaxLevel=2 (no VIEW).
+- `run_owners.sh` — current code must fail; each candidate GC fix must pass
+  or show its expected violation. Slow (~2h total: the passing safety runs
+  take 15-30 min each, liveness ~40 min each).
 
 ## Running
 
@@ -86,3 +96,22 @@ Each `Mut*` constant re-introduces one bug (historical bugs are tagged with
 their fixing commit; "seeded" ones are synthetic). `run.sh` checks that TLC
 finds the expected violation for each — a milestone isn't trusted until its
 target bugs are demonstrably caught. All flags FALSE = current code.
+
+## Ownership model
+
+`FairQueueOwners.tla` adds what `FairQueue.tla` leaves out: owners
+1..NumOwners taking over the partition in turn, each with its own
+reader/writer/acker/GC/sync processes over the shared database. It models
+the persisted metadata (range id and fair ack level), the takeover in
+`takeOverTaskQueueLocked` (plain read, then an LWT on the range id that
+writes back the metadata as read), range-id fencing of `CreateTasks` and
+`SyncState` (ConditionFailed -> the owner unloads), and the *absence* of
+fencing on `GetTasks` and `CompleteTasksLessThan`. A stale owner keeps
+reading, acking and GCing until a fenced call tells it otherwise.
+
+Mutation flags are dropped (FairQueue.tla covers them); read timeouts,
+write timeouts and expiry are switchable constants so the two-owner state
+space stays tractable. `GcMode` selects current code (`"unfenced"`) or a
+candidate fix; `TakeoverCAS` makes the takeover LWT also require the
+persisted ack level to be unchanged since its read. See the header comment
+of FairQueueOwners.tla for the abstractions and findings.md #4 for results.
