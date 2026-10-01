@@ -121,7 +121,7 @@ func (tx *Tx) LimiterRefs() []*taskqueuespb.LimiterRef {
 // // ReadinessState gets the readiness state of a limiter. If it's blocked and cb is not nil,
 // // cb.OnReady will be called once when the state of the limiter transitions to ready. If it is
 // // ready, the callback will be removed from the limiter
-// FIXME: comment more here
+// TODO(fc): comment more here
 func (tx *Tx) Check() (retErr error) {
 	if tx == nil {
 		return nil // no limiters

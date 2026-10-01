@@ -1,7 +1,9 @@
 package fc
 
 import (
+	"cmp"
 	"hash/maphash"
+	"reflect"
 	"slices"
 	"sync"
 
@@ -49,14 +51,14 @@ type (
 
 		// forward map, sorted by <pri, pointer(cb)>
 		fwd map[limiterState][]fwdMapEntry
-		// reverse map, sorted by <pointer(limiter), pri>
+		// reverse map, sorted by <pointer(limiter)>
 		rev map[ReadinessCallback][]revMapEntry
 
 		// TODO(fc): clean up caches of idle/stale state
 		// TODO(fc): gauges for size of cache
 		// TODO(fc): limit active waiters, add suspended state, etc.
 
-		_ [64 - 8 - 8 - 8 - 8 - 8]byte // force to different cache lines to avoid false sharing
+		_ [64 - 8 - 8 - 8 - 8 - 8 - 8]byte // force to different cache lines to avoid false sharing
 	}
 
 	fwdMapEntry struct {
@@ -117,12 +119,13 @@ func (rs *readinessShard) stop() {
 
 	clear(rs.fwd)
 	clear(rs.rev)
+	var rsu readinessSyncUpdate
 	for _, v := range rs.concurrencyLimiters {
-		v.syncLocked(nil)
+		v.syncLocked(&rsu)
 	}
 	clear(rs.concurrencyLimiters)
 	for _, v := range rs.localLimiters {
-		v.syncLocked(nil)
+		v.syncLocked(&rsu)
 	}
 	clear(rs.localLimiters)
 }
@@ -142,7 +145,8 @@ func (rs *readinessShard) cancelAllCallbacks(cb ReadinessCallback) {
 	defer rs.lock.Lock()
 
 	rEnts := rs.rev[cb]
-	for _, rEnt := range rEnts {
+	// note: clone slice before iterating over it, removeEdgeLocked may modify slices
+	for _, rEnt := range slices.Clone(rEnts) {
 		rs.removeEdgeLocked(rEnt.limiter, cb)
 		rs.syncLimiter(rEnt.limiter, &toNotify)
 	}
@@ -157,9 +161,10 @@ func (rs *readinessShard) syncLimiter(limiter limiterState, toNotify *deferedNot
 
 	// record and remove the ones that we're going to notify
 	woke := len(fEnts) - len(rsu.waiters)
-	for _, fEnt := range fEnts[:woke] {
-		toNotify.add(fEnt.cb)
+	// note: clone slice before iterating over it, removeEdgeLocked may modify slices
+	for _, fEnt := range slices.Clone(fEnts[:woke]) {
 		rs.removeEdgeLocked(limiter, fEnt.cb)
+		toNotify.add(fEnt.cb)
 	}
 }
 
@@ -171,30 +176,47 @@ func (rs *readinessShard) getWaiters(limiter limiterState) []fwdMapEntry {
 }
 
 func (rs *readinessShard) addEdgeLocked(limiter limiterState, cb ReadinessCallback, pri wakePriority) {
-	// FIXME: insert at right index to keep sorted
-	rs.fwd[limiter] = append(rs.fwd[limiter], fwdMapEntry{pri: pri, cb: cb})
-	// FIXME: insert at right index to sort
-	rs.rev[cb] = append(rs.rev[cb], revMapEntry{pri: pri, limiter: limiter})
+	newFEnt := fwdMapEntry{pri: pri, cb: cb}
+	fEnts := rs.fwd[limiter]
+	if i, found := slices.BinarySearchFunc(fEnts, newFEnt, fwdMapEntryCmp); found {
+		fEnts[i] = newFEnt
+	} else {
+		rs.fwd[limiter] = slices.Insert(fEnts, i, newFEnt)
+	}
+
+	newREnt := revMapEntry{limiter: limiter, pri: pri}
+	rEnts := rs.rev[cb]
+	if i, found := slices.BinarySearchFunc(rEnts, newREnt, revMapEntryCmp); found {
+		rEnts[i] = newREnt
+	} else {
+		rs.rev[cb] = slices.Insert(rEnts, i, newREnt)
+	}
 }
 
 func (rs *readinessShard) removeEdgeLocked(limiter limiterState, cb ReadinessCallback) {
+	// first look up in reverse map
 	rEnts := rs.rev[cb]
-	// FIXME: binary search
-	rEnts = slices.DeleteFunc(rEnts, func(rEnt revMapEntry) bool {
-		return rEnt.limiter == limiter
-	})
-	if len(rEnts) == 0 {
+	i, found := slices.BinarySearchFunc(rEnts, revMapEntry{limiter: limiter}, revMapEntryCmp)
+	if !found {
+		return
+	}
+	// record pri
+	pri := rEnts[i].pri
+	// now delete from reverse map
+	if rEnts = slices.Delete(rEnts, i, i+1); len(rEnts) == 0 {
 		delete(rs.rev, cb)
 	} else {
 		rs.rev[cb] = rEnts
 	}
 
+	// find in forward map
 	fEnts := rs.fwd[limiter]
-	// FIXME: binary search
-	fEnts = slices.DeleteFunc(fEnts, func(fEnt fwdMapEntry) bool {
-		return fEnt.cb == cb
-	})
-	if len(fEnts) == 0 {
+	i, found = slices.BinarySearchFunc(fEnts, fwdMapEntry{pri: pri, cb: cb}, fwdMapEntryCmp)
+	if !found {
+		return
+	}
+	// delete from forward map
+	if fEnts = slices.Delete(fEnts, i, i+1); len(fEnts) == 0 {
 		delete(rs.fwd, limiter)
 	} else {
 		rs.fwd[limiter] = fEnts
@@ -228,4 +250,21 @@ func (dn *deferedNotify) notify() {
 
 func (dn *deferedNotify) add(cb ...ReadinessCallback) {
 	*dn = append(*dn, cb...)
+}
+
+func fwdMapEntryCmp(a, b fwdMapEntry) int {
+	if c := cmp.Compare(a.pri, b.pri); c != 0 {
+		return c
+	}
+	return cmp.Compare(
+		reflect.ValueOf(a.cb).Pointer(),
+		reflect.ValueOf(b.cb).Pointer(),
+	)
+}
+
+func revMapEntryCmp(a, b revMapEntry) int {
+	return cmp.Compare(
+		reflect.ValueOf(a.limiter).Pointer(),
+		reflect.ValueOf(b.limiter).Pointer(),
+	)
 }
