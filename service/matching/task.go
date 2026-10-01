@@ -83,6 +83,7 @@ type (
 
 		// Flow control fields:
 		// After construction, limiters should only be accessed under matcherData lock.
+		// TODO(fc): make this a slice since every task will have the local limiter
 		limiters *fc.Limiters
 		fcTx     *fc.Tx
 

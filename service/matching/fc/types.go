@@ -38,9 +38,10 @@ type Limiters struct {
 }
 
 // fcTask is the interface that flow control needs from a task.
+// *matching.internalTask implements this.
 type fcTask interface {
 	Limiters() *Limiters
-	PriorityAndAge() (int32, time.Time)
+	PriorityAndAge() (int32, time.Time) // TODO(fc): consider moving to ReadinessCallback
 }
 
 // ReadinessCallback is something we can notify when we think the readiness state of a limiter

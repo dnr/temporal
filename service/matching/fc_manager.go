@@ -153,7 +153,7 @@ func (*fcManager) removeLimiter(oldLim fc.Limiter, limiters *fc.Limiters) *fc.Li
 }
 
 func (m *fcManager) wholeQueueConcurrencyLimiterKey() string {
-	// the "/0" at the end is for future extension for partitioning limiters
+	// the "/0" at the end is for future extension for sharding limiters
 	return fmt.Sprintf("wholequeue/%s/%d/0", m.partition.TaskQueue().Name(), m.partition.TaskType())
 }
 

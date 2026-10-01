@@ -19,7 +19,7 @@ var errInvalidTxState = serviceerror.NewInternal("invalid fc tx state")
 
 // A client of the flow control system should call NewTx when it it's ready to match a task, to
 // perform the flow control commit protocol. It should then call:
-//   - tx.Check(cb) -> checks readiness, if not ready atomically registers cb to be called when
+//   - tx.Check() -> checks readiness, if not ready atomically registers cb to be called when
 //     possibly ready
 //   - tx.Reserve(ctx) -> on error retry the task
 //   - tx.LimiterRefs() to get refs to pass to history (for releasing later)
@@ -28,6 +28,8 @@ var errInvalidTxState = serviceerror.NewInternal("invalid fc tx state")
 //
 // A nil *Tx is valid and all operations are no-ops.
 // Tx is not safe for concurrent use.
+// TODO(fc): consider getting rid of fcTask and passing []Limiters and (int32,time.Time)?
+// but may need task identity for choosing slot id
 func (r *Readiness) NewTx(nsID namespace.ID, task fcTask, cb ReadinessCallback) *Tx {
 	lims := canonicalLimiters(task)
 	if len(lims) == 0 {

@@ -559,6 +559,7 @@ func (d *matcherData) findAndWakeMatches() syncMatchOutcome {
 			if blockedBy == syncMatchRateLimited {
 				d.onRateLimited()
 			}
+			// TODO(fc): add onConcurrencyLimited
 			return blockedBy
 		}
 
@@ -579,7 +580,7 @@ func (d *matcherData) findAndWakeMatches() syncMatchOutcome {
 	}
 }
 
-// called from timer and flow control readiness callback
+// called from flow control; implements fc.ReadinessCallback
 func (d *matcherData) OnReady() {
 	d.lock.Lock()
 	defer d.lock.Unlock()

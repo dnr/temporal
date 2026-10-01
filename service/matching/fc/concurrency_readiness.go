@@ -79,6 +79,7 @@ func (cs *concurrencyState) reserve(
 	configUpdate *taskqueuepb.ConcurrencyLimit,
 	configUpdateVersion int64,
 ) error {
+	// TODO(fc): consider doing this from history to make invalid tasks cheaper to invalidate
 	res, err := cs.rs.r.concurrencyServiceClient.Batch(ctx, &fcpb.ConcurrencyBatchRequest{
 		NamespaceId:         cs.nsID.String(),
 		Key:                 cs.key,
@@ -164,7 +165,7 @@ func (cs *concurrencyState) syncLocked(rsu *readinessSyncUpdate) {
 		"",
 	))
 	ctx, cs.goroCancel = context.WithCancel(ctx)
-	// Wait result will be reported back through ReportReady/Blocked
+	// Wait result will be reported back through reportSlotsHint
 	go cs.callWait(ctx)
 
 	return

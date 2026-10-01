@@ -887,6 +887,7 @@ pollLoop:
 		}
 
 		if err = task.fcTx.Commit(ctx); err != nil {
+			// TODO(fc): consider fast recovery protocol
 			e.flowControlCommitFailed(task, taskQueueName, enumspb.TASK_QUEUE_TYPE_WORKFLOW, err)
 			// we must drop the task here!
 			task.finish(taskFinishResult{dropReason: dropReasonFlowControlCommitFailed})
@@ -1168,6 +1169,7 @@ pollLoop:
 		}
 
 		if err = task.fcTx.Commit(ctx); err != nil {
+			// TODO(fc): consider fast recovery protocol
 			e.flowControlCommitFailed(task, taskQueueName, enumspb.TASK_QUEUE_TYPE_ACTIVITY, err)
 			// we must drop the task here!
 			task.finish(taskFinishResult{dropReason: dropReasonFlowControlCommitFailed})
