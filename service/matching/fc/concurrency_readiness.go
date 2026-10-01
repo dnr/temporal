@@ -2,7 +2,6 @@ package fc
 
 import (
 	"context"
-	"sync"
 	"time"
 
 	"go.temporal.io/api/serviceerror"
@@ -19,58 +18,47 @@ import (
 var ErrConcurrencyBlocked = serviceerror.NewFailedPrecondition("blocked by concurrency limit")
 
 type concurrencyState struct {
-	r    *Readiness
-	nsID namespace.ID // TODO(fc): can we consolidate these?
+	rs   *readinessShard
+	nsID namespace.ID
 	key  string
 
-	lock       sync.Mutex
 	generation int64
 	tokens     int32
 	// invariant: {len(waiters) > 0} == {Wait goroutine is running} == {goroCancel != nil}
 	// (for now, until we add eviction)
-	waiters    waiterEntries
 	goroCancel context.CancelFunc
 }
 
 func (r *Readiness) getConcurrencyLimiter(nsID namespace.ID, key string) *concurrencyState {
-	if cs, ok := r.concurrencyLimiters.Load(nsID.String() + key); ok {
-		return cs.(*concurrencyState) // nolint:revive
+	return r.getShard(nsID).getConcurrencyLimiter(nsID, key)
+}
+
+func (rs *readinessShard) getConcurrencyLimiter(nsID namespace.ID, key string) *concurrencyState {
+	rs.lock.Lock()
+	defer rs.lock.Unlock()
+
+	mapkey := nsID.String() + key
+	if cs, ok := rs.concurrencyLimiters[mapkey]; ok {
+		return cs
 	}
-	cs, _ := r.concurrencyLimiters.LoadOrStore(nsID.String()+key, &concurrencyState{
-		r:       r,
-		nsID:    nsID,
-		key:     key,
-		waiters: *newWaiterEntries(),
-	})
-	return cs.(*concurrencyState) // nolint:revive
-}
-
-func (cs *concurrencyState) stop() {
-	cs.update(func() error {
-		cs.waiters.clear()
-		// FIXME: cs.r.unregisterWaiter on each one
-		return nil
-	})
-}
-
-func (cs *concurrencyState) cancelWaiter(cb ReadinessCallback) {
-	cs.update(func() error {
-		cs.waiters.remove(cb)
-		return nil
-	})
+	cs := &concurrencyState{
+		rs:   rs,
+		nsID: nsID,
+		key:  key,
+	}
+	rs.concurrencyLimiters[mapkey] = cs
+	return cs
 }
 
 func (cs *concurrencyState) check(cb ReadinessCallback, pri wakePriority) error {
-	return cs.update(func() error {
+	return cs.rs.update(cs, func() error {
 		if cs.tokens == 0 {
-			cs.waiters.add(cb, pri)
-			cs.r.registerWaiter(cs, cb)
+			cs.rs.addEdgeLocked(cs, cb, pri)
 			return ErrConcurrencyBlocked
 		}
 
 		// remove in case it was present before
-		cs.waiters.remove(cb)
-		cs.r.unregisterWaiter(cs, cb)
+		cs.rs.removeEdgeLocked(cs, cb)
 		// take one check token
 		cs.tokens--
 		return nil
@@ -78,7 +66,7 @@ func (cs *concurrencyState) check(cb ReadinessCallback, pri wakePriority) error 
 }
 
 func (cs *concurrencyState) cancelCheck() {
-	cs.update(func() error {
+	cs.rs.update(cs, func() error {
 		// this could theoretically go over the limit but it doesn't matter here
 		cs.tokens++
 		return nil
@@ -91,7 +79,7 @@ func (cs *concurrencyState) reserve(
 	configUpdate *taskqueuepb.ConcurrencyLimit,
 	configUpdateVersion int64,
 ) error {
-	res, err := cs.r.concurrencyServiceClient.Batch(ctx, &fcpb.ConcurrencyBatchRequest{
+	res, err := cs.rs.r.concurrencyServiceClient.Batch(ctx, &fcpb.ConcurrencyBatchRequest{
 		NamespaceId:         cs.nsID.String(),
 		Key:                 cs.key,
 		ReserveSlots:        []string{slotID},
@@ -109,7 +97,7 @@ func (cs *concurrencyState) reserve(
 }
 
 func (cs *concurrencyState) commit(ctx context.Context, slotID string) error {
-	res, err := cs.r.concurrencyServiceClient.Batch(ctx, &fcpb.ConcurrencyBatchRequest{
+	res, err := cs.rs.r.concurrencyServiceClient.Batch(ctx, &fcpb.ConcurrencyBatchRequest{
 		NamespaceId: cs.nsID.String(),
 		Key:         cs.key,
 		CommitSlots: []string{slotID},
@@ -127,7 +115,7 @@ func (cs *concurrencyState) commit(ctx context.Context, slotID string) error {
 func (cs *concurrencyState) cancelReserve(ctx context.Context, slotID string) {
 	// call in new goroutine, don't block here
 	go func() {
-		res, err := cs.r.concurrencyServiceClient.Batch(ctx, &fcpb.ConcurrencyBatchRequest{
+		res, err := cs.rs.r.concurrencyServiceClient.Batch(ctx, &fcpb.ConcurrencyBatchRequest{
 			NamespaceId:            cs.nsID.String(),
 			Key:                    cs.key,
 			CancelReservationSlots: []string{slotID},
@@ -139,7 +127,7 @@ func (cs *concurrencyState) cancelReserve(ctx context.Context, slotID string) {
 }
 
 func (cs *concurrencyState) reportSlotsHint(gen int64, slots int32) {
-	cs.update(func() error {
+	cs.rs.update(cs, func() error {
 		if gen < cs.generation {
 			return nil
 		}
@@ -154,24 +142,12 @@ func (cs *concurrencyState) reportSlotsHint(gen int64, slots int32) {
 	})
 }
 
-func (cs *concurrencyState) update(f func() error) error {
-	var waiters []ReadinessCallback
-	defer func() { notifyWaiters(waiters) }()
-
-	cs.lock.Lock()
-	defer cs.lock.Unlock()
-
-	defer func() { waiters = cs.syncGoroLocked() }()
-
-	return f()
-}
-
-func (cs *concurrencyState) syncGoroLocked() (out []ReadinessCallback) {
+func (cs *concurrencyState) syncLocked(rsu *readinessSyncUpdate) {
 	// wake as many as we can. note that we do not take the tokens here, the waiter will do
-	// that after it wakes up.
-	out = cs.waiters.take(cs.tokens)
+	// that after it wakes up and calls check.
+	rsu.wake(int(cs.tokens))
 
-	haveWaiters := cs.waiters.len() > 0
+	haveWaiters := len(rsu.waiters) > 0
 	if (cs.goroCancel != nil) == haveWaiters {
 		return
 	}
@@ -182,7 +158,6 @@ func (cs *concurrencyState) syncGoroLocked() (out []ReadinessCallback) {
 		return
 	}
 
-	// TODO(fc): put some limit on these, maybe two-stage lru
 	ctx := headers.SetCallerInfo(context.Background(), headers.NewCallerInfo(
 		cs.nsID.String(), // TODO(fc): use namespace name instead of id
 		headers.CallerTypeBackgroundHigh,
@@ -196,15 +171,17 @@ func (cs *concurrencyState) syncGoroLocked() (out []ReadinessCallback) {
 }
 
 func (cs *concurrencyState) makeWaitRequest() *fcpb.ConcurrencyWaitRequest {
-	cs.lock.Lock()
-	defer cs.lock.Unlock()
+	waiters := cs.rs.getWaiters(cs)
+	if len(waiters) == 0 {
+		return nil
+	}
 
 	return &fcpb.ConcurrencyWaitRequest{
 		NamespaceId:         cs.nsID.String(),
 		Key:                 cs.key,
 		Generation:          cs.generation,
-		WakePriority:        int64(cs.waiters.minPriority()),
-		RequestedWakeTokens: int32(cs.waiters.len()),
+		WakePriority:        int64(waiters[0].pri),
+		RequestedWakeTokens: int32(len(waiters)),
 	}
 }
 
@@ -217,7 +194,13 @@ func (cs *concurrencyState) callWait(ctx context.Context) {
 	for ctx.Err() == nil {
 		// TODO(fc): if minPriority decreases during this call, interrupt and restart it.
 		// increasing minPriority should not interrupt
-		res, err := cs.r.concurrencyServiceClient.Wait(ctx, cs.makeWaitRequest())
+		req := cs.makeWaitRequest()
+		if req == nil {
+			// maybe race with canceling context
+			util.InterruptibleSleep(ctx, retrier.NextBackOff(nil))
+			continue
+		}
+		res, err := cs.rs.r.concurrencyServiceClient.Wait(ctx, req)
 		if err != nil {
 			util.InterruptibleSleep(ctx, retrier.NextBackOff(err))
 			continue
