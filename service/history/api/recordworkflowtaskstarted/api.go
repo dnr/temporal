@@ -3,6 +3,7 @@ package recordworkflowtaskstarted
 import (
 	"context"
 	"errors"
+	"slices"
 
 	commonpb "go.temporal.io/api/common/v1"
 	enumspb "go.temporal.io/api/enums/v1"
@@ -19,6 +20,7 @@ import (
 	"go.temporal.io/server/common/namespace"
 	"go.temporal.io/server/common/persistence/visibility/manager"
 	serviceerrors "go.temporal.io/server/common/serviceerror"
+	commontaskqueue "go.temporal.io/server/common/taskqueue"
 	"go.temporal.io/server/common/tqid"
 	"go.temporal.io/server/common/worker_versioning"
 	"go.temporal.io/server/service/history/api"
@@ -160,6 +162,7 @@ func Invoke(
 				return nil, err
 			}
 
+			mutableState.GetExecutionInfo().WorkflowTaskLimiters = req.GetLimiters()
 			_, workflowTask, err = mutableState.AddWorkflowTaskStartedEvent(
 				scheduledEventID,
 				requestID,
@@ -178,7 +181,8 @@ func Invoke(
 			}
 
 			if workflowTask.Type == enumsspb.WORKFLOW_TASK_TYPE_SPECULATIVE {
-				updateAction.Noop = true
+				// Persist limiter refs so a history process restart cannot lose the release obligation.
+				updateAction.Noop = !slices.ContainsFunc(req.GetLimiters(), commontaskqueue.NeedsRelease)
 			} else {
 				// If the wft is speculative MS changes are not persisted, so the possibly started
 				// transition by the StartDeploymentTransition call above won't be persisted. This is OK

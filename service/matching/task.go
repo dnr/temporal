@@ -1,6 +1,7 @@
 package matching
 
 import (
+	"cmp"
 	"context"
 	"sync/atomic"
 	"time"
@@ -13,6 +14,7 @@ import (
 	persistencespb "go.temporal.io/server/api/persistence/v1"
 	taskqueuespb "go.temporal.io/server/api/taskqueue/v1"
 	"go.temporal.io/server/common/namespace"
+	"go.temporal.io/server/service/matching/fc"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
@@ -73,12 +75,17 @@ type (
 		// pollerScalingDecision is assigned when the queue has advice to give to the poller about whether
 		// it should adjust its poller count
 		pollerScalingDecision *taskqueuepb.PollerScalingDecision
-		recycleToken          func(*internalTask)
 		removeFromMatcher     atomic.Pointer[func()]
 		// taskDispatchRevisionNumber represents the revision number used by the task and is
 		// max(taskDirectiveRevisionNumber, routingConfigRevisionNumber) for the task.
 		taskDispatchRevisionNumber    int64
 		targetWorkerDeploymentVersion *deploymentspb.WorkerDeploymentVersion
+
+		// Flow control fields:
+		// After construction, limiters should only be accessed under matcherData lock.
+		// TODO(fc): make this a slice since every task will have the local limiter
+		limiters *fc.Limiters
+		fcTx     *fc.Tx
 
 		// The following fields are for use by priMatcher/matcherData:
 		waitableMatchResult
@@ -288,6 +295,23 @@ func (task *internalTask) workflowExecution() *commonpb.WorkflowExecution {
 	return &commonpb.WorkflowExecution{}
 }
 
+// Limiters implements fc.fcTask interface.
+func (task *internalTask) Limiters() *fc.Limiters {
+	return task.limiters
+}
+
+// PriorityAndAge implements fc.fcTask interface.
+func (task *internalTask) PriorityAndAge() (int32, time.Time) {
+	def := int32(3) // FIXME: ugh, have to get this here
+	pri := cmp.Or(task.getPriority().GetPriorityKey(), def)
+	createTime := task.getCreateTime().AsTime()
+	return pri, createTime
+}
+
+func (task *internalTask) updateLimitersFromConfig(manager *fcManager) {
+	task.limiters = manager.UpdateLimitersFromConfig(task.limiters, task)
+}
+
 // pollWorkflowTaskQueueResponse returns the poll response for a workflow task that is
 // already marked as started. This method should only be called when isStarted() is true
 func (task *internalTask) pollWorkflowTaskQueueResponse() *matchingservice.PollWorkflowTaskQueueResponse {
@@ -382,11 +406,8 @@ func (task *internalTask) finishForward(forwardRes any, forwardErr error, consum
 	task.finishInternal(taskResponse{forwarded: true, forwardRes: forwardRes, forwardErr: forwardErr}, consumedToken)
 }
 
+// TODO(fc): remove consumedToken from here
 func (task *internalTask) finishInternal(res taskResponse, consumedToken bool) {
-	if !consumedToken && task.recycleToken != nil {
-		task.recycleToken(task)
-	}
-
 	switch {
 	case task.responseC != nil:
 		task.responseC <- res

@@ -29,6 +29,8 @@ import (
 	replicationspb "go.temporal.io/server/api/replication/v1"
 	taskqueuespb "go.temporal.io/server/api/taskqueue/v1"
 	tokenspb "go.temporal.io/server/api/token/v1"
+	"go.temporal.io/server/chasm/lib/flowcontrol/concurrency"
+	fcpb "go.temporal.io/server/chasm/lib/flowcontrol/gen/flowcontrolpb/v1"
 	"go.temporal.io/server/client/matching"
 	"go.temporal.io/server/common"
 	"go.temporal.io/server/common/backoff"
@@ -62,6 +64,7 @@ import (
 	"go.temporal.io/server/common/util"
 	"go.temporal.io/server/common/worker_versioning"
 	"go.temporal.io/server/service/history/api"
+	"go.temporal.io/server/service/matching/fc"
 	"go.temporal.io/server/service/matching/hooks"
 	"go.temporal.io/server/service/worker/workerdeployment"
 	"google.golang.org/protobuf/types/known/timestamppb"
@@ -196,11 +199,13 @@ type (
 		// Lock to serialize replication queue updates.
 		replicationLock sync.Mutex
 		// Serialize and batch user data updates by namespace.
-		userDataUpdateBatchers collection.SyncMap[namespace.ID, *stream_batcher.Batcher[*userDataUpdate, error]]
+		userDataUpdateBatcher *stream_batcher.KeyedBatcher[namespace.ID, *userDataUpdate, error]
 		// Stores results of reachability queries to visibility
 		reachabilityCache reachabilityCache
 		// Rate limiter to limit the task dispatch
 		rateLimiter TaskDispatchRateLimiter
+		// Flow control readiness client
+		fcReadiness *fc.Readiness
 
 		taskHookFactories []hooks.TaskHookFactory
 	}
@@ -250,10 +255,11 @@ var (
 
 	// Options for batching user data updates.
 	userDataBatcherOptions = stream_batcher.BatcherOptions{
-		MaxItems: 100,
-		MinDelay: 100 * time.Millisecond,
-		MaxDelay: 500 * time.Millisecond,
-		IdleTime: time.Minute,
+		MaxItems:      100,
+		MinDelay:      100 * time.Millisecond,
+		MaxDelay:      500 * time.Millisecond,
+		IdleTime:      time.Minute,
+		ClearInterval: 0, // overlapping batchers would violate per-namespace serialization
 	}
 )
 
@@ -284,8 +290,10 @@ func NewEngine(
 	historySerializer serialization.Serializer,
 	taskHookFactories []hooks.TaskHookFactory,
 	partitionScalerFactory PartitionScalerFactory,
+	concurrencyServiceClient fcpb.ConcurrencyServiceClient,
 ) Engine {
 	scopedMetricsHandler := metricsHandler.WithTags(metrics.OperationTag(metrics.MatchingEngineScope))
+	timeSource := clock.NewRealTimeSource() // No need to mock this at the moment
 	e := &matchingEngineImpl{
 		status:                 common.DaemonStatusInitialized,
 		taskManager:            taskManager,
@@ -302,7 +310,7 @@ func NewEngine(
 		serviceResolver:        resolver,
 		membershipChangedCh:    make(chan *membership.ChangedEvent, 1), // allow one signal to be buffered while we're working
 		clusterMeta:            clusterMeta,
-		timeSource:             clock.NewRealTimeSource(), // No need to mock this at the moment
+		timeSource:             timeSource,
 		visibilityManager:      visibilityManager,
 		nexusEndpointClient:    newEndpointClient(config.NexusEndpointsRefreshInterval, nexusEndpointManager),
 		// nexusEndpointsOwnershipLostCh initialized below
@@ -325,11 +333,23 @@ func NewEngine(
 		workerInstancePollers:     workerPollerTracker{pollers: make(map[string]map[string]context.CancelFunc)},
 		shutdownWorkers:           cache.New(shutdownWorkersCacheMaxSize, &cache.Options{TTL: shutdownWorkersCacheTTL}),
 		namespaceReplicationQueue: namespaceReplicationQueue,
-		userDataUpdateBatchers:    collection.NewSyncMap[namespace.ID, *stream_batcher.Batcher[*userDataUpdate, error]](),
 		rateLimiter:               rateLimiter,
 		taskHookFactories:         taskHookFactories,
 		partitionScalerFactory:    partitionScalerFactory,
+		fcReadiness: fc.NewReadiness(
+			timeSource,
+			concurrency.NewBatchingClient(
+				concurrencyServiceClient,
+				config.FlowControlClientBatcherOptions(),
+				clock.NewRealTimeSource(),
+			),
+		),
 	}
+	e.userDataUpdateBatcher = stream_batcher.NewKeyedBatcher(
+		e.applyUserDataUpdateBatch,
+		userDataBatcherOptions,
+		e.timeSource,
+	)
 	e.nexusEndpointsOwnershipLostCh.Store(make(chan struct{}))
 	e.reachabilityCache = newReachabilityCache(
 		metrics.NoopMetricsHandler,
@@ -772,6 +792,13 @@ pollLoop:
 			return e.createPollWorkflowTaskQueueResponse(task, resp, opMetrics), nil
 		}
 
+		// The task returned by pollTask is likely to be allowed by flow control.
+		// We need to run the flow control commit protocol.
+		if err = task.fcTx.Reserve(ctx); err != nil {
+			task.finish(taskFinishResult{err: err})
+			continue pollLoop
+		}
+
 		requestClone := request
 		if versionSetUsed {
 			// We remove build ID from workerVersionCapabilities so History can differentiate between
@@ -780,15 +807,17 @@ pollLoop:
 			requestClone = common.CloneProto(request)
 			requestClone.WorkerVersionCapabilities.BuildId = ""
 		}
-		resp, err := e.recordWorkflowTaskStarted(ctx, requestClone, task)
+		resp, err := e.recordWorkflowTaskStarted(ctx, requestClone, task, task.fcTx.LimiterRefs())
 		if err != nil {
+			task.fcTx.Rollback(ctx)
+
 			switch err := err.(type) {
 			case *serviceerror.Internal:
-				e.nonRetryableErrorsDropTask(task, taskQueueName, err)
+				e.nonRetryableErrorsDropTask(task, taskQueueName, enumspb.TASK_QUEUE_TYPE_WORKFLOW, err)
 				// drop the task as otherwise task would be stuck in a retry-loop
 				task.finish(taskFinishResult{dropReason: dropReasonInternalError})
 			case *serviceerror.DataLoss:
-				e.nonRetryableErrorsDropTask(task, taskQueueName, err)
+				e.nonRetryableErrorsDropTask(task, taskQueueName, enumspb.TASK_QUEUE_TYPE_WORKFLOW, err)
 				// drop the task as otherwise task would be stuck in a retry-loop
 				task.finish(taskFinishResult{dropReason: dropReasonDataLoss})
 			case *serviceerror.NotFound: // mutable state not found, workflow not running or workflow task not found
@@ -854,6 +883,14 @@ pollLoop:
 				}
 			}
 
+			continue pollLoop
+		}
+
+		if err = task.fcTx.Commit(ctx); err != nil {
+			// TODO(fc): consider fast recovery protocol
+			e.flowControlCommitFailed(task, taskQueueName, enumspb.TASK_QUEUE_TYPE_WORKFLOW, err)
+			// we must drop the task here!
+			task.finish(taskFinishResult{dropReason: dropReasonFlowControlCommitFailed})
 			continue pollLoop
 		}
 
@@ -925,13 +962,14 @@ func (e *matchingEngineImpl) getHistoryForQueryTask(
 	return hist, resp.GetResponse().GetNextPageToken(), nil
 }
 
-func (e *matchingEngineImpl) nonRetryableErrorsDropTask(task *internalTask, taskQueueName string, err error) {
+func (e *matchingEngineImpl) nonRetryableErrorsDropTask(task *internalTask, tqName string, tqType enumspb.TaskQueueType, err error) {
 	e.logger.Error("dropping task due to non-nonretryable errors",
 		tag.WorkflowNamespace(task.namespace.String()),
 		tag.WorkflowNamespaceID(task.event.Data.GetNamespaceId()),
 		tag.WorkflowID(task.event.Data.GetWorkflowId()),
 		tag.WorkflowRunID(task.event.Data.GetRunId()),
-		tag.WorkflowTaskQueueName(taskQueueName),
+		tag.WorkflowTaskQueueName(tqName),
+		tag.WorkflowTaskQueueType(tqType),
 		tag.TaskID(task.event.GetTaskId()),
 		tag.WorkflowScheduledEventID(task.event.Data.GetScheduledEventId()),
 		tag.Error(err),
@@ -939,6 +977,25 @@ func (e *matchingEngineImpl) nonRetryableErrorsDropTask(task *internalTask, task
 	)
 
 	metrics.NonRetryableTasks.With(e.metricsHandler).Record(1, metrics.ServiceErrorTypeTag(err))
+}
+
+func (e *matchingEngineImpl) flowControlCommitFailed(task *internalTask, tqName string, tqType enumspb.TaskQueueType, err error) {
+	// TODO: these should use the logger and metrics handler from the tqpm that we polled
+	e.logger.Error("flow control commit failed",
+		tag.WorkflowNamespace(task.namespace.String()),
+		tag.WorkflowNamespaceID(task.event.Data.GetNamespaceId()),
+		tag.WorkflowID(task.event.Data.GetWorkflowId()),
+		tag.WorkflowRunID(task.event.Data.GetRunId()),
+		tag.WorkflowTaskQueueName(tqName),
+		tag.WorkflowTaskQueueType(tqType),
+		tag.TaskID(task.event.GetTaskId()),
+		tag.WorkflowScheduledEventID(task.event.Data.GetScheduledEventId()),
+		tag.Error(err))
+
+	metrics.FlowControlCommitFailed.With(e.metricsHandler).Record(1,
+		metrics.NamespaceTag(task.namespace.String()),
+		metrics.ServiceErrorTypeTag(err),
+	)
 }
 
 // PollActivityTaskQueue takes one task from the task manager, update workflow execution history, mark task as
@@ -999,6 +1056,14 @@ pollLoop:
 			// tasks received from remote are already started. So, simply forward the response
 			return task.pollActivityTaskQueueResponse(), nil
 		}
+
+		// The task returned by pollTask is likely to be allowed by flow control.
+		// We need to run the flow control commit protocol.
+		if err = task.fcTx.Reserve(ctx); err != nil {
+			task.finish(taskFinishResult{err: err})
+			continue pollLoop
+		}
+
 		requestClone := request
 		if versionSetUsed {
 			// We remove build ID from workerVersionCapabilities so History can differentiate between
@@ -1007,15 +1072,17 @@ pollLoop:
 			requestClone = common.CloneProto(request)
 			requestClone.WorkerVersionCapabilities.BuildId = ""
 		}
-		resp, err := e.recordActivityTaskStarted(ctx, requestClone, task)
+		resp, err := e.recordActivityTaskStarted(ctx, requestClone, task, task.fcTx.LimiterRefs())
 		if err != nil {
+			task.fcTx.Rollback(ctx)
+
 			switch err := err.(type) {
 			case *serviceerror.Internal:
-				e.nonRetryableErrorsDropTask(task, taskQueueName, err)
+				e.nonRetryableErrorsDropTask(task, taskQueueName, enumspb.TASK_QUEUE_TYPE_ACTIVITY, err)
 				// drop the task as otherwise task would be stuck in a retry-loop
 				task.finish(taskFinishResult{dropReason: dropReasonInternalError})
 			case *serviceerror.DataLoss:
-				e.nonRetryableErrorsDropTask(task, taskQueueName, err)
+				e.nonRetryableErrorsDropTask(task, taskQueueName, enumspb.TASK_QUEUE_TYPE_ACTIVITY, err)
 				// drop the task as otherwise task would be stuck in a retry-loop
 				task.finish(taskFinishResult{dropReason: dropReasonDataLoss})
 			case *serviceerror.NotFound: // mutable state not found, workflow not running or activity info not found
@@ -1100,6 +1167,15 @@ pollLoop:
 
 			continue pollLoop
 		}
+
+		if err = task.fcTx.Commit(ctx); err != nil {
+			// TODO(fc): consider fast recovery protocol
+			e.flowControlCommitFailed(task, taskQueueName, enumspb.TASK_QUEUE_TYPE_ACTIVITY, err)
+			// we must drop the task here!
+			task.finish(taskFinishResult{dropReason: dropReasonFlowControlCommitFailed})
+			continue pollLoop
+		}
+
 		task.finish(taskFinishResult{consumedToken: true})
 		e.emitTaskDispatchLatency(task, partition, req.GetNamespaceId(), request.Namespace, pollMetadata)
 		return e.createPollActivityTaskQueueResponse(task, resp, opMetrics), nil
@@ -2553,7 +2629,7 @@ func (e *matchingEngineImpl) ForceUnloadTaskQueuePartition(
 func (e *matchingEngineImpl) UpdateTaskQueueUserData(ctx context.Context, request *matchingservice.UpdateTaskQueueUserDataRequest) (*matchingservice.UpdateTaskQueueUserDataResponse, error) {
 	namespaceId := namespace.ID(request.NamespaceId)
 	var applied, conflicting bool
-	persistenceErr, ctxErr := e.getUserDataBatcher(namespaceId).Add(ctx, &userDataUpdate{
+	persistenceErr, ctxErr := e.userDataUpdateBatcher.Add(ctx, namespaceId, &userDataUpdate{
 		taskQueue: request.GetTaskQueue(),
 		update: persistence.SingleTaskQueueUserDataUpdate{
 			UserData:        request.UserData,
@@ -2941,20 +3017,6 @@ func (e *matchingEngineImpl) notifyNexusEndpointsOwnershipChange() {
 		close(e.nexusEndpointsOwnershipLostCh.Swap(make(chan struct{})).(chan struct{})) //nolint:revive // type is always chan struct{}
 	}
 	e.nexusEndpointClient.notifyOwnershipChanged(isOwner)
-}
-
-func (e *matchingEngineImpl) getUserDataBatcher(namespaceId namespace.ID) *stream_batcher.Batcher[*userDataUpdate, error] {
-	// Note that values are never removed from this map. The batcher's goroutine will exit
-	// after the idle time, though, which gets most of the desired resource savings.
-	if batcher, ok := e.userDataUpdateBatchers.Get(namespaceId); ok {
-		return batcher
-	}
-	fn := func(batch []*userDataUpdate) error {
-		return e.applyUserDataUpdateBatch(namespaceId, batch)
-	}
-	newBatcher := stream_batcher.NewBatcher[*userDataUpdate, error](fn, userDataBatcherOptions, e.timeSource)
-	batcher, _ := e.userDataUpdateBatchers.GetOrSet(namespaceId, newBatcher)
-	return batcher
 }
 
 func (e *matchingEngineImpl) applyUserDataUpdateBatch(namespaceId namespace.ID, batch []*userDataUpdate) error {
@@ -3446,8 +3508,8 @@ func (e *matchingEngineImpl) recordWorkflowTaskStarted(
 	ctx context.Context,
 	pollReq *workflowservice.PollWorkflowTaskQueueRequest,
 	task *internalTask,
+	limiters []*taskqueuespb.LimiterRef,
 ) (*historyservice.RecordWorkflowTaskStartedResponse, error) {
-
 	metrics.OperationCounter.With(e.metricsHandler).Record(
 		1,
 		metrics.OperationTag("RecordWorkflowTaskStarted"),
@@ -3485,6 +3547,7 @@ func (e *matchingEngineImpl) recordWorkflowTaskStarted(
 		Stamp:                      task.event.Data.GetStamp(),
 		TaskDispatchRevisionNumber: task.taskDispatchRevisionNumber,
 		TargetDeploymentVersion:    sentTargetVersion,
+		Limiters:                   limiters,
 	}
 
 	resp, err := e.historyClient.RecordWorkflowTaskStarted(ctx, recordStartedRequest)
@@ -3527,8 +3590,8 @@ func (e *matchingEngineImpl) recordActivityTaskStarted(
 	ctx context.Context,
 	pollReq *workflowservice.PollActivityTaskQueueRequest,
 	task *internalTask,
+	limiters []*taskqueuespb.LimiterRef,
 ) (*historyservice.RecordActivityTaskStartedResponse, error) {
-
 	metrics.OperationCounter.With(e.metricsHandler).Record(
 		1,
 		metrics.OperationTag("RecordActivityTaskStarted"),
@@ -3564,6 +3627,7 @@ func (e *matchingEngineImpl) recordActivityTaskStarted(
 		VersionDirective:           task.event.Data.VersionDirective,
 		TaskDispatchRevisionNumber: task.taskDispatchRevisionNumber,
 		ComponentRef:               task.event.Data.GetComponentRef(),
+		Limiters:                   limiters,
 	}
 
 	return e.historyClient.RecordActivityTaskStarted(ctx, recordStartedRequest)
@@ -3619,6 +3683,21 @@ func buildRateLimitConfig(update *workflowservice.UpdateTaskQueueConfigRequest_R
 	}
 	return &taskqueuepb.RateLimitConfig{
 		RateLimit: rateLimit,
+		Metadata: &taskqueuepb.ConfigMetadata{
+			Reason:         update.GetReason(),
+			UpdateTime:     updateTime,
+			UpdateIdentity: updateIdentity,
+		},
+	}
+}
+
+func buildConcurrencyLimitConfig(update *workflowservice.UpdateTaskQueueConfigRequest_ConcurrencyLimitUpdate, updateTime *timestamppb.Timestamp, updateIdentity string) *taskqueuepb.ConcurrencyLimitConfig {
+	var concurrencyLimit *taskqueuepb.ConcurrencyLimit
+	if limit := update.GetConcurrencyLimit(); limit != nil {
+		concurrencyLimit = &taskqueuepb.ConcurrencyLimit{ConcurrentTasks: limit.ConcurrentTasks}
+	}
+	return &taskqueuepb.ConcurrencyLimitConfig{
+		ConcurrencyLimit: concurrencyLimit,
 		Metadata: &taskqueuepb.ConfigMetadata{
 			Reason:         update.GetReason(),
 			UpdateTime:     updateTime,
@@ -3744,6 +3823,11 @@ func (e *matchingEngineImpl) UpdateTaskQueueConfig(
 			// Fairness Queue Rate Limit
 			if fkrl := updateTaskQueueConfig.GetUpdateFairnessKeyRateLimitDefault(); fkrl != nil {
 				cfg.FairnessKeysRateLimitDefault = buildRateLimitConfig(fkrl, protoTs, updateIdentity)
+			}
+
+			// Queue Concurrency Limit
+			if qcl := updateTaskQueueConfig.GetUpdateQueueConcurrencyLimit(); qcl != nil {
+				cfg.QueueConcurrencyLimit = buildConcurrencyLimitConfig(qcl, protoTs, updateIdentity)
 			}
 
 			// Fairness Weight Overrides

@@ -86,6 +86,7 @@ type library struct {
 	scheduleToCloseTimeoutTaskHandler *scheduleToCloseTimeoutTaskHandler
 	startToCloseTimeoutTaskHandler    *startToCloseTimeoutTaskHandler
 	heartbeatTimeoutTaskHandler       *heartbeatTimeoutTaskHandler
+	releaseLimiterTaskHandler         *releaseLimiterTaskHandler
 }
 
 func newLibrary(
@@ -95,6 +96,7 @@ func newLibrary(
 	scheduleToCloseTimeoutTaskHandler *scheduleToCloseTimeoutTaskHandler,
 	startToCloseTimeoutTaskHandler *startToCloseTimeoutTaskHandler,
 	heartbeatTimeoutTaskHandler *heartbeatTimeoutTaskHandler,
+	releaseLimiterTaskHandler *releaseLimiterTaskHandler,
 	config *Config,
 ) *library {
 	return &library{
@@ -105,6 +107,7 @@ func newLibrary(
 		scheduleToCloseTimeoutTaskHandler: scheduleToCloseTimeoutTaskHandler,
 		startToCloseTimeoutTaskHandler:    startToCloseTimeoutTaskHandler,
 		heartbeatTimeoutTaskHandler:       heartbeatTimeoutTaskHandler,
+		releaseLimiterTaskHandler:         releaseLimiterTaskHandler,
 	}
 }
 
@@ -133,6 +136,10 @@ func (l *library) Tasks() []*chasm.RegistrableTask {
 		chasm.NewRegistrablePureTask(
 			"heartbeatTimer",
 			l.heartbeatTimeoutTaskHandler,
+		),
+		chasm.NewRegistrableSideEffectTask(
+			"releaseLimiter",
+			l.releaseLimiterTaskHandler,
 		),
 	}
 }

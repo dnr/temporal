@@ -41,6 +41,7 @@ import (
 	"go.temporal.io/api/workflowservice/v1"
 	"go.temporal.io/server/api/historyservice/v1"
 	"go.temporal.io/server/api/matchingservice/v1"
+	taskqueuespb "go.temporal.io/server/api/taskqueue/v1"
 	tokenspb "go.temporal.io/server/api/token/v1"
 	"go.temporal.io/server/chasm"
 	"go.temporal.io/server/chasm/lib/activity/gen/activitypb/v1"
@@ -57,6 +58,7 @@ import (
 	"go.temporal.io/server/common/payload"
 	"go.temporal.io/server/common/retrypolicy"
 	serviceerrors "go.temporal.io/server/common/serviceerror"
+	commontaskqueue "go.temporal.io/server/common/taskqueue"
 	"go.temporal.io/server/common/tqid"
 	"go.temporal.io/server/common/util"
 	"go.temporal.io/server/service/history/consts"
@@ -1341,6 +1343,7 @@ func (a *Activity) recordFailedAttempt(
 	currentTime time.Time,
 	noRetriesLeft bool,
 ) error {
+	a.releaseAttemptLimiters(ctx)
 	attempt := a.LastAttempt.Get(ctx)
 
 	attemptFailure := failure
@@ -1363,6 +1366,25 @@ func (a *Activity) recordFailedAttempt(
 		attempt.CurrentRetryIntervalSource = retryIntervalSource
 	}
 	return nil
+}
+
+func (a *Activity) releaseAttemptLimiters(ctx chasm.MutableContext) {
+	attempt := a.LastAttempt.Get(ctx)
+	limiters := attempt.GetLimiters()
+	attempt.Limiters = nil
+	if len(limiters) == 0 {
+		return
+	}
+
+	toRelease := make([]*taskqueuespb.LimiterRef, 0, len(limiters))
+	for _, limiter := range limiters {
+		if commontaskqueue.NeedsRelease(limiter) {
+			toRelease = append(toRelease, limiter)
+		}
+	}
+	if len(toRelease) != 0 {
+		ctx.AddTask(a, chasm.TaskAttributes{}, &activitypb.ReleaseLimiterTask{Limiters: toRelease})
+	}
 }
 
 // truncateRetryableFailure caps the size of a failure retained in the activity's state while it

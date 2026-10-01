@@ -74,6 +74,7 @@ import (
 	"go.temporal.io/server/common/worker_versioning"
 	"go.temporal.io/server/components/nexusoperations"
 	"go.temporal.io/server/service/history/consts"
+	"go.temporal.io/server/service/matching/fc"
 	"go.uber.org/mock/gomock"
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/types/known/durationpb"
@@ -242,6 +243,7 @@ func newMatchingEngine(
 	mockVisibilityManager manager.VisibilityManager, mockHostInfoProvider membership.HostInfoProvider,
 	mockServiceResolver membership.ServiceResolver, nexusEndpointManager persistence.NexusEndpointManager,
 ) *matchingEngineImpl {
+	ts := clock.NewRealTimeSource()
 	e := &matchingEngineImpl{
 		taskManager:     taskMgr,
 		fairTaskManager: fairTaskMgr,
@@ -266,9 +268,10 @@ func newMatchingEngine(
 		serviceResolver:     mockServiceResolver,
 		membershipChangedCh: make(chan *membership.ChangedEvent, 1),
 		clusterMeta:         clustertest.NewMetadataForTest(cluster.NewTestClusterMetadataConfig(false, true)),
-		timeSource:          clock.NewRealTimeSource(),
+		timeSource:          ts,
 		visibilityManager:   mockVisibilityManager,
 		nexusEndpointClient: newEndpointClient(config.NexusEndpointsRefreshInterval, nexusEndpointManager),
+		fcReadiness:         fc.NewReadiness(ts, nil),
 	}
 	e.nexusEndpointsOwnershipLostCh.Store(make(chan struct{}))
 	return e

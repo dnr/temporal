@@ -11,6 +11,7 @@ import "temporal/api/enums/v1/workflow.proto";
 import "temporal/api/failure/v1/message.proto";
 import "temporal/api/sdk/v1/user_metadata.proto";
 import "temporal/api/taskqueue/v1/message.proto";
+import "temporal/server/api/taskqueue/v1/message.proto";
 
 option go_package = "go.temporal.io/server/chasm/lib/activity/gen/activitypb;activitypb";
 
@@ -263,6 +264,9 @@ message ActivityAttemptState {
   // worker-provided NextRetryDelay override. Retry policy updates only recompute
   // current_retry_interval when this is ACTIVITY_RETRY_INTERVAL_SOURCE_RETRY_POLICY.
   ActivityRetryIntervalSource current_retry_interval_source = 13;
+
+  // Flow control limiters held by the currently started activity task.
+  repeated temporal.server.api.taskqueue.v1.LimiterRef limiters = 15;
 }
 
 message ActivityHeartbeatState {

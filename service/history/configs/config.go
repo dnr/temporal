@@ -2,12 +2,14 @@ package configs
 
 import (
 	"go.temporal.io/server/chasm/lib/callback"
+	"go.temporal.io/server/chasm/lib/flowcontrol/concurrency"
 	"go.temporal.io/server/chasm/lib/nexusoperation"
 	"go.temporal.io/server/common"
 	"go.temporal.io/server/common/dynamicconfig"
 	"go.temporal.io/server/common/health"
 	"go.temporal.io/server/common/namespace"
 	"go.temporal.io/server/common/retrypolicy"
+	"go.temporal.io/server/common/stream_batcher"
 )
 
 // Config represents configuration for history service
@@ -177,6 +179,7 @@ type Config struct {
 	TransferProcessorPollBackoffInterval                dynamicconfig.DurationPropertyFn
 	TransferProcessorEnsureCloseBeforeDelete            dynamicconfig.BoolPropertyFn
 	TransferQueueMaxReaderCount                         dynamicconfig.IntPropertyFn
+	FlowControlClientBatcherOptions                     dynamicconfig.TypedPropertyFn[stream_batcher.BatcherOptions]
 
 	// OutboundQueueProcessor settings
 	OutboundTaskBatchSize                               dynamicconfig.IntPropertyFn
@@ -593,7 +596,7 @@ func NewConfig(
 		TimerProcessorMaxPollIntervalJitterCoefficient:   dynamicconfig.TimerProcessorMaxPollIntervalJitterCoefficient.Get(dc),
 		TimerProcessorPollBackoffInterval:                dynamicconfig.TimerProcessorPollBackoffInterval.Get(dc),
 		TimerProcessorMaxTimeShift:                       dynamicconfig.TimerProcessorMaxTimeShift.Get(dc),
-		TransferQueueMaxReaderCount:                      dynamicconfig.TransferQueueMaxReaderCount.Get(dc),
+		TimerQueueMaxReaderCount:                         dynamicconfig.TimerQueueMaxReaderCount.Get(dc),
 		RetentionTimerJitterDuration:                     dynamicconfig.RetentionTimerJitterDuration.Get(dc),
 
 		MemoryTimerProcessorSchedulerWorkerCount: dynamicconfig.MemoryTimerProcessorSchedulerWorkerCount.Subscribe(dc),
@@ -610,7 +613,8 @@ func NewConfig(
 		TransferProcessorUpdateAckIntervalJitterCoefficient: dynamicconfig.TransferProcessorUpdateAckIntervalJitterCoefficient.Get(dc),
 		TransferProcessorPollBackoffInterval:                dynamicconfig.TransferProcessorPollBackoffInterval.Get(dc),
 		TransferProcessorEnsureCloseBeforeDelete:            dynamicconfig.TransferProcessorEnsureCloseBeforeDelete.Get(dc),
-		TimerQueueMaxReaderCount:                            dynamicconfig.TimerQueueMaxReaderCount.Get(dc),
+		TransferQueueMaxReaderCount:                         dynamicconfig.TransferQueueMaxReaderCount.Get(dc),
+		FlowControlClientBatcherOptions:                     concurrency.HistoryClientBatcherOptions.Get(dc),
 
 		OutboundTaskBatchSize:                               dynamicconfig.OutboundTaskBatchSize.Get(dc),
 		OutboundProcessorMaxPollRPS:                         dynamicconfig.OutboundProcessorMaxPollRPS.Get(dc),

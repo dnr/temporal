@@ -132,6 +132,7 @@ type (
 		updateActivityInfos            map[int64]*persistencespb.ActivityInfo // Modified activities from last update.
 		deleteActivityInfos            map[int64]struct{}                     // Deleted activities from last update.
 		syncActivityTasks              map[int64]struct{}                     // Activity to be sync to remote
+		releaseLimiterRefs             []*taskqueuespb.LimiterRef
 
 		pendingTimerInfoIDs     map[string]*persistencespb.TimerInfo // User Timer ID -> Timer Info.
 		pendingTimerEventIDToID map[int64]string                     // User Timer Start Event ID -> User Timer ID.
@@ -2221,6 +2222,7 @@ func (ms *MutableStateImpl) DeleteActivity(
 	scheduledEventID int64,
 ) error {
 	if activityInfo, ok := ms.pendingActivityInfoIDs[scheduledEventID]; ok {
+		ms.trackRemovedLimiterRefs(activityInfo.Limiters, nil)
 		delete(ms.pendingActivityInfoIDs, scheduledEventID)
 		delete(ms.pendingActivityTimerHeartbeats, scheduledEventID)
 		ms.approximateSize -= activityInfo.Size() + int64SizeBytes
@@ -4604,7 +4606,6 @@ func (ms *MutableStateImpl) AddActivityTaskCompletedEvent(
 	if err := ms.ApplyActivityTaskCompletedEvent(event); err != nil {
 		return nil, err
 	}
-
 	return event, nil
 }
 
@@ -4654,7 +4655,6 @@ func (ms *MutableStateImpl) AddActivityTaskFailedEvent(
 	if err := ms.ApplyActivityTaskFailedEvent(event); err != nil {
 		return nil, err
 	}
-
 	return event, nil
 }
 
@@ -4706,7 +4706,6 @@ func (ms *MutableStateImpl) AddActivityTaskTimedOutEvent(
 	if err := ms.ApplyActivityTaskTimedOutEvent(event); err != nil {
 		return nil, err
 	}
-
 	return event, nil
 }
 
@@ -4918,7 +4917,6 @@ func (ms *MutableStateImpl) AddActivityTaskCanceledEvent(
 	if err := ms.ApplyActivityTaskCanceledEvent(event); err != nil {
 		return nil, err
 	}
-
 	return event, nil
 }
 
@@ -6914,7 +6912,6 @@ func (ms *MutableStateImpl) RetryActivity(
 		}); err != nil {
 			return enumspb.RETRY_STATE_INTERNAL_SERVER_ERROR, err
 		}
-
 		// TODO: uncomment once RETRY_STATE_PAUSED is supported
 		// return enumspb.RETRY_STATE_PAUSED, nil
 		return enumspb.RETRY_STATE_IN_PROGRESS, nil
@@ -7016,6 +7013,7 @@ func (ms *MutableStateImpl) UpdateActivity(scheduledEventId int64, updater histo
 	}
 
 	prevPause := ai.Paused
+	previousLimiters := ai.Limiters
 	var originalSize int
 	if prev, ok := ms.pendingActivityInfoIDs[ai.ScheduledEventId]; ok {
 		originalSize = prev.Size()
@@ -7025,6 +7023,7 @@ func (ms *MutableStateImpl) UpdateActivity(scheduledEventId int64, updater histo
 	if err := updater(ai, ms); err != nil {
 		return err
 	}
+	ms.trackRemovedLimiterRefs(previousLimiters, ai.Limiters)
 
 	if prevPause != ai.Paused {
 		err := ms.updatePauseInfoSearchAttribute()
@@ -8280,6 +8279,8 @@ func (ms *MutableStateImpl) closeTransactionPrepareTasks(
 	clearBufferEvents bool,
 	regenerateTimerTasksForTimeSkipping bool,
 ) error {
+	ms.closeTransactionGenerateReleaseLimiterTask(transactionPolicy)
+
 	if err := ms.closeTransactionHandleWorkflowResetTask(
 		transactionPolicy,
 	); err != nil {
@@ -8458,6 +8459,7 @@ func (ms *MutableStateImpl) cleanupTransaction() error {
 	ms.updateActivityInfos = make(map[int64]*persistencespb.ActivityInfo)
 	ms.deleteActivityInfos = make(map[int64]struct{})
 	ms.syncActivityTasks = make(map[int64]struct{})
+	ms.releaseLimiterRefs = nil
 
 	ms.updateTimerInfos = make(map[string]*persistencespb.TimerInfo)
 	ms.deleteTimerInfos = make(map[string]struct{})

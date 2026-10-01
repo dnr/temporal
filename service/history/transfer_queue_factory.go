@@ -1,6 +1,8 @@
 package history
 
 import (
+	"go.temporal.io/server/chasm/lib/flowcontrol/concurrency"
+	fcpb "go.temporal.io/server/chasm/lib/flowcontrol/gen/flowcontrolpb/v1"
 	"go.temporal.io/server/client"
 	"go.temporal.io/server/common/log"
 	"go.temporal.io/server/common/log/tag"
@@ -28,18 +30,20 @@ type (
 
 		QueueFactoryBaseParams
 
-		ClientBean             client.Bean
-		SdkClientFactory       sdk.ClientFactory
-		HistoryRawClient       resource.HistoryRawClient
-		MatchingRawClient      resource.MatchingRawClient
-		VisibilityManager      manager.VisibilityManager
-		VersionMembershipCache worker_versioning.VersionMembershipAndReactivationStatusCache
-		TestHooks              testhooks.TestHooks
+		ClientBean               client.Bean
+		SdkClientFactory         sdk.ClientFactory
+		HistoryRawClient         resource.HistoryRawClient
+		MatchingRawClient        resource.MatchingRawClient
+		ConcurrencyServiceClient fcpb.ConcurrencyServiceClient
+		VisibilityManager        manager.VisibilityManager
+		VersionMembershipCache   worker_versioning.VersionMembershipAndReactivationStatusCache
+		TestHooks                testhooks.TestHooks
 	}
 
 	transferQueueFactory struct {
 		transferQueueFactoryParams
 		QueueFactoryBase
+		concurrencyBatchingClient fcpb.ConcurrencyServiceClient
 	}
 )
 
@@ -48,6 +52,11 @@ func NewTransferQueueFactory(
 ) QueueFactory {
 	return &transferQueueFactory{
 		transferQueueFactoryParams: params,
+		concurrencyBatchingClient: concurrency.NewBatchingClient(
+			params.ConcurrencyServiceClient,
+			params.Config.FlowControlClientBatcherOptions(),
+			params.TimeSource,
+		),
 		QueueFactoryBase: QueueFactoryBase{
 			HostScheduler: queues.NewScheduler(
 				params.ClusterMetadata.GetCurrentClusterName(),
@@ -125,6 +134,7 @@ func (f *transferQueueFactory) CreateQueue(
 		f.Config,
 		f.HistoryRawClient,
 		f.MatchingRawClient,
+		f.concurrencyBatchingClient,
 		f.VisibilityManager,
 		f.ChasmEngine,
 		f.VersionMembershipCache,

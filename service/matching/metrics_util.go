@@ -16,6 +16,7 @@ const (
 	dropReasonExpiredRead
 	dropReasonExpiredMemory
 	dropReasonInvalid
+	dropReasonFlowControlCommitFailed
 )
 
 // tag maps the drop reason to its tasks_dropped `reason` metric tag.
@@ -31,6 +32,10 @@ func (r dropReason) tag() metrics.Tag {
 		return metrics.ReasonTag(metrics.DroppedTaskReasonExpiredRead)
 	case dropReasonExpiredMemory:
 		return metrics.ReasonTag(metrics.DroppedTaskReasonExpiredMemory)
+	case dropReasonInvalid:
+		return metrics.ReasonTag(metrics.DroppedTaskReasonInvalid)
+	case dropReasonFlowControlCommitFailed:
+		return metrics.ReasonTag(metrics.DroppedTaskReasonFlowControlCommitFailed)
 	default:
 		return metrics.ReasonTag(metrics.DroppedTaskReasonInvalid)
 	}

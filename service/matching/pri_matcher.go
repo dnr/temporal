@@ -39,6 +39,7 @@ type priTaskMatcher struct {
 	client           matchingservice.MatchingServiceClient
 	validator        taskValidator
 	rateLimitManager *rateLimitManager
+	fcManager        *fcManager
 	metricsHandler   metrics.Handler // namespace metric scope
 	logger           log.Logger
 	markAlive        func() // function to mark the physical task queue alive
@@ -99,12 +100,21 @@ func newPriTaskMatcher(
 	logger log.Logger,
 	metricsHandler metrics.Handler,
 	rateLimitManager *rateLimitManager,
+	fcManager *fcManager,
 	onRateLimited func(),
 	markAlive func(),
 ) *priTaskMatcher {
 	tm := &priTaskMatcher{
-		config:                    config,
-		data:                      newMatcherData(config, logger, clock.NewRealTimeSource(), fwdr != nil, rateLimitManager, onRateLimited),
+		config: config,
+		data: newMatcherData(
+			config,
+			logger,
+			clock.NewRealTimeSource(),
+			fwdr != nil,
+			rateLimitManager,
+			fcManager,
+			onRateLimited,
+		),
 		tqCtx:                     tqCtx,
 		logger:                    logger,
 		metricsHandler:            metricsHandler,
@@ -113,6 +123,7 @@ func newPriTaskMatcher(
 		client:                    client,
 		validator:                 validator,
 		rateLimitManager:          rateLimitManager,
+		fcManager:                 fcManager,
 		markAlive:                 markAlive,
 		priorityBacklogForwarders: goro.NewKeyedSet[remotePriorityBacklog](tqCtx),
 	}

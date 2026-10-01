@@ -405,6 +405,8 @@ lint-actions: $(ACTIONLINT)
 	@$(ACTIONLINT)
 
 lint-code: $(GOLANGCI_LINT) $(ERRORTYPE)
+	@echo "don't run make lint-code, run a targeted lint without --fix manually" 2>&1
+	@false
 	@printf $(COLOR) "Linting code..."
 	@$(GOLANGCI_LINT) run --verbose --build-tags $(ALL_TEST_TAGS) --timeout 10m --fix=$(GOLANGCI_LINT_FIX) --new-from-rev=$(GOLANGCI_LINT_BASE_REV) --config=.github/.golangci.yml
 	@go vet -tags $(ALL_TEST_TAGS) -vettool="$(ERRORTYPE)" -style-check=false ./...

@@ -640,12 +640,13 @@ const (
 
 // Matching task dropped reason tag values
 const (
-	DroppedTaskReasonNotFound      = "not_found"
-	DroppedTaskReasonInternalError = "internal_error"
-	DroppedTaskReasonDataLoss      = "data_loss"
-	DroppedTaskReasonExpiredRead   = "expired_read"
-	DroppedTaskReasonExpiredMemory = "expired_memory"
-	DroppedTaskReasonInvalid       = "invalid"
+	DroppedTaskReasonNotFound                = "not_found"
+	DroppedTaskReasonInternalError           = "internal_error"
+	DroppedTaskReasonDataLoss                = "data_loss"
+	DroppedTaskReasonExpiredRead             = "expired_read"
+	DroppedTaskReasonExpiredMemory           = "expired_memory"
+	DroppedTaskReasonInvalid                 = "invalid"
+	DroppedTaskReasonFlowControlCommitFailed = "fc_commit"
 )
 
 var (
@@ -1406,6 +1407,9 @@ var (
 
 	// Versioning and Reachability
 	ReachabilityExitPointCounter = NewCounterDef("reachability_exit_point_count")
+
+	// Flow control
+	FlowControlCommitFailed = NewCounterDef("fc_commit_failed")
 
 	// Worker
 	ExecutorTasksDoneCount                        = NewCounterDef("executor_done")

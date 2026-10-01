@@ -218,6 +218,7 @@ func newPhysicalTaskQueueManager(
 			pqMgr.logger,
 			newFairMetricsHandler(taggedMetricsHandler),
 			partitionMgr.rateLimitManager,
+			partitionMgr.fcManager,
 			pqMgr.onRateLimited,
 			pqMgr.MarkAlive,
 		)
@@ -258,6 +259,7 @@ func newPhysicalTaskQueueManager(
 			pqMgr.logger,
 			newPriMetricsHandler(taggedMetricsHandler),
 			partitionMgr.rateLimitManager,
+			partitionMgr.fcManager,
 			pqMgr.onRateLimited,
 			pqMgr.MarkAlive,
 		)

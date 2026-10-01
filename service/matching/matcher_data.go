@@ -42,6 +42,8 @@ const (
 	syncMatchNoPoller
 	// A poller was available but rate limiting blocked the match.
 	syncMatchRateLimited
+	// A poller was available but all tasks were blocked by concurrency limits.
+	syncMatchConcurrencyLimited
 )
 
 type taskForwarderType int32
@@ -51,14 +53,6 @@ const (
 	parentTaskForwarder                      // forwards tasks to parent partition
 	validatorTaskForwarder                   // validates tasks on root partition
 )
-
-// maxTokens is the maximum number of tokens we might consume at a time for simpleLimiter. This
-// is used to update ready times after a rate is changed from very low (or zero) to higher: we
-// may have set a ready time far in the future and need to clip it to something reasonable so
-// we can dispatch again.
-//
-// Currently we only use 1 token at a time.
-const maxTokens = 1
 
 // pollerList is an intrusive doubly-linked list of waiting pollers. Pollers are matched
 // by walking from the head, so the list is kept in the order we want to match them:
@@ -215,6 +209,7 @@ type matcherData struct {
 	timeSource       clock.TimeSource
 	canForward       bool
 	rateLimitManager *rateLimitManager
+	fcManager        *fcManager
 	// onRateLimited is called when a dispatch is blocked by the rate limiter.
 	onRateLimited func()
 
@@ -235,13 +230,22 @@ type matcherData struct {
 
 // newMatcherData creates a new matcherData. onRateLimited is called each time a dispatch
 // is blocked by the rate limiter (whole-queue or per-key).
-func newMatcherData(config *taskQueueConfig, logger log.Logger, timeSource clock.TimeSource, canForward bool, rateLimitManager *rateLimitManager, onRateLimited func()) matcherData {
+func newMatcherData(
+	config *taskQueueConfig,
+	logger log.Logger,
+	timeSource clock.TimeSource,
+	canForward bool,
+	rateLimitManager *rateLimitManager,
+	fcManager *fcManager,
+	onRateLimited func(),
+) matcherData {
 	return matcherData{
 		config:           config,
 		logger:           logger,
 		timeSource:       timeSource,
 		canForward:       canForward,
 		rateLimitManager: rateLimitManager,
+		fcManager:        fcManager,
 		onRateLimited:    onRateLimited,
 		pollers:          pollerList{logger: logger},
 		tasks:            newTaskBTree(),
@@ -252,6 +256,9 @@ func (d *matcherData) Stop() {
 	d.lock.Lock()
 	defer d.lock.Unlock()
 
+	d.fcManager.CancelAllCallbacks(d)
+	// CancelAllCallbacks isn't synchronous, so we may get a callback after it returns. But
+	// OnReady checks d.stopped, so the callback will be a safe no-op.
 	d.stopped = true
 }
 
@@ -264,6 +271,7 @@ func (d *matcherData) EnqueueTaskNoWait(task *internalTask) error {
 	}
 
 	task.initMatch(d)
+	task.updateLimitersFromConfig(d.fcManager)
 	d.tasks.Add(task)
 	d.findAndWakeMatches()
 	return nil
@@ -282,8 +290,13 @@ func (d *matcherData) EnqueueTaskAndWait(ctxs []context.Context, task *internalT
 	d.lock.Lock()
 	defer d.lock.Unlock()
 
+	if d.stopped {
+		return &matchResult{ctxErr: errMatcherStopped, ctxErrIdx: -1}
+	}
+
 	// add and look for match
 	task.initMatch(d)
+	task.updateLimitersFromConfig(d.fcManager)
 	d.tasks.Add(task)
 	d.findAndWakeMatches()
 
@@ -322,6 +335,10 @@ func (d *matcherData) ReenqueuePollerIfNotMatched(poller *waitingPoller) {
 func (d *matcherData) EnqueuePollerAndWait(ctxs []context.Context, poller *waitingPoller) *matchResult {
 	d.lock.Lock()
 	defer d.lock.Unlock()
+
+	if d.stopped {
+		return &matchResult{ctxErr: errMatcherStopped, ctxErrIdx: -1}
+	}
 
 	// update this for timeSinceLastPoll
 	d.lastPoller = util.MaxTime(d.lastPoller, poller.startTime)
@@ -362,6 +379,10 @@ func (d *matcherData) MatchTaskImmediately(task *internalTask) syncMatchOutcome 
 	d.lock.Lock()
 	defer d.lock.Unlock()
 
+	if d.stopped {
+		return syncMatchNoPoller
+	}
+
 	if !d.isBacklogNegligible() {
 		// To ensure better dispatch ordering, we block sync match when a significant backlog is present.
 		// Note that this check does not make a noticeable difference for history tasks, as they do not wait for a
@@ -372,22 +393,24 @@ func (d *matcherData) MatchTaskImmediately(task *internalTask) syncMatchOutcome 
 	}
 
 	task.initMatch(d)
+	task.updateLimitersFromConfig(d.fcManager)
 	d.tasks.Add(task)
-	rateLimited := d.findAndWakeMatches()
+	outcome := d.findAndWakeMatches()
 	// don't wait, check if match() picked this one already
 	if task.matchResult != nil {
 		return syncMatchSuccess
 	}
 	d.tasks.Remove(task)
-	if rateLimited {
-		return syncMatchRateLimited
-	}
-	return syncMatchNoPoller
+	return outcome
 }
 
 func (d *matcherData) MatchPollerImmediately(poller *waitingPoller) *matchResult {
 	d.lock.Lock()
 	defer d.lock.Unlock()
+
+	if d.stopped {
+		return &matchResult{ctxErr: errMatcherStopped, ctxErrIdx: -1}
+	}
 
 	poller.initMatch(d)
 	d.pollers.Add(poller)
@@ -404,6 +427,13 @@ func (d *matcherData) ReprocessTasks(pred func(*internalTask) bool) []*internalT
 	d.lock.Lock()
 	defer d.lock.Unlock()
 
+	// This is called when userdata changes, which includes the whole-queue concurrency limit
+	// in task queue config. We should update limiters on all tasks that we have already.
+	d.tasks.ForEachTask(func(task *internalTask) bool {
+		task.updateLimitersFromConfig(d.fcManager)
+		return false
+	}, nil)
+
 	reprocess := make([]*internalTask, 0, d.tasks.Len())
 	d.tasks.ForEachTask(
 		pred,
@@ -417,29 +447,20 @@ func (d *matcherData) ReprocessTasks(pred func(*internalTask) bool) []*internalT
 	return reprocess
 }
 
-// findMatch returns the highest-priority task+poller pair that is not rate-limited.
-// If no ready pair is found, returns (nil, nil, minDelay) where minDelay is the
-// minimum wait until any rate-limited task (that has a compatible poller) becomes ready.
+// findMatch returns the highest-priority task+poller pair that is not rate-limited or
+// concurrency-limited, or if none, a reason that some task was blocked by. (Different tasks
+// may be blocked for different reasons.)
 // call with lock held
 // nolint:revive // will improve later
-func (d *matcherData) findMatch(allowForwarding bool, now int64) (matchedTask *internalTask, matchedPoller *waitingPoller, minDelay time.Duration) {
-	// TODO(pri): optimize so it's not O(d*n) worst case
-	// Scan keeps its callback on the stack, so this walk does not allocate; the equivalent
-	// tree.Iter() cursor escapes to the heap.
+func (d *matcherData) findMatch(allowForwarding bool, now int64) (
+	matchedTask *internalTask,
+	matchedPoller *waitingPoller,
+	blockedBy syncMatchOutcome,
+) {
+	// default if no potential matches
+	blockedBy = syncMatchNoPoller
 
-	// Without a per-key limit the whole-queue ready time is the same for every task, so one
-	// check suffices and we avoid locking readyTimeForTask per task in the scan below. Only
-	// short-circuit when a match is actually possible (tasks and pollers both present) so we
-	// don't arm the rate-limit timer in cases where the full scan would have found nothing.
-	// TODO: reaching into the rate limiter's state like this breaks its encapsulation;
-	// refactor the rate limit logic so findMatch doesn't need to know about it.
-	wholeQueueReady, perKeyLimited := d.rateLimitManager.rateLimitState()
-	if !perKeyLimited && d.tasks.Len() > 0 && d.pollers.Len() > 0 {
-		if delay := wholeQueueReady.delay(now); delay > 0 {
-			return nil, nil, delay
-		}
-	}
-
+	// TODO(fc): optimize this with different data structures
 	d.tasks.tree.Scan(func(task *internalTask) bool {
 		// disallow normal poll forwarding when allowForwarding is false, but allow the
 		// "priority backlog poll forwarders".
@@ -447,8 +468,8 @@ func (d *matcherData) findMatch(allowForwarding bool, now int64) (matchedTask *i
 			return true
 		}
 
-		var matched *waitingPoller
-		for poller := d.pollers.head; poller != nil; poller = poller.next {
+		var poller *waitingPoller
+		for poller = d.pollers.head; poller != nil; poller = poller.next {
 			// can't match cases:
 			if poller.queryOnly && !task.isQuery() && !task.isPollForwarder() {
 				// query-only poll only matches with query (but can match poll forwarder)
@@ -468,29 +489,24 @@ func (d *matcherData) findMatch(allowForwarding bool, now int64) (matchedTask *i
 				// their priority above "1". that's inaccurate but it's just a temporary situation.
 				continue
 			}
-			matched = poller
-			break
+			break // use this poller
 		}
-		if matched == nil {
+		if poller == nil {
 			// no compatible poller for this task; keep scanning later tasks
 			return true
 		}
 
-		// skip per-key rate-limited tasks, tracking the minimum delay so the caller
-		// knows when the soonest one becomes ready
-		if perKeyLimited {
-			delay := d.rateLimitManager.readyTimeForTask(task).delay(now)
-			if delay > 0 {
-				if minDelay == 0 || delay < minDelay {
-					minDelay = delay
-				}
-				return true
-			}
+		// we have a possible match, check limiters:
+		if ready, taskBlockedBy, canContinue := d.fcManager.TaskReady(task, d); !ready {
+			blockedBy = taskBlockedBy
+			return canContinue
 		}
 
-		matchedTask, matchedPoller = task, matched
+		// no limiters apply, we can match
+		matchedTask, matchedPoller, blockedBy = task, poller, syncMatchSuccess
 		return false
 	})
+
 	return
 }
 
@@ -523,37 +539,33 @@ func (d *matcherData) allowForwarding() (allowForwarding bool) {
 		return true
 	}
 	delayToForwardingAllowed := d.config.MaxWaitForPollerBeforeFwd() - time.Since(d.lastPoller)
-	d.reconsiderForwardTimer.set(d.timeSource, d.rematchAfterTimer, delayToForwardingAllowed)
+	d.reconsiderForwardTimer.set(d.timeSource, d.OnReady, delayToForwardingAllowed)
 	return delayToForwardingAllowed <= 0
 }
 
-// call with lock held. Returns true if a match was found but blocked by rate limiting.
-func (d *matcherData) findAndWakeMatches() (rateLimited bool) {
+// findAndWakeMatches tries to match and wake all matches that are possible and not blocked.
+// After matching as many as possible, it returns a possible reason why the next match didn't
+// happen.
+// call with lock held
+func (d *matcherData) findAndWakeMatches() syncMatchOutcome {
 	allowForwarding := d.canForward && d.allowForwarding()
 
 	now := d.timeSource.Now().UnixNano()
 
 	for {
-		// search for highest-priority ready match; skip per-key rate-limited tasks
-		task, poller, minDelay := d.findMatch(allowForwarding, now)
+		// find one match. findMatch does not return matches that are blocked by flow control.
+		task, poller, blockedBy := d.findMatch(allowForwarding, now)
 		if task == nil || poller == nil {
-			if minDelay > 0 {
-				d.rateLimitTimer.set(d.timeSource, d.rematchAfterTimer, minDelay)
+			if blockedBy == syncMatchRateLimited {
 				d.onRateLimited()
-				return true
 			}
-			// no more current matches, stop rate limit timer if was running
-			d.rateLimitTimer.unset()
-			return false
+			// TODO(fc): add onConcurrencyLimited
+			return blockedBy
 		}
 
 		// ready to signal match
 		d.tasks.Remove(task)
 		d.pollers.Remove(poller)
-
-		// TODO(pri): maybe we can allow tasks to have costs other than 1
-		d.rateLimitManager.consumeTokens(now, task, 1)
-		task.recycleToken = d.recycleToken
 
 		res := &matchResult{task: task, poller: poller}
 		task.wake(d.logger, res)
@@ -568,19 +580,13 @@ func (d *matcherData) findAndWakeMatches() (rateLimited bool) {
 	}
 }
 
-func (d *matcherData) recycleToken(task *internalTask) {
+// called from flow control; implements fc.ReadinessCallback
+func (d *matcherData) OnReady() {
 	d.lock.Lock()
 	defer d.lock.Unlock()
-
-	now := d.timeSource.Now().UnixNano()
-	d.rateLimitManager.consumeTokens(now, task, -1)
-	d.findAndWakeMatches() // another task may be ready to match now
-}
-
-// called from timer
-func (d *matcherData) rematchAfterTimer() {
-	d.lock.Lock()
-	defer d.lock.Unlock()
+	if d.stopped {
+		return
+	}
 	d.findAndWakeMatches()
 }
 
@@ -674,75 +680,4 @@ func (rt *resettableTimer) unset() {
 		rt.timer.Stop()
 		rt.timer = nil
 	}
-}
-
-// simple limiter
-
-// simpleLimiter and simpleLimiterParams implement a "GCRA" limiter.
-// A simpleLimiter is "ready" if its value is <= now (as unix nanos).
-type simpleLimiter int64 // ready time as unix nanos
-
-type simpleLimiterParams struct {
-	interval time.Duration // ideal task spacing interval, or 0 for no limit (infinite), or -1 for zero limit
-	burst    time.Duration // burst duration
-}
-
-const maxBurst = time.Minute
-const simpleLimiterNever = simpleLimiter(7 << 60) // this is in the year 2225
-
-func makeSimpleLimiterParams(rate float64, burstDuration time.Duration) simpleLimiterParams {
-	// 1e-9 would make interval overflow int64
-	if rate <= 1e-9 {
-		return simpleLimiterParams{
-			interval: time.Duration(-1),
-		}
-	}
-	return simpleLimiterParams{
-		interval: time.Duration(float64(time.Second) / rate),
-		burst:    min(burstDuration, maxBurst),
-	}
-}
-
-func (p simpleLimiterParams) never() bool   { return p.interval < 0 }
-func (p simpleLimiterParams) limited() bool { return p.interval > 0 }
-
-// delay returns the time until the limiter is ready.
-// If the return value is <= 0 then the limiter can go now.
-func (ready simpleLimiter) delay(now int64) time.Duration {
-	return time.Duration(int64(ready) - now)
-}
-
-// consume updates ready based on the current time and number of new tokens consumed.
-func (ready simpleLimiter) consume(p simpleLimiterParams, now int64, tokens int64) simpleLimiter {
-	// This is a slight variation of the normal GCRA: instead of tracking the end of the
-	// allowed interval (the theoretical arrival time), ready tracks the beginning of it, and
-	// the end is ready + burst. To find the next ready time:
-	// - Add ready+burst to find the next theoretical arrival time.
-	// - If that's in the past, clip it at the current time.
-	// - Subtract burst to turn it back into a ready time.
-	// - Finally add the tokens we used.
-	//
-	// For intuition, consider that if if now is > ready by only a tiny amount, i.e. we're
-	// bursting, then the max takes ready+burst and we push up the ready time by the full
-	// interval. We can do this burst/interval times before it catches up and we're no longer
-	// ready.
-	//
-	// Alternatively, if now is > ready by more than burst, then we end up subtracting the full
-	// burst from now and adding one interval.
-	if p.never() {
-		return simpleLimiterNever
-	}
-	clippedReady := max(now, int64(ready)+p.burst.Nanoseconds()) - p.burst.Nanoseconds()
-	return simpleLimiter(clippedReady + tokens*p.interval.Nanoseconds())
-}
-
-// clip updates ready to an allowable range based on the given parameters.
-func (ready simpleLimiter) clip(p simpleLimiterParams, now int64, maxTokens int64) simpleLimiter {
-	if p.never() {
-		return simpleLimiterNever
-	}
-	// If ready was set very far in the future (e.g. because the rate was zero), then we can
-	// clip it back to now + maxTokens*interval + burst.
-	maxDelay := maxTokens*p.interval.Nanoseconds() + p.burst.Nanoseconds()
-	return min(ready, simpleLimiter(now+maxDelay))
 }

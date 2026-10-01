@@ -103,6 +103,8 @@ type (
 
 		// rateLimitManager is used to manage the rate limit for task queues.
 		rateLimitManager *rateLimitManager
+		// flow control manager
+		fcManager *fcManager
 
 		scaleManager *scaleManager
 
@@ -137,9 +139,18 @@ func newTaskQueuePartitionManager(
 	userDataManager userDataManager,
 ) (*taskQueuePartitionManagerImpl, error) {
 	rateLimitManager := newRateLimitManager(
+		e.timeSource,
 		userDataManager,
 		tqConfig,
-		partition.TaskQueue().TaskType())
+		partition.TaskQueue().TaskType(),
+	)
+	fcManager := newFCManager(
+		partition,
+		tqConfig,
+		userDataManager,
+		rateLimitManager,
+		e.fcReadiness,
+	)
 
 	var taskHooks []hooks.TaskHook
 	for _, hookFactory := range e.taskHookFactories {
@@ -190,6 +201,7 @@ func newTaskQueuePartitionManager(
 		versionedQueues:       make(map[PhysicalTaskQueueVersion]physicalTaskQueueManager),
 		userDataManager:       userDataManager,
 		rateLimitManager:      rateLimitManager,
+		fcManager:             fcManager,
 		scaleManager:          scaleManager,
 		defaultQueueFuture:    future.NewFuture[physicalTaskQueueManager](),
 		autoEnableRateLimiter: quotas.NewRateLimiter(1.0/60, 1),
@@ -709,11 +721,12 @@ func taskAddErrResult(err error) string {
 }
 
 func (pm *taskQueuePartitionManagerImpl) shouldBacklogSyncMatchTaskOnError(err error) bool {
-	var resourceExhaustedErr *serviceerror.ResourceExhausted
-	if err != nil && errors.As(err, &resourceExhaustedErr) {
+	if resourceExhaustedErr, ok := errors.AsType[*serviceerror.ResourceExhausted](err); ok {
 		if resourceExhaustedErr.Cause == enumspb.RESOURCE_EXHAUSTED_CAUSE_BUSY_WORKFLOW {
 			return true
 		}
+	} else if _, ok := errors.AsType[*serviceerrors.FlowControlBlocked](err); ok {
+		return true
 	}
 	return false
 }

@@ -14,6 +14,7 @@ import (
 	"go.temporal.io/api/workflowservice/v1"
 	"go.temporal.io/sdk/temporal"
 	deploymentspb "go.temporal.io/server/api/deployment/v1"
+	enumsspb "go.temporal.io/server/api/enums/v1"
 	"go.temporal.io/server/api/historyservice/v1"
 	persistencespb "go.temporal.io/server/api/persistence/v1"
 	taskqueuespb "go.temporal.io/server/api/taskqueue/v1"
@@ -391,10 +392,16 @@ func TestTransitionStarted(t *testing.T) {
 		Outcome:     chasm.NewDataField(ctx, outcome),
 	}
 
+	limiters := []*taskqueuespb.LimiterRef{{
+		LimiterType: enumsspb.LIMITER_TYPE_CONCURRENCY,
+		Key:         "queue-key",
+		SlotId:      "slot-id",
+	}}
 	err := TransitionStarted.Apply(activity, ctx, &historyservice.RecordActivityTaskStartedRequest{
 		PollRequest: &workflowservice.PollActivityTaskQueueRequest{
 			Identity: "test-worker",
 		},
+		Limiters: limiters,
 		// TODO: change this and serverside once versioning is supported in SAA.
 		// LastDeploymentVersion represents the worker that actually accepted the task,
 		// than when it's scheduled. WFA derives it from PollRequest via
@@ -413,6 +420,7 @@ func TestTransitionStarted(t *testing.T) {
 	require.Equal(t, "test-worker", attemptState.LastWorkerIdentity)
 	require.Equal(t, headers.ClientNameGoSDK, attemptState.SdkName)
 	require.Equal(t, temporal.SDKVersion, attemptState.SdkVersion)
+	protorequire.ProtoSliceEqual(t, limiters, attemptState.GetLimiters())
 
 	deploymentVersion := attemptState.GetLastDeploymentVersion()
 	require.Equal(t, "test-deployment", deploymentVersion.GetDeploymentName())
@@ -423,6 +431,34 @@ func TestTransitionStarted(t *testing.T) {
 	_, ok := ctx.Tasks[0].Payload.(*activitypb.StartToCloseTimeoutTask)
 	require.True(t, ok, "expected ScheduleToStartTimeoutTask")
 	require.Equal(t, defaultTime.Add(defaultStartToCloseTimeout), ctx.Tasks[0].Attributes.ScheduledTime)
+}
+
+func TestReleaseAttemptLimiters(t *testing.T) {
+	ctx := &chasm.MockMutableContext{}
+	concurrencyLimiter := &taskqueuespb.LimiterRef{
+		LimiterType: enumsspb.LIMITER_TYPE_CONCURRENCY,
+		Key:         "queue-key",
+		SlotId:      "slot-id",
+	}
+	rateLimiter := &taskqueuespb.LimiterRef{
+		LimiterType: enumsspb.LIMITER_TYPE_UNSPECIFIED,
+		Key:         "rate-key",
+	}
+	attemptState := &activitypb.ActivityAttemptState{
+		Limiters: []*taskqueuespb.LimiterRef{rateLimiter, concurrencyLimiter},
+	}
+	activity := &Activity{LastAttempt: chasm.NewDataField(ctx, attemptState)}
+
+	activity.releaseAttemptLimiters(ctx)
+
+	require.Nil(t, attemptState.GetLimiters())
+	require.Len(t, ctx.Tasks, 1)
+	releaseTask, ok := ctx.Tasks[0].Payload.(*activitypb.ReleaseLimiterTask)
+	require.True(t, ok)
+	protorequire.ProtoSliceEqual(t, []*taskqueuespb.LimiterRef{concurrencyLimiter}, releaseTask.GetLimiters())
+
+	activity.releaseAttemptLimiters(ctx)
+	require.Len(t, ctx.Tasks, 1)
 }
 
 func TestTransitionTimedout(t *testing.T) {

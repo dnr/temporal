@@ -12,6 +12,7 @@ import (
 	sync "sync"
 	unsafe "unsafe"
 
+	v1 "go.temporal.io/server/api/taskqueue/v1"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 )
@@ -244,6 +245,50 @@ func (x *ActivityDispatchTask) GetStartDelayBucket() StartDelayBucket {
 	return START_DELAY_BUCKET_UNSPECIFIED
 }
 
+type ReleaseLimiterTask struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Limiters      []*v1.LimiterRef       `protobuf:"bytes,1,rep,name=limiters,proto3" json:"limiters,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ReleaseLimiterTask) Reset() {
+	*x = ReleaseLimiterTask{}
+	mi := &file_temporal_server_chasm_lib_activity_proto_v1_tasks_proto_msgTypes[1]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ReleaseLimiterTask) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ReleaseLimiterTask) ProtoMessage() {}
+
+func (x *ReleaseLimiterTask) ProtoReflect() protoreflect.Message {
+	mi := &file_temporal_server_chasm_lib_activity_proto_v1_tasks_proto_msgTypes[1]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ReleaseLimiterTask.ProtoReflect.Descriptor instead.
+func (*ReleaseLimiterTask) Descriptor() ([]byte, []int) {
+	return file_temporal_server_chasm_lib_activity_proto_v1_tasks_proto_rawDescGZIP(), []int{1}
+}
+
+func (x *ReleaseLimiterTask) GetLimiters() []*v1.LimiterRef {
+	if x != nil {
+		return x.Limiters
+	}
+	return nil
+}
+
 type ScheduleToStartTimeoutTask struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// The current stamp for this activity execution. Used for task validation. See also [ActivityAttemptState].
@@ -254,7 +299,7 @@ type ScheduleToStartTimeoutTask struct {
 
 func (x *ScheduleToStartTimeoutTask) Reset() {
 	*x = ScheduleToStartTimeoutTask{}
-	mi := &file_temporal_server_chasm_lib_activity_proto_v1_tasks_proto_msgTypes[1]
+	mi := &file_temporal_server_chasm_lib_activity_proto_v1_tasks_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -266,7 +311,7 @@ func (x *ScheduleToStartTimeoutTask) String() string {
 func (*ScheduleToStartTimeoutTask) ProtoMessage() {}
 
 func (x *ScheduleToStartTimeoutTask) ProtoReflect() protoreflect.Message {
-	mi := &file_temporal_server_chasm_lib_activity_proto_v1_tasks_proto_msgTypes[1]
+	mi := &file_temporal_server_chasm_lib_activity_proto_v1_tasks_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -279,7 +324,7 @@ func (x *ScheduleToStartTimeoutTask) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ScheduleToStartTimeoutTask.ProtoReflect.Descriptor instead.
 func (*ScheduleToStartTimeoutTask) Descriptor() ([]byte, []int) {
-	return file_temporal_server_chasm_lib_activity_proto_v1_tasks_proto_rawDescGZIP(), []int{1}
+	return file_temporal_server_chasm_lib_activity_proto_v1_tasks_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *ScheduleToStartTimeoutTask) GetStamp() int32 {
@@ -301,7 +346,7 @@ type ScheduleToCloseTimeoutTask struct {
 
 func (x *ScheduleToCloseTimeoutTask) Reset() {
 	*x = ScheduleToCloseTimeoutTask{}
-	mi := &file_temporal_server_chasm_lib_activity_proto_v1_tasks_proto_msgTypes[2]
+	mi := &file_temporal_server_chasm_lib_activity_proto_v1_tasks_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -313,7 +358,7 @@ func (x *ScheduleToCloseTimeoutTask) String() string {
 func (*ScheduleToCloseTimeoutTask) ProtoMessage() {}
 
 func (x *ScheduleToCloseTimeoutTask) ProtoReflect() protoreflect.Message {
-	mi := &file_temporal_server_chasm_lib_activity_proto_v1_tasks_proto_msgTypes[2]
+	mi := &file_temporal_server_chasm_lib_activity_proto_v1_tasks_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -326,7 +371,7 @@ func (x *ScheduleToCloseTimeoutTask) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ScheduleToCloseTimeoutTask.ProtoReflect.Descriptor instead.
 func (*ScheduleToCloseTimeoutTask) Descriptor() ([]byte, []int) {
-	return file_temporal_server_chasm_lib_activity_proto_v1_tasks_proto_rawDescGZIP(), []int{2}
+	return file_temporal_server_chasm_lib_activity_proto_v1_tasks_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *ScheduleToCloseTimeoutTask) GetStamp() int32 {
@@ -346,7 +391,7 @@ type StartToCloseTimeoutTask struct {
 
 func (x *StartToCloseTimeoutTask) Reset() {
 	*x = StartToCloseTimeoutTask{}
-	mi := &file_temporal_server_chasm_lib_activity_proto_v1_tasks_proto_msgTypes[3]
+	mi := &file_temporal_server_chasm_lib_activity_proto_v1_tasks_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -358,7 +403,7 @@ func (x *StartToCloseTimeoutTask) String() string {
 func (*StartToCloseTimeoutTask) ProtoMessage() {}
 
 func (x *StartToCloseTimeoutTask) ProtoReflect() protoreflect.Message {
-	mi := &file_temporal_server_chasm_lib_activity_proto_v1_tasks_proto_msgTypes[3]
+	mi := &file_temporal_server_chasm_lib_activity_proto_v1_tasks_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -371,7 +416,7 @@ func (x *StartToCloseTimeoutTask) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StartToCloseTimeoutTask.ProtoReflect.Descriptor instead.
 func (*StartToCloseTimeoutTask) Descriptor() ([]byte, []int) {
-	return file_temporal_server_chasm_lib_activity_proto_v1_tasks_proto_rawDescGZIP(), []int{3}
+	return file_temporal_server_chasm_lib_activity_proto_v1_tasks_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *StartToCloseTimeoutTask) GetStamp() int32 {
@@ -392,7 +437,7 @@ type HeartbeatTimeoutTask struct {
 
 func (x *HeartbeatTimeoutTask) Reset() {
 	*x = HeartbeatTimeoutTask{}
-	mi := &file_temporal_server_chasm_lib_activity_proto_v1_tasks_proto_msgTypes[4]
+	mi := &file_temporal_server_chasm_lib_activity_proto_v1_tasks_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -404,7 +449,7 @@ func (x *HeartbeatTimeoutTask) String() string {
 func (*HeartbeatTimeoutTask) ProtoMessage() {}
 
 func (x *HeartbeatTimeoutTask) ProtoReflect() protoreflect.Message {
-	mi := &file_temporal_server_chasm_lib_activity_proto_v1_tasks_proto_msgTypes[4]
+	mi := &file_temporal_server_chasm_lib_activity_proto_v1_tasks_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -417,7 +462,7 @@ func (x *HeartbeatTimeoutTask) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HeartbeatTimeoutTask.ProtoReflect.Descriptor instead.
 func (*HeartbeatTimeoutTask) Descriptor() ([]byte, []int) {
-	return file_temporal_server_chasm_lib_activity_proto_v1_tasks_proto_rawDescGZIP(), []int{4}
+	return file_temporal_server_chasm_lib_activity_proto_v1_tasks_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *HeartbeatTimeoutTask) GetStamp() int32 {
@@ -431,11 +476,13 @@ var File_temporal_server_chasm_lib_activity_proto_v1_tasks_proto protoreflect.Fi
 
 const file_temporal_server_chasm_lib_activity_proto_v1_tasks_proto_rawDesc = "" +
 	"\n" +
-	"7temporal/server/chasm/lib/activity/proto/v1/tasks.proto\x12+temporal.server.chasm.lib.activity.proto.v1\"\xff\x01\n" +
+	"7temporal/server/chasm/lib/activity/proto/v1/tasks.proto\x12+temporal.server.chasm.lib.activity.proto.v1\x1a.temporal/server/api/taskqueue/v1/message.proto\"\xff\x01\n" +
 	"\x14ActivityDispatchTask\x12\x14\n" +
 	"\x05stamp\x18\x01 \x01(\x05R\x05stamp\x12d\n" +
 	"\x0fdispatch_reason\x18\x02 \x01(\x0e2;.temporal.server.chasm.lib.activity.proto.v1.DispatchReasonR\x0edispatchReason\x12k\n" +
-	"\x12start_delay_bucket\x18\x03 \x01(\x0e2=.temporal.server.chasm.lib.activity.proto.v1.StartDelayBucketR\x10startDelayBucket\"2\n" +
+	"\x12start_delay_bucket\x18\x03 \x01(\x0e2=.temporal.server.chasm.lib.activity.proto.v1.StartDelayBucketR\x10startDelayBucket\"^\n" +
+	"\x12ReleaseLimiterTask\x12H\n" +
+	"\blimiters\x18\x01 \x03(\v2,.temporal.server.api.taskqueue.v1.LimiterRefR\blimiters\"2\n" +
 	"\x1aScheduleToStartTimeoutTask\x12\x14\n" +
 	"\x05stamp\x18\x01 \x01(\x05R\x05stamp\"2\n" +
 	"\x1aScheduleToCloseTimeoutTask\x12\x14\n" +
@@ -474,24 +521,27 @@ func file_temporal_server_chasm_lib_activity_proto_v1_tasks_proto_rawDescGZIP() 
 }
 
 var file_temporal_server_chasm_lib_activity_proto_v1_tasks_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
-var file_temporal_server_chasm_lib_activity_proto_v1_tasks_proto_msgTypes = make([]protoimpl.MessageInfo, 5)
+var file_temporal_server_chasm_lib_activity_proto_v1_tasks_proto_msgTypes = make([]protoimpl.MessageInfo, 6)
 var file_temporal_server_chasm_lib_activity_proto_v1_tasks_proto_goTypes = []any{
 	(DispatchReason)(0),                // 0: temporal.server.chasm.lib.activity.proto.v1.DispatchReason
 	(StartDelayBucket)(0),              // 1: temporal.server.chasm.lib.activity.proto.v1.StartDelayBucket
 	(*ActivityDispatchTask)(nil),       // 2: temporal.server.chasm.lib.activity.proto.v1.ActivityDispatchTask
-	(*ScheduleToStartTimeoutTask)(nil), // 3: temporal.server.chasm.lib.activity.proto.v1.ScheduleToStartTimeoutTask
-	(*ScheduleToCloseTimeoutTask)(nil), // 4: temporal.server.chasm.lib.activity.proto.v1.ScheduleToCloseTimeoutTask
-	(*StartToCloseTimeoutTask)(nil),    // 5: temporal.server.chasm.lib.activity.proto.v1.StartToCloseTimeoutTask
-	(*HeartbeatTimeoutTask)(nil),       // 6: temporal.server.chasm.lib.activity.proto.v1.HeartbeatTimeoutTask
+	(*ReleaseLimiterTask)(nil),         // 3: temporal.server.chasm.lib.activity.proto.v1.ReleaseLimiterTask
+	(*ScheduleToStartTimeoutTask)(nil), // 4: temporal.server.chasm.lib.activity.proto.v1.ScheduleToStartTimeoutTask
+	(*ScheduleToCloseTimeoutTask)(nil), // 5: temporal.server.chasm.lib.activity.proto.v1.ScheduleToCloseTimeoutTask
+	(*StartToCloseTimeoutTask)(nil),    // 6: temporal.server.chasm.lib.activity.proto.v1.StartToCloseTimeoutTask
+	(*HeartbeatTimeoutTask)(nil),       // 7: temporal.server.chasm.lib.activity.proto.v1.HeartbeatTimeoutTask
+	(*v1.LimiterRef)(nil),              // 8: temporal.server.api.taskqueue.v1.LimiterRef
 }
 var file_temporal_server_chasm_lib_activity_proto_v1_tasks_proto_depIdxs = []int32{
 	0, // 0: temporal.server.chasm.lib.activity.proto.v1.ActivityDispatchTask.dispatch_reason:type_name -> temporal.server.chasm.lib.activity.proto.v1.DispatchReason
 	1, // 1: temporal.server.chasm.lib.activity.proto.v1.ActivityDispatchTask.start_delay_bucket:type_name -> temporal.server.chasm.lib.activity.proto.v1.StartDelayBucket
-	2, // [2:2] is the sub-list for method output_type
-	2, // [2:2] is the sub-list for method input_type
-	2, // [2:2] is the sub-list for extension type_name
-	2, // [2:2] is the sub-list for extension extendee
-	0, // [0:2] is the sub-list for field type_name
+	8, // 2: temporal.server.chasm.lib.activity.proto.v1.ReleaseLimiterTask.limiters:type_name -> temporal.server.api.taskqueue.v1.LimiterRef
+	3, // [3:3] is the sub-list for method output_type
+	3, // [3:3] is the sub-list for method input_type
+	3, // [3:3] is the sub-list for extension type_name
+	3, // [3:3] is the sub-list for extension extendee
+	0, // [0:3] is the sub-list for field type_name
 }
 
 func init() { file_temporal_server_chasm_lib_activity_proto_v1_tasks_proto_init() }
@@ -505,7 +555,7 @@ func file_temporal_server_chasm_lib_activity_proto_v1_tasks_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_temporal_server_chasm_lib_activity_proto_v1_tasks_proto_rawDesc), len(file_temporal_server_chasm_lib_activity_proto_v1_tasks_proto_rawDesc)),
 			NumEnums:      2,
-			NumMessages:   5,
+			NumMessages:   6,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
