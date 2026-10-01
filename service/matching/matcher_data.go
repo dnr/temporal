@@ -257,6 +257,8 @@ func (d *matcherData) Stop() {
 	defer d.lock.Unlock()
 
 	d.fcManager.CancelAllCallbacks(d)
+	// CancelAllCallbacks isn't synchronous, so we may get a callback after it returns. But
+	// OnReady checks d.stopped, so the callback will be a safe no-op.
 	d.stopped = true
 }
 
@@ -287,6 +289,10 @@ func (d *matcherData) RemoveTask(task *internalTask) {
 func (d *matcherData) EnqueueTaskAndWait(ctxs []context.Context, task *internalTask) *matchResult {
 	d.lock.Lock()
 	defer d.lock.Unlock()
+
+	if d.stopped {
+		return &matchResult{ctxErr: errMatcherStopped, ctxErrIdx: -1}
+	}
 
 	// add and look for match
 	task.initMatch(d)
@@ -330,6 +336,10 @@ func (d *matcherData) EnqueuePollerAndWait(ctxs []context.Context, poller *waiti
 	d.lock.Lock()
 	defer d.lock.Unlock()
 
+	if d.stopped {
+		return &matchResult{ctxErr: errMatcherStopped, ctxErrIdx: -1}
+	}
+
 	// update this for timeSinceLastPoll
 	d.lastPoller = util.MaxTime(d.lastPoller, poller.startTime)
 
@@ -369,6 +379,10 @@ func (d *matcherData) MatchTaskImmediately(task *internalTask) syncMatchOutcome 
 	d.lock.Lock()
 	defer d.lock.Unlock()
 
+	if d.stopped {
+		return syncMatchNoPoller
+	}
+
 	if !d.isBacklogNegligible() {
 		// To ensure better dispatch ordering, we block sync match when a significant backlog is present.
 		// Note that this check does not make a noticeable difference for history tasks, as they do not wait for a
@@ -393,6 +407,10 @@ func (d *matcherData) MatchTaskImmediately(task *internalTask) syncMatchOutcome 
 func (d *matcherData) MatchPollerImmediately(poller *waitingPoller) *matchResult {
 	d.lock.Lock()
 	defer d.lock.Unlock()
+
+	if d.stopped {
+		return &matchResult{ctxErr: errMatcherStopped, ctxErrIdx: -1}
+	}
 
 	poller.initMatch(d)
 	d.pollers.Add(poller)
