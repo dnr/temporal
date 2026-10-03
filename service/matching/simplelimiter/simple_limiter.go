@@ -2,22 +2,28 @@ package simplelimiter
 
 import "time"
 
-// Limiter and Params implement a "GCRA" limiter.
-// A Limiter is "ready" if its value is <= now (as unix nanos).
-type Limiter int64 // ready time as unix nanos
+// Ready and Params implement a "GCRA" limiter.
+// A Ready is "ready" if its value is <= now (as unix nanos).
+type Ready int64 // ready time as unix nanos
 
 type Params struct {
 	Interval time.Duration // ideal task spacing interval, or 0 for no limit (infinite), or -1 for zero limit
 	Burst    time.Duration // burst duration
 }
 
+// MaxBurst is the maximum supported burst duration. MakeParams clips the burst duration to this.
 const MaxBurst = time.Minute
-const Never = Limiter(7 << 60) // this is in the year 2225
 
-func NoLimitParams() Params {
+// never is a value of Ready (timestamp in unix nanos) that will never happen, but that won't
+// overflow when we do math with it (unlike math.MaxInt64).
+const never = Ready(7 << 60) // this is in the year 2225
+
+// NoLimit returns Params that correspond to an unlimited rate limiter.
+func NoLimit() Params {
 	return Params{}
 }
 
+// MakeParams returns Params for the given rate and burst duration.
 func MakeParams(rate float64, burstDuration time.Duration) Params {
 	// 1e-9 would make interval overflow int64
 	if rate <= 1e-9 {
@@ -36,12 +42,12 @@ func (p Params) Limited() bool { return p.Interval > 0 }
 
 // delay returns the time until the limiter is ready.
 // If the return value is <= 0 then the limiter can go now.
-func (ready Limiter) Delay(now int64) time.Duration {
+func (ready Ready) Delay(now int64) time.Duration {
 	return time.Duration(int64(ready) - now)
 }
 
 // consume updates ready based on the current time and number of new tokens consumed.
-func (ready Limiter) Consume(p Params, now int64, tokens int64) Limiter {
+func (ready Ready) Consume(p Params, now int64, tokens int64) Ready {
 	// This is a slight variation of the normal GCRA: instead of tracking the end of the
 	// allowed interval (the theoretical arrival time), ready tracks the beginning of it, and
 	// the end is ready + burst. To find the next ready time:
@@ -58,19 +64,19 @@ func (ready Limiter) Consume(p Params, now int64, tokens int64) Limiter {
 	// Alternatively, if now is > ready by more than burst, then we end up subtracting the full
 	// burst from now and adding one interval.
 	if p.Never() {
-		return Never
+		return never
 	}
 	clippedReady := max(now, int64(ready)+p.Burst.Nanoseconds()) - p.Burst.Nanoseconds()
-	return Limiter(clippedReady + tokens*p.Interval.Nanoseconds())
+	return Ready(clippedReady + tokens*p.Interval.Nanoseconds())
 }
 
 // clip updates ready to an allowable range based on the given parameters.
-func (ready Limiter) Clip(p Params, now int64, maxTokens int64) Limiter {
+func (ready Ready) Clip(p Params, now int64, maxTokens int64) Ready {
 	if p.Never() {
-		return Never
+		return never
 	}
 	// If ready was set very far in the future (e.g. because the rate was zero), then we can
 	// clip it back to now + maxTokens*interval + burst.
 	maxDelay := maxTokens*p.Interval.Nanoseconds() + p.Burst.Nanoseconds()
-	return min(ready, Limiter(now+maxDelay))
+	return min(ready, Ready(now+maxDelay))
 }

@@ -21,7 +21,7 @@ type localLimiterState struct {
 	rs *readinessShard
 
 	params simplelimiter.Params
-	lim    simplelimiter.Limiter
+	lim    simplelimiter.Ready
 	// invariant: lim.Delay() < 0 -> len(waiters) == 0
 	// invariant: {len(waiters) > 0} == {tmr != nil}
 	tmr clock.Timer
@@ -41,7 +41,7 @@ func (rs *readinessShard) getLocalLimiter(nsID namespace.ID, key string) *localL
 	}
 	lls := &localLimiterState{
 		rs:     rs,
-		params: simplelimiter.NoLimitParams(),
+		params: simplelimiter.NoLimit(),
 	}
 	rs.localLimiters[mapkey] = lls
 	return lls

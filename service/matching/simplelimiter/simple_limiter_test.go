@@ -14,7 +14,7 @@ func TestSimpleLimiter(t *testing.T) {
 
 	base := time.Now().UnixNano()
 	now := base
-	var ready Limiter
+	var ready Ready
 
 	// can consume 11 tokens immediately (1 since we're starting from 0 and 10 burst)
 	for range 11 {
@@ -38,7 +38,7 @@ func TestSimpleLimiterOverTime(t *testing.T) {
 
 	base := time.Now().UnixNano()
 	now := base
-	var ready Limiter
+	var ready Ready
 
 	consumed := int64(0)
 	for range 10000 {
@@ -61,7 +61,7 @@ func TestSimpleLimiterRecycle(t *testing.T) {
 
 	base := time.Now().UnixNano()
 	now := base
-	var ready Limiter
+	var ready Ready
 
 	consumed := int64(0)
 	for range 10000 {
@@ -87,7 +87,7 @@ func TestSimpleLimiterRecycle(t *testing.T) {
 
 func TestSimpleLimiterUnlimited(t *testing.T) {
 	now := time.Now().UnixNano()
-	var ready Limiter
+	var ready Ready
 
 	pInf := MakeParams(1e12, 0)
 	require.False(t, pInf.Never())
@@ -108,7 +108,7 @@ func TestSimpleLimiterLowToHigh(t *testing.T) {
 		require.Equal(t, pLow.Never(), (lowRate == 0))
 
 		now := time.Now().UnixNano()
-		var ready Limiter
+		var ready Ready
 		ready = ready.Consume(pLow, now, 1)
 		// not ready yet
 		require.Greater(t, ready.Delay(now), time.Duration(0))
