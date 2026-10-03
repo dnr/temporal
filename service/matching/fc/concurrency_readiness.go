@@ -51,7 +51,7 @@ func (rs *readinessShard) getConcurrencyLimiter(nsID namespace.ID, key string) *
 }
 
 func (cs *concurrencyState) check(cb ReadinessCallback, pri wakePriority) error {
-	return cs.rs.update(cs, func() error {
+	return cs.rs.update(cs, notifyAsync, func() error {
 		if cs.tokens == 0 {
 			cs.rs.addEdgeLocked(cs, cb, pri)
 			return ErrConcurrencyBlocked
@@ -66,7 +66,7 @@ func (cs *concurrencyState) check(cb ReadinessCallback, pri wakePriority) error 
 }
 
 func (cs *concurrencyState) cancelCheck() {
-	cs.rs.update(cs, func() error {
+	cs.rs.update(cs, notifyAsync, func() error {
 		// this could theoretically go over the limit but it doesn't matter here
 		cs.tokens++
 		return nil
@@ -90,7 +90,7 @@ func (cs *concurrencyState) reserve(
 	if err != nil {
 		return err // don't update cache on rpc error
 	}
-	cs.reportSlotsHint(res.Generation, res.AvailableSlotsHint)
+	cs.reportSlotsHint(res.Generation, res.AvailableSlotsHint, notifyAsync)
 	if !res.ReserveSuccess[0] {
 		return serviceerrors.NewFlowControlBlocked()
 	}
@@ -106,7 +106,7 @@ func (cs *concurrencyState) commit(ctx context.Context, slotID string) error {
 	if err != nil {
 		return err
 	}
-	cs.reportSlotsHint(res.Generation, res.AvailableSlotsHint)
+	cs.reportSlotsHint(res.Generation, res.AvailableSlotsHint, notifyAsync)
 	if !res.CommitSuccess[0] {
 		return errCommitFailure
 	}
@@ -122,13 +122,13 @@ func (cs *concurrencyState) cancelReserve(ctx context.Context, slotID string) {
 			CancelReservationSlots: []string{slotID},
 		})
 		if err == nil {
-			cs.reportSlotsHint(res.Generation, res.AvailableSlotsHint)
+			cs.reportSlotsHint(res.Generation, res.AvailableSlotsHint, notifySync)
 		}
 	}()
 }
 
-func (cs *concurrencyState) reportSlotsHint(gen int64, slots int32) {
-	cs.rs.update(cs, func() error {
+func (cs *concurrencyState) reportSlotsHint(gen int64, slots int32, mode notifyMode) {
+	cs.rs.update(cs, mode, func() error {
 		if gen < cs.generation {
 			return nil
 		}
@@ -208,7 +208,7 @@ func (cs *concurrencyState) callWait(ctx context.Context) {
 		if _, ok := err.(*serviceerror.NotFound); ok {
 			// The limiter is only created by Reserve, so there's nothing to wait on yet. Let one
 			// waiter through to Reserve, which will create it with the initial config.
-			cs.reportSlotsHint(req.Generation, 1)
+			cs.reportSlotsHint(req.Generation, 1, notifySync)
 			continue
 		} else if err != nil {
 			util.InterruptibleSleep(ctx, retrier.NextBackOff(err))
@@ -216,7 +216,7 @@ func (cs *concurrencyState) callWait(ctx context.Context) {
 		}
 		retrier.Reset()
 
-		cs.reportSlotsHint(res.Generation, res.WakeTokens)
+		cs.reportSlotsHint(res.Generation, res.WakeTokens, notifySync)
 		// note: If we have satisfied all our waiters, then ctx
 		// will be canceled before we continue this loop.
 	}

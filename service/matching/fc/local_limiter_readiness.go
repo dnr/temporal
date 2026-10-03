@@ -48,7 +48,7 @@ func (rs *readinessShard) getLocalLimiter(nsID namespace.ID, key string) *localL
 }
 
 func (lls *localLimiterState) check(config simplelimiter.Params, cb ReadinessCallback, pri wakePriority) error {
-	return lls.rs.update(lls, func() error {
+	return lls.rs.update(lls, notifyAsync, func() error {
 		now := lls.rs.r.timeSource.Now().UnixNano()
 
 		// install new params
@@ -71,7 +71,7 @@ func (lls *localLimiterState) check(config simplelimiter.Params, cb ReadinessCal
 }
 
 func (lls *localLimiterState) cancelCheck() {
-	lls.rs.update(lls, func() error {
+	lls.rs.update(lls, notifyAsync, func() error {
 		now := lls.rs.r.timeSource.Now().UnixNano()
 		// return the token
 		lls.lim = lls.lim.Consume(lls.params, now, -1)
@@ -108,5 +108,5 @@ func (lls *localLimiterState) syncLocked(rsu *readinessSyncUpdate) {
 }
 
 func (lls *localLimiterState) onTimer() {
-	lls.rs.update(lls, func() error { return nil })
+	lls.rs.update(lls, notifySync, func() error { return nil })
 }
