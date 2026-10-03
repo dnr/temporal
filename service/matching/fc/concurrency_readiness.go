@@ -24,6 +24,10 @@ type concurrencyState struct {
 
 	generation int64
 	tokens     int32
+	// tokensEpoch is incremented whenever tokens is overwritten from a server hint. A check
+	// token taken in an earlier epoch has been superseded by the hint (which doesn't know about
+	// our outstanding checks), so canceling the check should not return it.
+	tokensEpoch int64
 	// invariant: {len(waiters) > 0} == {Wait goroutine is running} == {goroCancel != nil}
 	// (for now, until we add eviction)
 	goroCancel context.CancelFunc
@@ -50,8 +54,10 @@ func (rs *readinessShard) getConcurrencyLimiter(nsID namespace.ID, key string) *
 	return cs
 }
 
-func (cs *concurrencyState) check(cb ReadinessCallback, pri wakePriority) error {
-	return cs.rs.update(cs, notifyAsync, func() error {
+// check takes a check token if available. It returns the epoch of the token taken, to be
+// passed to cancelCheck.
+func (cs *concurrencyState) check(cb ReadinessCallback, pri wakePriority) (epoch int64, err error) {
+	err = cs.rs.update(cs, notifyAsync, func() error {
 		if cs.tokens == 0 {
 			cs.rs.addEdgeLocked(cs, cb, pri)
 			return ErrConcurrencyBlocked
@@ -61,14 +67,18 @@ func (cs *concurrencyState) check(cb ReadinessCallback, pri wakePriority) error 
 		cs.rs.removeEdgeLocked(cs, cb)
 		// take one check token
 		cs.tokens--
+		epoch = cs.tokensEpoch
 		return nil
 	})
+	return epoch, err
 }
 
-func (cs *concurrencyState) cancelCheck() {
+func (cs *concurrencyState) cancelCheck(epoch int64) {
 	cs.rs.update(cs, notifyAsync, func() error {
-		// this could theoretically go over the limit but it doesn't matter here
-		cs.tokens++
+		if epoch == cs.tokensEpoch {
+			// this could theoretically go over the limit but it doesn't matter here
+			cs.tokens++
+		}
 		return nil
 	})
 }
@@ -138,6 +148,7 @@ func (cs *concurrencyState) reportSlotsHint(gen int64, slots int32, mode notifyM
 		// that we don't resupply tokens after a waiter that we wake takes them
 		if slots >= 0 {
 			cs.tokens = slots
+			cs.tokensEpoch++
 		}
 		return nil
 	})
