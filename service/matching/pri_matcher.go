@@ -240,19 +240,19 @@ func (tm *priTaskMatcher) forwardTask(task *internalTask) (bool, error) {
 
 	if task.isQuery() {
 		res, err := tm.fwdr.ForwardQueryTask(ctx, task)
-		task.finishForward(res, err, true)
+		task.finishForward(res, err)
 		return false, err
 	}
 
 	if task.isNexus() {
 		res, err := tm.fwdr.ForwardNexusTask(ctx, task)
-		task.finishForward(res, err, true)
+		task.finishForward(res, err)
 		return false, err
 	}
 
 	// normal wf/activity task
 	err := tm.fwdr.ForwardTask(ctx, task)
-	task.finishForward(nil, err, true)
+	task.finishForward(nil, err)
 
 	return false, err
 }
@@ -287,7 +287,7 @@ func (tm *priTaskMatcher) validateTasksOnRoot(retrier backoff.Retrier) {
 			retrier.Reset()
 		} else {
 			// Task was valid, put it back and slow down checking.
-			task.finish(taskFinishResult{err: errReprocessTask, consumedToken: true})
+			task.finish(taskFinishResult{err: errReprocessTask})
 			// retrier's max interval is backlogTaskForwardTimeout, so for just valid tasks,
 			// this loop will essentially be limited to that interval.
 			util.InterruptibleSleep(tm.tqCtx, retrier.NextBackOff(nil))
@@ -568,7 +568,7 @@ func (tm *priTaskMatcher) ReprocessAllTasks() {
 	// ReprocessTasks will have woken sync tasks, but for backlog we also need to call finish.
 	for _, task := range tasks {
 		if !task.isSyncMatchTask() {
-			task.finish(taskFinishResult{err: errReprocessTask, consumedToken: true})
+			task.finish(taskFinishResult{err: errReprocessTask})
 		}
 	}
 }
@@ -585,7 +585,7 @@ func (tm *priTaskMatcher) ReprocessRedirectedTasksAfterStop() {
 			for _, task := range tasks {
 				// these should all be from backlog (not sync-match) but check again to be sure
 				if !task.isSyncMatchTask() {
-					task.finish(taskFinishResult{err: errReprocessTask, consumedToken: true})
+					task.finish(taskFinishResult{err: errReprocessTask})
 				}
 			}
 		}()

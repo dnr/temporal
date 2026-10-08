@@ -490,7 +490,7 @@ func (s *BacklogManagerTestSuite) TestApproximateBacklogCount_ResetOnDrained() {
 	// - ackLevel gets set to maxReadLevel
 	// - backlog counts reset to 0
 	for _, t := range s.capturedTasks() {
-		t.finish(taskFinishResult{consumedToken: true})
+		t.finish(taskFinishResult{})
 	}
 
 	_, ackLevel := blm.subqueues[subqueueZero].getLevels()
@@ -669,7 +669,7 @@ func (s *BacklogManagerTestSuite) TestProcessTaskBatch_IgnoresAlreadyAckedTasks(
 	tasks := s.capturedTasks()
 	s.Require().Len(tasks, 2)
 	for _, t := range tasks {
-		t.finish(taskFinishResult{consumedToken: true})
+		t.finish(taskFinishResult{})
 	}
 	_, ackLevel := tr.getLevels()
 	s.Require().Equal(start+2, ackLevel)
@@ -834,7 +834,7 @@ func (s *BacklogManagerTestSuite) testSkipExpiredTasks(batchSize int, blocks ...
 
 	// Complete the delivered tasks.
 	for _, t := range s.capturedTasks() {
-		t.finish(taskFinishResult{consumedToken: true})
+		t.finish(taskFinishResult{})
 	}
 
 	// Verify the ack level advances past all tasks (expired + valid).
@@ -1196,7 +1196,7 @@ func (s *BacklogManagerTestSuite) testStandingBacklog(p standingBacklogParams) {
 		for sleepUntil(func() bool { return delta() >= -p.gap }) {
 			if t := getTask(); t != nil {
 				// TODO: error sometimes?
-				t.finish(taskFinishResult{consumedToken: true})
+				t.finish(taskFinishResult{})
 
 				tindex := t.event.Data.ScheduledEventId
 				if _, loaded := tracker.LoadAndDelete(tindex); loaded {
@@ -1289,7 +1289,7 @@ func (s *BacklogManagerTestSuite) TestFairReaderReMergeOfCompletedWriteKeepsRead
 	finish := func(id int64) {
 		for _, t := range s.capturedTasks() {
 			if t.fairLevel() == lvl(id) {
-				t.finish(taskFinishResult{consumedToken: true})
+				t.finish(taskFinishResult{})
 				return
 			}
 		}

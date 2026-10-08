@@ -744,7 +744,7 @@ pollLoop:
 		}
 
 		if task.isQuery() {
-			task.finish(taskFinishResult{consumedToken: true}) // this only means query task sync match succeed.
+			task.finish(taskFinishResult{}) // this only means query task sync match succeed.
 
 			// for query task, we don't need to update history to record workflow task started. but we need to know
 			// the NextEventID and the currently set sticky task queue.
@@ -894,7 +894,7 @@ pollLoop:
 			continue pollLoop
 		}
 
-		task.finish(taskFinishResult{consumedToken: true})
+		task.finish(taskFinishResult{})
 		e.emitTaskDispatchLatency(task, partition, req.GetNamespaceId(), request.Namespace, pollMetadata)
 		return e.createPollWorkflowTaskQueueResponse(task, resp, opMetrics), nil
 	}
@@ -1176,7 +1176,7 @@ pollLoop:
 			continue pollLoop
 		}
 
-		task.finish(taskFinishResult{consumedToken: true})
+		task.finish(taskFinishResult{})
 		e.emitTaskDispatchLatency(task, partition, req.GetNamespaceId(), request.Namespace, pollMetadata)
 		return e.createPollActivityTaskQueueResponse(task, resp, opMetrics), nil
 	}
@@ -2841,7 +2841,7 @@ pollLoop:
 			return task.pollNexusTaskQueueResponse(), nil
 		}
 
-		task.finish(taskFinishResult{err: err, consumedToken: true})
+		task.finish(taskFinishResult{err: err})
 		if err != nil {
 			continue pollLoop
 		}
