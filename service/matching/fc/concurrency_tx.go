@@ -12,6 +12,7 @@ type concurrencyTx struct {
 	configUpdate        *taskqueuepb.ConcurrencyLimit
 	configUpdateVersion int64
 	pri                 wakePriority
+	checkSeq            int64
 }
 
 func newConcurrencyTx(
@@ -31,11 +32,13 @@ func newConcurrencyTx(
 }
 
 func (ct *concurrencyTx) check(cb ReadinessCallback) error {
-	return ct.cs.check(cb, ct.pri)
+	var err error
+	ct.checkSeq, err = ct.cs.check(cb, ct.pri)
+	return err
 }
 
 func (ct *concurrencyTx) cancelCheck() {
-	ct.cs.cancelCheck()
+	ct.cs.cancelCheck(ct.checkSeq)
 }
 
 func (ct *concurrencyTx) reserve(ctx context.Context) error {

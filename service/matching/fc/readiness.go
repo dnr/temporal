@@ -77,6 +77,18 @@ type (
 		waiters []fwdMapEntry
 	}
 	deferedNotify []ReadinessCallback
+
+	// notifyMode controls how ReadinessCallbacks are called after an update.
+	notifyMode int
+)
+
+const (
+	// notifyAsync calls callbacks on a new goroutine. Use this when the caller might be
+	// holding its own locks that OnReady needs (e.g. matcherData.lock, held around Tx.Check).
+	notifyAsync notifyMode = iota
+	// notifySync calls callbacks synchronously, after releasing the shard lock. Use this only
+	// from goroutines that we own (timers, the Wait loop).
+	notifySync
 )
 
 func NewReadiness(
@@ -139,7 +151,7 @@ func (rs *readinessShard) cancelAllCallbacks(cb ReadinessCallback) {
 	// callbacks when we sync it. e.g. a rate limit due to the wall clock time advancing. The
 	// timer would usually get there first but we may need to call some here.
 	var toNotify deferedNotify
-	defer toNotify.notify() // outside lock
+	defer toNotify.notify(notifyAsync) // outside lock
 
 	rs.lock.Lock()
 	defer rs.lock.Unlock()
@@ -216,9 +228,9 @@ func (rs *readinessShard) removeEdgeLocked(limiter limiterState, cb ReadinessCal
 	}
 }
 
-func (rs *readinessShard) update(limiter limiterState, f func() error) error {
+func (rs *readinessShard) update(limiter limiterState, mode notifyMode, f func() error) error {
 	var toNotify deferedNotify
-	defer toNotify.notify() // outside lock
+	defer toNotify.notify(mode) // outside lock
 
 	rs.lock.Lock()
 	defer rs.lock.Unlock()
@@ -235,9 +247,20 @@ func (rsu *readinessSyncUpdate) wake(n int) {
 	rsu.waiters = rsu.waiters[take:]
 }
 
-func (dn *deferedNotify) notify() {
-	for _, cb := range *dn {
-		cb.OnReady()
+func (dn *deferedNotify) notify(mode notifyMode) {
+	cbs := *dn
+	if len(cbs) == 0 {
+		return
+	}
+	call := func() {
+		for _, cb := range cbs {
+			cb.OnReady()
+		}
+	}
+	if mode == notifySync {
+		call()
+	} else {
+		go call()
 	}
 }
 
