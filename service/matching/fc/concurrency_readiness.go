@@ -217,6 +217,14 @@ func (cs *concurrencyState) callWait(ctx context.Context) {
 			continue
 		}
 		res, err := cs.rs.r.concurrencyServiceClient.Wait(ctx, req)
+		if _, ok := errors.AsType[*serviceerror.NotFound](err); ok {
+			// If the limiter doesn't exist yet, we'll get NotFound. Treat that as if we got
+			// one token, so we'll allow a task through Check to Reserve, which will create it.
+			res, err = &fcpb.ConcurrencyWaitResponse{
+				Generation: req.Generation,
+				WakeTokens: 1,
+			}, nil
+		}
 		if err != nil {
 			util.InterruptibleSleep(ctx, retrier.NextBackOff(err))
 			continue
