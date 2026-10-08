@@ -183,17 +183,28 @@ func (tx *Tx) Commit(ctx context.Context) (retErr error) {
 		}
 	}()
 
+	for i := range tx.limiters {
+		if tx.state[i] != txStateReserved {
+			return errInvalidTxState
+		}
+	}
+
 	// commit all concurrently
 	var wg sync.WaitGroup
 	errs := make([]error, len(tx.limiters))
 	for i, lim := range tx.limiters {
-		if tx.state[i] != txStateReserved {
-			return errInvalidTxState
+		f := func() {
+			errs[i] = lim.commit(ctx)
+			if errs[i] != nil {
+				tx.state[i] = txStateCommitFailed
+			} else {
+				tx.state[i] = txStateCommitted
+			}
 		}
 		if i == len(tx.limiters)-1 {
-			errs[i] = lim.commit(ctx)
+			f()
 		} else {
-			wg.Go(func() { errs[i] = lim.commit(ctx) })
+			wg.Go(f)
 		}
 	}
 	wg.Wait()
