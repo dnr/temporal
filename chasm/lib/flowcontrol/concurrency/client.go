@@ -58,6 +58,9 @@ func (c *BatchingClient) Batch(
 	if err != nil {
 		return nil, err
 	}
+	if res.res == nil && res.err == nil {
+		res.err = serviceerror.NewInternal("nil response")
+	}
 	return res.res, res.err
 }
 
