@@ -22,10 +22,10 @@ func TestSlotLifecycle(t *testing.T) {
 	now := time.Now().UTC()
 	limiter := newTestComponent(1)
 
-	require.True(t, limiter.reserve("slot-1", now))
-	require.True(t, limiter.reserve("slot-1", now))
+	require.True(t, limiter.reserve("slot-1", now, defaultReserveTimeout))
+	require.True(t, limiter.reserve("slot-1", now, defaultReserveTimeout))
 	require.Len(t, limiter.Slots, 1)
-	require.False(t, limiter.reserve("slot-2", now))
+	require.False(t, limiter.reserve("slot-2", now, defaultReserveTimeout))
 	require.False(t, limiter.commit("slot-2"))
 
 	require.True(t, limiter.commit("slot-1"))
@@ -44,9 +44,9 @@ func TestExpiredSlotIDCanBeReplaced(t *testing.T) {
 	now := time.Now().UTC()
 	limiter := newTestComponent(1)
 
-	require.True(t, limiter.reserve("expired-slot", now))
-	limiter.expire(now.Add(reserveTimeout + time.Second))
-	require.True(t, limiter.reserve("new-slot", now.Add(reserveTimeout+time.Second)))
+	require.True(t, limiter.reserve("expired-slot", now, defaultReserveTimeout))
+	limiter.expire(now.Add(defaultReserveTimeout + time.Second))
+	require.True(t, limiter.reserve("new-slot", now.Add(defaultReserveTimeout+time.Second), defaultReserveTimeout))
 	require.Len(t, limiter.Slots, 1)
 	require.Equal(t, "new-slot", limiter.Slots[0].GetSlotId())
 }

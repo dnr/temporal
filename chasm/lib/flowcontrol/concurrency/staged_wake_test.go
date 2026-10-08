@@ -1,6 +1,7 @@
 package concurrency
 
 import (
+	"math"
 	"testing"
 	"time"
 
@@ -18,7 +19,7 @@ func TestDoWakeNoAvailableSlots(t *testing.T) {
 	c := newTestComponent(1)
 	c.Slots = []*fcpb.ConcurrencyState_Slot{{SlotId: "committed", Committed: true}}
 
-	doWake(cctx, c, func(int32) (int64, bool) {
+	doWake(cctx, c, defaultStagedWakeOptions, func(int32) (int64, bool) {
 		t.Fatal("getWakeTime called without capacity")
 		return 0, false
 	})
@@ -33,7 +34,7 @@ func TestDoWakeAlreadyWakingAll(t *testing.T) {
 	c := newTestComponent(1)
 	c.WakeAll = true
 
-	doWake(cctx, c, func(int32) (int64, bool) {
+	doWake(cctx, c, defaultStagedWakeOptions, func(int32) (int64, bool) {
 		t.Fatal("getWakeTime called after wake all")
 		return 0, false
 	})
@@ -49,7 +50,7 @@ func TestDoWakePartialWakeSchedulesNextStage(t *testing.T) {
 	c.WakeStage = 1
 	var gotTokens int32
 
-	doWake(cctx, c, func(tokens int32) (int64, bool) {
+	doWake(cctx, c, defaultStagedWakeOptions, func(tokens int32) (int64, bool) {
 		gotTokens = tokens
 		return 100, false
 	})
@@ -58,7 +59,7 @@ func TestDoWakePartialWakeSchedulesNextStage(t *testing.T) {
 	require.Equal(t, int64(100), c.WakeUpTo)
 	require.False(t, c.WakeAll)
 	require.Len(t, cctx.Tasks, 1)
-	require.Equal(t, now.Add(stagedWakeInterval), cctx.Tasks[0].Attributes.ScheduledTime)
+	require.Equal(t, now.Add(defaultStagedWakeOptions.Interval), cctx.Tasks[0].Attributes.ScheduledTime)
 	require.IsType(t, &stagedWake{}, cctx.Tasks[0].Payload)
 }
 
@@ -68,7 +69,7 @@ func TestDoWakeDoesNotMoveCutoffBackward(t *testing.T) {
 	c := newTestComponent(1)
 	c.WakeUpTo = 100
 
-	doWake(cctx, c, func(int32) (int64, bool) { return 50, false })
+	doWake(cctx, c, defaultStagedWakeOptions, func(int32) (int64, bool) { return 50, false })
 
 	require.Equal(t, int64(100), c.WakeUpTo)
 	require.False(t, c.WakeAll)
@@ -80,7 +81,7 @@ func TestDoWakeAllDoesNotScheduleNextStage(t *testing.T) {
 	cctx := newTestMutableContext(now)
 	c := newTestComponent(1)
 
-	doWake(cctx, c, func(int32) (int64, bool) { return 0, true })
+	doWake(cctx, c, defaultStagedWakeOptions, func(int32) (int64, bool) { return 0, true })
 
 	require.Zero(t, c.WakeUpTo)
 	require.True(t, c.WakeAll)
@@ -91,15 +92,63 @@ func TestDoWakeStageCapWakesAll(t *testing.T) {
 	now := time.Now().UTC()
 	cctx := newTestMutableContext(now)
 	c := newTestComponent(1)
-	c.WakeStage = maxStagedWakeStage
+	c.WakeStage = int32(defaultStagedWakeOptions.MaxStage)
 	c.WakeUpTo = 100
 
-	doWake(cctx, c, func(int32) (int64, bool) {
+	doWake(cctx, c, defaultStagedWakeOptions, func(int32) (int64, bool) {
 		t.Fatal("getWakeTime called at stage cap")
 		return 0, false
 	})
 
 	require.Zero(t, c.WakeUpTo)
+	require.True(t, c.WakeAll)
+	require.Empty(t, cctx.Tasks)
+}
+
+func TestDoWakeUsesOptions(t *testing.T) {
+	now := time.Now().UTC()
+	opts := StagedWakeOptions{Interval: 5 * time.Second, MaxStage: 2}
+
+	cctx := newTestMutableContext(now)
+	c := newTestComponent(1)
+	c.WakeStage = 1
+	doWake(cctx, c, opts, func(int32) (int64, bool) { return 100, false })
+	require.False(t, c.WakeAll)
+	require.Len(t, cctx.Tasks, 1)
+	require.Equal(t, now.Add(opts.Interval), cctx.Tasks[0].Attributes.ScheduledTime)
+
+	cctx = newTestMutableContext(now)
+	c.WakeStage = 2
+	doWake(cctx, c, opts, func(int32) (int64, bool) {
+		t.Fatal("getWakeTime called at stage cap")
+		return 0, false
+	})
+	require.True(t, c.WakeAll)
+	require.Empty(t, cctx.Tasks)
+}
+
+func TestDoWakeLargeStageDoesNotOverflow(t *testing.T) {
+	now := time.Now().UTC()
+	opts := StagedWakeOptions{Interval: time.Second, MaxStage: 1000}
+
+	cctx := newTestMutableContext(now)
+	c := newTestComponent(1 << 20)
+	c.WakeStage = maxStagedWakeMaxStage - 1
+	var gotTokens int32
+	doWake(cctx, c, opts, func(tokens int32) (int64, bool) {
+		gotTokens = tokens
+		return 100, false
+	})
+	require.Equal(t, int32(math.MaxInt32), gotTokens)
+	require.False(t, c.WakeAll)
+	require.Len(t, cctx.Tasks, 1)
+
+	cctx = newTestMutableContext(now)
+	c.WakeStage = maxStagedWakeMaxStage
+	doWake(cctx, c, opts, func(int32) (int64, bool) {
+		t.Fatal("getWakeTime called at stage cap")
+		return 0, false
+	})
 	require.True(t, c.WakeAll)
 	require.Empty(t, cctx.Tasks)
 }
@@ -159,5 +208,5 @@ func TestStagedWakeHandlerExecuteExpiresAndExpandsWake(t *testing.T) {
 	require.Equal(t, int64(40), c.WakeUpTo)
 	require.False(t, c.WakeAll)
 	require.Len(t, cctx.Tasks, 1)
-	require.Equal(t, now.Add(stagedWakeInterval), cctx.Tasks[0].Attributes.ScheduledTime)
+	require.Equal(t, now.Add(defaultStagedWakeOptions.Interval), cctx.Tasks[0].Attributes.ScheduledTime)
 }

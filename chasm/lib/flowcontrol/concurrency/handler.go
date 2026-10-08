@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/tidwall/btree"
+	"go.temporal.io/api/serviceerror"
 	taskqueuepb "go.temporal.io/api/taskqueue/v1"
 	"go.temporal.io/server/chasm"
 	fcpb "go.temporal.io/server/chasm/lib/flowcontrol/gen/flowcontrolpb/v1"
@@ -29,8 +30,10 @@ type batchReq struct {
 }
 
 type chasmReq struct {
-	items        []batchReq
-	getWakeLevel func(wantTokens int32) (wakeUpTo int64, wakeAll bool)
+	items          []batchReq
+	reserveTimeout time.Duration
+	stagedWake     StagedWakeOptions
+	getWakeLevel   func(wantTokens int32) (wakeUpTo int64, wakeAll bool)
 }
 
 type batchRes struct {
@@ -63,8 +66,11 @@ type waiterShard struct {
 type Handler struct {
 	fcpb.UnimplementedConcurrencyServiceServer
 
-	logger   log.Logger
-	batchers *stream_batcher.KeyedBatcher[batchKey, batchReq, batchRes]
+	logger         log.Logger
+	batchers       *stream_batcher.KeyedBatcher[batchKey, batchReq, batchRes]
+	waitLongPoll   dynamicconfig.TypedPropertyFn[WaitLongPollOptions]
+	reserveTimeout dynamicconfig.DurationPropertyFn
+	stagedWake     dynamicconfig.TypedPropertyFn[StagedWakeOptions]
 
 	waiterSeed   maphash.Seed
 	waiterShards [numWaiterShards]waiterShard
@@ -75,8 +81,11 @@ func NewHandler(
 	dc *dynamicconfig.Collection,
 ) *Handler {
 	h := &Handler{
-		logger:     logger,
-		waiterSeed: maphash.MakeSeed(),
+		logger:         logger,
+		waitLongPoll:   WaitLongPoll.Get(dc),
+		reserveTimeout: ReserveTimeout.Get(dc),
+		stagedWake:     StagedWake.Get(dc),
+		waiterSeed:     maphash.MakeSeed(),
 	}
 	for i := range h.waiterShards {
 		h.waiterShards[i].waiters = make(map[batchKey]*waiterEntries)
@@ -152,7 +161,7 @@ func updateFn(c *Component, cctx chasm.MutableContext, creq chasmReq) ([]*fcpb.C
 	// apply reserves
 	for i, it := range creq.items {
 		for _, slotId := range it.req.GetReserveSlots() {
-			success := c.reserve(slotId, now)
+			success := c.reserve(slotId, now, creq.reserveTimeout)
 			ress[i].ReserveSuccess = append(ress[i].ReserveSuccess, success)
 		}
 	}
@@ -172,7 +181,7 @@ func updateFn(c *Component, cctx chasm.MutableContext, creq chasmReq) ([]*fcpb.C
 	// Note that we can't do this in the same transaction that we increment generation in
 	// (availableSlots can't be both 0 and > prevStoredAvailable).
 	if c.availableSlots() > prevStoredAvailable {
-		doWake(cctx, c, creq.getWakeLevel)
+		doWake(cctx, c, creq.stagedWake, creq.getWakeLevel)
 	}
 
 	// capture Generation after maybe incrementing
@@ -206,8 +215,10 @@ func (h *Handler) applyBatch(
 	}
 
 	creq := chasmReq{
-		items:        items,
-		getWakeLevel: func(wantTokens int32) (int64, bool) { return h.getWakeLevel(key, wantTokens) },
+		items:          items,
+		reserveTimeout: h.reserveTimeout(),
+		stagedWake:     h.stagedWake(),
+		getWakeLevel:   func(wantTokens int32) (int64, bool) { return h.getWakeLevel(key, wantTokens) },
 	}
 
 	if needStart {
@@ -290,8 +301,8 @@ func (h *Handler) Wait(ctx context.Context, req *fcpb.ConcurrencyWaitRequest) (r
 	// will expire. But expiration is handled lazily, it doesn't cause a state transition of
 	// the component. So a Wait call that's waiting for that expiry will only notice when it
 	// re-enters PollComponent, which is only once per this timeout.
-	// TODO(fc): move constants to dynamic config
-	ctx, cancel := contextutil.WithDeadlineBuffer(ctx, time.Minute, time.Second)
+	longPoll := h.waitLongPoll()
+	ctx, cancel := contextutil.WithDeadlineBuffer(ctx, longPoll.Timeout, longPoll.Buffer)
 	defer cancel()
 
 	k := batchKey{namespaceID: req.NamespaceId, key: req.Key}

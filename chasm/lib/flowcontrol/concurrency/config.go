@@ -37,3 +37,53 @@ var HistoryClientBatcherOptions = dynamicconfig.NewGlobalTypedSetting(
 	defaultClientBatcherOptions,
 	`Batcher options for concurrency limiter releases from history transfer queue/CHASM activities. Requires server restart.`,
 )
+
+type WaitLongPollOptions struct {
+	// Timeout is the maximum time a single Wait call will block on the server.
+	Timeout time.Duration
+	// Buffer is the minimum time left before the caller's deadline when the long poll returns.
+	Buffer time.Duration
+}
+
+var defaultWaitLongPollOptions = WaitLongPollOptions{
+	Timeout: time.Minute,
+	Buffer:  time.Second,
+}
+
+var WaitLongPoll = dynamicconfig.NewGlobalTypedSetting(
+	"flowcontrol.concurrency.waitLongPoll",
+	defaultWaitLongPollOptions,
+	`Long-poll timeout and buffer for concurrency limiter Wait calls. Since reservation expiry is
+noticed lazily, Timeout also bounds how long a waiter may take to notice a slot freed by an
+expired reservation.`,
+)
+
+const defaultReserveTimeout = 30 * time.Second
+
+var ReserveTimeout = dynamicconfig.NewGlobalDurationSetting(
+	"flowcontrol.concurrency.reserveTimeout",
+	defaultReserveTimeout,
+	`How long a concurrency limiter slot reservation lasts before it expires if not committed.`,
+)
+
+type StagedWakeOptions struct {
+	// Interval is the time between wake stages.
+	Interval time.Duration
+	// MaxStage is the stage at which all remaining waiters are woken. The number of tokens
+	// woken doubles at each stage before that.
+	MaxStage int
+}
+
+// Higher values could overflow the token count computation.
+const maxStagedWakeMaxStage = 30
+
+var defaultStagedWakeOptions = StagedWakeOptions{
+	Interval: time.Second,
+	MaxStage: 10,
+}
+
+var StagedWake = dynamicconfig.NewGlobalTypedSetting(
+	"flowcontrol.concurrency.stagedWake",
+	defaultStagedWakeOptions,
+	`Options for waking concurrency limiter waiters in stages when slots become available.`,
+)

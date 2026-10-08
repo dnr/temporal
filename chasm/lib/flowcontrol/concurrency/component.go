@@ -10,10 +10,6 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
-// FIXME: move to dynamic config
-const reserveTimeout = 30 * time.Second
-const stagedWakeInterval = time.Second
-
 const initialLimit = int32(1_000_000)
 
 type Component struct {
@@ -85,7 +81,7 @@ func (c *Component) updateConfig(config *taskqueuepb.ConcurrencyLimit, version i
 	}
 }
 
-func (c *Component) reserve(slotID string, now time.Time) bool {
+func (c *Component) reserve(slotID string, now time.Time, timeout time.Duration) bool {
 	if c.find(slotID) >= 0 {
 		return true // already reserved or committed, accept
 	}
@@ -96,7 +92,7 @@ func (c *Component) reserve(slotID string, now time.Time) bool {
 		SlotId:    slotID,
 		Committed: false,
 		// Truncate is okay because expire adds a second anyway.
-		Expires: timestamppb.New(now.Add(reserveTimeout).Truncate(time.Second)),
+		Expires: timestamppb.New(now.Add(timeout).Truncate(time.Second)),
 	})
 	return true
 }

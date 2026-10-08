@@ -1,8 +1,10 @@
 package concurrency
 
-import "go.temporal.io/server/chasm"
+import (
+	"math"
 
-const maxStagedWakeStage = 10
+	"go.temporal.io/server/chasm"
+)
 
 type StagedWakeHandler struct {
 	chasm.PureTaskHandlerBase
@@ -37,18 +39,23 @@ func (t *StagedWakeHandler) Execute(cctx chasm.MutableContext, c *Component, _ c
 
 	// double number woken at each stage
 	c.WakeStage++
-	doWake(cctx, c, getWakeLevel)
+	doWake(cctx, c, t.handler.stagedWake(), getWakeLevel)
 
 	return nil
 }
 
-func doWake(cctx chasm.MutableContext, c *Component, getWakeTime func(int32) (int64, bool)) {
-	if c.WakeStage >= maxStagedWakeStage {
+func doWake(
+	cctx chasm.MutableContext,
+	c *Component,
+	opts StagedWakeOptions,
+	getWakeTime func(int32) (int64, bool),
+) {
+	if int(c.WakeStage) >= min(opts.MaxStage, maxStagedWakeMaxStage) {
 		c.WakeUpTo, c.WakeAll = 0, true
 		return
 	}
 
-	wantTokens := c.availableSlots() << c.WakeStage
+	wantTokens := int32(min(int64(c.availableSlots())<<c.WakeStage, math.MaxInt32))
 	if wantTokens <= 0 || c.WakeAll {
 		return // no slots available or done, return without modifying wake state
 	}
@@ -60,7 +67,7 @@ func doWake(cctx chasm.MutableContext, c *Component, getWakeTime func(int32) (in
 	if !c.WakeAll { // not all woken yet, add task for more
 		cctx.AddTask(
 			c,
-			chasm.TaskAttributes{ScheduledTime: cctx.Now(c).Add(stagedWakeInterval)},
+			chasm.TaskAttributes{ScheduledTime: cctx.Now(c).Add(opts.Interval)},
 			&stagedWake{},
 		)
 	}
