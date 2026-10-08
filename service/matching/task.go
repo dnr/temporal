@@ -116,15 +116,6 @@ type (
 		// reader.completeTask records it in tasks_dropped.
 		dropReason dropReason
 	}
-
-	// taskFinishResult describes how a task finished. It is passed to internalTask.finish.
-	taskFinishResult struct {
-		// err is the result of RecordTaskStarted (or forwarding); nil on success or drop.
-		err error
-		// dropReason, when set, indicates the task is being dropped rather than dispatched
-		// and is recorded in tasks_dropped.
-		dropReason dropReason
-	}
 )
 
 var (
@@ -386,14 +377,15 @@ func (task *internalTask) setEvicted() {
 // and marks it as started. If the task is unable to marked as started, then this
 // method should be called with a non-nil error argument.
 //
-// When a backlog task is being dropped rather than dispatched, set r.dropReason; it is
-// carried on the taskResponse and counted in tasks_dropped by the backlog completion
-// callback (reader.completeTask).
-func (task *internalTask) finish(r taskFinishResult) {
-	task.finishInternal(taskResponse{
-		startErr:   r.err,
-		dropReason: r.dropReason,
-	})
+// When a backlog task is being dropped rather than dispatched, use one of the values of
+// dropReason as err; it is carried on the taskResponse and counted in tasks_dropped by the
+// backlog completion callback (reader.completeTask).
+func (task *internalTask) finish(err error) {
+	if dr, ok := err.(dropReason); ok {
+		task.finishInternal(taskResponse{dropReason: dr})
+	} else {
+		task.finishInternal(taskResponse{startErr: err})
+	}
 }
 
 // finishForward must be called after forwarding a task.

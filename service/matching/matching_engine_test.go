@@ -2648,7 +2648,7 @@ func (s *matchingEngineSuite) TestAddTaskAfterStartFailure() {
 	task1, _, err := s.matchingEngine.pollTask(context.Background(), dbq.partition, &pollMetadata{})
 	s.NoError(err)
 
-	task1.finish(taskFinishResult{err: serviceerror.NewInternal("test error")})
+	task1.finish(serviceerror.NewInternal("test error"))
 	s.EqualValues(1, s.taskManager.getTaskCount(dbq))
 
 	task2, _, err := s.matchingEngine.pollTask(context.Background(), dbq.partition, &pollMetadata{})
@@ -2656,7 +2656,7 @@ func (s *matchingEngineSuite) TestAddTaskAfterStartFailure() {
 	protoassert.ProtoEqual(s.T(), task1.event.Data, task2.event.Data)
 	s.NotEqual(task1.event.GetTaskId(), task2.event.GetTaskId(), "IDs should not match")
 
-	task2.finish(taskFinishResult{})
+	task2.finish(nil)
 	s.EqualValues(0, s.taskManager.getTaskCount(dbq))
 }
 
@@ -3312,7 +3312,7 @@ func (s *matchingEngineSuite) TestUnknownBuildId_Match() {
 		s.NoError(err)
 		s.Equal("wf", task.event.Data.WorkflowId)
 		s.Equal(int64(123), task.event.Data.ScheduledEventId)
-		task.finish(taskFinishResult{})
+		task.finish(nil)
 		wg.Done()
 	}()
 
@@ -3421,7 +3421,7 @@ func (s *matchingEngineSuite) TestDemotedMatch() {
 	s.Require().NoError(err)
 	s.Equal("wf", task.event.Data.WorkflowId)
 	s.Equal(int64(123), task.event.Data.ScheduledEventId)
-	task.finish(taskFinishResult{})
+	task.finish(nil)
 }
 
 type mockRoutingMatchingClient struct {

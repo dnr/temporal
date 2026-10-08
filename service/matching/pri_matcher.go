@@ -224,7 +224,7 @@ func (tm *priTaskMatcher) forwardTask(task *internalTask) (bool, error) {
 		maybeValid := tm.validator.maybeValidate(task.event.AllocatedTaskInfo, tm.fwdr.partition.TaskType())
 		if !maybeValid {
 			// consider this task expired while processing.
-			task.finish(taskFinishResult{dropReason: getDroppedTaskExpiryReason(task)})
+			task.finish(getDroppedTaskExpiryReason(task))
 
 			// Stay alive as long as we're invalidating tasks
 			tm.markAlive()
@@ -279,7 +279,7 @@ func (tm *priTaskMatcher) validateTasksOnRoot(retrier backoff.Retrier) {
 		maybeValid := tm.validator == nil || tm.validator.maybeValidate(task.event.AllocatedTaskInfo, tm.partition.TaskType())
 		if !maybeValid {
 			// We found an invalid one, complete it and go back for another immediately.
-			task.finish(taskFinishResult{dropReason: getDroppedTaskExpiryReason(task)})
+			task.finish(getDroppedTaskExpiryReason(task))
 
 			// Stay alive as long as we're invalidating tasks
 			tm.markAlive()
@@ -287,7 +287,7 @@ func (tm *priTaskMatcher) validateTasksOnRoot(retrier backoff.Retrier) {
 			retrier.Reset()
 		} else {
 			// Task was valid, put it back and slow down checking.
-			task.finish(taskFinishResult{err: errReprocessTask})
+			task.finish(errReprocessTask)
 			// retrier's max interval is backlogTaskForwardTimeout, so for just valid tasks,
 			// this loop will essentially be limited to that interval.
 			util.InterruptibleSleep(tm.tqCtx, retrier.NextBackOff(nil))
@@ -568,7 +568,7 @@ func (tm *priTaskMatcher) ReprocessAllTasks() {
 	// ReprocessTasks will have woken sync tasks, but for backlog we also need to call finish.
 	for _, task := range tasks {
 		if !task.isSyncMatchTask() {
-			task.finish(taskFinishResult{err: errReprocessTask})
+			task.finish(errReprocessTask)
 		}
 	}
 }
@@ -585,7 +585,7 @@ func (tm *priTaskMatcher) ReprocessRedirectedTasksAfterStop() {
 			for _, task := range tasks {
 				// these should all be from backlog (not sync-match) but check again to be sure
 				if !task.isSyncMatchTask() {
-					task.finish(taskFinishResult{err: errReprocessTask})
+					task.finish(errReprocessTask)
 				}
 			}
 		}()
