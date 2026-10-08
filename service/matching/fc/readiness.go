@@ -181,6 +181,10 @@ func (rs *readinessShard) syncLimiter(limiter limiterState, toNotify *deferedNot
 }
 
 func (rs *readinessShard) addEdgeLocked(limiter limiterState, cb ReadinessCallback, pri wakePriority) {
+	// fwd is sorted by pri, so if cb is already present with a different pri, we have to
+	// remove the old entry first or we'll leave a stale one behind.
+	rs.removeEdgeLocked(limiter, cb)
+
 	newFEnt := fwdMapEntry{pri: pri, cb: cb}
 	fEnts := rs.fwd[limiter]
 	if i, found := slices.BinarySearchFunc(fEnts, newFEnt, fwdMapEntryCmp); found {
