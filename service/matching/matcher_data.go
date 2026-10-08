@@ -20,7 +20,7 @@ const (
 	pollForwarderPriority   = 1000000 // lower than any other priority. must be > maxPriorityLevels*effectivePriorityFactor.
 )
 
-type pollForwarderType int32
+type pollForwarderType int8
 
 const (
 	notPollForwarder pollForwarderType = iota

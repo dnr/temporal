@@ -593,8 +593,11 @@ func (c *taskQueueConfig) clipPriority(priority priorityKey) priorityKey {
 	return priority
 }
 
+// setDefaultPriority should be called after constructing any internalTask that will go through
+// matching or flow control (basically anything except a "started" task).
 func (c *taskQueueConfig) setDefaultPriority(task *internalTask) {
 	if task.effectivePriority == 0 {
 		task.effectivePriority = effectivePriorityFactor * c.DefaultPriorityKey
 	}
+	task.defaultPriorityKey = int8(c.DefaultPriorityKey)
 }

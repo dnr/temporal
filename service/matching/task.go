@@ -98,6 +98,9 @@ type (
 		// in between priority levels.
 		effectivePriority priorityKey
 		pollForwarderType pollForwarderType
+		// copy of default priority key from config, so that we can use it from PriorityAndAge
+		// (we can use int8 because we limit to maxPriorityLevels, so this packs better)
+		defaultPriorityKey int8
 	}
 
 	// taskResponse is used to report the result of either a match with a local poller,
@@ -302,8 +305,7 @@ func (task *internalTask) Limiters() *fc.Limiters {
 
 // PriorityAndAge implements fc.fcTask interface.
 func (task *internalTask) PriorityAndAge() (int32, time.Time) {
-	def := int32(3) // FIXME: ugh, have to get this here
-	pri := cmp.Or(task.getPriority().GetPriorityKey(), def)
+	pri := cmp.Or(task.getPriority().GetPriorityKey(), int32(task.defaultPriorityKey))
 	createTime := task.getCreateTime().AsTime()
 	return pri, createTime
 }
