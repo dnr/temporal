@@ -250,19 +250,21 @@ func (s *MatcherDataSuite) TestMatchTaskImmediatelyRateLimited() {
 }
 
 func (s *MatcherDataSuite) TestSyncMatchRateLimitedIncrementsStats() {
-	// Set a rate limit and consume a token so the limiter is blocking.
+	// Set a rate limit (1 RPS, no burst) so that a single dispatch makes the limiter block.
 	s.md.rateLimitManager.SetEffectiveRPSAndSourceForTesting(1.0, enumspb.RATE_LIMIT_SOURCE_API)
 	s.md.rateLimitManager.UpdateSimpleRateLimitWithBurstForTesting(0)
-	s.md.rateLimitManager.mu.Lock()
-	// FIXME TEST: update with new fc mechanism
-	// now := s.ts.Now().UnixNano()
-	// s.md.rateLimitManager.wholeQueueReady = s.md.rateLimitManager.wholeQueueReady.Consume(
-	// 	s.md.rateLimitManager.wholeQueueLimit, now, 1)
-	s.md.rateLimitManager.mu.Unlock()
+
+	// Consume the token with one successful sync match.
+	go func() {
+		poller := &waitingPoller{startTime: s.now()}
+		s.md.EnqueuePollerAndWait(nil, poller)
+	}()
+	s.waitForPollers(1)
+	s.Equal(syncMatchSuccess, s.md.MatchTaskImmediately(s.newSyncTask(nil)))
 
 	s.Equal(int32(0), s.rateLimitedCount.Load())
 
-	// Add a waiting poller.
+	// Add another waiting poller.
 	go func() {
 		poller := &waitingPoller{startTime: s.now()}
 		s.md.EnqueuePollerAndWait(nil, poller)
@@ -277,22 +279,24 @@ func (s *MatcherDataSuite) TestSyncMatchRateLimitedIncrementsStats() {
 }
 
 func (s *MatcherDataSuite) TestBacklogRateLimitedIncrementsStats() {
-	// Set a rate limit and consume a token so the limiter is blocking.
+	// Set a rate limit (1 RPS, no burst) so that a single dispatch makes the limiter block.
 	s.md.rateLimitManager.SetEffectiveRPSAndSourceForTesting(1.0, enumspb.RATE_LIMIT_SOURCE_API)
 	s.md.rateLimitManager.UpdateSimpleRateLimitWithBurstForTesting(0)
-	s.md.rateLimitManager.mu.Lock()
-	// FIXME TEST: update with new fc mechanism
-	// now := s.ts.Now().UnixNano()
-	// s.md.rateLimitManager.wholeQueueReady = s.md.rateLimitManager.wholeQueueReady.Consume(
-	// 	s.md.rateLimitManager.wholeQueueLimit, now, 1)
-	s.md.rateLimitManager.mu.Unlock()
 
-	// Enqueue a backlog task.
-	_ = s.md.EnqueueTaskNoWait(s.newBacklogTask(123, 0, nil))
+	// Consume the token by dispatching one backlog task.
+	t1 := s.newBacklogTask(1, 0, nil)
+	s.Require().NoError(s.md.EnqueueTaskNoWait(t1))
+	res := s.pollImmediately(nil)
+	s.Require().NotNil(res)
+	s.Equal(t1, res.task)
+
+	s.Equal(int32(0), s.rateLimitedCount.Load())
+
+	// Enqueue another backlog task.
+	s.Require().NoError(s.md.EnqueueTaskNoWait(s.newBacklogTask(2, 0, nil)))
 
 	// Poller arrives — findAndWakeMatches should hit the rate limiter.
-	poller := &waitingPoller{startTime: s.now()}
-	s.md.MatchPollerImmediately(poller)
+	s.Nil(s.pollImmediately(nil))
 
 	s.Positive(s.rateLimitedCount.Load())
 }

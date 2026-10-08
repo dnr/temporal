@@ -28,39 +28,56 @@ func (s *RateLimitManagerSuite) SetupTest() {
 	s.Assertions = require.New(s.T())
 }
 
-// FIXME TEST: not applicable anymore?
-// func (s *RateLimitManagerSuite) TestUpdatePerKeySimpleRateLimitLocked_WhenFairnessKeyRateLimitDefaultIsNil() {
-// 	mockUserDataManager := &mockUserDataManager{}
-// 	config := newTaskQueueConfig(
-// 		tqid.UnsafeTaskQueueFamily("test-namespace", "test-task-queue").TaskQueue(enumspb.TASK_QUEUE_TYPE_ACTIVITY),
-// 		NewConfig(dynamicconfig.NewNoopCollection()),
-// 		"test-namespace",
-// 	)
-// 	ts := clock.NewRealTimeSource()
-// 	rateLimitManager := newRateLimitManager(ts, mockUserDataManager, config, enumspb.TASK_QUEUE_TYPE_ACTIVITY)
-// 	rateLimitManager.Start()
-// 	rateLimitManager.mu.Lock()
-// 	// Simulate the condition where fairnessKeyRateLimitDefault is nil
-// 	rateLimitManager.fairnessKeyRateLimitDefault = nil
-// 	// Add per-key ready entries to verify they get cleared
-// 	rateLimitManager.perKeyReady.Put("key1", simplelimiter.Limiter(1000))
-// 	rateLimitManager.perKeyReady.Put("key2", simplelimiter.Limiter(2000))
-// 	// Set per-key limit to verify it gets cleared
-// 	rateLimitManager.perKeyLimit = simplelimiter.Params{
-// 		Interval: time.Second,
-// 		Burst:    10,
-// 	}
-// 	// Verify initial state
-// 	s.Equal(2, rateLimitManager.perKeyReady.Size())
-// 	s.True(rateLimitManager.perKeyLimit.Limited())
-// 	// Update the per-key simple rate limit with fairnessKeyRateLimitDefault as nil
-// 	rateLimitManager.updatePerKeySimpleRateLimitWithBurstLocked(time.Second)
-// 	// Verify that clearPerKeyRateLimitsLocked was called
-// 	// The cache should be replaced with a new empty cache
-// 	s.Equal(0, rateLimitManager.perKeyReady.Size(), "All per-key ready entries should be cleared")
-// 	s.False(rateLimitManager.perKeyLimit.Limited(), "Per-key limit should be cleared")
-// 	rateLimitManager.mu.Unlock()
-// }
+func (s *RateLimitManagerSuite) TestPerKeyLimitClearedWhenFairnessKeyRateLimitDefaultUnset() {
+	config := newTaskQueueConfig(
+		tqid.UnsafeTaskQueueFamily("test-namespace", "test-task-queue").TaskQueue(enumspb.TASK_QUEUE_TYPE_ACTIVITY),
+		NewConfig(dynamicconfig.NewNoopCollection()),
+		"test-namespace",
+	)
+	udm := &mockUserDataManager{
+		data: userDataWithFairnessKeysRateLimitDefault(enumspb.TASK_QUEUE_TYPE_ACTIVITY, &taskqueuepb.RateLimitConfig{
+			RateLimit: &taskqueuepb.RateLimit{RequestsPerSecond: 10},
+		}),
+	}
+	rlm := newRateLimitManager(clock.NewRealTimeSource(), udm, config, enumspb.TASK_QUEUE_TYPE_ACTIVITY)
+	rlm.Start()
+	defer rlm.Stop()
+
+	rlm.UserDataChanged()
+	_, ok := rlm.GetFairnessKeyRateLimitDefaultForTesting()
+	s.True(ok)
+	s.True(rlm.GetPerKeyLimit(nil).Limited())
+
+	// An empty RateLimitConfig means the limit was unset via the API.
+	udm.Lock()
+	udm.data = userDataWithFairnessKeysRateLimitDefault(enumspb.TASK_QUEUE_TYPE_ACTIVITY, &taskqueuepb.RateLimitConfig{})
+	udm.Unlock()
+	rlm.UserDataChanged()
+
+	_, ok = rlm.GetFairnessKeyRateLimitDefaultForTesting()
+	s.False(ok)
+	// fcManager removes the per-key limiter from tasks when the limit is neither Limited nor Never.
+	perKeyLimit := rlm.GetPerKeyLimit(nil)
+	s.False(perKeyLimit.Limited())
+	s.False(perKeyLimit.Never())
+}
+
+func userDataWithFairnessKeysRateLimitDefault(
+	tqType enumspb.TaskQueueType,
+	rateLimit *taskqueuepb.RateLimitConfig,
+) *persistencespb.VersionedTaskQueueUserData {
+	return &persistencespb.VersionedTaskQueueUserData{
+		Data: &persistencespb.TaskQueueUserData{
+			PerType: map[int32]*persistencespb.TaskQueueTypeUserData{
+				int32(tqType): {
+					Config: &taskqueuepb.TaskQueueConfig{
+						FairnessKeysRateLimitDefault: rateLimit,
+					},
+				},
+			},
+		},
+	}
+}
 
 // Additions to rateLimitManager for use by other unit tests:
 
