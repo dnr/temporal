@@ -94,8 +94,9 @@ type (
 		taskTrackerLock sync.Mutex
 		tasksAdded      map[priorityKey]*taskTracker
 		tasksDispatched map[priorityKey]*taskTracker
-		// tasksRateLimited tracks rate-limit events in a sliding window for stats reporting.
-		tasksRateLimited *taskTracker
+		// these tracks flow control events in a sliding window for stats reporting.
+		tasksRateLimited        *taskTracker
+		tasksConcurrencyLimited *taskTracker
 	}
 
 	// TODO(pri): old matcher cleanup
@@ -162,6 +163,7 @@ func newPhysicalTaskQueueManager(
 		tasksAdded:               make(map[priorityKey]*taskTracker),
 		tasksDispatched:          make(map[priorityKey]*taskTracker),
 		tasksRateLimited:         e.newTaskTracker(),
+		tasksConcurrencyLimited:  e.newTaskTracker(),
 		pollerScalingRateLimiter: quotas.NewDefaultOutgoingRateLimiter(pollerScalingRateLimitFn),
 		deploymentRegistrationCh: make(chan struct{}, 1),
 	}
@@ -219,7 +221,7 @@ func newPhysicalTaskQueueManager(
 			newFairMetricsHandler(taggedMetricsHandler),
 			partitionMgr.rateLimitManager,
 			partitionMgr.fcManager,
-			pqMgr.onRateLimited,
+			pqMgr.onBlocked,
 			pqMgr.MarkAlive,
 		)
 		pqMgr.matcher = pqMgr.priMatcher
@@ -260,7 +262,7 @@ func newPhysicalTaskQueueManager(
 			newPriMetricsHandler(taggedMetricsHandler),
 			partitionMgr.rateLimitManager,
 			partitionMgr.fcManager,
-			pqMgr.onRateLimited,
+			pqMgr.onBlocked,
 			pqMgr.MarkAlive,
 		)
 		pqMgr.matcher = pqMgr.priMatcher
@@ -549,10 +551,15 @@ func (c *physicalTaskQueueManagerImpl) MarkAlive() {
 	c.liveness.markAlive()
 }
 
-// onRateLimited records a rate-limit event.
-func (c *physicalTaskQueueManagerImpl) onRateLimited() {
+// onBlocked records a rate-limit event.
+func (c *physicalTaskQueueManagerImpl) onBlocked(reason syncMatchOutcome) {
 	c.taskTrackerLock.Lock()
-	c.tasksRateLimited.inc(1)
+	switch reason {
+	case syncMatchRateLimited:
+		c.tasksRateLimited.inc(1)
+	case syncMatchConcurrencyLimited:
+		c.tasksConcurrencyLimited.inc(1)
+	}
 	c.taskTrackerLock.Unlock()
 }
 
@@ -695,10 +702,12 @@ func (c *physicalTaskQueueManagerImpl) GetStatsByPriority(includeRates bool) map
 			util.GetOrSetNew(stats, int32(pri)).TasksDispatchRate = tt.rate()
 		}
 		rateLimitingActive := c.tasksRateLimited.rate() > 0
+		concurrencyLimitingActive := c.tasksConcurrencyLimited.rate() > 0
 		c.taskTrackerLock.Unlock()
 
 		for _, s := range stats {
 			s.RateLimitingActive = rateLimitingActive
+			s.FlowControlActive = rateLimitingActive || concurrencyLimitingActive
 		}
 	}
 

@@ -101,7 +101,7 @@ func newPriTaskMatcher(
 	metricsHandler metrics.Handler,
 	rateLimitManager *rateLimitManager,
 	fcManager *fcManager,
-	onRateLimited func(),
+	onBlocked func(syncMatchOutcome),
 	markAlive func(),
 ) *priTaskMatcher {
 	tm := &priTaskMatcher{
@@ -113,7 +113,7 @@ func newPriTaskMatcher(
 			fwdr != nil,
 			rateLimitManager,
 			fcManager,
-			onRateLimited,
+			onBlocked,
 		),
 		tqCtx:                     tqCtx,
 		logger:                    logger,

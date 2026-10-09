@@ -65,7 +65,7 @@ func (s *MatcherDataSuite) SetupTest() {
 		true,
 		rateLimitManager,
 		s.fcManager,
-		func() { s.rateLimitedCount.Add(1) },
+		func(syncMatchOutcome) { s.rateLimitedCount.Add(1) },
 	)
 }
 
@@ -1100,7 +1100,7 @@ func FuzzMatcherData(f *testing.F) {
 			true,
 			rateLimitManager,
 			newFCManager(taskQueue.RootPartition(), cfg, userDataManager, rateLimitManager, fc.NewReadiness(ts, nil)),
-			func() {},
+			func(syncMatchOutcome) {},
 		)
 
 		next := func() int {

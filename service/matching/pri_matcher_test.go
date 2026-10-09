@@ -83,8 +83,8 @@ func (s *PriMatcherSuite) TestValidatorWorksOnRoot() {
 		metrics.NoopMetricsHandler,
 		rateLimitManager,
 		newFCManager(partition, cfg, userDataManager, rateLimitManager, fc.NewReadiness(ts, nil)),
-		func() {}, // onRateLimited
-		func() {}, // markAlive
+		func(syncMatchOutcome) {}, // onRateLimited
+		func() {},                 // markAlive
 	)
 
 	// start the matcher
@@ -181,7 +181,7 @@ func (s *PriMatcherSuite) TestForwardPollRetriesOnResourceExhausted() {
 			metrics.NoopMetricsHandler,
 			rateLimitManager,
 			newFCManager(childPartition, cfg, userDataManager, rateLimitManager, fc.NewReadiness(ts, nil)),
-			func() {},
+			func(syncMatchOutcome) {},
 			func() {},
 		)
 
@@ -252,7 +252,7 @@ func (s *PriMatcherSuite) TestValidatorDrop_SetsDropReason() {
 				metrics.NoopMetricsHandler,
 				rateLimitManager,
 				newFCManager(partition, cfg, userDataManager, rateLimitManager, fc.NewReadiness(ts, nil)),
-				func() {},
+				func(syncMatchOutcome) {},
 				func() {},
 			)
 			tm.Start()

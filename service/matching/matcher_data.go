@@ -210,8 +210,8 @@ type matcherData struct {
 	canForward       bool
 	rateLimitManager *rateLimitManager
 	fcManager        *fcManager
-	// onRateLimited is called when a dispatch is blocked by the rate limiter.
-	onRateLimited func()
+	// onBlocked is called when a dispatch is blocked by flow control
+	onBlocked func(syncMatchOutcome)
 
 	lock sync.Mutex // covers everything below, and all fields in any waitableMatchResult
 
@@ -237,7 +237,7 @@ func newMatcherData(
 	canForward bool,
 	rateLimitManager *rateLimitManager,
 	fcManager *fcManager,
-	onRateLimited func(),
+	onBlocked func(syncMatchOutcome),
 ) matcherData {
 	return matcherData{
 		config:           config,
@@ -246,7 +246,7 @@ func newMatcherData(
 		canForward:       canForward,
 		rateLimitManager: rateLimitManager,
 		fcManager:        fcManager,
-		onRateLimited:    onRateLimited,
+		onBlocked:        onBlocked,
 		pollers:          pollerList{logger: logger},
 		tasks:            newTaskBTree(),
 	}
@@ -556,10 +556,9 @@ func (d *matcherData) findAndWakeMatches() syncMatchOutcome {
 		// find one match. findMatch does not return matches that are blocked by flow control.
 		task, poller, blockedBy := d.findMatch(allowForwarding, now)
 		if task == nil || poller == nil {
-			if blockedBy == syncMatchRateLimited {
-				d.onRateLimited()
+			if blockedBy != syncMatchNoPoller {
+				d.onBlocked(blockedBy)
 			}
-			// TODO(fc): add onConcurrencyLimited
 			return blockedBy
 		}
 
