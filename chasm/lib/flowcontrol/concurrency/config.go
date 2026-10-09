@@ -70,16 +70,13 @@ type StagedWakeOptions struct {
 	// Interval is the time between wake stages.
 	Interval time.Duration
 	// MaxStage is the stage at which all remaining waiters are woken. The number of tokens
-	// woken doubles at each stage before that.
-	MaxStage int
+	// woken doubles at each stage before that. Capped to 10.
+	MaxStage int32
 }
-
-// Higher values could overflow the token count computation.
-const maxStagedWakeMaxStage = 30
 
 var defaultStagedWakeOptions = StagedWakeOptions{
 	Interval: time.Second,
-	MaxStage: 10,
+	MaxStage: 8,
 }
 
 var StagedWake = dynamicconfig.NewGlobalTypedSetting(

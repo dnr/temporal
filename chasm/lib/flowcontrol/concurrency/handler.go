@@ -67,10 +67,10 @@ type Handler struct {
 	fcpb.UnimplementedConcurrencyServiceServer
 
 	logger         log.Logger
-	batchers       *stream_batcher.KeyedBatcher[batchKey, batchReq, batchRes]
-	waitLongPoll   dynamicconfig.TypedPropertyFn[WaitLongPollOptions]
+	longPollOpts   dynamicconfig.TypedPropertyFn[WaitLongPollOptions]
 	reserveTimeout dynamicconfig.DurationPropertyFn
 	stagedWake     dynamicconfig.TypedPropertyFn[StagedWakeOptions]
+	batchers       *stream_batcher.KeyedBatcher[batchKey, batchReq, batchRes]
 
 	waiterSeed   maphash.Seed
 	waiterShards [numWaiterShards]waiterShard
@@ -82,7 +82,7 @@ func NewHandler(
 ) *Handler {
 	h := &Handler{
 		logger:         logger,
-		waitLongPoll:   WaitLongPoll.Get(dc),
+		longPollOpts:   WaitLongPoll.Get(dc),
 		reserveTimeout: ReserveTimeout.Get(dc),
 		stagedWake:     StagedWake.Get(dc),
 		waiterSeed:     maphash.MakeSeed(),
@@ -301,8 +301,8 @@ func (h *Handler) Wait(ctx context.Context, req *fcpb.ConcurrencyWaitRequest) (r
 	// will expire. But expiration is handled lazily, it doesn't cause a state transition of
 	// the component. So a Wait call that's waiting for that expiry will only notice when it
 	// re-enters PollComponent, which is only once per this timeout.
-	longPoll := h.waitLongPoll()
-	ctx, cancel := contextutil.WithDeadlineBuffer(ctx, longPoll.Timeout, longPoll.Buffer)
+	longPollOpts := h.longPollOpts()
+	ctx, cancel := contextutil.WithDeadlineBuffer(ctx, longPollOpts.Timeout, longPollOpts.Buffer)
 	defer cancel()
 
 	k := batchKey{namespaceID: req.NamespaceId, key: req.Key}

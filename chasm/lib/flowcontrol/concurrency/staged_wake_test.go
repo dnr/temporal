@@ -1,7 +1,6 @@
 package concurrency
 
 import (
-	"math"
 	"testing"
 	"time"
 
@@ -92,7 +91,7 @@ func TestDoWakeStageCapWakesAll(t *testing.T) {
 	now := time.Now().UTC()
 	cctx := newTestMutableContext(now)
 	c := newTestComponent(1)
-	c.WakeStage = int32(defaultStagedWakeOptions.MaxStage)
+	c.WakeStage = defaultStagedWakeOptions.MaxStage
 	c.WakeUpTo = 100
 
 	doWake(cctx, c, defaultStagedWakeOptions, func(int32) (int64, bool) {
@@ -132,19 +131,20 @@ func TestDoWakeLargeStageDoesNotOverflow(t *testing.T) {
 	opts := StagedWakeOptions{Interval: time.Second, MaxStage: 1000}
 
 	cctx := newTestMutableContext(now)
-	c := newTestComponent(1 << 20)
-	c.WakeStage = maxStagedWakeMaxStage - 1
+	c := newTestComponent(1 << 25)
+	c.WakeStage = 9 // one below max
 	var gotTokens int32
 	doWake(cctx, c, opts, func(tokens int32) (int64, bool) {
 		gotTokens = tokens
 		return 100, false
 	})
-	require.Equal(t, int32(math.MaxInt32), gotTokens)
+	// exact value doesn't matter, just that it's larger than we'll ever use, and positive
+	require.Greater(t, gotTokens, int32(100_000_000))
 	require.False(t, c.WakeAll)
 	require.Len(t, cctx.Tasks, 1)
 
 	cctx = newTestMutableContext(now)
-	c.WakeStage = maxStagedWakeMaxStage
+	c.WakeStage = 10
 	doWake(cctx, c, opts, func(int32) (int64, bool) {
 		t.Fatal("getWakeTime called at stage cap")
 		return 0, false

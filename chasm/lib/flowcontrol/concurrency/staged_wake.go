@@ -1,8 +1,6 @@
 package concurrency
 
 import (
-	"math"
-
 	"go.temporal.io/server/chasm"
 )
 
@@ -37,7 +35,6 @@ func (t *StagedWakeHandler) Execute(cctx chasm.MutableContext, c *Component, _ c
 
 	c.expire(cctx.Now(c))
 
-	// double number woken at each stage
 	c.WakeStage++
 	doWake(cctx, c, t.handler.stagedWake(), getWakeLevel)
 
@@ -50,12 +47,16 @@ func doWake(
 	opts StagedWakeOptions,
 	getWakeTime func(int32) (int64, bool),
 ) {
-	if int(c.WakeStage) >= min(opts.MaxStage, maxStagedWakeMaxStage) {
+	opts.MaxStage = min(opts.MaxStage, 10) // avoid overflow
+
+	if c.WakeStage >= opts.MaxStage {
 		c.WakeUpTo, c.WakeAll = 0, true
 		return
 	}
 
-	wantTokens := int32(min(int64(c.availableSlots())<<c.WakeStage, math.MaxInt32))
+	slots := min(c.availableSlots(), 1e6) // avoid overflow
+	// double number woken at each stage
+	wantTokens := slots << c.WakeStage
 	if wantTokens <= 0 || c.WakeAll {
 		return // no slots available or done, return without modifying wake state
 	}

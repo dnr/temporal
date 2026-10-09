@@ -10,6 +10,7 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
+// If a limiter is created without an initial config, use an effectively "unlimited" limit.
 const initialLimit = int32(1_000_000)
 
 type Component struct {
