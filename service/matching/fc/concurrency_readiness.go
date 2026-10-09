@@ -31,7 +31,8 @@ type concurrencyState struct {
 	tokensSeq int64
 	// invariant: {len(waiters) > 0} == {Wait goroutine is running} == {goroCancel != nil}
 	// (for now, until we add eviction)
-	goroCancel context.CancelFunc
+	goroCancel         context.CancelFunc
+	waiterWakePriority wakePriority // wake priority in use by current call
 }
 
 func (r *Readiness) getConcurrencyLimiter(nsID namespace.ID, key string) *concurrencyState {
@@ -161,6 +162,13 @@ func (cs *concurrencyState) syncLocked(rsu *readinessSyncUpdate) {
 	rsu.wake(int(cs.tokens))
 
 	haveWaiters := len(rsu.waiters) > 0
+
+	// if we have an outstanding call but wake priority decreased, cancel it and start a new one
+	if cs.goroCancel != nil && haveWaiters && betterWakePriority(rsu.waiters[0].pri, cs.waiterWakePriority) {
+		cs.goroCancel()
+		cs.goroCancel = nil
+	}
+
 	if (cs.goroCancel != nil) == haveWaiters {
 		return
 	}
@@ -177,6 +185,7 @@ func (cs *concurrencyState) syncLocked(rsu *readinessSyncUpdate) {
 		"",
 	))
 	ctx, cs.goroCancel = context.WithCancel(ctx)
+	cs.waiterWakePriority = rsu.waiters[0].pri // set here so we have a not-stale value before callWait runs
 	// Wait result will be reported back through reportSlotsHint
 	go cs.callWait(ctx)
 
@@ -192,11 +201,12 @@ func (cs *concurrencyState) makeWaitRequest() *fcpb.ConcurrencyServiceWaitReques
 		return nil
 	}
 
+	cs.waiterWakePriority = waiters[0].pri
 	return &fcpb.ConcurrencyServiceWaitRequest{
 		NamespaceId:         cs.nsID.String(),
 		Key:                 cs.key,
 		Generation:          cs.generation,
-		WakePriority:        int64(waiters[0].pri),
+		WakePriority:        int64(cs.waiterWakePriority),
 		RequestedWakeTokens: int32(len(waiters)),
 	}
 }
@@ -208,8 +218,6 @@ func (cs *concurrencyState) callWait(ctx context.Context) {
 	retrier := backoff.NewRetrier(policy, clock.NewRealTimeSource())
 
 	for ctx.Err() == nil {
-		// TODO(fc): if minPriority decreases during this call, interrupt and restart it.
-		// increasing minPriority should not interrupt
 		req := cs.makeWaitRequest()
 		if req == nil {
 			// maybe race with canceling context
