@@ -67,10 +67,10 @@ func (c *ConcurrencyServiceLayeredClient) Stop() {
 }
 func (c *ConcurrencyServiceLayeredClient) callBatchNoRetry(
 	ctx context.Context,
-	request *ConcurrencyBatchRequest,
+	request *ConcurrencyServiceBatchRequest,
 	opts ...grpc.CallOption,
-) (*ConcurrencyBatchResponse, error) {
-	var response *ConcurrencyBatchResponse
+) (*ConcurrencyServiceBatchResponse, error) {
+	var response *ConcurrencyServiceBatchResponse
 	var err error
 	startTime := time.Now().UTC()
 	// the caller is a namespace, hence the tag below.
@@ -100,20 +100,20 @@ func (c *ConcurrencyServiceLayeredClient) callBatchNoRetry(
 }
 func (c *ConcurrencyServiceLayeredClient) Batch(
 	ctx context.Context,
-	request *ConcurrencyBatchRequest,
+	request *ConcurrencyServiceBatchRequest,
 	opts ...grpc.CallOption,
-) (*ConcurrencyBatchResponse, error) {
-	call := func(ctx context.Context) (*ConcurrencyBatchResponse, error) {
+) (*ConcurrencyServiceBatchResponse, error) {
+	call := func(ctx context.Context) (*ConcurrencyServiceBatchResponse, error) {
 		return c.callBatchNoRetry(ctx, request, opts...)
 	}
 	return backoff.ThrottleRetryContextWithReturn(ctx, call, c.retryPolicy, common.IsServiceClientTransientError)
 }
 func (c *ConcurrencyServiceLayeredClient) callWaitNoRetry(
 	ctx context.Context,
-	request *ConcurrencyWaitRequest,
+	request *ConcurrencyServiceWaitRequest,
 	opts ...grpc.CallOption,
-) (*ConcurrencyWaitResponse, error) {
-	var response *ConcurrencyWaitResponse
+) (*ConcurrencyServiceWaitResponse, error) {
+	var response *ConcurrencyServiceWaitResponse
 	var err error
 	startTime := time.Now().UTC()
 	// the caller is a namespace, hence the tag below.
@@ -143,10 +143,10 @@ func (c *ConcurrencyServiceLayeredClient) callWaitNoRetry(
 }
 func (c *ConcurrencyServiceLayeredClient) Wait(
 	ctx context.Context,
-	request *ConcurrencyWaitRequest,
+	request *ConcurrencyServiceWaitRequest,
 	opts ...grpc.CallOption,
-) (*ConcurrencyWaitResponse, error) {
-	call := func(ctx context.Context) (*ConcurrencyWaitResponse, error) {
+) (*ConcurrencyServiceWaitResponse, error) {
+	call := func(ctx context.Context) (*ConcurrencyServiceWaitResponse, error) {
 		return c.callWaitNoRetry(ctx, request, opts...)
 	}
 	return backoff.ThrottleRetryContextWithReturn(ctx, call, c.retryPolicy, common.IsServiceClientTransientError)

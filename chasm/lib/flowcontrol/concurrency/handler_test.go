@@ -65,7 +65,7 @@ func newTestHandlerContext(t *testing.T) *testHandlerContext {
 
 func (tc *testHandlerContext) start(t *testing.T, limit int32) {
 	t.Helper()
-	req := &fcpb.ConcurrencyBatchRequest{
+	req := &fcpb.ConcurrencyServiceBatchRequest{
 		NamespaceId:         tc.key.namespaceID,
 		Key:                 tc.key.key,
 		ConfigUpdate:        &taskqueuepb.ConcurrencyLimit{ConcurrentTasks: limit},
@@ -81,13 +81,13 @@ func (tc *testHandlerContext) start(t *testing.T, limit int32) {
 }
 
 // testUpdateFn calls updateFn with default dynamic config values.
-func testUpdateFn(c *Component, cctx chasm.MutableContext, creq chasmReq) ([]*fcpb.ConcurrencyBatchResponse, error) {
+func testUpdateFn(c *Component, cctx chasm.MutableContext, creq chasmReq) ([]*fcpb.ConcurrencyServiceBatchResponse, error) {
 	creq.reserveTimeout = defaultReserveTimeout
 	creq.stagedWake = defaultStagedWakeOptions
 	return updateFn(c, cctx, creq)
 }
 
-func (tc *testHandlerContext) apply(reqs ...*fcpb.ConcurrencyBatchRequest) []batchRes {
+func (tc *testHandlerContext) apply(reqs ...*fcpb.ConcurrencyServiceBatchRequest) []batchRes {
 	items := make([]batchReq, len(reqs))
 	for i, req := range reqs {
 		items[i] = batchReq{ctx: tc.ctx, req: req}
@@ -143,15 +143,15 @@ func TestHandlerWaiterEntries(t *testing.T) {
 func TestHandlerWaitRetriesWithCurrentGeneration(t *testing.T) {
 	tc := newTestHandlerContext(t)
 	tc.start(t, 1)
-	res := tc.apply(&fcpb.ConcurrencyBatchRequest{ReserveSlots: []string{"slot"}})
+	res := tc.apply(&fcpb.ConcurrencyServiceBatchRequest{ReserveSlots: []string{"slot"}})
 	require.NoError(t, res[0].err)
 	require.Equal(t, int64(1), res[0].res.Generation)
-	res = tc.apply(&fcpb.ConcurrencyBatchRequest{CommitSlots: []string{"slot"}})
+	res = tc.apply(&fcpb.ConcurrencyServiceBatchRequest{CommitSlots: []string{"slot"}})
 	require.NoError(t, res[0].err)
 	require.Equal(t, []bool{true}, res[0].res.CommitSuccess)
-	res = tc.apply(&fcpb.ConcurrencyBatchRequest{ReleaseSlots: []string{"slot"}})
+	res = tc.apply(&fcpb.ConcurrencyServiceBatchRequest{ReleaseSlots: []string{"slot"}})
 	require.NoError(t, res[0].err)
-	req := &fcpb.ConcurrencyWaitRequest{
+	req := &fcpb.ConcurrencyServiceWaitRequest{
 		NamespaceId: tc.key.namespaceID,
 		Key:         tc.key.key,
 	}
@@ -172,7 +172,7 @@ func TestHandlerWaitLongPollTimeoutReturnsRequestGeneration(t *testing.T) {
 	ctx, cancel := context.WithCancel(tc.ctx)
 	cancel()
 
-	res, err := tc.handler.Wait(ctx, &fcpb.ConcurrencyWaitRequest{
+	res, err := tc.handler.Wait(ctx, &fcpb.ConcurrencyServiceWaitRequest{
 		NamespaceId:  tc.key.namespaceID,
 		Key:          tc.key.key,
 		WakePriority: 100,
@@ -190,7 +190,7 @@ func TestHandlerWaitDeadlineExceededReturnsRequestGeneration(t *testing.T) {
 	h := NewHandler(log.NewTestLogger(), dynamicconfig.NewNoopCollection())
 	ctx := chasm.NewEngineContext(context.Background(), engine)
 
-	res, err := h.Wait(ctx, &fcpb.ConcurrencyWaitRequest{
+	res, err := h.Wait(ctx, &fcpb.ConcurrencyServiceWaitRequest{
 		NamespaceId:  "namespace",
 		Key:          "limiter",
 		Generation:   2,
@@ -236,7 +236,7 @@ func TestHandlerWaitUsesLongPollConfig(t *testing.T) {
 				defer cancel()
 			}
 
-			_, err := h.Wait(ctx, &fcpb.ConcurrencyWaitRequest{NamespaceId: "namespace", Key: "limiter"})
+			_, err := h.Wait(ctx, &fcpb.ConcurrencyServiceWaitRequest{NamespaceId: "namespace", Key: "limiter"})
 			require.NoError(t, err)
 			require.InDelta(t, tt.wantTimeout, gotTimeout, float64(time.Second))
 		})
@@ -252,7 +252,7 @@ func TestHandlerWaitPropagatesPollError(t *testing.T) {
 	ctx := chasm.NewEngineContext(context.Background(), engine)
 	key := batchKey{namespaceID: "namespace", key: "limiter"}
 
-	res, err := h.Wait(ctx, &fcpb.ConcurrencyWaitRequest{
+	res, err := h.Wait(ctx, &fcpb.ConcurrencyServiceWaitRequest{
 		NamespaceId:  key.namespaceID,
 		Key:          key.key,
 		Generation:   2,
@@ -266,7 +266,7 @@ func TestHandlerWaitPropagatesPollError(t *testing.T) {
 func TestHandlerApplyBatchSlotLifecycle(t *testing.T) {
 	tc := newTestHandlerContext(t)
 
-	ress := tc.apply(&fcpb.ConcurrencyBatchRequest{
+	ress := tc.apply(&fcpb.ConcurrencyServiceBatchRequest{
 		ReserveSlots:        []string{"first"},
 		ConfigUpdate:        &taskqueuepb.ConcurrencyLimit{ConcurrentTasks: 1},
 		ConfigUpdateVersion: 1,
@@ -275,26 +275,26 @@ func TestHandlerApplyBatchSlotLifecycle(t *testing.T) {
 	require.Equal(t, []bool{true}, ress[0].res.ReserveSuccess)
 	require.Equal(t, int64(1), ress[0].res.Generation)
 
-	ress = tc.apply(&fcpb.ConcurrencyBatchRequest{CommitSlots: []string{"first", "first"}})
+	ress = tc.apply(&fcpb.ConcurrencyServiceBatchRequest{CommitSlots: []string{"first", "first"}})
 	require.NoError(t, ress[0].err)
 	require.Equal(t, []bool{true, true}, ress[0].res.CommitSuccess)
 
-	ress = tc.apply(&fcpb.ConcurrencyBatchRequest{CancelReservationSlots: []string{"first"}})
+	ress = tc.apply(&fcpb.ConcurrencyServiceBatchRequest{CancelReservationSlots: []string{"first"}})
 	require.NoError(t, ress[0].err)
-	ress = tc.apply(&fcpb.ConcurrencyBatchRequest{ReserveSlots: []string{"second"}})
+	ress = tc.apply(&fcpb.ConcurrencyServiceBatchRequest{ReserveSlots: []string{"second"}})
 	require.NoError(t, ress[0].err)
 	require.Equal(t, []bool{false}, ress[0].res.ReserveSuccess)
 
-	ress = tc.apply(&fcpb.ConcurrencyBatchRequest{ReleaseSlots: []string{"first", "first"}})
+	ress = tc.apply(&fcpb.ConcurrencyServiceBatchRequest{ReleaseSlots: []string{"first", "first"}})
 	require.NoError(t, ress[0].err)
-	ress = tc.apply(&fcpb.ConcurrencyBatchRequest{ReserveSlots: []string{"second", "second"}})
+	ress = tc.apply(&fcpb.ConcurrencyServiceBatchRequest{ReserveSlots: []string{"second", "second"}})
 	require.NoError(t, ress[0].err)
 	require.Equal(t, []bool{true, true}, ress[0].res.ReserveSuccess)
 	require.Equal(t, int64(2), ress[0].res.Generation)
 
-	ress = tc.apply(&fcpb.ConcurrencyBatchRequest{CancelReservationSlots: []string{"second", "second"}})
+	ress = tc.apply(&fcpb.ConcurrencyServiceBatchRequest{CancelReservationSlots: []string{"second", "second"}})
 	require.NoError(t, ress[0].err)
-	ress = tc.apply(&fcpb.ConcurrencyBatchRequest{ReserveSlots: []string{"third"}})
+	ress = tc.apply(&fcpb.ConcurrencyServiceBatchRequest{ReserveSlots: []string{"third"}})
 	require.NoError(t, ress[0].err)
 	require.Equal(t, []bool{true}, ress[0].res.ReserveSuccess)
 	require.Equal(t, int64(3), ress[0].res.Generation)
@@ -303,7 +303,7 @@ func TestHandlerApplyBatchSlotLifecycle(t *testing.T) {
 func TestHandlerApplyBatchCommitAfterReservationExpiry(t *testing.T) {
 	tc := newTestHandlerContext(t)
 
-	ress := tc.apply(&fcpb.ConcurrencyBatchRequest{
+	ress := tc.apply(&fcpb.ConcurrencyServiceBatchRequest{
 		ReserveSlots:        []string{"expired"},
 		ConfigUpdate:        &taskqueuepb.ConcurrencyLimit{ConcurrentTasks: 1},
 		ConfigUpdateVersion: 1,
@@ -312,10 +312,10 @@ func TestHandlerApplyBatchCommitAfterReservationExpiry(t *testing.T) {
 	require.Equal(t, []bool{true}, ress[0].res.ReserveSuccess)
 	tc.timeSource.Update(tc.timeSource.Now().Add(defaultReserveTimeout + time.Second))
 
-	ress = tc.apply(&fcpb.ConcurrencyBatchRequest{CommitSlots: []string{"expired"}})
+	ress = tc.apply(&fcpb.ConcurrencyServiceBatchRequest{CommitSlots: []string{"expired"}})
 	require.NoError(t, ress[0].err)
 	require.Equal(t, []bool{false}, ress[0].res.CommitSuccess)
-	ress = tc.apply(&fcpb.ConcurrencyBatchRequest{ReserveSlots: []string{"replacement"}})
+	ress = tc.apply(&fcpb.ConcurrencyServiceBatchRequest{ReserveSlots: []string{"replacement"}})
 	require.NoError(t, ress[0].err)
 	require.Equal(t, []bool{true}, ress[0].res.ReserveSuccess)
 	require.Equal(t, int64(2), ress[0].res.Generation)
@@ -328,7 +328,7 @@ func TestHandlerApplyBatchUsesReserveTimeoutConfig(t *testing.T) {
 		ReserveTimeout.Key(): reserveTimeout,
 	}, log.NewNoopLogger()))
 
-	ress := tc.apply(&fcpb.ConcurrencyBatchRequest{
+	ress := tc.apply(&fcpb.ConcurrencyServiceBatchRequest{
 		ReserveSlots:        []string{"short", "long"},
 		ConfigUpdate:        &taskqueuepb.ConcurrencyLimit{ConcurrentTasks: 2},
 		ConfigUpdateVersion: 1,
@@ -336,12 +336,12 @@ func TestHandlerApplyBatchUsesReserveTimeoutConfig(t *testing.T) {
 	require.NoError(t, ress[0].err)
 	require.Equal(t, []bool{true, true}, ress[0].res.ReserveSuccess)
 	tc.timeSource.Update(tc.timeSource.Now().Add(reserveTimeout - 2*time.Second))
-	ress = tc.apply(&fcpb.ConcurrencyBatchRequest{CommitSlots: []string{"long"}})
+	ress = tc.apply(&fcpb.ConcurrencyServiceBatchRequest{CommitSlots: []string{"long"}})
 	require.NoError(t, ress[0].err)
 	require.Equal(t, []bool{true}, ress[0].res.CommitSuccess)
 
 	tc.timeSource.Update(tc.timeSource.Now().Add(4 * time.Second))
-	ress = tc.apply(&fcpb.ConcurrencyBatchRequest{CommitSlots: []string{"short"}})
+	ress = tc.apply(&fcpb.ConcurrencyServiceBatchRequest{CommitSlots: []string{"short"}})
 	require.NoError(t, ress[0].err)
 	require.Equal(t, []bool{false}, ress[0].res.CommitSuccess)
 }
@@ -350,8 +350,8 @@ func TestHandlerApplyBatchWithoutReserveRequiresExistingComponent(t *testing.T) 
 	tc := newTestHandlerContext(t)
 
 	ress := tc.apply(
-		&fcpb.ConcurrencyBatchRequest{CommitSlots: []string{"missing"}},
-		&fcpb.ConcurrencyBatchRequest{ReleaseSlots: []string{"missing"}},
+		&fcpb.ConcurrencyServiceBatchRequest{CommitSlots: []string{"missing"}},
+		&fcpb.ConcurrencyServiceBatchRequest{ReleaseSlots: []string{"missing"}},
 	)
 	require.Len(t, ress, 2)
 	require.Error(t, ress[0].err)
@@ -373,7 +373,7 @@ func TestInitFn(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			c, err := initFn(nil, chasmReq{items: []batchReq{{
-				req: &fcpb.ConcurrencyBatchRequest{
+				req: &fcpb.ConcurrencyServiceBatchRequest{
 					ConfigUpdate:        &taskqueuepb.ConcurrencyLimit{ConcurrentTasks: tt.limit},
 					ConfigUpdateVersion: 4,
 				},
@@ -388,11 +388,11 @@ func TestInitFn(t *testing.T) {
 
 func TestInitFnUsesNewestConfigInBatch(t *testing.T) {
 	c, err := initFn(nil, chasmReq{items: []batchReq{
-		{req: &fcpb.ConcurrencyBatchRequest{
+		{req: &fcpb.ConcurrencyServiceBatchRequest{
 			ConfigUpdate:        &taskqueuepb.ConcurrencyLimit{ConcurrentTasks: 3},
 			ConfigUpdateVersion: 3,
 		}},
-		{req: &fcpb.ConcurrencyBatchRequest{
+		{req: &fcpb.ConcurrencyServiceBatchRequest{
 			ConfigUpdate:        &taskqueuepb.ConcurrencyLimit{ConcurrentTasks: 1},
 			ConfigUpdateVersion: 2,
 		}},
@@ -412,7 +412,7 @@ func TestUpdateFnReserveLastSlotIncrementsGeneration(t *testing.T) {
 	c.WakeStage = 4
 
 	ress, err := testUpdateFn(c, newTestMutableContext(now), chasmReq{items: []batchReq{{
-		req: &fcpb.ConcurrencyBatchRequest{ReserveSlots: []string{"new"}},
+		req: &fcpb.ConcurrencyServiceBatchRequest{ReserveSlots: []string{"new"}},
 	}}})
 	require.NoError(t, err)
 	require.Len(t, ress, 1)
@@ -431,7 +431,7 @@ func TestUpdateFnFailedReserveDoesNotIncrementGeneration(t *testing.T) {
 	c.Slots = []*fcpb.ConcurrencyState_Slot{{SlotId: "existing", Committed: true}}
 
 	ress, err := testUpdateFn(c, newTestMutableContext(now), chasmReq{items: []batchReq{{
-		req: &fcpb.ConcurrencyBatchRequest{ReserveSlots: []string{"new"}},
+		req: &fcpb.ConcurrencyServiceBatchRequest{ReserveSlots: []string{"new"}},
 	}}})
 	require.NoError(t, err)
 	require.Equal(t, []bool{false}, ress[0].ReserveSuccess)
@@ -445,7 +445,7 @@ func TestUpdateFnIgnoresStaleConfig(t *testing.T) {
 	c.ConfigVersion = 2
 
 	ress, err := testUpdateFn(c, newTestMutableContext(now), chasmReq{items: []batchReq{{
-		req: &fcpb.ConcurrencyBatchRequest{
+		req: &fcpb.ConcurrencyServiceBatchRequest{
 			ConfigUpdate:        &taskqueuepb.ConcurrencyLimit{ConcurrentTasks: 0},
 			ConfigUpdateVersion: 1,
 			ReserveSlots:        []string{"first", "second"},
@@ -467,11 +467,11 @@ func TestUpdateFnPreservesPerRequestResults(t *testing.T) {
 	}
 
 	ress, err := testUpdateFn(c, newTestMutableContext(now), chasmReq{items: []batchReq{
-		{req: &fcpb.ConcurrencyBatchRequest{
+		{req: &fcpb.ConcurrencyServiceBatchRequest{
 			CommitSlots:  []string{"first", "missing"},
 			ReserveSlots: []string{"third"},
 		}},
-		{req: &fcpb.ConcurrencyBatchRequest{
+		{req: &fcpb.ConcurrencyServiceBatchRequest{
 			CommitSlots:  []string{"second"},
 			ReserveSlots: []string{"fourth", "fifth"},
 		}},
@@ -495,11 +495,11 @@ func TestUpdateFnCancelAndReleaseFreeCapacityBeforeReserve(t *testing.T) {
 	}
 
 	ress, err := testUpdateFn(c, newTestMutableContext(now), chasmReq{items: []batchReq{
-		{req: &fcpb.ConcurrencyBatchRequest{
+		{req: &fcpb.ConcurrencyServiceBatchRequest{
 			ReleaseSlots: []string{"committed"},
 			ReserveSlots: []string{"first"},
 		}},
-		{req: &fcpb.ConcurrencyBatchRequest{
+		{req: &fcpb.ConcurrencyServiceBatchRequest{
 			CancelReservationSlots: []string{"reserved"},
 			ReserveSlots:           []string{"second"},
 		}},
@@ -522,7 +522,7 @@ func TestUpdateFnExpireAndReserveIncrementsGeneration(t *testing.T) {
 	}}
 
 	ress, err := testUpdateFn(c, newTestMutableContext(now), chasmReq{items: []batchReq{{
-		req: &fcpb.ConcurrencyBatchRequest{ReserveSlots: []string{"replacement"}},
+		req: &fcpb.ConcurrencyServiceBatchRequest{ReserveSlots: []string{"replacement"}},
 	}}})
 	require.NoError(t, err)
 	require.Equal(t, []bool{true}, ress[0].ReserveSuccess)
@@ -538,8 +538,8 @@ func TestUpdateFnAtomicReleaseAndReserveDoesNotIncrementGeneration(t *testing.T)
 	c.Slots = []*fcpb.ConcurrencyState_Slot{{SlotId: "old", Committed: true}}
 
 	ress, err := testUpdateFn(c, newTestMutableContext(now), chasmReq{items: []batchReq{
-		{req: &fcpb.ConcurrencyBatchRequest{ReleaseSlots: []string{"old"}}},
-		{req: &fcpb.ConcurrencyBatchRequest{ReserveSlots: []string{"new"}}},
+		{req: &fcpb.ConcurrencyServiceBatchRequest{ReleaseSlots: []string{"old"}}},
+		{req: &fcpb.ConcurrencyServiceBatchRequest{ReserveSlots: []string{"new"}}},
 	}})
 	require.NoError(t, err)
 	require.Len(t, ress, 2)
@@ -559,7 +559,7 @@ func TestUpdateFnConfigDecreaseIncrementsGeneration(t *testing.T) {
 	c.Slots = []*fcpb.ConcurrencyState_Slot{{SlotId: "existing", Committed: true}}
 
 	ress, err := testUpdateFn(c, newTestMutableContext(now), chasmReq{items: []batchReq{{
-		req: &fcpb.ConcurrencyBatchRequest{
+		req: &fcpb.ConcurrencyServiceBatchRequest{
 			ConfigUpdate:        &taskqueuepb.ConcurrencyLimit{ConcurrentTasks: 1},
 			ConfigUpdateVersion: 2,
 		},
@@ -583,7 +583,7 @@ func TestUpdateFnConfigDecreaseDoesNotEvictSlots(t *testing.T) {
 	getWakeLevel := func(int32) (int64, bool) { return 0, true }
 
 	ress, err := testUpdateFn(c, newTestMutableContext(now), chasmReq{
-		items: []batchReq{{req: &fcpb.ConcurrencyBatchRequest{
+		items: []batchReq{{req: &fcpb.ConcurrencyServiceBatchRequest{
 			ConfigUpdate:        &taskqueuepb.ConcurrencyLimit{ConcurrentTasks: 1},
 			ConfigUpdateVersion: 2,
 		}}},
@@ -596,7 +596,7 @@ func TestUpdateFnConfigDecreaseDoesNotEvictSlots(t *testing.T) {
 
 	for _, slotID := range []string{"first", "second"} {
 		_, err = testUpdateFn(c, newTestMutableContext(now), chasmReq{
-			items:        []batchReq{{req: &fcpb.ConcurrencyBatchRequest{ReleaseSlots: []string{slotID}}}},
+			items:        []batchReq{{req: &fcpb.ConcurrencyServiceBatchRequest{ReleaseSlots: []string{slotID}}}},
 			getWakeLevel: getWakeLevel,
 		})
 		require.NoError(t, err)
@@ -604,7 +604,7 @@ func TestUpdateFnConfigDecreaseDoesNotEvictSlots(t *testing.T) {
 	}
 
 	_, err = testUpdateFn(c, newTestMutableContext(now), chasmReq{
-		items:        []batchReq{{req: &fcpb.ConcurrencyBatchRequest{ReleaseSlots: []string{"third"}}}},
+		items:        []batchReq{{req: &fcpb.ConcurrencyServiceBatchRequest{ReleaseSlots: []string{"third"}}}},
 		getWakeLevel: getWakeLevel,
 	})
 	require.NoError(t, err)
@@ -622,7 +622,7 @@ func TestUpdateFnConfigIncreaseWakesWaiters(t *testing.T) {
 	var wantTokens int32
 
 	ress, err := testUpdateFn(c, newTestMutableContext(now), chasmReq{
-		items: []batchReq{{req: &fcpb.ConcurrencyBatchRequest{
+		items: []batchReq{{req: &fcpb.ConcurrencyServiceBatchRequest{
 			ConfigUpdate:        &taskqueuepb.ConcurrencyLimit{ConcurrentTasks: 3},
 			ConfigUpdateVersion: 2,
 		}}},
@@ -648,7 +648,7 @@ func TestUpdateFnAvailabilityIncreaseStartsWake(t *testing.T) {
 	wantTokens := int32(0)
 
 	ress, err := testUpdateFn(c, cctx, chasmReq{
-		items: []batchReq{{req: &fcpb.ConcurrencyBatchRequest{ReleaseSlots: []string{"existing"}}}},
+		items: []batchReq{{req: &fcpb.ConcurrencyServiceBatchRequest{ReleaseSlots: []string{"existing"}}}},
 		getWakeLevel: func(tokens int32) (int64, bool) {
 			wantTokens = tokens
 			return 100, false
@@ -673,7 +673,7 @@ func TestUpdateFnNoAvailabilityIncreaseDoesNotRestartWake(t *testing.T) {
 	c.Slots = []*fcpb.ConcurrencyState_Slot{{SlotId: "existing", Committed: true}}
 
 	ress, err := testUpdateFn(c, cctx, chasmReq{
-		items: []batchReq{{req: &fcpb.ConcurrencyBatchRequest{ReleaseSlots: []string{"missing"}}}},
+		items: []batchReq{{req: &fcpb.ConcurrencyServiceBatchRequest{ReleaseSlots: []string{"missing"}}}},
 		getWakeLevel: func(int32) (int64, bool) {
 			t.Fatal("getWakeLevel called without an availability increase")
 			return 0, false
@@ -703,7 +703,7 @@ func TestUpdateFnExpirationStartsWake(t *testing.T) {
 	wantTokens := int32(0)
 
 	ress, err := testUpdateFn(c, cctx, chasmReq{
-		items: []batchReq{{req: &fcpb.ConcurrencyBatchRequest{CommitSlots: []string{"active"}}}},
+		items: []batchReq{{req: &fcpb.ConcurrencyServiceBatchRequest{CommitSlots: []string{"active"}}}},
 		getWakeLevel: func(tokens int32) (int64, bool) {
 			wantTokens = tokens
 			return 0, true

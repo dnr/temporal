@@ -41,7 +41,7 @@ message ConcurrencyState {
   }
 }
 
-message ConcurrencyBatchRequest {
+message ConcurrencyServiceBatchRequest {
   string namespace_id = 1;
   string key = 2;
 
@@ -66,7 +66,7 @@ message ConcurrencyBatchRequest {
   int64 config_update_version = 8;
 }
 
-message ConcurrencyBatchResponse {
+message ConcurrencyServiceBatchResponse {
   // Generation of limiter state.
   int64 generation = 1;
 
@@ -83,7 +83,7 @@ message ConcurrencyBatchResponse {
   // Note: we don't need a release_success, it's always considered successful.
 }
 
-message ConcurrencyWaitRequest {
+message ConcurrencyServiceWaitRequest {
   string namespace_id = 1;
   string key = 2;
   // Generation is used to ensure monotonicity of waits. The caller should pass its last known
@@ -100,7 +100,7 @@ message ConcurrencyWaitRequest {
   int32 requested_wake_tokens = 5;
 }
 
-message ConcurrencyWaitResponse {
+message ConcurrencyServiceWaitResponse {
   // Generation of limiter state.
   int64 generation = 1;
   // Number of slots that the client should consider available. This may be zero when the call
@@ -124,13 +124,13 @@ service ConcurrencyService {
   // durable. The server may or may not split the batch into multiple CHASM transitions with
   // different durability, so callers should not assume that e.g. a Reserve plus Commit in one
   // batch means that the Reserve was durable.
-  rpc Batch(ConcurrencyBatchRequest) returns (ConcurrencyBatchResponse) {
+  rpc Batch(ConcurrencyServiceBatchRequest) returns (ConcurrencyServiceBatchResponse) {
     option (temporal.server.api.routing.v1.routing).business_id = "key";
     option (temporal.server.api.common.v1.api_category).category = API_CATEGORY_STANDARD;
   };
 
   // Wait is a long-poll RPC that returns when at least one slot is free, or timeout.
-  rpc Wait(ConcurrencyWaitRequest) returns (ConcurrencyWaitResponse) {
+  rpc Wait(ConcurrencyServiceWaitRequest) returns (ConcurrencyServiceWaitResponse) {
     option (temporal.server.api.routing.v1.routing).business_id = "key";
     option (temporal.server.api.common.v1.api_category).category = API_CATEGORY_LONG_POLL;
   };

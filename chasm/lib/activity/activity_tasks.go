@@ -54,7 +54,7 @@ func (h *releaseLimiterTaskHandler) Execute(
 	for _, limiter := range task.GetLimiters() {
 		switch limiter.GetLimiterType() {
 		case enumsspb.LIMITER_TYPE_CONCURRENCY:
-			_, err := h.concurrencyServiceClient.Batch(ctx, &fcpb.ConcurrencyBatchRequest{
+			_, err := h.concurrencyServiceClient.Batch(ctx, &fcpb.ConcurrencyServiceBatchRequest{
 				NamespaceId:  activityRef.NamespaceID,
 				Key:          limiter.GetKey(),
 				ReleaseSlots: []string{limiter.GetSlotId()},

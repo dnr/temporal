@@ -18,29 +18,29 @@ import (
 
 type testClient struct {
 	fcpb.ConcurrencyServiceClient
-	batch func(context.Context, *fcpb.ConcurrencyBatchRequest, ...grpc.CallOption) (*fcpb.ConcurrencyBatchResponse, error)
+	batch func(context.Context, *fcpb.ConcurrencyServiceBatchRequest, ...grpc.CallOption) (*fcpb.ConcurrencyServiceBatchResponse, error)
 }
 
 func (c *testClient) Batch(
 	ctx context.Context,
-	req *fcpb.ConcurrencyBatchRequest,
+	req *fcpb.ConcurrencyServiceBatchRequest,
 	opts ...grpc.CallOption,
-) (*fcpb.ConcurrencyBatchResponse, error) {
+) (*fcpb.ConcurrencyServiceBatchResponse, error) {
 	return c.batch(ctx, req, opts...)
 }
 
 func TestBatchingClient(t *testing.T) {
 	callCount := 0
-	batchedRequests := make(chan *fcpb.ConcurrencyBatchRequest, 1)
+	batchedRequests := make(chan *fcpb.ConcurrencyServiceBatchRequest, 1)
 	client := NewBatchingClient(
 		&testClient{batch: func(
 			_ context.Context,
-			req *fcpb.ConcurrencyBatchRequest,
+			req *fcpb.ConcurrencyServiceBatchRequest,
 			_ ...grpc.CallOption,
-		) (*fcpb.ConcurrencyBatchResponse, error) {
+		) (*fcpb.ConcurrencyServiceBatchResponse, error) {
 			callCount++
 			batchedRequests <- req
-			res := &fcpb.ConcurrencyBatchResponse{Generation: 42}
+			res := &fcpb.ConcurrencyServiceBatchResponse{Generation: 42}
 			for _, slotID := range req.ReserveSlots {
 				res.ReserveSuccess = append(res.ReserveSuccess, slotID == "reserve-1")
 			}
@@ -59,10 +59,10 @@ func TestBatchingClient(t *testing.T) {
 	)
 
 	type result struct {
-		res *fcpb.ConcurrencyBatchResponse
+		res *fcpb.ConcurrencyServiceBatchResponse
 		err error
 	}
-	requests := []*fcpb.ConcurrencyBatchRequest{
+	requests := []*fcpb.ConcurrencyServiceBatchRequest{
 		{
 			NamespaceId:            "namespace-id",
 			Key:                    "limiter-key",
@@ -115,31 +115,31 @@ func TestBatchingClient(t *testing.T) {
 func TestBatchingClientRejectsInvalidBatchResponse(t *testing.T) {
 	tests := []struct {
 		name string
-		res  *fcpb.ConcurrencyBatchResponse
+		res  *fcpb.ConcurrencyServiceBatchResponse
 	}{
 		{name: "nil response"},
-		{name: "missing reserve result", res: &fcpb.ConcurrencyBatchResponse{
+		{name: "missing reserve result", res: &fcpb.ConcurrencyServiceBatchResponse{
 			ReserveSuccess: []bool{true},
 			CommitSuccess:  []bool{true},
 		}},
-		{name: "extra reserve result", res: &fcpb.ConcurrencyBatchResponse{
+		{name: "extra reserve result", res: &fcpb.ConcurrencyServiceBatchResponse{
 			ReserveSuccess: []bool{true, false, true},
 			CommitSuccess:  []bool{true},
 		}},
-		{name: "missing commit result", res: &fcpb.ConcurrencyBatchResponse{
+		{name: "missing commit result", res: &fcpb.ConcurrencyServiceBatchResponse{
 			ReserveSuccess: []bool{true, false},
 		}},
-		{name: "extra commit result", res: &fcpb.ConcurrencyBatchResponse{
+		{name: "extra commit result", res: &fcpb.ConcurrencyServiceBatchResponse{
 			ReserveSuccess: []bool{true, false},
 			CommitSuccess:  []bool{true, false},
 		}},
 	}
 	items := []clientBatchItem{
-		{ctx: t.Context(), req: &fcpb.ConcurrencyBatchRequest{
+		{ctx: t.Context(), req: &fcpb.ConcurrencyServiceBatchRequest{
 			ReserveSlots: []string{"first"},
 			CommitSlots:  []string{"first"},
 		}},
-		{ctx: t.Context(), req: &fcpb.ConcurrencyBatchRequest{
+		{ctx: t.Context(), req: &fcpb.ConcurrencyServiceBatchRequest{
 			ReserveSlots: []string{"second"},
 		}},
 	}
@@ -148,9 +148,9 @@ func TestBatchingClientRejectsInvalidBatchResponse(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			client := &BatchingClient{ConcurrencyServiceClient: &testClient{batch: func(
 				context.Context,
-				*fcpb.ConcurrencyBatchRequest,
+				*fcpb.ConcurrencyServiceBatchRequest,
 				...grpc.CallOption,
-			) (*fcpb.ConcurrencyBatchResponse, error) {
+			) (*fcpb.ConcurrencyServiceBatchResponse, error) {
 				return tt.res, nil
 			}}}
 
@@ -169,15 +169,15 @@ func TestBatchingClientPropagatesBatchError(t *testing.T) {
 	testErr := errors.New("batch failed")
 	client := &BatchingClient{ConcurrencyServiceClient: &testClient{batch: func(
 		context.Context,
-		*fcpb.ConcurrencyBatchRequest,
+		*fcpb.ConcurrencyServiceBatchRequest,
 		...grpc.CallOption,
-	) (*fcpb.ConcurrencyBatchResponse, error) {
+	) (*fcpb.ConcurrencyServiceBatchResponse, error) {
 		return nil, testErr
 	}}}
 
 	results := client.applyBatch(clientBatchKey{}, []clientBatchItem{
-		{ctx: t.Context(), req: &fcpb.ConcurrencyBatchRequest{}},
-		{ctx: t.Context(), req: &fcpb.ConcurrencyBatchRequest{}},
+		{ctx: t.Context(), req: &fcpb.ConcurrencyServiceBatchRequest{}},
+		{ctx: t.Context(), req: &fcpb.ConcurrencyServiceBatchRequest{}},
 	})
 	require.Len(t, results, 2)
 	for _, result := range results {
@@ -193,16 +193,16 @@ func TestBatchingClientUsesActiveRequestContext(t *testing.T) {
 	activeCtx := context.WithValue(t.Context(), contextKey{}, "active")
 	client := &BatchingClient{ConcurrencyServiceClient: &testClient{batch: func(
 		ctx context.Context,
-		_ *fcpb.ConcurrencyBatchRequest,
+		_ *fcpb.ConcurrencyServiceBatchRequest,
 		_ ...grpc.CallOption,
-	) (*fcpb.ConcurrencyBatchResponse, error) {
+	) (*fcpb.ConcurrencyServiceBatchResponse, error) {
 		require.Equal(t, "active", ctx.Value(contextKey{}))
-		return &fcpb.ConcurrencyBatchResponse{}, nil
+		return &fcpb.ConcurrencyServiceBatchResponse{}, nil
 	}}}
 
 	results := client.applyBatch(clientBatchKey{}, []clientBatchItem{
-		{ctx: canceledCtx, req: &fcpb.ConcurrencyBatchRequest{}},
-		{ctx: activeCtx, req: &fcpb.ConcurrencyBatchRequest{}},
+		{ctx: canceledCtx, req: &fcpb.ConcurrencyServiceBatchRequest{}},
+		{ctx: activeCtx, req: &fcpb.ConcurrencyServiceBatchRequest{}},
 	})
 	require.NoError(t, results[0].err)
 	require.NoError(t, results[1].err)
@@ -212,15 +212,15 @@ func TestBatchingClientCallOptionsBypassBatching(t *testing.T) {
 	callCount := 0
 	client := &BatchingClient{ConcurrencyServiceClient: &testClient{batch: func(
 		_ context.Context,
-		_ *fcpb.ConcurrencyBatchRequest,
+		_ *fcpb.ConcurrencyServiceBatchRequest,
 		opts ...grpc.CallOption,
-	) (*fcpb.ConcurrencyBatchResponse, error) {
+	) (*fcpb.ConcurrencyServiceBatchResponse, error) {
 		callCount++
 		require.Len(t, opts, 1)
-		return &fcpb.ConcurrencyBatchResponse{Generation: 42}, nil
+		return &fcpb.ConcurrencyServiceBatchResponse{Generation: 42}, nil
 	}}}
 
-	res, err := client.Batch(t.Context(), &fcpb.ConcurrencyBatchRequest{}, grpc.WaitForReady(true))
+	res, err := client.Batch(t.Context(), &fcpb.ConcurrencyServiceBatchRequest{}, grpc.WaitForReady(true))
 	require.NoError(t, err)
 	require.Equal(t, int64(42), res.Generation)
 	require.Equal(t, 1, callCount)
@@ -231,11 +231,11 @@ func TestBatchingClientDoesNotCombineDifferentLimiters(t *testing.T) {
 	client := NewBatchingClient(
 		&testClient{batch: func(
 			_ context.Context,
-			req *fcpb.ConcurrencyBatchRequest,
+			req *fcpb.ConcurrencyServiceBatchRequest,
 			_ ...grpc.CallOption,
-		) (*fcpb.ConcurrencyBatchResponse, error) {
+		) (*fcpb.ConcurrencyServiceBatchResponse, error) {
 			keys <- req.NamespaceId + "/" + req.Key
-			return &fcpb.ConcurrencyBatchResponse{}, nil
+			return &fcpb.ConcurrencyServiceBatchResponse{}, nil
 		}},
 		stream_batcher.BatcherOptions{
 			MaxItems: 2,
@@ -254,7 +254,7 @@ func TestBatchingClientDoesNotCombineDifferentLimiters(t *testing.T) {
 		{namespaceID: "other-namespace", key: "first"},
 	} {
 		wg.Go(func() {
-			_, err := client.Batch(t.Context(), &fcpb.ConcurrencyBatchRequest{
+			_, err := client.Batch(t.Context(), &fcpb.ConcurrencyServiceBatchRequest{
 				NamespaceId: limiter.namespaceID,
 				Key:         limiter.key,
 			})

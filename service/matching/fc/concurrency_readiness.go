@@ -91,7 +91,7 @@ func (cs *concurrencyState) reserve(
 	configUpdateVersion int64,
 ) error {
 	// TODO(fc): consider doing this from history to make invalid tasks cheaper to invalidate
-	res, err := cs.rs.r.concurrencyServiceClient.Batch(ctx, &fcpb.ConcurrencyBatchRequest{
+	res, err := cs.rs.r.concurrencyServiceClient.Batch(ctx, &fcpb.ConcurrencyServiceBatchRequest{
 		NamespaceId:         cs.nsID.String(),
 		Key:                 cs.key,
 		ReserveSlots:        []string{slotID},
@@ -109,7 +109,7 @@ func (cs *concurrencyState) reserve(
 }
 
 func (cs *concurrencyState) commit(ctx context.Context, slotID string) error {
-	res, err := cs.rs.r.concurrencyServiceClient.Batch(ctx, &fcpb.ConcurrencyBatchRequest{
+	res, err := cs.rs.r.concurrencyServiceClient.Batch(ctx, &fcpb.ConcurrencyServiceBatchRequest{
 		NamespaceId: cs.nsID.String(),
 		Key:         cs.key,
 		CommitSlots: []string{slotID},
@@ -127,7 +127,7 @@ func (cs *concurrencyState) commit(ctx context.Context, slotID string) error {
 func (cs *concurrencyState) cancelReserve(ctx context.Context, slotID string) {
 	// call in new goroutine, don't block here
 	go func() {
-		res, err := cs.rs.r.concurrencyServiceClient.Batch(ctx, &fcpb.ConcurrencyBatchRequest{
+		res, err := cs.rs.r.concurrencyServiceClient.Batch(ctx, &fcpb.ConcurrencyServiceBatchRequest{
 			NamespaceId:            cs.nsID.String(),
 			Key:                    cs.key,
 			CancelReservationSlots: []string{slotID},
@@ -183,7 +183,7 @@ func (cs *concurrencyState) syncLocked(rsu *readinessSyncUpdate) {
 	return
 }
 
-func (cs *concurrencyState) makeWaitRequest() *fcpb.ConcurrencyWaitRequest {
+func (cs *concurrencyState) makeWaitRequest() *fcpb.ConcurrencyServiceWaitRequest {
 	cs.rs.lock.Lock()
 	defer cs.rs.lock.Unlock()
 
@@ -192,7 +192,7 @@ func (cs *concurrencyState) makeWaitRequest() *fcpb.ConcurrencyWaitRequest {
 		return nil
 	}
 
-	return &fcpb.ConcurrencyWaitRequest{
+	return &fcpb.ConcurrencyServiceWaitRequest{
 		NamespaceId:         cs.nsID.String(),
 		Key:                 cs.key,
 		Generation:          cs.generation,
@@ -220,7 +220,7 @@ func (cs *concurrencyState) callWait(ctx context.Context) {
 		if _, ok := errors.AsType[*serviceerror.NotFound](err); ok {
 			// If the limiter doesn't exist yet, we'll get NotFound. Treat that as if we got
 			// one token, so we'll allow a task through Check to Reserve, which will create it.
-			res, err = &fcpb.ConcurrencyWaitResponse{
+			res, err = &fcpb.ConcurrencyServiceWaitResponse{
 				Generation: req.Generation,
 				WakeTokens: 1,
 			}, nil

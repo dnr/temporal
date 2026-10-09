@@ -42,35 +42,35 @@ func (this *ConcurrencyState) Equal(that interface{}) bool {
 	return proto.Equal(this, that1)
 }
 
-// Marshal an object of type ConcurrencyBatchRequest to the protobuf v3 wire format
-func (val *ConcurrencyBatchRequest) Marshal() ([]byte, error) {
+// Marshal an object of type ConcurrencyServiceBatchRequest to the protobuf v3 wire format
+func (val *ConcurrencyServiceBatchRequest) Marshal() ([]byte, error) {
 	return proto.Marshal(val)
 }
 
-// Unmarshal an object of type ConcurrencyBatchRequest from the protobuf v3 wire format
-func (val *ConcurrencyBatchRequest) Unmarshal(buf []byte) error {
+// Unmarshal an object of type ConcurrencyServiceBatchRequest from the protobuf v3 wire format
+func (val *ConcurrencyServiceBatchRequest) Unmarshal(buf []byte) error {
 	return proto.Unmarshal(buf, val)
 }
 
 // Size returns the size of the object, in bytes, once serialized
-func (val *ConcurrencyBatchRequest) Size() int {
+func (val *ConcurrencyServiceBatchRequest) Size() int {
 	return proto.Size(val)
 }
 
-// Equal returns whether two ConcurrencyBatchRequest values are equivalent by recursively
+// Equal returns whether two ConcurrencyServiceBatchRequest values are equivalent by recursively
 // comparing the message's fields.
 // For more information see the documentation for
 // https://pkg.go.dev/google.golang.org/protobuf/proto#Equal
-func (this *ConcurrencyBatchRequest) Equal(that interface{}) bool {
+func (this *ConcurrencyServiceBatchRequest) Equal(that interface{}) bool {
 	if that == nil {
 		return this == nil
 	}
 
-	var that1 *ConcurrencyBatchRequest
+	var that1 *ConcurrencyServiceBatchRequest
 	switch t := that.(type) {
-	case *ConcurrencyBatchRequest:
+	case *ConcurrencyServiceBatchRequest:
 		that1 = t
-	case ConcurrencyBatchRequest:
+	case ConcurrencyServiceBatchRequest:
 		that1 = &t
 	default:
 		return false
@@ -79,35 +79,35 @@ func (this *ConcurrencyBatchRequest) Equal(that interface{}) bool {
 	return proto.Equal(this, that1)
 }
 
-// Marshal an object of type ConcurrencyBatchResponse to the protobuf v3 wire format
-func (val *ConcurrencyBatchResponse) Marshal() ([]byte, error) {
+// Marshal an object of type ConcurrencyServiceBatchResponse to the protobuf v3 wire format
+func (val *ConcurrencyServiceBatchResponse) Marshal() ([]byte, error) {
 	return proto.Marshal(val)
 }
 
-// Unmarshal an object of type ConcurrencyBatchResponse from the protobuf v3 wire format
-func (val *ConcurrencyBatchResponse) Unmarshal(buf []byte) error {
+// Unmarshal an object of type ConcurrencyServiceBatchResponse from the protobuf v3 wire format
+func (val *ConcurrencyServiceBatchResponse) Unmarshal(buf []byte) error {
 	return proto.Unmarshal(buf, val)
 }
 
 // Size returns the size of the object, in bytes, once serialized
-func (val *ConcurrencyBatchResponse) Size() int {
+func (val *ConcurrencyServiceBatchResponse) Size() int {
 	return proto.Size(val)
 }
 
-// Equal returns whether two ConcurrencyBatchResponse values are equivalent by recursively
+// Equal returns whether two ConcurrencyServiceBatchResponse values are equivalent by recursively
 // comparing the message's fields.
 // For more information see the documentation for
 // https://pkg.go.dev/google.golang.org/protobuf/proto#Equal
-func (this *ConcurrencyBatchResponse) Equal(that interface{}) bool {
+func (this *ConcurrencyServiceBatchResponse) Equal(that interface{}) bool {
 	if that == nil {
 		return this == nil
 	}
 
-	var that1 *ConcurrencyBatchResponse
+	var that1 *ConcurrencyServiceBatchResponse
 	switch t := that.(type) {
-	case *ConcurrencyBatchResponse:
+	case *ConcurrencyServiceBatchResponse:
 		that1 = t
-	case ConcurrencyBatchResponse:
+	case ConcurrencyServiceBatchResponse:
 		that1 = &t
 	default:
 		return false
@@ -116,35 +116,35 @@ func (this *ConcurrencyBatchResponse) Equal(that interface{}) bool {
 	return proto.Equal(this, that1)
 }
 
-// Marshal an object of type ConcurrencyWaitRequest to the protobuf v3 wire format
-func (val *ConcurrencyWaitRequest) Marshal() ([]byte, error) {
+// Marshal an object of type ConcurrencyServiceWaitRequest to the protobuf v3 wire format
+func (val *ConcurrencyServiceWaitRequest) Marshal() ([]byte, error) {
 	return proto.Marshal(val)
 }
 
-// Unmarshal an object of type ConcurrencyWaitRequest from the protobuf v3 wire format
-func (val *ConcurrencyWaitRequest) Unmarshal(buf []byte) error {
+// Unmarshal an object of type ConcurrencyServiceWaitRequest from the protobuf v3 wire format
+func (val *ConcurrencyServiceWaitRequest) Unmarshal(buf []byte) error {
 	return proto.Unmarshal(buf, val)
 }
 
 // Size returns the size of the object, in bytes, once serialized
-func (val *ConcurrencyWaitRequest) Size() int {
+func (val *ConcurrencyServiceWaitRequest) Size() int {
 	return proto.Size(val)
 }
 
-// Equal returns whether two ConcurrencyWaitRequest values are equivalent by recursively
+// Equal returns whether two ConcurrencyServiceWaitRequest values are equivalent by recursively
 // comparing the message's fields.
 // For more information see the documentation for
 // https://pkg.go.dev/google.golang.org/protobuf/proto#Equal
-func (this *ConcurrencyWaitRequest) Equal(that interface{}) bool {
+func (this *ConcurrencyServiceWaitRequest) Equal(that interface{}) bool {
 	if that == nil {
 		return this == nil
 	}
 
-	var that1 *ConcurrencyWaitRequest
+	var that1 *ConcurrencyServiceWaitRequest
 	switch t := that.(type) {
-	case *ConcurrencyWaitRequest:
+	case *ConcurrencyServiceWaitRequest:
 		that1 = t
-	case ConcurrencyWaitRequest:
+	case ConcurrencyServiceWaitRequest:
 		that1 = &t
 	default:
 		return false
@@ -153,35 +153,35 @@ func (this *ConcurrencyWaitRequest) Equal(that interface{}) bool {
 	return proto.Equal(this, that1)
 }
 
-// Marshal an object of type ConcurrencyWaitResponse to the protobuf v3 wire format
-func (val *ConcurrencyWaitResponse) Marshal() ([]byte, error) {
+// Marshal an object of type ConcurrencyServiceWaitResponse to the protobuf v3 wire format
+func (val *ConcurrencyServiceWaitResponse) Marshal() ([]byte, error) {
 	return proto.Marshal(val)
 }
 
-// Unmarshal an object of type ConcurrencyWaitResponse from the protobuf v3 wire format
-func (val *ConcurrencyWaitResponse) Unmarshal(buf []byte) error {
+// Unmarshal an object of type ConcurrencyServiceWaitResponse from the protobuf v3 wire format
+func (val *ConcurrencyServiceWaitResponse) Unmarshal(buf []byte) error {
 	return proto.Unmarshal(buf, val)
 }
 
 // Size returns the size of the object, in bytes, once serialized
-func (val *ConcurrencyWaitResponse) Size() int {
+func (val *ConcurrencyServiceWaitResponse) Size() int {
 	return proto.Size(val)
 }
 
-// Equal returns whether two ConcurrencyWaitResponse values are equivalent by recursively
+// Equal returns whether two ConcurrencyServiceWaitResponse values are equivalent by recursively
 // comparing the message's fields.
 // For more information see the documentation for
 // https://pkg.go.dev/google.golang.org/protobuf/proto#Equal
-func (this *ConcurrencyWaitResponse) Equal(that interface{}) bool {
+func (this *ConcurrencyServiceWaitResponse) Equal(that interface{}) bool {
 	if that == nil {
 		return this == nil
 	}
 
-	var that1 *ConcurrencyWaitResponse
+	var that1 *ConcurrencyServiceWaitResponse
 	switch t := that.(type) {
-	case *ConcurrencyWaitResponse:
+	case *ConcurrencyServiceWaitResponse:
 		that1 = t
-	case ConcurrencyWaitResponse:
+	case ConcurrencyServiceWaitResponse:
 		that1 = &t
 	default:
 		return false

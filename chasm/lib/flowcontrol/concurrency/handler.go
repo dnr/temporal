@@ -26,7 +26,7 @@ type batchKey struct {
 
 type batchReq struct {
 	ctx context.Context
-	req *fcpb.ConcurrencyBatchRequest
+	req *fcpb.ConcurrencyServiceBatchRequest
 }
 
 type chasmReq struct {
@@ -37,7 +37,7 @@ type chasmReq struct {
 }
 
 type batchRes struct {
-	res *fcpb.ConcurrencyBatchResponse
+	res *fcpb.ConcurrencyServiceBatchResponse
 	err error
 }
 
@@ -116,13 +116,13 @@ func initFn(_ chasm.MutableContext, creq chasmReq) (*Component, error) {
 	return c, nil
 }
 
-func updateFn(c *Component, cctx chasm.MutableContext, creq chasmReq) ([]*fcpb.ConcurrencyBatchResponse, error) {
+func updateFn(c *Component, cctx chasm.MutableContext, creq chasmReq) ([]*fcpb.ConcurrencyServiceBatchResponse, error) {
 	now := cctx.Now(c)
 
 	// allocate new protos for responses
-	ress := make([]*fcpb.ConcurrencyBatchResponse, len(creq.items))
+	ress := make([]*fcpb.ConcurrencyServiceBatchResponse, len(creq.items))
 	for i := range ress {
-		ress[i] = &fcpb.ConcurrencyBatchResponse{}
+		ress[i] = &fcpb.ConcurrencyServiceBatchResponse{}
 	}
 
 	prevStoredAvailable := c.availableSlots()
@@ -255,7 +255,7 @@ func (h *Handler) applyBatch(
 
 func makeBatchResults(
 	size int,
-	ress []*fcpb.ConcurrencyBatchResponse,
+	ress []*fcpb.ConcurrencyServiceBatchResponse,
 	err error,
 ) []batchRes {
 	results := make([]batchRes, size)
@@ -273,7 +273,7 @@ func makeBatchResults(
 	return results
 }
 
-func (h *Handler) Batch(ctx context.Context, req *fcpb.ConcurrencyBatchRequest) (retRes *fcpb.ConcurrencyBatchResponse, retErr error) {
+func (h *Handler) Batch(ctx context.Context, req *fcpb.ConcurrencyServiceBatchRequest) (retRes *fcpb.ConcurrencyServiceBatchResponse, retErr error) {
 	defer log.CapturePanic(h.logger, &retErr)
 
 	res, err := h.batchers.Add(ctx, batchKey{
@@ -289,7 +289,7 @@ func (h *Handler) Batch(ctx context.Context, req *fcpb.ConcurrencyBatchRequest) 
 	return res.res, res.err
 }
 
-func (h *Handler) Wait(ctx context.Context, req *fcpb.ConcurrencyWaitRequest) (retRes *fcpb.ConcurrencyWaitResponse, retErr error) {
+func (h *Handler) Wait(ctx context.Context, req *fcpb.ConcurrencyServiceWaitRequest) (retRes *fcpb.ConcurrencyServiceWaitResponse, retErr error) {
 	defer log.CapturePanic(h.logger, &retErr)
 
 	req = common.CloneProto(req)
@@ -324,24 +324,24 @@ func (h *Handler) Wait(ctx context.Context, req *fcpb.ConcurrencyWaitRequest) (r
 				NamespaceID: req.NamespaceId,
 				BusinessID:  req.Key,
 			}),
-			func(c *Component, cctx chasm.Context, req *fcpb.ConcurrencyWaitRequest) (*fcpb.ConcurrencyWaitResponse, bool, error) {
+			func(c *Component, cctx chasm.Context, req *fcpb.ConcurrencyServiceWaitRequest) (*fcpb.ConcurrencyServiceWaitResponse, bool, error) {
 				generation, tokens, ready := c.poll(cctx.Now(c), req.Generation, req.WakePriority, req.RequestedWakeTokens)
 				if !ready {
 					return nil, false, nil
 				}
-				return &fcpb.ConcurrencyWaitResponse{Generation: generation, WakeTokens: tokens}, true, nil
+				return &fcpb.ConcurrencyServiceWaitResponse{Generation: generation, WakeTokens: tokens}, true, nil
 			},
 			req,
 		)
 		if err != nil {
 			if common.IsContextDeadlineExceededErr(err) {
 				// timed out without becoming ready
-				return &fcpb.ConcurrencyWaitResponse{Generation: req.Generation}, nil
+				return &fcpb.ConcurrencyServiceWaitResponse{Generation: req.Generation}, nil
 			}
 			return nil, err
 		} else if res == nil {
 			// chasm-imposed timeout
-			return &fcpb.ConcurrencyWaitResponse{Generation: req.Generation}, nil
+			return &fcpb.ConcurrencyServiceWaitResponse{Generation: req.Generation}, nil
 		} else if res.Generation != req.Generation {
 			// try again on server with new generation
 			req.Generation = res.Generation

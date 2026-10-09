@@ -41,9 +41,9 @@ type ConcurrencyServiceClient interface {
 	// durable. The server may or may not split the batch into multiple CHASM transitions with
 	// different durability, so callers should not assume that e.g. a Reserve plus Commit in one
 	// batch means that the Reserve was durable.
-	Batch(ctx context.Context, in *ConcurrencyBatchRequest, opts ...grpc.CallOption) (*ConcurrencyBatchResponse, error)
+	Batch(ctx context.Context, in *ConcurrencyServiceBatchRequest, opts ...grpc.CallOption) (*ConcurrencyServiceBatchResponse, error)
 	// Wait is a long-poll RPC that returns when at least one slot is free, or timeout.
-	Wait(ctx context.Context, in *ConcurrencyWaitRequest, opts ...grpc.CallOption) (*ConcurrencyWaitResponse, error)
+	Wait(ctx context.Context, in *ConcurrencyServiceWaitRequest, opts ...grpc.CallOption) (*ConcurrencyServiceWaitResponse, error)
 }
 
 type concurrencyServiceClient struct {
@@ -54,8 +54,8 @@ func NewConcurrencyServiceClient(cc grpc.ClientConnInterface) ConcurrencyService
 	return &concurrencyServiceClient{cc}
 }
 
-func (c *concurrencyServiceClient) Batch(ctx context.Context, in *ConcurrencyBatchRequest, opts ...grpc.CallOption) (*ConcurrencyBatchResponse, error) {
-	out := new(ConcurrencyBatchResponse)
+func (c *concurrencyServiceClient) Batch(ctx context.Context, in *ConcurrencyServiceBatchRequest, opts ...grpc.CallOption) (*ConcurrencyServiceBatchResponse, error) {
+	out := new(ConcurrencyServiceBatchResponse)
 	err := c.cc.Invoke(ctx, ConcurrencyService_Batch_FullMethodName, in, out, opts...)
 	if err != nil {
 		return nil, err
@@ -63,8 +63,8 @@ func (c *concurrencyServiceClient) Batch(ctx context.Context, in *ConcurrencyBat
 	return out, nil
 }
 
-func (c *concurrencyServiceClient) Wait(ctx context.Context, in *ConcurrencyWaitRequest, opts ...grpc.CallOption) (*ConcurrencyWaitResponse, error) {
-	out := new(ConcurrencyWaitResponse)
+func (c *concurrencyServiceClient) Wait(ctx context.Context, in *ConcurrencyServiceWaitRequest, opts ...grpc.CallOption) (*ConcurrencyServiceWaitResponse, error) {
+	out := new(ConcurrencyServiceWaitResponse)
 	err := c.cc.Invoke(ctx, ConcurrencyService_Wait_FullMethodName, in, out, opts...)
 	if err != nil {
 		return nil, err
@@ -89,9 +89,9 @@ type ConcurrencyServiceServer interface {
 	// durable. The server may or may not split the batch into multiple CHASM transitions with
 	// different durability, so callers should not assume that e.g. a Reserve plus Commit in one
 	// batch means that the Reserve was durable.
-	Batch(context.Context, *ConcurrencyBatchRequest) (*ConcurrencyBatchResponse, error)
+	Batch(context.Context, *ConcurrencyServiceBatchRequest) (*ConcurrencyServiceBatchResponse, error)
 	// Wait is a long-poll RPC that returns when at least one slot is free, or timeout.
-	Wait(context.Context, *ConcurrencyWaitRequest) (*ConcurrencyWaitResponse, error)
+	Wait(context.Context, *ConcurrencyServiceWaitRequest) (*ConcurrencyServiceWaitResponse, error)
 	mustEmbedUnimplementedConcurrencyServiceServer()
 }
 
@@ -99,10 +99,10 @@ type ConcurrencyServiceServer interface {
 type UnimplementedConcurrencyServiceServer struct {
 }
 
-func (UnimplementedConcurrencyServiceServer) Batch(context.Context, *ConcurrencyBatchRequest) (*ConcurrencyBatchResponse, error) {
+func (UnimplementedConcurrencyServiceServer) Batch(context.Context, *ConcurrencyServiceBatchRequest) (*ConcurrencyServiceBatchResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Batch not implemented")
 }
-func (UnimplementedConcurrencyServiceServer) Wait(context.Context, *ConcurrencyWaitRequest) (*ConcurrencyWaitResponse, error) {
+func (UnimplementedConcurrencyServiceServer) Wait(context.Context, *ConcurrencyServiceWaitRequest) (*ConcurrencyServiceWaitResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Wait not implemented")
 }
 func (UnimplementedConcurrencyServiceServer) mustEmbedUnimplementedConcurrencyServiceServer() {}
@@ -119,7 +119,7 @@ func RegisterConcurrencyServiceServer(s grpc.ServiceRegistrar, srv ConcurrencySe
 }
 
 func _ConcurrencyService_Batch_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(ConcurrencyBatchRequest)
+	in := new(ConcurrencyServiceBatchRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
@@ -131,13 +131,13 @@ func _ConcurrencyService_Batch_Handler(srv interface{}, ctx context.Context, dec
 		FullMethod: ConcurrencyService_Batch_FullMethodName,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(ConcurrencyServiceServer).Batch(ctx, req.(*ConcurrencyBatchRequest))
+		return srv.(ConcurrencyServiceServer).Batch(ctx, req.(*ConcurrencyServiceBatchRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
 
 func _ConcurrencyService_Wait_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(ConcurrencyWaitRequest)
+	in := new(ConcurrencyServiceWaitRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
@@ -149,7 +149,7 @@ func _ConcurrencyService_Wait_Handler(srv interface{}, ctx context.Context, dec 
 		FullMethod: ConcurrencyService_Wait_FullMethodName,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(ConcurrencyServiceServer).Wait(ctx, req.(*ConcurrencyWaitRequest))
+		return srv.(ConcurrencyServiceServer).Wait(ctx, req.(*ConcurrencyServiceWaitRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }

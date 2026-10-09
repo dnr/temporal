@@ -18,11 +18,11 @@ type clientBatchKey struct {
 
 type clientBatchItem struct {
 	ctx context.Context
-	req *fcpb.ConcurrencyBatchRequest
+	req *fcpb.ConcurrencyServiceBatchRequest
 }
 
 type clientBatchResult struct {
-	res *fcpb.ConcurrencyBatchResponse
+	res *fcpb.ConcurrencyServiceBatchResponse
 	err error
 }
 
@@ -45,9 +45,9 @@ func NewBatchingClient(
 
 func (c *BatchingClient) Batch(
 	ctx context.Context,
-	req *fcpb.ConcurrencyBatchRequest,
+	req *fcpb.ConcurrencyServiceBatchRequest,
 	opts ...grpc.CallOption,
-) (*fcpb.ConcurrencyBatchResponse, error) {
+) (*fcpb.ConcurrencyServiceBatchResponse, error) {
 	if len(opts) > 0 {
 		return c.ConcurrencyServiceClient.Batch(ctx, req, opts...)
 	}
@@ -79,7 +79,7 @@ func (c *BatchingClient) applyBatch(key clientBatchKey, items []clientBatchItem)
 		}
 	}
 
-	req := &fcpb.ConcurrencyBatchRequest{
+	req := &fcpb.ConcurrencyServiceBatchRequest{
 		NamespaceId: key.namespaceID,
 		Key:         key.key,
 	}
@@ -132,7 +132,7 @@ func (c *BatchingClient) applyBatch(key clientBatchKey, items []clientBatchItem)
 			// pass hint to first batch result only so we don't refill tokens multiple times
 			slotsHint = res.AvailableSlotsHint
 		}
-		results[i].res = &fcpb.ConcurrencyBatchResponse{
+		results[i].res = &fcpb.ConcurrencyServiceBatchResponse{
 			Generation:         res.Generation,
 			AvailableSlotsHint: slotsHint,
 			ReserveSuccess:     res.ReserveSuccess[reserveOff : reserveOff+reserveLen],

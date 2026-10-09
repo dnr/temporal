@@ -28,31 +28,31 @@ import (
 
 type testConcurrencyServiceClient struct {
 	fcpb.ConcurrencyServiceClient
-	batch func(context.Context, *fcpb.ConcurrencyBatchRequest, ...grpc.CallOption) (*fcpb.ConcurrencyBatchResponse, error)
+	batch func(context.Context, *fcpb.ConcurrencyServiceBatchRequest, ...grpc.CallOption) (*fcpb.ConcurrencyServiceBatchResponse, error)
 }
 
 func (c *testConcurrencyServiceClient) Batch(
 	ctx context.Context,
-	request *fcpb.ConcurrencyBatchRequest,
+	request *fcpb.ConcurrencyServiceBatchRequest,
 	opts ...grpc.CallOption,
-) (*fcpb.ConcurrencyBatchResponse, error) {
+) (*fcpb.ConcurrencyServiceBatchResponse, error) {
 	return c.batch(ctx, request, opts...)
 }
 
 func TestReleaseLimiterTaskExecute(t *testing.T) {
 	releaseErr := errors.New("release failed")
-	var requests []*fcpb.ConcurrencyBatchRequest
+	var requests []*fcpb.ConcurrencyServiceBatchRequest
 	handler := newReleaseLimiterTaskHandler(&testConcurrencyServiceClient{
 		batch: func(
 			_ context.Context,
-			request *fcpb.ConcurrencyBatchRequest,
+			request *fcpb.ConcurrencyServiceBatchRequest,
 			_ ...grpc.CallOption,
-		) (*fcpb.ConcurrencyBatchResponse, error) {
+		) (*fcpb.ConcurrencyServiceBatchResponse, error) {
 			requests = append(requests, request)
 			if request.GetReleaseSlots()[0] == "bad-slot" {
 				return nil, releaseErr
 			}
-			return &fcpb.ConcurrencyBatchResponse{}, nil
+			return &fcpb.ConcurrencyServiceBatchResponse{}, nil
 		},
 	}, &Config{FlowControlClientBatcherOptions: dynamicconfig.GetTypedPropertyFn(stream_batcher.BatcherOptions{
 		MaxItems: 1,
@@ -69,7 +69,7 @@ func TestReleaseLimiterTaskExecute(t *testing.T) {
 	}}, chasm.TaskAttributes{}, task)
 
 	require.ErrorIs(t, err, releaseErr)
-	require.Equal(t, []*fcpb.ConcurrencyBatchRequest{
+	require.Equal(t, []*fcpb.ConcurrencyServiceBatchRequest{
 		{NamespaceId: "namespace-id", Key: "first-key", ReleaseSlots: []string{"bad-slot"}},
 		{NamespaceId: "namespace-id", Key: "second-key", ReleaseSlots: []string{"good-slot"}},
 	}, requests)
