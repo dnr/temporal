@@ -37,18 +37,12 @@ func newFCManager(
 	}
 }
 
-func (m *fcManager) TaskReady(task *internalTask, cb fc.ReadinessCallback) (ready bool, blockedBy syncMatchOutcome, canContinue bool) {
+func (m *fcManager) TaskReady(task *internalTask, cb fc.ReadinessCallback) error {
 	// FIXME: consider what we should do for forwarded tasks
-
 	nsID := namespace.ID(m.partition.NamespaceId())
 	tx := m.readiness.NewTx(nsID, task, cb)
 	task.fcTx = tx // attach to task so we can use it in matching engine
-
-	err := tx.Check()
-	ready = err == nil
-	blockedBy = limiterErrorToSyncMatchOutcome(err)
-	canContinue = false // FIXME: set this based on "whole queue" scope, but allow fkey skipping
-	return
+	return tx.Check()
 }
 
 func (m *fcManager) CancelAllCallbacks(cb fc.ReadinessCallback) {

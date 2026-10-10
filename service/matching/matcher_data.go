@@ -2,6 +2,7 @@ package matching
 
 import (
 	"context"
+	"math"
 	"sync"
 	"time"
 	"unsafe"
@@ -461,7 +462,11 @@ func (d *matcherData) findMatch(allowForwarding bool, now int64) (
 	blockedBy = syncMatchNoPoller
 
 	// TODO(fc): optimize this with different data structures
+	ignorePriorityBelow := priorityKey(math.MinInt32)
 	d.tasks.tree.Scan(func(task *internalTask) bool {
+		if task.effectivePriority < ignorePriorityBelow {
+			return true
+		}
 		// disallow normal poll forwarding when allowForwarding is false, but allow the
 		// "priority backlog poll forwarders".
 		if !allowForwarding && task.pollForwarderType == parentPollForwarder {
@@ -497,9 +502,15 @@ func (d *matcherData) findMatch(allowForwarding bool, now int64) (
 		}
 
 		// we have a possible match, check limiters:
-		if ready, taskBlockedBy, canContinue := d.fcManager.TaskReady(task, d); !ready {
-			blockedBy = taskBlockedBy
-			return canContinue
+		if blockErr := d.fcManager.TaskReady(task, d); blockErr != nil {
+			// set blockedBy to first blocked reason
+			if blockedBy == syncMatchNoPoller {
+				blockedBy = limiterErrorToSyncMatchOutcome(blockErr)
+			}
+			// ignore rest of this priority level, but allow lower priority.
+			// TODO(fc): after per-task priority, remove this and allow any.
+			ignorePriorityBelow = task.effectivePriority + 1
+			return true
 		}
 
 		// no limiters apply, we can match
