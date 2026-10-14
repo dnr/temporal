@@ -7,20 +7,15 @@ import (
 	"reflect"
 	"slices"
 	"sync"
-	"time"
 
 	fcpb "go.temporal.io/server/chasm/lib/flowcontrol/gen/flowcontrolpb/v1"
-	"go.temporal.io/server/common/backoff"
 	"go.temporal.io/server/common/clock"
 	"go.temporal.io/server/common/namespace"
-	"go.temporal.io/server/common/util"
 )
 
 const (
 	// Shards should be a power of 2
 	readinessStateShards = 32
-
-	readinessCleanupInterval = time.Minute
 )
 
 type (
@@ -291,31 +286,6 @@ func (rs *readinessShard) update(limiter limiterState, mode notifyMode, f func()
 	defer rs.syncLimiter(limiter, &toNotify)
 
 	return f()
-}
-
-func (r *Readiness) cleanupLoop(ctx context.Context) {
-	_ = util.InterruptibleSleep(ctx, backoff.FullJitter(readinessCleanupInterval))
-	for ctx.Err() == nil {
-		for i := range r.shards {
-			r.shards[i].cleanup()
-		}
-		_ = util.InterruptibleSleep(ctx, backoff.Jitter(readinessCleanupInterval, 0.1))
-	}
-}
-
-func (rs *readinessShard) cleanup() {
-	rs.lock.Lock()
-	defer rs.lock.Unlock()
-
-	for remaining := rs.candidates.len; remaining > 0; remaining-- {
-		limiter := rs.candidates.head
-		rs.candidates.remove(limiter)
-		if limiter.droppableLocked() {
-			limiter.deleteLocked()
-		} else {
-			rs.candidates.pushBack(limiter)
-		}
-	}
 }
 
 // syncLocked may call this. wake should remove up to n items from the front of rsu.waiters and

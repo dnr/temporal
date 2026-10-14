@@ -60,7 +60,7 @@ func TestTransactionPins(t *testing.T) {
 			lim := r.getLocalLimiter(namespace.ID("ns"), "key")
 			tx := &Tx{limiters: []limiterTx{newLocalLimiterTx(lim, simplelimiter.NoLimit(), 0)}}
 			requirePins(t, lim, 1)
-			lim.rs.cleanup()
+			lim.rs.cleanup(1000)
 			require.Len(t, lim.rs.localLimiters, 1)
 			require.NoError(t, tx.Check())
 			if rollback {
@@ -75,7 +75,7 @@ func TestTransactionPins(t *testing.T) {
 			requirePins(t, lim, 0)
 			require.ErrorIs(t, tx.Check(), errInvalidTxState)
 			ts.Advance(time.Nanosecond)
-			lim.rs.cleanup()
+			lim.rs.cleanup(1000)
 			require.Empty(t, lim.rs.localLimiters)
 		})
 	}
@@ -120,7 +120,7 @@ func TestCanceledWaitRetainsPinUntilExit(t *testing.T) {
 	r.CancelAllCallbacks(ns, cb)
 	<-canceled
 	requirePins(t, lim, 1)
-	lim.rs.cleanup()
+	lim.rs.cleanup(1000)
 	require.Len(t, lim.rs.concurrencyLimiters, 1)
 	close(exit)
 	await.RequireTrue(t, func() bool {
@@ -128,7 +128,7 @@ func TestCanceledWaitRetainsPinUntilExit(t *testing.T) {
 		defer lim.rs.lock.Unlock()
 		return lim.pins == 0
 	}, time.Second, time.Millisecond)
-	lim.rs.cleanup()
+	lim.rs.cleanup(1000)
 	require.Empty(t, lim.rs.concurrencyLimiters)
 }
 
@@ -151,7 +151,7 @@ func TestCancelReservationOwnsPinAndDeadline(t *testing.T) {
 	lim.unpin()
 	<-started
 	requirePins(t, lim, 1)
-	lim.rs.cleanup()
+	lim.rs.cleanup(1000)
 	require.Len(t, lim.rs.concurrencyLimiters, 1)
 	close(exit)
 	await.RequireTrue(t, func() bool {
@@ -227,17 +227,17 @@ func TestCleanupCandidates(t *testing.T) {
 	free.unpin()
 	zero.unpin()
 	rs := debt.rs
-	rs.cleanup()
+	rs.cleanup(1000)
 	require.Len(t, rs.localLimiters, 2)
 	require.Same(t, debt, rs.localLimiters[debt.mapKey])
 	require.Same(t, pinned, rs.localLimiters[pinned.mapKey])
 	require.Equal(t, 1, rs.candidates.len)
 	ts.Advance(2 * time.Second)
-	rs.cleanup()
+	rs.cleanup(1000)
 	require.Equal(t, 0, rs.candidates.len)
 	require.Len(t, rs.localLimiters, 1)
 	pinned.unpin()
-	rs.cleanup()
+	rs.cleanup(1000)
 	require.Empty(t, rs.localLimiters)
 }
 
