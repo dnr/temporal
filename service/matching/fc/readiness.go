@@ -10,6 +10,7 @@ import (
 
 	fcpb "go.temporal.io/server/chasm/lib/flowcontrol/gen/flowcontrolpb/v1"
 	"go.temporal.io/server/common/clock"
+	"go.temporal.io/server/common/dynamicconfig"
 	"go.temporal.io/server/common/namespace"
 )
 
@@ -22,6 +23,7 @@ type (
 	Readiness struct {
 		timeSource               clock.TimeSource
 		concurrencyServiceClient fcpb.ConcurrencyServiceClient
+		config                   readinessConfig
 
 		// Readiness state sharding and locking:
 		//
@@ -67,7 +69,7 @@ type (
 		// TODO(fc): gauges for size of cache
 		// TODO(fc): limit active waiters, add suspended state, etc.
 
-		_ [64 - 8 - 8 - 8 - 8 - 8 - 8]byte // force to different cache lines to avoid false sharing
+		_ [128 - 6*8 - 40 - 8 - 1]byte // force to different cache lines to avoid false sharing
 	}
 
 	fwdMapEntry struct {
@@ -128,6 +130,11 @@ func NewReadiness(
 		timeSource:               timeSource,
 		concurrencyServiceClient: concurrencyServiceClient,
 		seed:                     maphash.MakeSeed(),
+		config: readinessConfig{
+			cleanupOptions:           dynamicconfig.GetTypedPropertyFn(defaultCleanupOptions),
+			concurrencyRetention:     dynamicconfig.GetDurationPropertyFn(concurrencyBlockedRetention),
+			cancelReservationTimeout: dynamicconfig.GetDurationPropertyFn(defaultCancelReservationTimeout),
+		},
 	}
 	r.lifecycleCtx, r.lifecycleCancel = context.WithCancel(context.Background())
 	for i := range r.shards {

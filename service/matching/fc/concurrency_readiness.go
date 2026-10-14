@@ -138,7 +138,7 @@ func (cs *concurrencyState) commit(ctx context.Context, slotID string) error {
 
 func (cs *concurrencyState) cancelReserve(ctx context.Context, slotID string) {
 	// The poll context may already be canceled when rollback runs.
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), cs.rs.r.config.cancelReservationTimeout())
 	cs.rs.lock.Lock()
 	cs.pins++
 	cs.rs.lock.Unlock()
@@ -266,7 +266,7 @@ func (cs *concurrencyState) callWait(ctx context.Context) {
 }
 
 func (cs *concurrencyState) droppableLocked() bool {
-	return cs.tokens > 0 || cs.rs.r.timeSource.Now().UnixNano()-cs.lastUsed >= int64(concurrencyBlockedRetention)
+	return cs.tokens > 0 || cs.rs.r.timeSource.Now().UnixNano()-cs.lastUsed >= int64(cs.rs.r.config.concurrencyRetention())
 }
 
 func (cs *concurrencyState) unpin() {
