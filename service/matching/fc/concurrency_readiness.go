@@ -264,3 +264,7 @@ func (cs *concurrencyState) droppableLocked() bool {
 func (cs *concurrencyState) unpin() {
 	cs.rs.unpin(cs)
 }
+
+func (cs *concurrencyState) deleteLocked() {
+	delete(cs.rs.concurrencyLimiters, cs.mapKey)
+}
