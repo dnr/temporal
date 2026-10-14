@@ -124,9 +124,17 @@ func (lls *localLimiterState) onTimer() {
 }
 
 func (lls *localLimiterState) droppableLocked() bool {
-	return lls.lim.Delay(lls.now()) < 0
+	// A localLimiterState is droppable if it would be initialized in the same effective state
+	// that it's in now. That's trivially true if it's completely blocked (Never) or has no
+	// limit (!Limited). For a positive non-infinite limit, it would be initialized with a full
+	// burst allowed, so return true if a full burst would be allowed right now.
+	return lls.params.Never() || !lls.params.Limited() || lls.lim.Delay(lls.now()) <= -lls.params.Burst
 }
 
 func (lls *localLimiterState) unpin() {
 	lls.rs.unpin(lls)
+}
+
+func (lls *localLimiterState) deleteLocked() {
+	delete(lls.rs.localLimiters, lls.mapKey)
 }

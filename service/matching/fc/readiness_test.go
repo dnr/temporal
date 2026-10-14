@@ -211,3 +211,39 @@ func TestCandidateMembership(t *testing.T) {
 	r.Stop()
 	require.Zero(t, rs.candidates.len)
 }
+
+func TestCleanupCandidates(t *testing.T) {
+	r, ts := newTestReadiness(t, nil)
+	ns := namespace.ID("ns")
+	debt := r.getLocalLimiter(ns, "debt")
+	free := r.getLocalLimiter(ns, "free")
+	zero := r.getLocalLimiter(ns, "zero")
+	pinned := r.getLocalLimiter(ns, "pinned")
+	cb := &testCallback{}
+	require.NoError(t, debt.check(simplelimiter.MakeParams(1, 0), cb, 0))
+	require.ErrorIs(t, zero.check(simplelimiter.MakeParams(0, 0), cb, 0), ErrLocalLimiterBlocked)
+	r.CancelAllCallbacks(ns, cb)
+	debt.unpin()
+	free.unpin()
+	zero.unpin()
+	rs := debt.rs
+	rs.cleanup()
+	require.Len(t, rs.localLimiters, 2)
+	require.Same(t, debt, rs.localLimiters[debt.mapKey])
+	require.Same(t, pinned, rs.localLimiters[pinned.mapKey])
+	require.Equal(t, 1, rs.candidates.len)
+	ts.Advance(2 * time.Second)
+	rs.cleanup()
+	require.Equal(t, 0, rs.candidates.len)
+	require.Len(t, rs.localLimiters, 1)
+	pinned.unpin()
+	rs.cleanup()
+	require.Empty(t, rs.localLimiters)
+}
+
+func TestCleanupWorkerStops(t *testing.T) {
+	r, _ := newTestReadiness(t, nil)
+	r.Start()
+	r.Stop()
+	require.ErrorIs(t, r.lifecycleCtx.Err(), context.Canceled)
+}

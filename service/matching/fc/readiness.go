@@ -44,6 +44,7 @@ type (
 
 		lifecycleCtx    context.Context
 		lifecycleCancel context.CancelFunc
+		cleanupWG       sync.WaitGroup
 	}
 
 	readinessShard struct {
@@ -92,15 +93,18 @@ type (
 
 	limiterState interface {
 		base() *limiterStateBase
+
 		// After any call to update(), Readiness will call syncLocked with a readinessSyncUpdate
 		// containing a list of waiters. syncLocked may call wake on the readinessSyncUpdate to
 		// wake some of the waiters, and then it should update any asynchronous resources based
 		// on the remaining waiters.
 		syncLocked(*readinessSyncUpdate)
 
-		// droppableLocked should return true if this limiter can be dropped without disruption.
-		// It will only be called on limiters that have no waiters.
+		// droppableLocked should return true if this limiter can be dropped without disruption
+		// or information loss. It will only be called on limiters that have no waiters and no
+		// pins.
 		droppableLocked() bool
+		deleteLocked()
 	}
 
 	readinessSyncUpdate struct {
@@ -151,20 +155,15 @@ func (r *Readiness) getShard(nsID namespace.ID) *readinessShard {
 }
 
 func (r *Readiness) Start() {
-	for i := range r.shards {
-		r.shards[i].start(r.lifecycleCtx)
-	}
+	r.cleanupWG.Go(func() { r.cleanupLoop(r.lifecycleCtx) })
 }
 
 func (r *Readiness) Stop() {
 	r.lifecycleCancel()
+	r.cleanupWG.Wait()
 	for i := range r.shards {
 		r.shards[i].stop()
 	}
-}
-
-func (rs *readinessShard) start(ctx context.Context) {
-	go rs.cleanupLoop(ctx)
 }
 
 func (rs *readinessShard) stop() {
@@ -294,10 +293,12 @@ func (rs *readinessShard) update(limiter limiterState, mode notifyMode, f func()
 	return f()
 }
 
-func (rs *readinessShard) cleanupLoop(ctx context.Context) {
+func (r *Readiness) cleanupLoop(ctx context.Context) {
 	_ = util.InterruptibleSleep(ctx, backoff.FullJitter(readinessCleanupInterval))
 	for ctx.Err() == nil {
-		rs.cleanup()
+		for i := range r.shards {
+			r.shards[i].cleanup()
+		}
 		_ = util.InterruptibleSleep(ctx, backoff.Jitter(readinessCleanupInterval, 0.1))
 	}
 }
@@ -306,17 +307,13 @@ func (rs *readinessShard) cleanup() {
 	rs.lock.Lock()
 	defer rs.lock.Unlock()
 
-	for key, lim := range rs.concurrencyLimiters {
-		if _, ok := rs.fwd[lim]; !ok && lim.pins == 0 && lim.droppableLocked() {
-			rs.candidates.remove(lim)
-			delete(rs.concurrencyLimiters, key)
-		}
-	}
-
-	for key, lim := range rs.localLimiters {
-		if _, ok := rs.fwd[lim]; !ok && lim.pins == 0 && lim.droppableLocked() {
-			rs.candidates.remove(lim)
-			delete(rs.localLimiters, key)
+	for remaining := rs.candidates.len; remaining > 0; remaining-- {
+		limiter := rs.candidates.head
+		rs.candidates.remove(limiter)
+		if limiter.droppableLocked() {
+			limiter.deleteLocked()
+		} else {
+			rs.candidates.pushBack(limiter)
 		}
 	}
 }
