@@ -178,3 +178,36 @@ func TestTimerPins(t *testing.T) {
 		return lim.pins == 0
 	}, time.Second, time.Millisecond)
 }
+
+func TestCandidateMembership(t *testing.T) {
+	r, _ := newTestReadiness(t, nil)
+	ns := namespace.ID("ns")
+	first := r.getLocalLimiter(ns, "first")
+	second := r.getLocalLimiter(ns, "second")
+	rs := first.rs
+	require.EqualValues(t, 2, rs.created)
+	require.Zero(t, rs.candidates.len)
+	first.unpin()
+	second.unpin()
+	require.Equal(t, 2, rs.candidates.len)
+	require.Same(t, first, rs.candidates.head)
+	require.Same(t, second, rs.candidates.tail)
+	first = r.getLocalLimiter(ns, "first")
+	require.EqualValues(t, 2, rs.created)
+	require.Same(t, second, rs.candidates.head)
+	cb := &testCallback{}
+	rs.lock.Lock()
+	rs.addEdgeLocked(first, cb, 0)
+	rs.lock.Unlock()
+	first.unpin()
+	require.Equal(t, 1, rs.candidates.len)
+	r.CancelAllCallbacks(ns, cb)
+	require.Equal(t, 2, rs.candidates.len)
+	require.Same(t, first, rs.candidates.tail)
+	second = r.getLocalLimiter(ns, "second")
+	require.Same(t, first, rs.candidates.head)
+	require.Same(t, first, rs.candidates.tail)
+	second.unpin()
+	r.Stop()
+	require.Zero(t, rs.candidates.len)
+}

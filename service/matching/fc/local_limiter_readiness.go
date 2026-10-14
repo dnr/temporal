@@ -37,14 +37,15 @@ func (rs *readinessShard) getLocalLimiter(nsID namespace.ID, key string) *localL
 
 	mapkey := nsID.String() + key
 	if lls, ok := rs.localLimiters[mapkey]; ok {
-		lls.pins++
+		rs.pinLocked(lls)
 		return lls
 	}
 	lls := &localLimiterState{
-		limiterStateBase: limiterStateBase{rs: rs, pins: 1},
+		limiterStateBase: limiterStateBase{rs: rs, pins: 1, mapKey: mapkey},
 		params:           simplelimiter.NoLimit(),
 	}
 	rs.localLimiters[mapkey] = lls
+	rs.created++
 	return lls
 }
 
@@ -124,4 +125,8 @@ func (lls *localLimiterState) onTimer() {
 
 func (lls *localLimiterState) droppableLocked() bool {
 	return lls.lim.Delay(lls.now()) < 0
+}
+
+func (lls *localLimiterState) unpin() {
+	lls.rs.unpin(lls)
 }

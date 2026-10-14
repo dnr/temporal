@@ -46,15 +46,16 @@ func (rs *readinessShard) getConcurrencyLimiter(nsID namespace.ID, key string) *
 
 	mapkey := nsID.String() + key
 	if cs, ok := rs.concurrencyLimiters[mapkey]; ok {
-		cs.pins++
+		rs.pinLocked(cs)
 		return cs
 	}
 	cs := &concurrencyState{
-		limiterStateBase: limiterStateBase{rs: rs, pins: 1},
+		limiterStateBase: limiterStateBase{rs: rs, pins: 1, mapKey: mapkey},
 		nsID:             nsID,
 		key:              key,
 	}
 	rs.concurrencyLimiters[mapkey] = cs
+	rs.created++
 	return cs
 }
 
@@ -258,4 +259,8 @@ func (cs *concurrencyState) callWait(ctx context.Context) {
 
 func (cs *concurrencyState) droppableLocked() bool {
 	return true
+}
+
+func (cs *concurrencyState) unpin() {
+	cs.rs.unpin(cs)
 }

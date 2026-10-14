@@ -63,6 +63,10 @@ type (
 		// reverse map, sorted by <pointer(limiter)>
 		rev map[ReadinessCallback][]revMapEntry
 
+		candidates limiterList
+		created    uint64
+		stopped    bool
+
 		// TODO(fc): clean up caches of idle/stale state
 		// TODO(fc): gauges for size of cache
 		// TODO(fc): limit active waiters, add suspended state, etc.
@@ -79,8 +83,11 @@ type (
 		pri     wakePriority
 	}
 	limiterStateBase struct {
-		rs   *readinessShard
-		pins int
+		rs     *readinessShard
+		pins   int
+		mapKey string
+		prev   limiterState
+		next   limiterState
 	}
 
 	limiterState interface {
@@ -164,6 +171,7 @@ func (rs *readinessShard) stop() {
 	rs.lock.Lock()
 	defer rs.lock.Unlock()
 
+	rs.stopped = true
 	clear(rs.fwd)
 	clear(rs.rev)
 	var rsu readinessSyncUpdate
@@ -175,6 +183,9 @@ func (rs *readinessShard) stop() {
 		v.syncLocked(&rsu)
 	}
 	clear(rs.localLimiters)
+	for rs.candidates.head != nil {
+		rs.candidates.remove(rs.candidates.head)
+	}
 }
 
 func (r *Readiness) CancelAllCallbacks(nsID namespace.ID, cb ReadinessCallback) {
@@ -213,6 +224,7 @@ func (rs *readinessShard) syncLimiter(limiter limiterState, toNotify *deferedNot
 		rs.removeEdgeLocked(limiter, fEnt.cb)
 		toNotify.add(fEnt.cb)
 	}
+	rs.updateCandidateLocked(limiter)
 }
 
 func (rs *readinessShard) addEdgeLocked(limiter limiterState, cb ReadinessCallback, pri wakePriority) {
@@ -296,12 +308,14 @@ func (rs *readinessShard) cleanup() {
 
 	for key, lim := range rs.concurrencyLimiters {
 		if _, ok := rs.fwd[lim]; !ok && lim.pins == 0 && lim.droppableLocked() {
+			rs.candidates.remove(lim)
 			delete(rs.concurrencyLimiters, key)
 		}
 	}
 
 	for key, lim := range rs.localLimiters {
 		if _, ok := rs.fwd[lim]; !ok && lim.pins == 0 && lim.droppableLocked() {
+			rs.candidates.remove(lim)
 			delete(rs.localLimiters, key)
 		}
 	}
@@ -356,8 +370,28 @@ func (b *limiterStateBase) base() *limiterStateBase {
 	return b
 }
 
-func (b *limiterStateBase) unpin() {
-	b.rs.lock.Lock()
-	defer b.rs.lock.Unlock()
-	b.pins--
+func (rs *readinessShard) pinLocked(limiter limiterState) {
+	b := limiter.base()
+	if b.prev != nil || rs.candidates.head == limiter {
+		rs.candidates.remove(limiter)
+	}
+	b.pins++
+}
+
+func (rs *readinessShard) unpin(limiter limiterState) {
+	rs.lock.Lock()
+	defer rs.lock.Unlock()
+	limiter.base().pins--
+	rs.updateCandidateLocked(limiter)
+}
+
+func (rs *readinessShard) updateCandidateLocked(limiter limiterState) {
+	b := limiter.base()
+	listed := b.prev != nil || rs.candidates.head == limiter
+	eligible := !rs.stopped && b.pins == 0 && len(rs.fwd[limiter]) == 0
+	if eligible && !listed {
+		rs.candidates.pushBack(limiter)
+	} else if !eligible && listed {
+		rs.candidates.remove(limiter)
+	}
 }
