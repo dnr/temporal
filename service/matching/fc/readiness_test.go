@@ -330,3 +330,54 @@ func TestBlockedConcurrencyRetention(t *testing.T) {
 	recreated.rs.cleanup(1000)
 	require.Empty(t, recreated.rs.concurrencyLimiters)
 }
+
+type pendingTimerClock struct {
+	clock.TimeSource
+	timer *pendingTimer
+}
+
+type pendingTimer struct {
+	active   bool
+	callback func()
+}
+
+func (c *pendingTimerClock) AfterFunc(_ time.Duration, callback func()) clock.Timer {
+	c.timer = &pendingTimer{active: true, callback: callback}
+	return c.timer
+}
+
+func (t *pendingTimer) Reset(time.Duration) bool {
+	active := t.active
+	t.active = true
+	return active
+}
+
+func (t *pendingTimer) Stop() bool {
+	active := t.active
+	t.active = false
+	return active
+}
+
+func TestPendingTimerCallbackRetainsPin(t *testing.T) {
+	ts := &pendingTimerClock{TimeSource: clock.NewEventTimeSource().Update(time.Now())}
+	r := NewReadiness(ts, nil)
+	t.Cleanup(r.Stop)
+	ns := namespace.ID("ns")
+	lim := r.getLocalLimiter(ns, "key")
+	cb := &testCallback{}
+	params := simplelimiter.MakeParams(1, 0)
+	require.NoError(t, lim.check(params, cb, 0))
+	require.ErrorIs(t, lim.check(params, cb, 0), ErrLocalLimiterBlocked)
+	requirePins(t, lim, 2)
+	// The timer has fired, but its callback has not acquired the shard lock yet.
+	ts.timer.active = false
+	require.ErrorIs(t, lim.check(params, cb, 0), ErrLocalLimiterBlocked)
+	requirePins(t, lim, 3)
+	r.CancelAllCallbacks(ns, cb)
+	lim.unpin()
+	requirePins(t, lim, 1)
+	require.Zero(t, lim.rs.candidates.len)
+	ts.timer.callback()
+	requirePins(t, lim, 0)
+	require.Equal(t, 1, lim.rs.candidates.len)
+}

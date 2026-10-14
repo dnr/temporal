@@ -7,14 +7,6 @@ import (
 	"go.temporal.io/server/common/util"
 )
 
-const (
-	cleanupBatchSize        = 256
-	cleanupScansPerCreation = 2
-	cleanupBusyInterval     = 5 * time.Millisecond
-	cleanupIdleInterval     = 5 * time.Second
-	cleanupSweepInterval    = time.Minute
-)
-
 type cleanupState struct {
 	created   uint64
 	credits   int
@@ -24,13 +16,14 @@ type cleanupState struct {
 
 func (r *Readiness) cleanupLoop(ctx context.Context) {
 	var state cleanupState
-	interval := cleanupIdleInterval
+	interval := r.config.cleanup().IdleInterval
 	for util.InterruptibleSleep(ctx, interval) == nil {
 		interval = r.cleanupPass(&state)
 	}
 }
 
 func (r *Readiness) cleanupPass(state *cleanupState) time.Duration {
+	opts := r.config.cleanup()
 	var created uint64
 	var candidates int
 	for i := range r.shards {
@@ -42,17 +35,22 @@ func (r *Readiness) cleanupPass(state *cleanupState) time.Duration {
 	}
 
 	// Keep at most one traversal's worth of work, even after a large allocation burst.
-	maxCredits := max(candidates, cleanupBatchSize)
+	maxCredits := max(candidates, opts.BatchSize)
+	state.credits = min(state.credits, maxCredits)
 	allocations := int(min(created-state.created, uint64(maxCredits)))
 	state.created = created
-	state.credits = min(maxCredits, state.credits+cleanupScansPerCreation*allocations)
+	if opts.ScansPerCreation > 0 && allocations > (maxCredits-state.credits)/opts.ScansPerCreation {
+		state.credits = maxCredits
+	} else {
+		state.credits = min(maxCredits, state.credits+opts.ScansPerCreation*allocations)
+	}
 	now := r.timeSource.Now()
 	if !now.Before(state.nextSweep) {
 		state.credits = max(state.credits, candidates)
-		state.nextSweep = now.Add(cleanupSweepInterval)
+		state.nextSweep = now.Add(opts.SweepInterval)
 	}
 
-	budget := min(state.credits, cleanupBatchSize)
+	budget := min(state.credits, opts.BatchSize)
 	scanned := 0
 	for visited := 0; visited < len(r.shards) && scanned < budget; visited++ {
 		rs := &r.shards[state.nextShard]
@@ -61,9 +59,9 @@ func (r *Readiness) cleanupPass(state *cleanupState) time.Duration {
 	}
 	state.credits -= scanned
 	if state.credits > 0 && scanned > 0 {
-		return cleanupBusyInterval
+		return opts.BusyInterval
 	}
-	return cleanupIdleInterval
+	return opts.IdleInterval
 }
 
 func (rs *readinessShard) cleanup(budget int) int {

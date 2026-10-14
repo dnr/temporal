@@ -22,7 +22,7 @@ func readinessProvider(
 	concurrencyServiceClient fcpb.ConcurrencyServiceClient,
 	dc *dynamicconfig.Collection,
 ) *Readiness {
-	return NewReadiness(
+	r := NewReadiness(
 		timeSource,
 		concurrency.NewBatchingClient(
 			concurrencyServiceClient,
@@ -30,4 +30,6 @@ func readinessProvider(
 			timeSource,
 		),
 	)
+	r.config = newReadinessConfig(dc)
+	return r
 }
