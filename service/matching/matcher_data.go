@@ -502,7 +502,13 @@ func (d *matcherData) findMatch(allowForwarding bool, now int64) (
 		}
 
 		// we have a possible match, check limiters:
-		if blockErr := d.fcManager.TaskReady(task, d); blockErr != nil {
+		if task.isPollForwarder() || poller.taskForwarderType == validatorTaskForwarder {
+			// Poll forwarders aren't real tasks: flow control applies to whatever task the
+			// forwarded poll matches on the other partition. The validator doesn't dispatch
+			// the task. Note that parentTaskForwarder is not exempt: forwarded tasks are
+			// checked here, on the partition that forwards them.
+			task.fcTx = nil
+		} else if blockErr := d.fcManager.TaskReady(task, d); blockErr != nil {
 			// set blockedBy to first blocked reason
 			if blockedBy == syncMatchNoPoller {
 				blockedBy = limiterErrorToSyncMatchOutcome(blockErr)

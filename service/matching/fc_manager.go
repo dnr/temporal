@@ -43,13 +43,6 @@ func newFCManager(
 }
 
 func (m *fcManager) TaskReady(task *internalTask, cb fc.ReadinessCallback) error {
-	if task.isPollForwarder() {
-		// Not a real task. Flow control applies to whatever task the forwarded poll matches
-		// with on the other partition.
-		task.fcTx = nil
-		return nil
-	}
-
 	nsID := namespace.ID(m.partition.NamespaceId())
 	tx := m.readiness.NewTx(nsID, task, cb)
 	task.fcTx = tx // attach to task so we can use it in matching engine
@@ -72,6 +65,9 @@ func (m *fcManager) UpdateLimitersFromConfig(limiters *fc.Limiters, task *intern
 	if task.isPollForwarder() {
 		return nil
 	}
+	// TODO(fc): decide which limiters should apply to query and nexus tasks. Currently they get
+	// the same ones as workflow/activity tasks, but their dispatch paths only do Check, not
+	// Reserve/Commit/release (see TODO(fc) in matchingEngineImpl).
 	userData, _, err := m.userDataManager.GetUserData()
 	if err != nil {
 		return nil

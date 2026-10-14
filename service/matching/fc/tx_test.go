@@ -3,56 +3,20 @@ package fc
 import (
 	"context"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/require"
 	enumsspb "go.temporal.io/server/api/enums/v1"
 	taskqueuespb "go.temporal.io/server/api/taskqueue/v1"
 	fcpb "go.temporal.io/server/chasm/lib/flowcontrol/gen/flowcontrolpb/v1"
-	"go.temporal.io/server/common/clock"
 	"go.temporal.io/server/common/namespace"
 	serviceerrors "go.temporal.io/server/common/serviceerror"
 	"go.temporal.io/server/service/matching/simplelimiter"
-	"google.golang.org/grpc"
 )
 
 const (
 	testNsID   = namespace.ID("nsid")
 	testConKey = "conkey"
 )
-
-type testConcurrencyClient struct {
-	fcpb.ConcurrencyServiceClient
-	batch func(*fcpb.ConcurrencyServiceBatchRequest) *fcpb.ConcurrencyServiceBatchResponse
-}
-
-func (c *testConcurrencyClient) Batch(
-	_ context.Context,
-	req *fcpb.ConcurrencyServiceBatchRequest,
-	_ ...grpc.CallOption,
-) (*fcpb.ConcurrencyServiceBatchResponse, error) {
-	return c.batch(req), nil
-}
-
-func (c *testConcurrencyClient) Wait(
-	ctx context.Context,
-	_ *fcpb.ConcurrencyServiceWaitRequest,
-	_ ...grpc.CallOption,
-) (*fcpb.ConcurrencyServiceWaitResponse, error) {
-	<-ctx.Done()
-	return nil, ctx.Err()
-}
-
-type testTask struct {
-	limiters Limiters
-}
-
-func (t *testTask) Limiters() *Limiters                { return &t.limiters }
-func (t *testTask) PriorityAndAge() (int32, time.Time) { return 3, time.Time{} }
-
-type testCallback struct{}
-
-func (*testCallback) OnReady() {}
 
 func newConcurrencyTestTask() *testTask {
 	return &testTask{limiters: Limiters{Limiters: [MaxLimiters]Limiter{{
@@ -62,15 +26,30 @@ func newConcurrencyTestTask() *testTask {
 	}}}}
 }
 
-func newTestReadiness(batch func(*fcpb.ConcurrencyServiceBatchRequest) *fcpb.ConcurrencyServiceBatchResponse) *Readiness {
-	return NewReadiness(clock.NewRealTimeSource(), &testConcurrencyClient{batch: batch})
+func newHintTestClient(batch func(*fcpb.ConcurrencyServiceBatchRequest) *fcpb.ConcurrencyServiceBatchResponse) *testClient {
+	return &testClient{
+		batch: func(_ context.Context, req *fcpb.ConcurrencyServiceBatchRequest) (*fcpb.ConcurrencyServiceBatchResponse, error) {
+			return batch(req), nil
+		},
+		wait: func(ctx context.Context, _ *fcpb.ConcurrencyServiceWaitRequest) (*fcpb.ConcurrencyServiceWaitResponse, error) {
+			<-ctx.Done()
+			return nil, ctx.Err()
+		},
+	}
+}
+
+// setTokens sets the cached state of the test concurrency limiter.
+func setTokens(r *Readiness, gen int64, tokens int32) {
+	cs := r.getConcurrencyLimiter(testNsID, testConKey)
+	defer cs.unpin()
+	cs.reportSlotsHint(gen, tokens, notifySync)
 }
 
 func getTokens(r *Readiness) int32 {
-	cs := r.getConcurrencyLimiter(testNsID, testConKey)
-	cs.rs.lock.Lock()
-	defer cs.rs.lock.Unlock()
-	return cs.tokens
+	rs := r.getShard(testNsID)
+	rs.lock.Lock()
+	defer rs.lock.Unlock()
+	return rs.concurrencyLimiters[testNsID.String()+testConKey].tokens
 }
 
 func concurrencyHint(gen int64, slots int32) *taskqueuespb.LimiterHint {
@@ -83,9 +62,8 @@ func concurrencyHint(gen int64, slots int32) *taskqueuespb.LimiterHint {
 }
 
 func TestSkipCheck_DoesNotConsumeOrReturnTokens(t *testing.T) {
-	t.Parallel()
-	r := newTestReadiness(nil)
-	r.getConcurrencyLimiter(testNsID, testConKey).reportSlotsHint(1, 5, notifySync)
+	r, _ := newTestReadiness(t, nil)
+	setTokens(r, 1, 5)
 
 	tx := r.NewTx(testNsID, newConcurrencyTestTask(), &testCallback{})
 	require.NoError(t, tx.SkipCheck())
@@ -96,9 +74,8 @@ func TestSkipCheck_DoesNotConsumeOrReturnTokens(t *testing.T) {
 }
 
 func TestSkipCheck_DoesNotBlock(t *testing.T) {
-	t.Parallel()
-	r := newTestReadiness(nil)
-	defer r.Stop()
+	r, _ := newTestReadiness(t, newHintTestClient(nil))
+	setTokens(r, 1, 0)
 	task := newConcurrencyTestTask()
 	// a local rate limiter that's always blocked
 	task.limiters.Limiters[1] = Limiter{
@@ -107,69 +84,92 @@ func TestSkipCheck_DoesNotBlock(t *testing.T) {
 		Source: LimiterSourceConfig,
 		Config: simplelimiter.MakeParams(0, 0),
 	}
+	cb := &testCallback{}
+	defer r.CancelAllCallbacks(testNsID, cb)
 
 	// concurrency limiter has zero tokens, so a normal check blocks
-	tx := r.NewTx(testNsID, task, &testCallback{})
+	tx := r.NewTx(testNsID, task, cb)
 	require.ErrorIs(t, tx.Check(), ErrConcurrencyBlocked)
 
-	tx = r.NewTx(testNsID, task, &testCallback{})
+	tx = r.NewTx(testNsID, task, cb)
 	require.NoError(t, tx.SkipCheck())
 	require.Equal(t, int32(0), getTokens(r))
+	tx.Close()
 }
 
 func TestSkipCheck_InvalidState(t *testing.T) {
-	t.Parallel()
-	r := newTestReadiness(nil)
-	r.getConcurrencyLimiter(testNsID, testConKey).reportSlotsHint(1, 5, notifySync)
+	r, _ := newTestReadiness(t, nil)
+	setTokens(r, 1, 5)
 
 	tx := r.NewTx(testNsID, newConcurrencyTestTask(), &testCallback{})
 	require.NoError(t, tx.Check())
 	require.ErrorIs(t, tx.SkipCheck(), errInvalidTxState)
+	tx.Rollback(context.Background())
+	require.ErrorIs(t, tx.SkipCheck(), errInvalidTxState)
 }
 
 func TestHints_FromReserveAndCommit(t *testing.T) {
-	t.Parallel()
-	r := newTestReadiness(func(req *fcpb.ConcurrencyServiceBatchRequest) *fcpb.ConcurrencyServiceBatchResponse {
+	r, _ := newTestReadiness(t, newHintTestClient(func(req *fcpb.ConcurrencyServiceBatchRequest) *fcpb.ConcurrencyServiceBatchResponse {
 		if len(req.ReserveSlots) > 0 {
 			return &fcpb.ConcurrencyServiceBatchResponse{Generation: 7, AvailableSlotsHint: 3, ReserveSuccess: []bool{true}}
 		}
 		return &fcpb.ConcurrencyServiceBatchResponse{Generation: 7, AvailableSlotsHint: 2, CommitSuccess: []bool{true}}
-	})
+	}))
 
 	tx := r.NewTx(testNsID, newConcurrencyTestTask(), &testCallback{})
 	require.NoError(t, tx.SkipCheck())
 	require.Empty(t, tx.Hints())
 
 	require.NoError(t, tx.Reserve(context.Background()))
-	require.Len(t, tx.Hints(), 1)
-	require.Equal(t, int32(3), tx.Hints()[0].GetAvailableSlotsHint())
+	require.Equal(t, []*taskqueuespb.LimiterHint{concurrencyHint(7, 3)}, tx.Hints())
 
 	require.NoError(t, tx.Commit(context.Background()))
-	require.Len(t, tx.Hints(), 1)
-	require.Equal(t, int64(7), tx.Hints()[0].GetGeneration())
-	require.Equal(t, int32(2), tx.Hints()[0].GetAvailableSlotsHint())
-	require.Equal(t, testConKey, tx.Hints()[0].GetKey())
-	require.Equal(t, enumsspb.LIMITER_TYPE_CONCURRENCY, tx.Hints()[0].GetLimiterType())
+	require.Equal(t, []*taskqueuespb.LimiterHint{concurrencyHint(7, 2)}, tx.Hints())
+	tx.Close()
+}
+
+func TestHints_UnknownSlotsOmitted(t *testing.T) {
+	reserveSlots := int32(-1)
+	r, _ := newTestReadiness(t, newHintTestClient(func(req *fcpb.ConcurrencyServiceBatchRequest) *fcpb.ConcurrencyServiceBatchResponse {
+		if len(req.ReserveSlots) > 0 {
+			return &fcpb.ConcurrencyServiceBatchResponse{Generation: 5, AvailableSlotsHint: reserveSlots, ReserveSuccess: []bool{true}}
+		}
+		return &fcpb.ConcurrencyServiceBatchResponse{Generation: 6, AvailableSlotsHint: -1, CommitSuccess: []bool{true}}
+	}))
+
+	tx := r.NewTx(testNsID, newConcurrencyTestTask(), &testCallback{})
+	require.NoError(t, tx.SkipCheck())
+	require.NoError(t, tx.Reserve(context.Background()))
+	require.Empty(t, tx.Hints())
+	tx.Rollback(context.Background())
+
+	// commit with unknown slots doesn't replace the hint from reserve
+	reserveSlots = 3
+	tx = r.NewTx(testNsID, newConcurrencyTestTask(), &testCallback{})
+	require.NoError(t, tx.SkipCheck())
+	require.NoError(t, tx.Reserve(context.Background()))
+	require.NoError(t, tx.Commit(context.Background()))
+	require.Equal(t, []*taskqueuespb.LimiterHint{concurrencyHint(5, 3)}, tx.Hints())
+	tx.Close()
 }
 
 func TestHints_FromBlockedReserve(t *testing.T) {
-	t.Parallel()
-	r := newTestReadiness(func(req *fcpb.ConcurrencyServiceBatchRequest) *fcpb.ConcurrencyServiceBatchResponse {
+	r, _ := newTestReadiness(t, newHintTestClient(func(*fcpb.ConcurrencyServiceBatchRequest) *fcpb.ConcurrencyServiceBatchResponse {
 		return &fcpb.ConcurrencyServiceBatchResponse{Generation: 4, AvailableSlotsHint: 0, ReserveSuccess: []bool{false}}
-	})
+	}))
 
 	tx := r.NewTx(testNsID, newConcurrencyTestTask(), &testCallback{})
 	require.NoError(t, tx.SkipCheck())
 	err := tx.Reserve(context.Background())
 	var blocked *serviceerrors.FlowControlBlocked
 	require.ErrorAs(t, err, &blocked)
+	// still available after Reserve's implicit Rollback
 	require.Equal(t, []*taskqueuespb.LimiterHint{concurrencyHint(4, 0)}, tx.Hints())
 }
 
 func TestApplyHints_SupersedesCheckToken(t *testing.T) {
-	t.Parallel()
-	r := newTestReadiness(nil)
-	r.getConcurrencyLimiter(testNsID, testConKey).reportSlotsHint(1, 5, notifySync)
+	r, _ := newTestReadiness(t, nil)
+	setTokens(r, 1, 5)
 
 	tx := r.NewTx(testNsID, newConcurrencyTestTask(), &testCallback{})
 	require.NoError(t, tx.Check())
@@ -188,9 +188,8 @@ func TestApplyHints_SupersedesCheckToken(t *testing.T) {
 }
 
 func TestApplyHints_StaleGenerationIgnored(t *testing.T) {
-	t.Parallel()
-	r := newTestReadiness(nil)
-	r.getConcurrencyLimiter(testNsID, testConKey).reportSlotsHint(3, 5, notifySync)
+	r, _ := newTestReadiness(t, nil)
+	setTokens(r, 3, 5)
 
 	tx := r.NewTx(testNsID, newConcurrencyTestTask(), &testCallback{})
 	require.NoError(t, tx.Check())
@@ -204,9 +203,8 @@ func TestApplyHints_StaleGenerationIgnored(t *testing.T) {
 }
 
 func TestApplyHints_UnknownLimiterIgnored(t *testing.T) {
-	t.Parallel()
-	r := newTestReadiness(nil)
-	r.getConcurrencyLimiter(testNsID, testConKey).reportSlotsHint(1, 5, notifySync)
+	r, _ := newTestReadiness(t, nil)
+	setTokens(r, 1, 5)
 
 	tx := r.NewTx(testNsID, newConcurrencyTestTask(), &testCallback{})
 	require.NoError(t, tx.Check())
@@ -224,7 +222,6 @@ func TestApplyHints_UnknownLimiterIgnored(t *testing.T) {
 }
 
 func TestNilTx(t *testing.T) {
-	t.Parallel()
 	var tx *Tx
 	require.NoError(t, tx.SkipCheck())
 	require.Nil(t, tx.Hints())

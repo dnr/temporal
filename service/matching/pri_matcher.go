@@ -242,6 +242,9 @@ func (tm *priTaskMatcher) forwardTask(task *internalTask) (bool, error) {
 	// Flow control Check was done on this partition when the task matched the forwarder. The
 	// parent does Reserve and Commit (if it dispatches the task), and returns hints so we can
 	// update our cache. If forwarding fails, we return our check tokens.
+	// TODO(fc): for query and nexus tasks, ForwardQueryTask/ForwardNexusTask should return hints
+	// from the trailer (and DispatchQueryTask/DispatchNexusTask on the parent should send them),
+	// and we should apply them here, as for workflow/activity tasks.
 	if task.isQuery() {
 		res, err := tm.fwdr.ForwardQueryTask(ctx, task)
 		if err != nil {

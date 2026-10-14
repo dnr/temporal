@@ -70,7 +70,7 @@ func (ct *concurrencyTx) hint() *taskqueuespb.LimiterHint {
 }
 
 func (ct *concurrencyTx) applyHint(hint *taskqueuespb.LimiterHint) {
-	if hint.GetLimiterType() != enumsspb.LIMITER_TYPE_CONCURRENCY || hint.GetKey() != ct.cs.key {
+	if hint.GetLimiterType() != enumsspb.LIMITER_TYPE_CONCURRENCY || hint.GetKey() != ct.cs.limiterKey() {
 		return
 	}
 	ct.cs.reportSlotsHint(hint.GetGeneration(), hint.GetAvailableSlotsHint(), notifyAsync)
@@ -78,7 +78,7 @@ func (ct *concurrencyTx) applyHint(hint *taskqueuespb.LimiterHint) {
 }
 
 func (ct *concurrencyTx) recordHint(hint *taskqueuespb.LimiterHint) {
-	if hint != nil && hint.GetGeneration() >= ct.lastHint.GetGeneration() {
+	if hint != nil {
 		ct.lastHint = hint
 	}
 }

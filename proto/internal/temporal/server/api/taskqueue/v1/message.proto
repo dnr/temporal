@@ -216,7 +216,6 @@ message LimiterHint {
   temporal.server.api.enums.v1.LimiterType limiter_type = 1;
   string key = 2;
   int64 generation = 3;
-  // Available slots, or -1 if unknown.
   int32 available_slots_hint = 4;
 }
 

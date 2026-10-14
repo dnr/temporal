@@ -735,6 +735,9 @@ pollLoop:
 		}
 
 		if task.isQuery() {
+			// TODO(fc): do Reserve and Commit here, like for workflow tasks below, and pass the
+			// limiter refs to the QueryWorkflow call that's waiting for this query's result, so
+			// it can release the slots when the result arrives or times out.
 			task.finish(nil) // this only means query task sync match succeed.
 
 			// for query task, we don't need to update history to record workflow task started. but we need to know
@@ -1216,6 +1219,8 @@ func (e *matchingEngineImpl) QueryWorkflow(
 
 	// if we get here it means that dispatch of query task has occurred locally
 	// must wait on result channel to get query result
+	// TODO(fc): release flow control slots (reserved by the poll that matched the query) when
+	// this returns, whether we got a result or timed out.
 	select {
 	case result := <-queryResultCh:
 		if result.internalError != nil {
@@ -2757,6 +2762,8 @@ func (e *matchingEngineImpl) DispatchNexusTask(ctx context.Context, request *mat
 
 	// If we get here it means that task dispatch has occurred locally.
 	// Must wait on result channel to get query result.
+	// TODO(fc): release flow control slots (reserved by the poll that matched the task) when
+	// this returns, whether we got a result or timed out.
 	select {
 	case result := <-resultCh:
 		if result.internalError != nil {
@@ -2832,6 +2839,9 @@ pollLoop:
 			return task.pollNexusTaskQueueResponse(), nil
 		}
 
+		// TODO(fc): do Reserve and Commit here, and pass the limiter refs to the DispatchNexusTask
+		// call that's waiting for this task's result, so it can release the slots when the
+		// result arrives or times out.
 		task.finish(err)
 		if err != nil {
 			continue pollLoop

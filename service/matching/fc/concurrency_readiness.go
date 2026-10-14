@@ -155,10 +155,15 @@ func (cs *concurrencyState) cancelReserve(ctx context.Context, slotID string) {
 	}()
 }
 
+// makeHint returns a hint to pass to other partitions, or nil if slots is unknown (the batching
+// client gives -1 to all but the first response in a batch).
 func (cs *concurrencyState) makeHint(gen int64, slots int32) *taskqueuespb.LimiterHint {
+	if slots < 0 {
+		return nil
+	}
 	return &taskqueuespb.LimiterHint{
 		LimiterType:        enumsspb.LIMITER_TYPE_CONCURRENCY,
-		Key:                cs.key,
+		Key:                cs.limiterKey(),
 		Generation:         gen,
 		AvailableSlotsHint: slots,
 	}

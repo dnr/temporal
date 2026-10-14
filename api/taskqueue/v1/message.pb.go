@@ -1120,12 +1120,11 @@ func (x *LimiterRef) GetSlotId() string {
 // LimiterHint carries a matching node's latest knowledge of a flow control limiter's state, so
 // that it can be shared with other partitions along a forwarding chain.
 type LimiterHint struct {
-	state       protoimpl.MessageState `protogen:"open.v1"`
-	LimiterType v14.LimiterType        `protobuf:"varint,1,opt,name=limiter_type,json=limiterType,proto3,enum=temporal.server.api.enums.v1.LimiterType" json:"limiter_type,omitempty"`
-	Key         string                 `protobuf:"bytes,2,opt,name=key,proto3" json:"key,omitempty"`
-	Generation  int64                  `protobuf:"varint,3,opt,name=generation,proto3" json:"generation,omitempty"`
-	// Available slots, or -1 if unknown.
-	AvailableSlotsHint int32 `protobuf:"varint,4,opt,name=available_slots_hint,json=availableSlotsHint,proto3" json:"available_slots_hint,omitempty"`
+	state              protoimpl.MessageState `protogen:"open.v1"`
+	LimiterType        v14.LimiterType        `protobuf:"varint,1,opt,name=limiter_type,json=limiterType,proto3,enum=temporal.server.api.enums.v1.LimiterType" json:"limiter_type,omitempty"`
+	Key                string                 `protobuf:"bytes,2,opt,name=key,proto3" json:"key,omitempty"`
+	Generation         int64                  `protobuf:"varint,3,opt,name=generation,proto3" json:"generation,omitempty"`
+	AvailableSlotsHint int32                  `protobuf:"varint,4,opt,name=available_slots_hint,json=availableSlotsHint,proto3" json:"available_slots_hint,omitempty"`
 	unknownFields      protoimpl.UnknownFields
 	sizeCache          protoimpl.SizeCache
 }

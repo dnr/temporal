@@ -161,10 +161,18 @@ func (tx *Tx) Check() (retErr error) {
 // SkipCheck moves all limiters to the checked state without checking or consuming local
 // tokens. This is used for tasks forwarded from another partition, which already did Check on
 // that partition.
-func (tx *Tx) SkipCheck() error {
+func (tx *Tx) SkipCheck() (retErr error) {
 	if tx == nil {
 		return nil // no limiters
+	} else if tx.closed {
+		return errInvalidTxState
 	}
+	defer func() {
+		if retErr != nil {
+			tx.Rollback(context.Background())
+		}
+	}()
+
 	for i := range tx.limiters {
 		if tx.state[i] != txStateInit {
 			return errInvalidTxState
@@ -281,7 +289,7 @@ func (tx *Tx) Close() {
 }
 
 // Hints returns the latest known state of the shared limiters in this tx, from the results of
-// Reserve and Commit, or from ApplyHints.
+// Reserve and Commit, or from ApplyHints. It may be called after Close.
 func (tx *Tx) Hints() []*taskqueuespb.LimiterHint {
 	if tx == nil {
 		return nil // no limiters
@@ -299,8 +307,8 @@ func (tx *Tx) Hints() []*taskqueuespb.LimiterHint {
 // limiters that are not part of this tx are ignored. If the tx is going to be rolled back, call
 // ApplyHints first, so that check tokens are not returned on top of the updated state.
 func (tx *Tx) ApplyHints(hints []*taskqueuespb.LimiterHint) {
-	if tx == nil {
-		return // no limiters
+	if tx == nil || tx.closed {
+		return
 	}
 	for _, hint := range hints {
 		for _, lim := range tx.limiters {

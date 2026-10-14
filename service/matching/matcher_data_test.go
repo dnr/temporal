@@ -6,6 +6,7 @@ import (
 	"errors"
 	"math/rand"
 	"runtime"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -388,8 +389,10 @@ func (s *MatcherDataSuite) TestTaskForward() {
 		pres.task.finishForward(nil, someError)
 	}()
 	// two normal pollers
-	go s.pollFakeTime(time.Second)
-	go s.pollFakeTime(time.Second)
+	var pollers sync.WaitGroup
+	pollers.Go(func() { s.pollFakeTime(time.Second) })
+	pollers.Go(func() { s.pollFakeTime(time.Second) })
+	defer pollers.Wait()
 
 	s.waitForPollers(3)
 
@@ -436,27 +439,19 @@ func (s *MatcherDataSuite) TestForwardedTaskSkipsFlowControlCheck() {
 	s.doFlowControl(pres)
 }
 
-func (s *MatcherDataSuite) TestPollForwarderSkipsFlowControl() {
+func (s *MatcherDataSuite) TestValidatorSkipsFlowControl() {
 	// Set rate limit to zero — blocks all matches of local tasks.
 	s.md.rateLimitManager.SetEffectiveRPSAndSourceForTesting(0, enumspb.RATE_LIMIT_SOURCE_API)
 	s.md.rateLimitManager.UpdateSimpleRateLimitWithBurstForTesting(0)
 
-	fwdDone := make(chan struct{})
-	go func() {
-		defer close(fwdDone)
-		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-		defer cancel()
-		tres := s.md.EnqueueTaskAndWait([]context.Context{ctx}, newPollForwarderTask(pollForwarderPriority, parentPollForwarder))
-		s.NotNil(tres.poller)
-		s.Nil(tres.task.fcTx)
-		s.md.FinishMatchAfterPollForward(tres.poller, s.newBacklogTask(1, 0, nil))
-	}()
-	s.waitForTasks(1)
+	t := s.newBacklogTask(1, 0, nil)
+	s.Require().NoError(s.md.EnqueueTaskNoWait(t))
+	s.Nil(s.pollImmediately(nil), "normal poll should be rate limited")
 
-	pres := s.pollRealTime(time.Second)
-	s.Require().NoError(pres.ctxErr)
-	s.NotNil(pres.task)
-	<-fwdDone
+	pres := s.md.MatchPollerImmediately(&waitingPoller{taskForwarderType: validatorTaskForwarder})
+	s.Require().NotNil(pres)
+	s.Equal(t, pres.task)
+	s.Nil(t.fcTx)
 }
 
 func (s *MatcherDataSuite) TestRateLimitedBacklog() {

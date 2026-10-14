@@ -291,11 +291,10 @@ func (s *PriMatcherSuite) TestValidatorDrop_SetsDropReason() {
 	}
 }
 
-// testConcurrencyClient grants one token on the first Wait call, then blocks. Batch should not
-// be called, since a child partition doesn't reserve or commit tasks that it forwards.
+// testConcurrencyClient blocks in Wait. Batch should not be called, since a child partition
+// doesn't reserve or commit tasks that it forwards.
 type testConcurrencyClient struct {
 	fcpb.ConcurrencyServiceClient
-	waitCalls atomic.Int32
 }
 
 func (c *testConcurrencyClient) Batch(
@@ -311,9 +310,6 @@ func (c *testConcurrencyClient) Wait(
 	_ *fcpb.ConcurrencyServiceWaitRequest,
 	_ ...grpc.CallOption,
 ) (*fcpb.ConcurrencyServiceWaitResponse, error) {
-	if c.waitCalls.Add(1) == 1 {
-		return &fcpb.ConcurrencyServiceWaitResponse{Generation: 1, WakeTokens: 1}, nil
-	}
 	<-ctx.Done()
 	return nil, ctx.Err()
 }
@@ -346,8 +342,9 @@ func (s *PriMatcherSuite) TestForwardTaskAppliesLimiterHints() {
 		ts := clock.NewRealTimeSource()
 		rateLimitManager := newRateLimitManager(ts, userDataManager, cfg, enumspb.TASK_QUEUE_TYPE_WORKFLOW)
 		rateLimitManager.Start()
-		fcManager := newFCManager(childPartition, cfg, userDataManager, rateLimitManager,
-			fc.NewReadiness(ts, &testConcurrencyClient{}))
+		readiness := fc.NewReadiness(ts, &testConcurrencyClient{}, fc.NewReadinessConfig(dynamicconfig.NewNoopCollection()))
+		defer readiness.Stop()
+		fcManager := newFCManager(childPartition, cfg, userDataManager, rateLimitManager, readiness)
 
 		// parent has no slots available
 		hints, err := proto.Marshal(&taskqueuespb.LimiterHints{Hints: []*taskqueuespb.LimiterHint{{
@@ -399,11 +396,8 @@ func (s *PriMatcherSuite) TestForwardTaskAppliesLimiterHints() {
 			return outcome
 		}
 
-		// No cached concurrency tokens yet. This starts a Wait call, which grants one token.
-		require.Equal(t, syncMatchConcurrencyLimited, offer())
-		synctest.Wait()
-
-		// Takes the token and forwards. The parent rejects it and says there are no slots.
+		// Takes the optimistic initial token and forwards. The parent rejects it and says there
+		// are no slots.
 		require.Equal(t, syncMatchNoPoller, offer())
 		synctest.Wait()
 
