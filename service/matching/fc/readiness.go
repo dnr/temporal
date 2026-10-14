@@ -78,7 +78,13 @@ type (
 		limiter limiterState
 		pri     wakePriority
 	}
+	limiterStateBase struct {
+		rs   *readinessShard
+		pins int
+	}
+
 	limiterState interface {
+		base() *limiterStateBase
 		// After any call to update(), Readiness will call syncLocked with a readinessSyncUpdate
 		// containing a list of waiters. syncLocked may call wake on the readinessSyncUpdate to
 		// wake some of the waiters, and then it should update any asynchronous resources based
@@ -289,13 +295,13 @@ func (rs *readinessShard) cleanup() {
 	defer rs.lock.Unlock()
 
 	for key, lim := range rs.concurrencyLimiters {
-		if _, ok := rs.fwd[lim]; !ok && lim.droppableLocked() {
+		if _, ok := rs.fwd[lim]; !ok && lim.pins == 0 && lim.droppableLocked() {
 			delete(rs.concurrencyLimiters, key)
 		}
 	}
 
 	for key, lim := range rs.localLimiters {
-		if _, ok := rs.fwd[lim]; !ok && lim.droppableLocked() {
+		if _, ok := rs.fwd[lim]; !ok && lim.pins == 0 && lim.droppableLocked() {
 			delete(rs.localLimiters, key)
 		}
 	}
@@ -344,4 +350,14 @@ func revMapEntryCmp(a, b revMapEntry) int {
 		reflect.ValueOf(a.limiter).Pointer(),
 		reflect.ValueOf(b.limiter).Pointer(),
 	)
+}
+
+func (b *limiterStateBase) base() *limiterStateBase {
+	return b
+}
+
+func (b *limiterStateBase) unpin() {
+	b.rs.lock.Lock()
+	defer b.rs.lock.Unlock()
+	b.pins--
 }

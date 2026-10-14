@@ -34,3 +34,7 @@ func (llt *localLimiterTx) commit(context.Context) error {
 
 func (llt *localLimiterTx) cancelReserve(context.Context) {
 }
+
+func (llt *localLimiterTx) finish() {
+	llt.lls.unpin()
+}
