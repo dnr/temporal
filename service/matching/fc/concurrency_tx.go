@@ -4,6 +4,8 @@ import (
 	"context"
 
 	taskqueuepb "go.temporal.io/api/taskqueue/v1"
+	enumsspb "go.temporal.io/server/api/enums/v1"
+	taskqueuespb "go.temporal.io/server/api/taskqueue/v1"
 )
 
 type concurrencyTx struct {
@@ -13,6 +15,8 @@ type concurrencyTx struct {
 	configUpdateVersion int64
 	pri                 wakePriority
 	checkSeq            int64
+	// latest known limiter state, from reserve, commit, or applyHint
+	lastHint *taskqueuespb.LimiterHint
 }
 
 func newConcurrencyTx(
@@ -42,11 +46,15 @@ func (ct *concurrencyTx) cancelCheck() {
 }
 
 func (ct *concurrencyTx) reserve(ctx context.Context) error {
-	return ct.cs.reserve(ctx, ct.slotID, ct.configUpdate, ct.configUpdateVersion)
+	hint, err := ct.cs.reserve(ctx, ct.slotID, ct.configUpdate, ct.configUpdateVersion)
+	ct.recordHint(hint)
+	return err
 }
 
 func (ct *concurrencyTx) commit(ctx context.Context) error {
-	return ct.cs.commit(ctx, ct.slotID)
+	hint, err := ct.cs.commit(ctx, ct.slotID)
+	ct.recordHint(hint)
+	return err
 }
 
 func (ct *concurrencyTx) cancelReserve(ctx context.Context) {
@@ -55,4 +63,22 @@ func (ct *concurrencyTx) cancelReserve(ctx context.Context) {
 
 func (ct *concurrencyTx) close() {
 	ct.cs.unpin()
+}
+
+func (ct *concurrencyTx) hint() *taskqueuespb.LimiterHint {
+	return ct.lastHint
+}
+
+func (ct *concurrencyTx) applyHint(hint *taskqueuespb.LimiterHint) {
+	if hint.GetLimiterType() != enumsspb.LIMITER_TYPE_CONCURRENCY || hint.GetKey() != ct.cs.key {
+		return
+	}
+	ct.cs.reportSlotsHint(hint.GetGeneration(), hint.GetAvailableSlotsHint(), notifyAsync)
+	ct.recordHint(hint)
+}
+
+func (ct *concurrencyTx) recordHint(hint *taskqueuespb.LimiterHint) {
+	if hint != nil && hint.GetGeneration() >= ct.lastHint.GetGeneration() {
+		ct.lastHint = hint
+	}
 }

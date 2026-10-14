@@ -39,6 +39,16 @@ type forwarder interface {
 	ForwardPoll(ctx context.Context, p *pollMetadata) (*internalTask, error)
 }
 
+// priForwarderAdapter drops limiter hints so priForwarder fits the forwarder interface.
+type priForwarderAdapter struct {
+	*priForwarder
+}
+
+func (a priForwarderAdapter) ForwardTask(ctx context.Context, task *internalTask) error {
+	_, err := a.priForwarder.ForwardTask(ctx, task)
+	return err
+}
+
 // TODO(pri): cleanup; delete this
 func TestForwarderSuite(t *testing.T) {
 	t.Parallel()
@@ -65,8 +75,10 @@ func (t *ForwarderTestSuite) SetupTest() {
 	t.partition = tqFam.TaskQueue(enumspb.TASK_QUEUE_TYPE_WORKFLOW).RootPartition()
 
 	if t.newFwdr {
-		t.fwdr, err = newPriForwarder(t.cfg, UnversionedQueueKey(t.partition), t.client, testhooks.TestHooks{})
+		var priFwdr *priForwarder
+		priFwdr, err = newPriForwarder(t.cfg, UnversionedQueueKey(t.partition), t.client, testhooks.TestHooks{})
 		t.NoError(err)
+		t.fwdr = priForwarderAdapter{priFwdr}
 	} else {
 		t.fwdr, err = newForwarder(t.cfg, UnversionedQueueKey(t.partition), t.client)
 		t.NoError(err)

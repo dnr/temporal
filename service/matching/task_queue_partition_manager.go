@@ -483,6 +483,14 @@ func (pm *taskQueuePartitionManagerImpl) sendPartitionCountTrailer(ctx context.C
 	}
 }
 
+// sendLimiterHintsTrailer passes flow control hints for a forwarded task back to the partition
+// that forwarded it. Call only after TrySyncMatch returns, when nothing else is using task.fcTx.
+func (pm *taskQueuePartitionManagerImpl) sendLimiterHintsTrailer(ctx context.Context, task *internalTask) {
+	if err := setLimiterHintsTrailer(ctx, task.fcTx.Hints()); err != nil {
+		pm.throttledLogger.Debug("error setting limiter hints trailer", tag.Error(err))
+	}
+}
+
 func (pm *taskQueuePartitionManagerImpl) GetRateLimitManager() *rateLimitManager {
 	return pm.rateLimitManager
 }
@@ -631,6 +639,9 @@ reredirectTask:
 	if isActive {
 		outcome, err = syncMatchQueue.TrySyncMatch(ctx, syncMatchTask)
 		syncMatched = outcome == syncMatchSuccess
+		if forwarded {
+			pm.sendLimiterHintsTrailer(ctx, syncMatchTask)
+		}
 		if syncMatched && !pm.shouldBacklogSyncMatchTaskOnError(err) {
 			// Only fire hooks for non-forwarded tasks. Forwarded tasks already had hooks fired
 			// on the child partition that originally received the task.

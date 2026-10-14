@@ -2,6 +2,7 @@ package matching
 
 import (
 	"context"
+	"errors"
 	"sync/atomic"
 	"testing"
 	"testing/synctest"
@@ -11,9 +12,13 @@ import (
 	"github.com/stretchr/testify/suite"
 	enumspb "go.temporal.io/api/enums/v1"
 	"go.temporal.io/api/serviceerror"
+	taskqueuepb "go.temporal.io/api/taskqueue/v1"
+	enumsspb "go.temporal.io/server/api/enums/v1"
 	"go.temporal.io/server/api/matchingservice/v1"
 	"go.temporal.io/server/api/matchingservicemock/v1"
 	persistencespb "go.temporal.io/server/api/persistence/v1"
+	taskqueuespb "go.temporal.io/server/api/taskqueue/v1"
+	fcpb "go.temporal.io/server/chasm/lib/flowcontrol/gen/flowcontrolpb/v1"
 	"go.temporal.io/server/common/clock"
 	"go.temporal.io/server/common/dynamicconfig"
 	"go.temporal.io/server/common/log"
@@ -23,6 +28,9 @@ import (
 	"go.temporal.io/server/common/tqid"
 	"go.temporal.io/server/service/matching/fc"
 	"go.uber.org/mock/gomock"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/metadata"
+	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
@@ -281,4 +289,126 @@ func (s *PriMatcherSuite) TestValidatorDrop_SetsDropReason() {
 			}
 		})
 	}
+}
+
+// testConcurrencyClient grants one token on the first Wait call, then blocks. Batch should not
+// be called, since a child partition doesn't reserve or commit tasks that it forwards.
+type testConcurrencyClient struct {
+	fcpb.ConcurrencyServiceClient
+	waitCalls atomic.Int32
+}
+
+func (c *testConcurrencyClient) Batch(
+	context.Context,
+	*fcpb.ConcurrencyServiceBatchRequest,
+	...grpc.CallOption,
+) (*fcpb.ConcurrencyServiceBatchResponse, error) {
+	return nil, errors.New("unexpected Batch call")
+}
+
+func (c *testConcurrencyClient) Wait(
+	ctx context.Context,
+	_ *fcpb.ConcurrencyServiceWaitRequest,
+	_ ...grpc.CallOption,
+) (*fcpb.ConcurrencyServiceWaitResponse, error) {
+	if c.waitCalls.Add(1) == 1 {
+		return &fcpb.ConcurrencyServiceWaitResponse{Generation: 1, WakeTokens: 1}, nil
+	}
+	<-ctx.Done()
+	return nil, ctx.Err()
+}
+
+// TestForwardTaskAppliesLimiterHints verifies that when forwarding fails, the child partition
+// applies the flow control hints returned by the parent before rolling back its check, so that
+// it stops forwarding tasks that the parent has no slots for.
+func (s *PriMatcherSuite) TestForwardTaskAppliesLimiterHints() {
+	synctest.Test(s.T(), func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		tq := tqid.UnsafeTaskQueueFamily("nsid", "tq").TaskQueue(enumspb.TASK_QUEUE_TYPE_WORKFLOW)
+		childPartition := tq.NormalPartition(1)
+		cfg := newTaskQueueConfig(tq, NewConfig(dynamicconfig.NewNoopCollection()), "nsname")
+
+		userDataManager := &mockUserDataManager{data: &persistencespb.VersionedTaskQueueUserData{
+			Data: &persistencespb.TaskQueueUserData{
+				PerType: map[int32]*persistencespb.TaskQueueTypeUserData{
+					int32(enumspb.TASK_QUEUE_TYPE_WORKFLOW): {
+						Config: &taskqueuepb.TaskQueueConfig{
+							QueueConcurrencyLimit: &taskqueuepb.ConcurrencyLimitConfig{
+								ConcurrencyLimit: &taskqueuepb.ConcurrencyLimit{ConcurrentTasks: 5},
+							},
+						},
+					},
+				},
+			},
+		}}
+		ts := clock.NewRealTimeSource()
+		rateLimitManager := newRateLimitManager(ts, userDataManager, cfg, enumspb.TASK_QUEUE_TYPE_WORKFLOW)
+		rateLimitManager.Start()
+		fcManager := newFCManager(childPartition, cfg, userDataManager, rateLimitManager,
+			fc.NewReadiness(ts, &testConcurrencyClient{}))
+
+		// parent has no slots available
+		hints, err := proto.Marshal(&taskqueuespb.LimiterHints{Hints: []*taskqueuespb.LimiterHint{{
+			LimiterType:        enumsspb.LIMITER_TYPE_CONCURRENCY,
+			Key:                fcManager.wholeQueueConcurrencyLimiterKey(),
+			Generation:         2,
+			AvailableSlotsHint: 0,
+		}}})
+		require.NoError(t, err)
+		mockClient := matchingservicemock.NewMockMatchingServiceClient(s.controller)
+		mockClient.EXPECT().
+			AddWorkflowTask(gomock.Any(), gomock.Any(), gomock.Any()).
+			DoAndReturn(func(_ context.Context, _ *matchingservice.AddWorkflowTaskRequest, opts ...grpc.CallOption) (*matchingservice.AddWorkflowTaskResponse, error) {
+				for _, opt := range opts {
+					if trailerOpt, ok := opt.(grpc.TrailerCallOption); ok {
+						*trailerOpt.TrailerAddr = metadata.Pairs(limiterHintsTrailerName, string(hints))
+					}
+				}
+				return nil, errRemoteSyncMatchFailed
+			}).
+			Times(1)
+
+		fwdr, err := newPriForwarder(&cfg.forwarderConfig, UnversionedQueueKey(childPartition), mockClient, testhooks.TestHooks{})
+		require.NoError(t, err)
+
+		tm := newPriTaskMatcher(
+			ctx,
+			cfg,
+			childPartition,
+			fwdr,
+			mockClient,
+			nil, // no validator needed on child
+			s.logger,
+			metrics.NoopMetricsHandler,
+			rateLimitManager,
+			fcManager,
+			func(syncMatchOutcome) {},
+			func() {},
+		)
+		tm.Start()
+		defer tm.Stop()
+		synctest.Wait()
+
+		offer := func() syncMatchOutcome {
+			task := newInternalTaskForSyncMatch(&persistencespb.TaskInfo{CreateTime: timestamppb.Now()}, nil, 0, nil)
+			cfg.setDefaultPriority(task)
+			outcome, err := tm.Offer(ctx, task)
+			require.NoError(t, err)
+			return outcome
+		}
+
+		// No cached concurrency tokens yet. This starts a Wait call, which grants one token.
+		require.Equal(t, syncMatchConcurrencyLimited, offer())
+		synctest.Wait()
+
+		// Takes the token and forwards. The parent rejects it and says there are no slots.
+		require.Equal(t, syncMatchNoPoller, offer())
+		synctest.Wait()
+
+		// The hint superseded our check token, so rollback didn't return it, and we don't
+		// forward again.
+		require.Equal(t, syncMatchConcurrencyLimited, offer())
+	})
 }

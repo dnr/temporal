@@ -522,3 +522,77 @@ func (this *LimiterRef) Equal(that interface{}) bool {
 
 	return proto.Equal(this, that1)
 }
+
+// Marshal an object of type LimiterHint to the protobuf v3 wire format
+func (val *LimiterHint) Marshal() ([]byte, error) {
+	return proto.Marshal(val)
+}
+
+// Unmarshal an object of type LimiterHint from the protobuf v3 wire format
+func (val *LimiterHint) Unmarshal(buf []byte) error {
+	return proto.Unmarshal(buf, val)
+}
+
+// Size returns the size of the object, in bytes, once serialized
+func (val *LimiterHint) Size() int {
+	return proto.Size(val)
+}
+
+// Equal returns whether two LimiterHint values are equivalent by recursively
+// comparing the message's fields.
+// For more information see the documentation for
+// https://pkg.go.dev/google.golang.org/protobuf/proto#Equal
+func (this *LimiterHint) Equal(that interface{}) bool {
+	if that == nil {
+		return this == nil
+	}
+
+	var that1 *LimiterHint
+	switch t := that.(type) {
+	case *LimiterHint:
+		that1 = t
+	case LimiterHint:
+		that1 = &t
+	default:
+		return false
+	}
+
+	return proto.Equal(this, that1)
+}
+
+// Marshal an object of type LimiterHints to the protobuf v3 wire format
+func (val *LimiterHints) Marshal() ([]byte, error) {
+	return proto.Marshal(val)
+}
+
+// Unmarshal an object of type LimiterHints from the protobuf v3 wire format
+func (val *LimiterHints) Unmarshal(buf []byte) error {
+	return proto.Unmarshal(buf, val)
+}
+
+// Size returns the size of the object, in bytes, once serialized
+func (val *LimiterHints) Size() int {
+	return proto.Size(val)
+}
+
+// Equal returns whether two LimiterHints values are equivalent by recursively
+// comparing the message's fields.
+// For more information see the documentation for
+// https://pkg.go.dev/google.golang.org/protobuf/proto#Equal
+func (this *LimiterHints) Equal(that interface{}) bool {
+	if that == nil {
+		return this == nil
+	}
+
+	var that1 *LimiterHints
+	switch t := that.(type) {
+	case *LimiterHints:
+		that1 = t
+	case LimiterHints:
+		that1 = &t
+	default:
+		return false
+	}
+
+	return proto.Equal(this, that1)
+}

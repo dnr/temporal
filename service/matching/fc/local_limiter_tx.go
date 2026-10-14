@@ -3,6 +3,7 @@ package fc
 import (
 	"context"
 
+	taskqueuespb "go.temporal.io/server/api/taskqueue/v1"
 	"go.temporal.io/server/service/matching/simplelimiter"
 )
 
@@ -37,4 +38,11 @@ func (llt *localLimiterTx) cancelReserve(context.Context) {
 
 func (llt *localLimiterTx) close() {
 	llt.lls.unpin()
+}
+
+func (llt *localLimiterTx) hint() *taskqueuespb.LimiterHint {
+	return nil // local limiters are not shared across partitions
+}
+
+func (llt *localLimiterTx) applyHint(*taskqueuespb.LimiterHint) {
 }

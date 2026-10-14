@@ -209,3 +209,19 @@ message LimiterRef {
   // Identifier for the reserved or committed slot. Empty for limiters that don't allocate slots.
   string slot_id = 3;
 }
+
+// LimiterHint carries a matching node's latest knowledge of a flow control limiter's state, so
+// that it can be shared with other partitions along a forwarding chain.
+message LimiterHint {
+  temporal.server.api.enums.v1.LimiterType limiter_type = 1;
+  string key = 2;
+  int64 generation = 3;
+  // Available slots, or -1 if unknown.
+  int32 available_slots_hint = 4;
+}
+
+// LimiterHints is passed back from a parent partition to a child partition in a grpc trailer
+// on task forwarding rpcs.
+message LimiterHints {
+  repeated LimiterHint hints = 1;
+}

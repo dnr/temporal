@@ -7,6 +7,8 @@ import (
 
 	"go.temporal.io/api/serviceerror"
 	taskqueuepb "go.temporal.io/api/taskqueue/v1"
+	enumsspb "go.temporal.io/server/api/enums/v1"
+	taskqueuespb "go.temporal.io/server/api/taskqueue/v1"
 	fcpb "go.temporal.io/server/chasm/lib/flowcontrol/gen/flowcontrolpb/v1"
 	"go.temporal.io/server/common/backoff"
 	"go.temporal.io/server/common/clock"
@@ -96,7 +98,7 @@ func (cs *concurrencyState) reserve(
 	slotID string,
 	configUpdate *taskqueuepb.ConcurrencyLimit,
 	configUpdateVersion int64,
-) error {
+) (*taskqueuespb.LimiterHint, error) {
 	// TODO(fc): consider doing this from history to make invalid tasks cheaper to invalidate
 	res, err := cs.rs.r.concurrencyServiceClient.Batch(ctx, &fcpb.ConcurrencyServiceBatchRequest{
 		NamespaceId:         cs.namespaceID().String(),
@@ -106,29 +108,31 @@ func (cs *concurrencyState) reserve(
 		ConfigUpdateVersion: configUpdateVersion,
 	})
 	if err != nil {
-		return err // don't update cache on rpc error
+		return nil, err // don't update cache on rpc error
 	}
 	cs.reportSlotsHint(res.Generation, res.AvailableSlotsHint, notifyAsync)
+	hint := cs.makeHint(res.Generation, res.AvailableSlotsHint)
 	if !res.ReserveSuccess[0] {
-		return serviceerrors.NewFlowControlBlocked()
+		return hint, serviceerrors.NewFlowControlBlocked()
 	}
-	return nil
+	return hint, nil
 }
 
-func (cs *concurrencyState) commit(ctx context.Context, slotID string) error {
+func (cs *concurrencyState) commit(ctx context.Context, slotID string) (*taskqueuespb.LimiterHint, error) {
 	res, err := cs.rs.r.concurrencyServiceClient.Batch(ctx, &fcpb.ConcurrencyServiceBatchRequest{
 		NamespaceId: cs.namespaceID().String(),
 		Key:         cs.limiterKey(),
 		CommitSlots: []string{slotID},
 	})
 	if err != nil {
-		return err
+		return nil, err
 	}
 	cs.reportSlotsHint(res.Generation, res.AvailableSlotsHint, notifyAsync)
+	hint := cs.makeHint(res.Generation, res.AvailableSlotsHint)
 	if !res.CommitSuccess[0] {
-		return errCommitFailure
+		return hint, errCommitFailure
 	}
-	return nil
+	return hint, nil
 }
 
 func (cs *concurrencyState) cancelReserve(ctx context.Context, slotID string) {
@@ -149,6 +153,15 @@ func (cs *concurrencyState) cancelReserve(ctx context.Context, slotID string) {
 			cs.reportSlotsHint(res.Generation, res.AvailableSlotsHint, notifySync)
 		}
 	}()
+}
+
+func (cs *concurrencyState) makeHint(gen int64, slots int32) *taskqueuespb.LimiterHint {
+	return &taskqueuespb.LimiterHint{
+		LimiterType:        enumsspb.LIMITER_TYPE_CONCURRENCY,
+		Key:                cs.key,
+		Generation:         gen,
+		AvailableSlotsHint: slots,
+	}
 }
 
 func (cs *concurrencyState) reportSlotsHint(gen int64, slots int32, mode notifyMode) {
