@@ -2,19 +2,25 @@ package fc
 
 import (
 	"cmp"
+	"context"
 	"hash/maphash"
 	"reflect"
 	"slices"
 	"sync"
+	"time"
 
 	fcpb "go.temporal.io/server/chasm/lib/flowcontrol/gen/flowcontrolpb/v1"
+	"go.temporal.io/server/common/backoff"
 	"go.temporal.io/server/common/clock"
 	"go.temporal.io/server/common/namespace"
+	"go.temporal.io/server/common/util"
 )
 
 const (
 	// Shards should be a power of 2
 	readinessStateShards = 32
+
+	readinessCleanupInterval = time.Minute
 )
 
 type (
@@ -35,6 +41,9 @@ type (
 		shards [readinessStateShards]readinessShard
 
 		seed maphash.Seed
+
+		lifecycleCtx    context.Context
+		lifecycleCancel context.CancelFunc
 	}
 
 	readinessShard struct {
@@ -70,7 +79,15 @@ type (
 		pri     wakePriority
 	}
 	limiterState interface {
+		// After any call to update(), Readiness will call syncLocked with a readinessSyncUpdate
+		// containing a list of waiters. syncLocked may call wake on the readinessSyncUpdate to
+		// wake some of the waiters, and then it should update any asynchronous resources based
+		// on the remaining waiters.
 		syncLocked(*readinessSyncUpdate)
+
+		// droppableLocked should return true if this limiter can be dropped without disruption.
+		// It will only be called on limiters that have no waiters.
+		droppableLocked() bool
 	}
 
 	readinessSyncUpdate struct {
@@ -100,6 +117,7 @@ func NewReadiness(
 		concurrencyServiceClient: concurrencyServiceClient,
 		seed:                     maphash.MakeSeed(),
 	}
+	r.lifecycleCtx, r.lifecycleCancel = context.WithCancel(context.Background())
 	for i := range r.shards {
 		rs := &r.shards[i]
 		rs.r = r
@@ -119,10 +137,21 @@ func (r *Readiness) getShard(nsID namespace.ID) *readinessShard {
 	return &r.shards[r.getShardIdx(nsID)]
 }
 
+func (r *Readiness) Start() {
+	for i := range r.shards {
+		r.shards[i].start(r.lifecycleCtx)
+	}
+}
+
 func (r *Readiness) Stop() {
+	r.lifecycleCancel()
 	for i := range r.shards {
 		r.shards[i].stop()
 	}
+}
+
+func (rs *readinessShard) start(ctx context.Context) {
+	go rs.cleanupLoop(ctx)
 }
 
 func (rs *readinessShard) stop() {
@@ -232,6 +261,9 @@ func (rs *readinessShard) removeEdgeLocked(limiter limiterState, cb ReadinessCal
 	}
 }
 
+// update is the interface used by limiter states to update state atomically. Update will call
+// f, and then call limiter.syncLocked, which may wake some waiters, and then should update any
+// asynchronous resources (timers, rpcs, etc.) based on the remaining waiters.
 func (rs *readinessShard) update(limiter limiterState, mode notifyMode, f func() error) error {
 	var toNotify deferedNotify
 	defer toNotify.notify(mode) // outside lock
@@ -242,6 +274,31 @@ func (rs *readinessShard) update(limiter limiterState, mode notifyMode, f func()
 	defer rs.syncLimiter(limiter, &toNotify)
 
 	return f()
+}
+
+func (rs *readinessShard) cleanupLoop(ctx context.Context) {
+	_ = util.InterruptibleSleep(ctx, backoff.FullJitter(readinessCleanupInterval))
+	for ctx.Err() == nil {
+		rs.cleanup()
+		_ = util.InterruptibleSleep(ctx, backoff.Jitter(readinessCleanupInterval, 0.1))
+	}
+}
+
+func (rs *readinessShard) cleanup() {
+	rs.lock.Lock()
+	defer rs.lock.Unlock()
+
+	for key, lim := range rs.concurrencyLimiters {
+		if _, ok := rs.fwd[lim]; !ok && lim.droppableLocked() {
+			delete(rs.concurrencyLimiters, key)
+		}
+	}
+
+	for key, lim := range rs.localLimiters {
+		if _, ok := rs.fwd[lim]; !ok && lim.droppableLocked() {
+			delete(rs.localLimiters, key)
+		}
+	}
 }
 
 // syncLocked may call this. wake should remove up to n items from the front of rsu.waiters and

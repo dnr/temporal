@@ -244,3 +244,7 @@ func (cs *concurrencyState) callWait(ctx context.Context) {
 		// will be canceled before we continue this loop.
 	}
 }
+
+func (cs *concurrencyState) droppableLocked() bool {
+	return cs.goroCancel == nil
+}
