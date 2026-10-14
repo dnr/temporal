@@ -14,6 +14,8 @@ import (
 	"go.temporal.io/server/common/namespace"
 	"go.temporal.io/server/common/testing/testhooks"
 	"go.temporal.io/server/common/tqid"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/metadata"
 	"google.golang.org/protobuf/types/known/durationpb"
 )
 
@@ -58,8 +60,9 @@ func newPriForwarder(
 	}, nil
 }
 
-// ForwardTask forwards an activity or workflow task to the parent task queue partition if it exists
-func (f *priForwarder) ForwardTask(ctx context.Context, task *internalTask) error {
+// ForwardTask forwards an activity or workflow task to the parent partition. It returns any
+// flow control limiter hints that the parent sent back, whether or not forwarding succeeded.
+func (f *priForwarder) ForwardTask(ctx context.Context, task *internalTask) ([]*taskqueuespb.LimiterHint, error) {
 	if delay, ok := testhooks.Get(f.testHooks, testhooks.MatchingForwardTaskDelay, namespace.ID(task.event.Data.GetNamespaceId())); ok {
 		time.Sleep(delay)
 	}
@@ -67,7 +70,7 @@ func (f *priForwarder) ForwardTask(ctx context.Context, task *internalTask) erro
 	degree := f.cfg.ForwarderMaxChildrenPerNode()
 	target, err := f.partition.ParentPartition(degree)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	var expirationDuration *durationpb.Duration
@@ -76,11 +79,12 @@ func (f *priForwarder) ForwardTask(ctx context.Context, task *internalTask) erro
 		expirationTime = task.event.Data.ExpiryTime.AsTime()
 		remaining := time.Until(expirationTime)
 		if remaining <= 0 {
-			return nil
+			return nil, nil
 		}
 		expirationDuration = durationpb.New(remaining)
 	}
 
+	var trailer metadata.MD
 	// nolint:exhaustive // there's a default clause
 	switch f.partition.TaskType() {
 	case enumspb.TASK_QUEUE_TYPE_WORKFLOW:
@@ -100,6 +104,7 @@ func (f *priForwarder) ForwardTask(ctx context.Context, task *internalTask) erro
 				Stamp:                  task.event.Data.GetStamp(),
 				Priority:               task.event.Data.GetPriority(),
 			},
+			grpc.Trailer(&trailer),
 		)
 	case enumspb.TASK_QUEUE_TYPE_ACTIVITY:
 		_, err = f.client.AddActivityTask(
@@ -119,12 +124,13 @@ func (f *priForwarder) ForwardTask(ctx context.Context, task *internalTask) erro
 				Priority:               task.event.Data.GetPriority(),
 				ComponentRef:           task.event.Data.GetComponentRef(),
 			},
+			grpc.Trailer(&trailer),
 		)
 	default:
-		return errInvalidTaskQueueType
+		return nil, errInvalidTaskQueueType
 	}
 
-	return err
+	return getLimiterHintsFromTrailer(trailer), err
 }
 
 func (f *priForwarder) getForwardInfo(task *internalTask) *taskqueuespb.TaskForwardInfo {

@@ -416,6 +416,49 @@ func (s *MatcherDataSuite) TestTaskForward() {
 	s.ErrorIs(fres.forwardErr, someError)
 }
 
+func (s *MatcherDataSuite) TestForwardedTaskSkipsFlowControlCheck() {
+	// Set rate limit to zero — blocks all matches of local tasks.
+	s.md.rateLimitManager.SetEffectiveRPSAndSourceForTesting(0, enumspb.RATE_LIMIT_SOURCE_API)
+	s.md.rateLimitManager.UpdateSimpleRateLimitWithBurstForTesting(0)
+
+	pollDone := make(chan *matchResult)
+	go func() { pollDone <- s.pollFakeTime(time.Second) }()
+	s.waitForPollers(1)
+
+	s.Equal(syncMatchRateLimited, s.md.MatchTaskImmediately(s.newSyncTask(nil)))
+
+	// Forwarded task was already checked on the child, so it matches.
+	t := s.newSyncTask(&taskqueuespb.TaskForwardInfo{SourcePartition: "child"})
+	s.Equal(syncMatchSuccess, s.md.MatchTaskImmediately(t))
+	pres := <-pollDone
+	s.Equal(t, pres.task)
+	s.NotNil(t.fcTx, "forwarded task should still get a tx for reserve/commit")
+	s.doFlowControl(pres)
+}
+
+func (s *MatcherDataSuite) TestPollForwarderSkipsFlowControl() {
+	// Set rate limit to zero — blocks all matches of local tasks.
+	s.md.rateLimitManager.SetEffectiveRPSAndSourceForTesting(0, enumspb.RATE_LIMIT_SOURCE_API)
+	s.md.rateLimitManager.UpdateSimpleRateLimitWithBurstForTesting(0)
+
+	fwdDone := make(chan struct{})
+	go func() {
+		defer close(fwdDone)
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		tres := s.md.EnqueueTaskAndWait([]context.Context{ctx}, newPollForwarderTask(pollForwarderPriority, parentPollForwarder))
+		s.NotNil(tres.poller)
+		s.Nil(tres.task.fcTx)
+		s.md.FinishMatchAfterPollForward(tres.poller, s.newBacklogTask(1, 0, nil))
+	}()
+	s.waitForTasks(1)
+
+	pres := s.pollRealTime(time.Second)
+	s.Require().NoError(pres.ctxErr)
+	s.NotNil(pres.task)
+	<-fwdDone
+}
+
 func (s *MatcherDataSuite) TestRateLimitedBacklog() {
 	s.md.rateLimitManager.SetEffectiveRPSAndSourceForTesting(10.0, enumspb.RATE_LIMIT_SOURCE_API)
 	s.md.rateLimitManager.UpdateSimpleRateLimitWithBurstForTesting(300 * time.Millisecond)

@@ -1,6 +1,7 @@
 package matching
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"slices"
@@ -8,9 +9,13 @@ import (
 	commonpb "go.temporal.io/api/common/v1"
 	taskqueuepb "go.temporal.io/api/taskqueue/v1"
 	enumsspb "go.temporal.io/server/api/enums/v1"
+	taskqueuespb "go.temporal.io/server/api/taskqueue/v1"
 	"go.temporal.io/server/common/namespace"
 	"go.temporal.io/server/common/tqid"
 	"go.temporal.io/server/service/matching/fc"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/metadata"
+	"google.golang.org/protobuf/proto"
 )
 
 type fcManager struct {
@@ -38,10 +43,23 @@ func newFCManager(
 }
 
 func (m *fcManager) TaskReady(task *internalTask, cb fc.ReadinessCallback) error {
-	// FIXME: consider what we should do for forwarded tasks
+	if task.isPollForwarder() {
+		// Not a real task. Flow control applies to whatever task the forwarded poll matches
+		// with on the other partition.
+		task.fcTx = nil
+		return nil
+	}
+
 	nsID := namespace.ID(m.partition.NamespaceId())
 	tx := m.readiness.NewTx(nsID, task, cb)
 	task.fcTx = tx // attach to task so we can use it in matching engine
+
+	if task.isForwarded() {
+		// The partition that forwarded this task already did Check (on the parentTaskForwarder
+		// match), so we shouldn't block it again here. If we record it as started, we still do
+		// Reserve and Commit, and pass hints back to the forwarding partition.
+		return tx.SkipCheck()
+	}
 	return tx.Check()
 }
 
@@ -179,4 +197,33 @@ func limiterErrorToSyncMatchOutcome(err error) syncMatchOutcome {
 	default:
 		return syncMatchUnspecified
 	}
+}
+
+// The "-bin" suffix instructs grpc to base64-encode the value, so we can use binary.
+const limiterHintsTrailerName = "fchints-bin"
+
+// setLimiterHintsTrailer sends hints back to a partition that forwarded a task to us.
+func setLimiterHintsTrailer(ctx context.Context, hints []*taskqueuespb.LimiterHint) error {
+	if len(hints) == 0 {
+		return nil
+	}
+	b, err := proto.Marshal(&taskqueuespb.LimiterHints{Hints: hints})
+	if err != nil {
+		return err
+	}
+	return grpc.SetTrailer(ctx, metadata.Pairs(limiterHintsTrailerName, string(b)))
+}
+
+// getLimiterHintsFromTrailer parses hints from a trailer received from a forwarding rpc.
+// Hints are advisory, so malformed hints are treated as absent.
+func getLimiterHintsFromTrailer(trailer metadata.MD) []*taskqueuespb.LimiterHint {
+	vals := trailer.Get(limiterHintsTrailerName)
+	if len(vals) == 0 {
+		return nil
+	}
+	var hints taskqueuespb.LimiterHints
+	if err := proto.Unmarshal([]byte(vals[0]), &hints); err != nil {
+		return nil
+	}
+	return hints.GetHints()
 }

@@ -8,11 +8,15 @@ import (
 	"github.com/stretchr/testify/require"
 	enumspb "go.temporal.io/api/enums/v1"
 	enumsspb "go.temporal.io/server/api/enums/v1"
+	taskqueuespb "go.temporal.io/server/api/taskqueue/v1"
 	"go.temporal.io/server/common/clock"
 	"go.temporal.io/server/common/dynamicconfig"
 	"go.temporal.io/server/common/log"
+	"go.temporal.io/server/common/testing/protorequire"
 	"go.temporal.io/server/common/tqid"
 	"go.temporal.io/server/service/matching/fc"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/metadata"
 )
 
 func TestPollForwardersBypassFlowControl(t *testing.T) {
@@ -53,4 +57,47 @@ func TestPollForwardersBypassFlowControl(t *testing.T) {
 			require.Nil(t, task.fcTx)
 		})
 	}
+}
+
+type trailerCapturingStream struct {
+	grpc.ServerTransportStream
+	trailer metadata.MD
+}
+
+func (s *trailerCapturingStream) SetTrailer(md metadata.MD) error {
+	s.trailer = metadata.Join(s.trailer, md)
+	return nil
+}
+
+func TestLimiterHintsTrailer_RoundTrip(t *testing.T) {
+	t.Parallel()
+	stream := &trailerCapturingStream{}
+	ctx := grpc.NewContextWithServerTransportStream(context.Background(), stream)
+
+	hints := []*taskqueuespb.LimiterHint{{
+		LimiterType:        enumsspb.LIMITER_TYPE_CONCURRENCY,
+		Key:                "key",
+		Generation:         3,
+		AvailableSlotsHint: 7,
+	}}
+	require.NoError(t, setLimiterHintsTrailer(ctx, hints))
+
+	got := getLimiterHintsFromTrailer(stream.trailer)
+	require.Len(t, got, 1)
+	protorequire.ProtoEqual(t, hints[0], got[0])
+}
+
+func TestLimiterHintsTrailer_NoHints(t *testing.T) {
+	t.Parallel()
+	stream := &trailerCapturingStream{}
+	ctx := grpc.NewContextWithServerTransportStream(context.Background(), stream)
+
+	require.NoError(t, setLimiterHintsTrailer(ctx, nil))
+	require.Nil(t, stream.trailer)
+	require.Nil(t, getLimiterHintsFromTrailer(nil))
+}
+
+func TestLimiterHintsTrailer_Malformed(t *testing.T) {
+	t.Parallel()
+	require.Nil(t, getLimiterHintsFromTrailer(metadata.Pairs(limiterHintsTrailerName, "\xff\xff")))
 }

@@ -224,6 +224,7 @@ func (tm *priTaskMatcher) forwardTask(task *internalTask) (bool, error) {
 		maybeValid := tm.validator.maybeValidate(task.event.AllocatedTaskInfo, tm.fwdr.partition.TaskType())
 		if !maybeValid {
 			// consider this task expired while processing.
+			task.fcTx.Rollback(tm.tqCtx)
 			task.finish(getDroppedTaskExpiryReason(task))
 
 			// Stay alive as long as we're invalidating tasks
@@ -238,20 +239,34 @@ func (tm *priTaskMatcher) forwardTask(task *internalTask) (bool, error) {
 		defer cancel()
 	}
 
+	// Flow control Check was done on this partition when the task matched the forwarder. The
+	// parent does Reserve and Commit (if it dispatches the task), and returns hints so we can
+	// update our cache. If forwarding fails, we return our check tokens.
 	if task.isQuery() {
 		res, err := tm.fwdr.ForwardQueryTask(ctx, task)
+		if err != nil {
+			task.fcTx.Rollback(ctx)
+		}
 		task.finishForward(res, err)
 		return false, err
 	}
 
 	if task.isNexus() {
 		res, err := tm.fwdr.ForwardNexusTask(ctx, task)
+		if err != nil {
+			task.fcTx.Rollback(ctx)
+		}
 		task.finishForward(res, err)
 		return false, err
 	}
 
 	// normal wf/activity task
-	err := tm.fwdr.ForwardTask(ctx, task)
+	hints, err := tm.fwdr.ForwardTask(ctx, task)
+	// apply hints before rollback, so we don't return a check token on top of fresh state
+	task.fcTx.ApplyHints(hints)
+	if err != nil {
+		task.fcTx.Rollback(ctx)
+	}
 	task.finishForward(nil, err)
 
 	return false, err

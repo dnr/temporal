@@ -20,12 +20,16 @@ var errInvalidTxState = serviceerror.NewInternal("invalid fc tx state")
 // A client of the flow control system should call NewTx when it it's ready to match a task, to
 // perform the flow control commit protocol. It should then call:
 //   - tx.Check() -> checks readiness, if not ready atomically registers cb to be called when
-//     possibly ready
+//     possibly ready (or tx.SkipCheck() for a task forwarded from another partition)
 //   - tx.Reserve(ctx) -> on error retry the task
 //   - tx.LimiterRefs() to get refs to pass to history (for releasing later)
 //   - history.RecordTaskStarted(refs) -> on error call tx.Rollback()
 //   - tx.Commit(ctx) -> on error DROP the task
 //   - tx.Close() -> release limiter pins (also called by Rollback)
+//   - tx.Hints() to pass back to the partition that forwarded the task, if any
+//
+// If the task is forwarded to another partition after Check, call tx.ApplyHints() with the hints
+// that the other partition returns, and then tx.Rollback() if the forward failed.
 //
 // A nil *Tx is valid and all operations are no-ops.
 // Tx is not safe for concurrent use.
@@ -86,11 +90,12 @@ func (r *Readiness) makeLimiterTx(nsID namespace.ID, task fcTask, lim Limiter) (
 
 // Holds state for an invocation of the flow control commit protocol. See Readiness.NewTx.
 type Tx struct {
-	limiters []limiterTx
-	refs     []*taskqueuespb.LimiterRef
-	cb       ReadinessCallback
-	state    [MaxLimiters]txState
-	closed   bool
+	limiters     []limiterTx
+	refs         []*taskqueuespb.LimiterRef
+	cb           ReadinessCallback
+	state        [MaxLimiters]txState
+	closed       bool
+	skippedCheck bool // true if SkipCheck was used, so there are no local tokens to return.
 }
 
 type limiterTx interface {
@@ -100,6 +105,8 @@ type limiterTx interface {
 	commit(context.Context) error
 	cancelReserve(context.Context)
 	close()
+	hint() *taskqueuespb.LimiterHint
+	applyHint(*taskqueuespb.LimiterHint)
 }
 
 type txState int8 // just so we can pack these in an array
@@ -148,6 +155,25 @@ func (tx *Tx) Check() (retErr error) {
 		}
 		tx.state[i] = txStateChecked
 	}
+	return nil
+}
+
+// SkipCheck moves all limiters to the checked state without checking or consuming local
+// tokens. This is used for tasks forwarded from another partition, which already did Check on
+// that partition.
+func (tx *Tx) SkipCheck() error {
+	if tx == nil {
+		return nil // no limiters
+	}
+	for i := range tx.limiters {
+		if tx.state[i] != txStateInit {
+			return errInvalidTxState
+		}
+	}
+	for i := range tx.limiters {
+		tx.state[i] = txStateChecked
+	}
+	tx.skippedCheck = true
 	return nil
 }
 
@@ -235,7 +261,9 @@ func (tx *Tx) Rollback(ctx context.Context) {
 			lim.cancelReserve(ctx)
 			fallthrough
 		case txStateChecked:
-			lim.cancelCheck()
+			if !tx.skippedCheck {
+				lim.cancelCheck()
+			}
 			tx.state[i] = txStateCanceled
 		}
 	}
@@ -252,11 +280,42 @@ func (tx *Tx) Close() {
 	}
 }
 
+// Hints returns the latest known state of the shared limiters in this tx, from the results of
+// Reserve and Commit, or from ApplyHints.
+func (tx *Tx) Hints() []*taskqueuespb.LimiterHint {
+	if tx == nil {
+		return nil // no limiters
+	}
+	var hints []*taskqueuespb.LimiterHint
+	for _, lim := range tx.limiters {
+		if hint := lim.hint(); hint != nil {
+			hints = append(hints, hint)
+		}
+	}
+	return hints
+}
+
+// ApplyHints updates cached limiter state from hints returned by another partition. Hints for
+// limiters that are not part of this tx are ignored. If the tx is going to be rolled back, call
+// ApplyHints first, so that check tokens are not returned on top of the updated state.
+func (tx *Tx) ApplyHints(hints []*taskqueuespb.LimiterHint) {
+	if tx == nil {
+		return // no limiters
+	}
+	for _, hint := range hints {
+		for _, lim := range tx.limiters {
+			lim.applyHint(hint)
+		}
+	}
+}
+
 type noopLimiterTx struct{}
 
-func (noopLimiterTx) check(cb ReadinessCallback) error { return nil }
-func (noopLimiterTx) cancelCheck()                     {}
-func (noopLimiterTx) reserve(context.Context) error    { return nil }
-func (noopLimiterTx) commit(context.Context) error     { return nil }
-func (noopLimiterTx) cancelReserve(context.Context)    {}
-func (noopLimiterTx) close()                           {}
+func (noopLimiterTx) check(cb ReadinessCallback) error    { return nil }
+func (noopLimiterTx) cancelCheck()                        {}
+func (noopLimiterTx) reserve(context.Context) error       { return nil }
+func (noopLimiterTx) commit(context.Context) error        { return nil }
+func (noopLimiterTx) cancelReserve(context.Context)       {}
+func (noopLimiterTx) close()                              {}
+func (noopLimiterTx) hint() *taskqueuespb.LimiterHint     { return nil }
+func (noopLimiterTx) applyHint(*taskqueuespb.LimiterHint) {}
