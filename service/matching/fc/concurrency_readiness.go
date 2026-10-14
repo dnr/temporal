@@ -53,6 +53,9 @@ func (rs *readinessShard) getConcurrencyLimiter(nsID namespace.ID, key string) *
 		limiterStateBase: limiterStateBase{rs: rs, pins: 1, mapKey: mapkey},
 		nsID:             nsID,
 		key:              key,
+		// optimistically assume unknown limiter has one slot, so we call Reserve first.
+		// we'll get the real number of slots as a hint.
+		tokens: 1,
 	}
 	rs.concurrencyLimiters[mapkey] = cs
 	rs.created++
