@@ -47,9 +47,13 @@ func (rs *readinessShard) getLocalLimiter(nsID namespace.ID, key string) *localL
 	return lls
 }
 
+func (lls *localLimiterState) now() int64 {
+	return lls.rs.r.timeSource.Now().UnixNano()
+}
+
 func (lls *localLimiterState) check(config simplelimiter.Params, cb ReadinessCallback, pri wakePriority) error {
 	return lls.rs.update(lls, notifyAsync, func() error {
-		now := lls.rs.r.timeSource.Now().UnixNano()
+		now := lls.now()
 
 		// install new params
 		lls.params = config
@@ -72,7 +76,7 @@ func (lls *localLimiterState) check(config simplelimiter.Params, cb ReadinessCal
 
 func (lls *localLimiterState) cancelCheck() {
 	lls.rs.update(lls, notifyAsync, func() error {
-		now := lls.rs.r.timeSource.Now().UnixNano()
+		now := lls.now()
 		// return the token
 		lls.lim = lls.lim.Consume(lls.params, now, -1)
 		return nil
@@ -80,7 +84,7 @@ func (lls *localLimiterState) cancelCheck() {
 }
 
 func (lls *localLimiterState) syncLocked(rsu *readinessSyncUpdate) {
-	now := lls.rs.r.timeSource.Now().UnixNano()
+	now := lls.now()
 
 	// use a local copy to figure out how many we can wake. note that we do not take from the
 	// actual limiter here, since the waiter will do that after it wakes up and calls check.
@@ -109,4 +113,8 @@ func (lls *localLimiterState) syncLocked(rsu *readinessSyncUpdate) {
 
 func (lls *localLimiterState) onTimer() {
 	lls.rs.update(lls, notifySync, func() error { return nil })
+}
+
+func (lls *localLimiterState) droppableLocked() bool {
+	return lls.tmr == nil && lls.lim.Delay(lls.now()) < 0
 }
