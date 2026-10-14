@@ -16,6 +16,8 @@ import (
 	"go.temporal.io/server/common/util"
 )
 
+const concurrencyBlockedRetention = time.Minute
+
 var ErrConcurrencyBlocked = serviceerror.NewFailedPrecondition("blocked by concurrency limit")
 
 type concurrencyState struct {
@@ -24,6 +26,7 @@ type concurrencyState struct {
 	nsID namespace.ID
 	key  string
 
+	lastUsed   int64
 	generation int64
 	tokens     int32
 	// tokensSeq is incremented whenever tokens is overwritten from a server hint. When we take
@@ -47,6 +50,7 @@ func (rs *readinessShard) getConcurrencyLimiter(nsID namespace.ID, key string) *
 	mapkey := nsID.String() + key
 	if cs, ok := rs.concurrencyLimiters[mapkey]; ok {
 		rs.pinLocked(cs)
+		cs.lastUsed = rs.r.timeSource.Now().UnixNano()
 		return cs
 	}
 	cs := &concurrencyState{
@@ -55,7 +59,8 @@ func (rs *readinessShard) getConcurrencyLimiter(nsID namespace.ID, key string) *
 		key:              key,
 		// optimistically assume unknown limiter has one slot, so we call Reserve first.
 		// we'll get the real number of slots as a hint.
-		tokens: 1,
+		tokens:   1,
+		lastUsed: rs.r.timeSource.Now().UnixNano(),
 	}
 	rs.concurrencyLimiters[mapkey] = cs
 	rs.created++
@@ -261,7 +266,7 @@ func (cs *concurrencyState) callWait(ctx context.Context) {
 }
 
 func (cs *concurrencyState) droppableLocked() bool {
-	return true
+	return cs.tokens > 0 || cs.rs.r.timeSource.Now().UnixNano()-cs.lastUsed >= int64(concurrencyBlockedRetention)
 }
 
 func (cs *concurrencyState) unpin() {

@@ -110,7 +110,7 @@ func TestCanceledWaitRetainsPinUntilExit(t *testing.T) {
 		<-exit
 		return nil, ctx.Err()
 	}}
-	r, _ := newTestReadiness(t, client)
+	r, ts := newTestReadiness(t, client)
 	ns := namespace.ID("ns")
 	lim := r.getConcurrencyLimiter(ns, "key")
 	lim.tokens = 0
@@ -130,6 +130,7 @@ func TestCanceledWaitRetainsPinUntilExit(t *testing.T) {
 		defer lim.rs.lock.Unlock()
 		return lim.pins == 0
 	}, time.Second, time.Millisecond)
+	ts.Advance(concurrencyBlockedRetention)
 	lim.rs.cleanup(1000)
 	require.Empty(t, lim.rs.concurrencyLimiters)
 }
@@ -301,4 +302,31 @@ func TestOptimisticConcurrencyReserve(t *testing.T) {
 			requirePins(t, lim, 0)
 		})
 	}
+}
+
+func TestBlockedConcurrencyRetention(t *testing.T) {
+	r, ts := newTestReadiness(t, nil)
+	ns := namespace.ID("ns")
+	lim := r.getConcurrencyLimiter(ns, "key")
+	lim.tokens = 0
+	lim.unpin()
+	lim.rs.cleanup(1000)
+	require.Len(t, lim.rs.concurrencyLimiters, 1)
+	ts.Advance(concurrencyBlockedRetention / 2)
+	reused := r.getConcurrencyLimiter(ns, "key")
+	require.Same(t, lim, reused)
+	reused.unpin()
+	ts.Advance(concurrencyBlockedRetention / 2)
+	lim.rs.cleanup(1000)
+	require.Len(t, lim.rs.concurrencyLimiters, 1)
+	ts.Advance(concurrencyBlockedRetention / 2)
+	lim.rs.cleanup(1000)
+	require.Empty(t, lim.rs.concurrencyLimiters)
+
+	recreated := r.getConcurrencyLimiter(ns, "key")
+	require.NotSame(t, lim, recreated)
+	require.EqualValues(t, 1, recreated.tokens)
+	recreated.unpin()
+	recreated.rs.cleanup(1000)
+	require.Empty(t, recreated.rs.concurrencyLimiters)
 }
