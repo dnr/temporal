@@ -29,8 +29,6 @@ import (
 	replicationspb "go.temporal.io/server/api/replication/v1"
 	taskqueuespb "go.temporal.io/server/api/taskqueue/v1"
 	tokenspb "go.temporal.io/server/api/token/v1"
-	"go.temporal.io/server/chasm/lib/flowcontrol/concurrency"
-	fcpb "go.temporal.io/server/chasm/lib/flowcontrol/gen/flowcontrolpb/v1"
 	"go.temporal.io/server/client/matching"
 	"go.temporal.io/server/common"
 	"go.temporal.io/server/common/backoff"
@@ -290,7 +288,7 @@ func NewEngine(
 	historySerializer serialization.Serializer,
 	taskHookFactories []hooks.TaskHookFactory,
 	partitionScalerFactory PartitionScalerFactory,
-	concurrencyServiceClient fcpb.ConcurrencyServiceClient,
+	fcReadiness *fc.Readiness,
 ) Engine {
 	scopedMetricsHandler := metricsHandler.WithTags(metrics.OperationTag(metrics.MatchingEngineScope))
 	timeSource := clock.NewRealTimeSource() // No need to mock this at the moment
@@ -336,14 +334,7 @@ func NewEngine(
 		rateLimiter:               rateLimiter,
 		taskHookFactories:         taskHookFactories,
 		partitionScalerFactory:    partitionScalerFactory,
-		fcReadiness: fc.NewReadiness(
-			timeSource,
-			concurrency.NewBatchingClient(
-				concurrencyServiceClient,
-				config.FlowControlClientBatcherOptions(),
-				clock.NewRealTimeSource(),
-			),
-		),
+		fcReadiness:               fcReadiness,
 	}
 	e.userDataUpdateBatcher = stream_batcher.NewKeyedBatcher(
 		e.applyUserDataUpdateBatch,

@@ -10,7 +10,6 @@ import (
 	workerpb "go.temporal.io/api/worker/v1"
 	"go.temporal.io/api/workflowservice/v1"
 	"go.temporal.io/server/api/matchingservice/v1"
-	fcpb "go.temporal.io/server/chasm/lib/flowcontrol/gen/flowcontrolpb/v1"
 	"go.temporal.io/server/common"
 	"go.temporal.io/server/common/cluster"
 	"go.temporal.io/server/common/headers"
@@ -26,6 +25,7 @@ import (
 	"go.temporal.io/server/common/searchattribute"
 	"go.temporal.io/server/common/testing/testhooks"
 	"go.temporal.io/server/common/tqid"
+	"go.temporal.io/server/service/matching/fc"
 	"go.temporal.io/server/service/matching/hooks"
 	"go.temporal.io/server/service/matching/workers"
 	"go.temporal.io/server/service/worker/workerdeployment"
@@ -76,7 +76,7 @@ type (
 		Serializer                    serialization.Serializer
 		TaskHookFactories             []hooks.TaskHookFactory `group:"TaskHookFactories"`
 		PartitionScalerFactory        PartitionScalerFactory
-		ConcurrencyServiceClient      fcpb.ConcurrencyServiceClient
+		FCReadiness                   *fc.Readiness
 	}
 )
 
@@ -121,7 +121,7 @@ func NewHandler(
 			params.Serializer,
 			params.TaskHookFactories,
 			params.PartitionScalerFactory,
-			params.ConcurrencyServiceClient,
+			params.FCReadiness,
 		),
 		namespaceRegistry: params.NamespaceRegistry,
 		workersRegistry:   params.WorkersRegistry,
