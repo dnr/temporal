@@ -51,11 +51,7 @@ func requirePins(t *testing.T, lim limiterState, pins int) {
 }
 
 func TestTransactionPins(t *testing.T) {
-	for _, rollback := range []bool{false, true} {
-		name := "finish"
-		if rollback {
-			name = "rollback"
-		}
+	for _, name := range []string{"finish", "rollback", "check only"} {
 		t.Run(name, func(t *testing.T) {
 			r, ts := newTestReadiness(t, nil)
 			lim := r.getLocalLimiter(namespace.ID("ns"), "key")
@@ -64,12 +60,15 @@ func TestTransactionPins(t *testing.T) {
 			lim.rs.cleanup(1000)
 			require.Len(t, lim.rs.localLimiters, 1)
 			require.NoError(t, tx.Check())
-			if rollback {
+			switch name {
+			case "rollback":
 				tx.Rollback(context.Background())
-			} else {
+			case "finish":
 				require.NoError(t, tx.Reserve(context.Background()))
 				require.NoError(t, tx.Commit(context.Background()))
 				tx.Finish()
+			default:
+				require.Equal(t, "check only", name)
 			}
 			tx.Finish()
 			tx.Rollback(context.Background())
