@@ -394,6 +394,7 @@ func (task *internalTask) finishForward(forwardRes any, forwardErr error) {
 }
 
 func (task *internalTask) finishInternal(res taskResponse) {
+	task.fcTx.Finish()
 	switch {
 	case task.responseC != nil:
 		task.responseC <- res

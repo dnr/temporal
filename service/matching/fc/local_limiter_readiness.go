@@ -18,7 +18,7 @@ const maxLocalLimiterTokens = 1
 var ErrLocalLimiterBlocked = serviceerror.NewFailedPrecondition("blocked by local limiter")
 
 type localLimiterState struct {
-	rs *readinessShard
+	limiterStateBase
 
 	params simplelimiter.Params
 	lim    simplelimiter.Ready
@@ -37,11 +37,12 @@ func (rs *readinessShard) getLocalLimiter(nsID namespace.ID, key string) *localL
 
 	mapkey := nsID.String() + key
 	if lls, ok := rs.localLimiters[mapkey]; ok {
+		lls.pins++
 		return lls
 	}
 	lls := &localLimiterState{
-		rs:     rs,
-		params: simplelimiter.NoLimit(),
+		limiterStateBase: limiterStateBase{rs: rs, pins: 1},
+		params:           simplelimiter.NoLimit(),
 	}
 	rs.localLimiters[mapkey] = lls
 	return lls
@@ -96,7 +97,9 @@ func (lls *localLimiterState) syncLocked(rsu *readinessSyncUpdate) {
 
 	if len(rsu.waiters) == 0 {
 		if lls.tmr != nil {
-			lls.tmr.Stop()
+			if lls.tmr.Stop() {
+				lls.pins--
+			}
 			lls.tmr = nil
 		}
 		return
@@ -104,17 +107,21 @@ func (lls *localLimiterState) syncLocked(rsu *readinessSyncUpdate) {
 
 	delay := lim.Delay(now)
 	if lls.tmr != nil {
-		lls.tmr.Reset(delay)
+		if !lls.tmr.Reset(delay) {
+			lls.pins++
+		}
 	} else {
+		lls.pins++
 		lls.tmr = lls.rs.r.timeSource.AfterFunc(delay, lls.onTimer)
 	}
 	return
 }
 
 func (lls *localLimiterState) onTimer() {
+	defer lls.unpin()
 	lls.rs.update(lls, notifySync, func() error { return nil })
 }
 
 func (lls *localLimiterState) droppableLocked() bool {
-	return lls.tmr == nil && lls.lim.Delay(lls.now()) < 0
+	return lls.lim.Delay(lls.now()) < 0
 }

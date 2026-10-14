@@ -52,3 +52,7 @@ func (ct *concurrencyTx) commit(ctx context.Context) error {
 func (ct *concurrencyTx) cancelReserve(ctx context.Context) {
 	ct.cs.cancelReserve(ctx, ct.slotID)
 }
+
+func (ct *concurrencyTx) finish() {
+	ct.cs.unpin()
+}

@@ -19,7 +19,8 @@ import (
 var ErrConcurrencyBlocked = serviceerror.NewFailedPrecondition("blocked by concurrency limit")
 
 type concurrencyState struct {
-	rs   *readinessShard
+	limiterStateBase
+
 	nsID namespace.ID
 	key  string
 
@@ -45,12 +46,13 @@ func (rs *readinessShard) getConcurrencyLimiter(nsID namespace.ID, key string) *
 
 	mapkey := nsID.String() + key
 	if cs, ok := rs.concurrencyLimiters[mapkey]; ok {
+		cs.pins++
 		return cs
 	}
 	cs := &concurrencyState{
-		rs:   rs,
-		nsID: nsID,
-		key:  key,
+		limiterStateBase: limiterStateBase{rs: rs, pins: 1},
+		nsID:             nsID,
+		key:              key,
 	}
 	rs.concurrencyLimiters[mapkey] = cs
 	return cs
@@ -126,8 +128,14 @@ func (cs *concurrencyState) commit(ctx context.Context, slotID string) error {
 }
 
 func (cs *concurrencyState) cancelReserve(ctx context.Context, slotID string) {
-	// call in new goroutine, don't block here
+	// The poll context may already be canceled when rollback runs.
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	cs.rs.lock.Lock()
+	cs.pins++
+	cs.rs.lock.Unlock()
 	go func() {
+		defer cs.unpin()
+		defer cancel()
 		res, err := cs.rs.r.concurrencyServiceClient.Batch(ctx, &fcpb.ConcurrencyServiceBatchRequest{
 			NamespaceId:            cs.nsID.String(),
 			Key:                    cs.key,
@@ -187,6 +195,7 @@ func (cs *concurrencyState) syncLocked(rsu *readinessSyncUpdate) {
 	ctx, cs.goroCancel = context.WithCancel(ctx)
 	cs.waiterWakePriority = rsu.waiters[0].pri // set here so we have a not-stale value before callWait runs
 	// Wait result will be reported back through reportSlotsHint
+	cs.pins++
 	go cs.callWait(ctx)
 
 	return
@@ -212,6 +221,8 @@ func (cs *concurrencyState) makeWaitRequest() *fcpb.ConcurrencyServiceWaitReques
 }
 
 func (cs *concurrencyState) callWait(ctx context.Context) {
+	defer cs.unpin()
+
 	policy := backoff.NewExponentialRetryPolicy(time.Second).
 		WithExpirationInterval(backoff.NoInterval).
 		WithMaximumInterval(time.Minute)
@@ -246,5 +257,5 @@ func (cs *concurrencyState) callWait(ctx context.Context) {
 }
 
 func (cs *concurrencyState) droppableLocked() bool {
-	return cs.goroCancel == nil
+	return true
 }
