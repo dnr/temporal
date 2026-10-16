@@ -31,10 +31,10 @@ func TestReadinessDynamicConfig(t *testing.T) {
 	lim.tokens = 0
 	lim.unpin()
 	ts.Advance(9 * time.Second)
-	lim.rs.cleanup(1000)
+	lim.rs.cleanup(1000, r.gcParameters())
 	require.Len(t, lim.rs.concurrencyLimiters, 1)
 	t.Cleanup(client.OverrideSetting(ReadinessConcurrencyBlockedRetention, time.Second))
-	lim.rs.cleanup(1000)
+	lim.rs.cleanup(1000, r.gcParameters())
 	require.Empty(t, lim.rs.concurrencyLimiters)
 
 	t.Cleanup(client.OverrideSetting(ReadinessCleanupOptions, CleanupOptions{}))

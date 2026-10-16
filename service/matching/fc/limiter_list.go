@@ -1,33 +1,31 @@
 package fc
 
-// limiterList is intrusive: list membership needs no allocation beyond the limiter itself.
-type limiterList struct {
-	head limiterState
-	tail limiterState
+// limiterGCList is intrusive: list membership needs no allocation beyond the limiter itself.
+type limiterGCList struct {
+	head *limiterStateBase
+	tail *limiterStateBase
 	len  int
 }
 
-func (l *limiterList) pushBack(limiter limiterState) {
-	b := limiter.base()
+func (l *limiterGCList) pushBack(b *limiterStateBase) {
 	b.prev = l.tail
 	if l.tail != nil {
-		l.tail.base().next = limiter
+		l.tail.next = b
 	} else {
-		l.head = limiter
+		l.head = b
 	}
-	l.tail = limiter
+	l.tail = b
 	l.len++
 }
 
-func (l *limiterList) remove(limiter limiterState) {
-	b := limiter.base()
+func (l *limiterGCList) remove(b *limiterStateBase) {
 	if b.prev != nil {
-		b.prev.base().next = b.next
+		b.prev.next = b.next
 	} else {
 		l.head = b.next
 	}
 	if b.next != nil {
-		b.next.base().prev = b.prev
+		b.next.prev = b.prev
 	} else {
 		l.tail = b.prev
 	}

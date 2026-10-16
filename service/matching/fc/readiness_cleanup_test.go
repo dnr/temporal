@@ -15,20 +15,21 @@ func TestCleanupBatchCursor(t *testing.T) {
 	var limiters []*localLimiterState
 	for i := range 600 {
 		lim := r.getLocalLimiter(namespace.ID("ns"), fmt.Sprint(i))
+		lim.params = simplelimiter.MakeParams(1, 0)
 		lim.lim = simplelimiter.Ready(ts.Now().Add(time.Hour).UnixNano())
 		lim.unpin()
 		limiters = append(limiters, lim)
 	}
 	rs := limiters[0].rs
-	require.Equal(t, 256, rs.cleanup(256))
-	require.Same(t, limiters[256], rs.candidates.head)
-	require.Same(t, limiters[255], rs.candidates.tail)
+	require.Equal(t, 256, rs.cleanup(256, r.gcParameters()))
+	require.Same(t, limiters[256].base(), rs.gcList.head)
+	require.Same(t, limiters[255].base(), rs.gcList.tail)
 	lim := r.getLocalLimiter(namespace.ID("ns"), "256")
-	require.Same(t, limiters[257], rs.candidates.head)
+	require.Same(t, limiters[257].base(), rs.gcList.head)
 	lim.unpin()
-	require.Same(t, lim, rs.candidates.tail)
-	require.Equal(t, 600, rs.cleanup(1000))
-	require.Same(t, limiters[257], rs.candidates.head)
+	require.Same(t, lim.base(), rs.gcList.tail)
+	require.Equal(t, 600, rs.cleanup(1000, r.gcParameters()))
+	require.Same(t, limiters[257].base(), rs.gcList.head)
 }
 
 func TestCleanupAllocationCredits(t *testing.T) {
@@ -37,6 +38,7 @@ func TestCleanupAllocationCredits(t *testing.T) {
 	require.Equal(t, defaultCleanupOptions.IdleInterval, r.cleanupPass(&state))
 	for i := range 300 {
 		lim := r.getLocalLimiter(namespace.ID("ns"), fmt.Sprint(i))
+		lim.params = simplelimiter.MakeParams(1, 0)
 		lim.lim = simplelimiter.Ready(ts.Now().Add(time.Hour).UnixNano())
 		lim.unpin()
 	}
@@ -53,7 +55,7 @@ func TestCleanupAllocationCredits(t *testing.T) {
 	require.Equal(t, defaultCleanupOptions.IdleInterval, r.cleanupPass(&state))
 	rs := r.getShard(namespace.ID("ns"))
 	require.Empty(t, rs.localLimiters)
-	require.Zero(t, rs.candidates.len)
+	require.Zero(t, rs.gcList.len)
 }
 
 func TestCleanupCreditsWithPinnedAllocations(t *testing.T) {
@@ -90,4 +92,25 @@ func TestCleanupRotatesAcrossShards(t *testing.T) {
 	require.Equal(t, opts.BusyInterval, r.cleanupPass(&state))
 	require.Len(t, r.getShard(secondNS).localLimiters, 1)
 	require.Len(t, r.getShard(firstNS).localLimiters, 5)
+}
+
+func TestCleanupSnapshotsConfigAndResetsAllocations(t *testing.T) {
+	r, ts := newTestReadiness(t, nil)
+	reads := 0
+	r.config.concurrencyRetention = func() time.Duration {
+		reads++
+		return time.Minute
+	}
+	for i := range 300 {
+		lim := r.getConcurrencyLimiter(namespace.ID("ns"), fmt.Sprint(i))
+		lim.tokens = 0
+		lim.unpin()
+	}
+	state := cleanupState{nextSweep: ts.Now().Add(time.Hour)}
+	require.Equal(t, defaultCleanupOptions.BusyInterval, r.cleanupPass(&state))
+	require.Equal(t, 1, reads)
+	require.Zero(t, r.getShard(namespace.ID("ns")).created)
+	require.Equal(t, defaultCleanupOptions.IdleInterval, r.cleanupPass(&state))
+	require.Equal(t, 2, reads)
+	require.Zero(t, state.credits)
 }
