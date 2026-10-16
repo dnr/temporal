@@ -10,7 +10,7 @@ import (
 
 	fcpb "go.temporal.io/server/chasm/lib/flowcontrol/gen/flowcontrolpb/v1"
 	"go.temporal.io/server/common/clock"
-	"go.temporal.io/server/common/dynamicconfig"
+	"go.temporal.io/server/common/goro"
 	"go.temporal.io/server/common/namespace"
 )
 
@@ -39,9 +39,7 @@ type (
 
 		seed maphash.Seed
 
-		lifecycleCtx    context.Context
-		lifecycleCancel context.CancelFunc
-		cleanupWG       sync.WaitGroup
+		cleanupHandle *goro.Handle
 	}
 
 	readinessShard struct {
@@ -125,18 +123,14 @@ const (
 func NewReadiness(
 	timeSource clock.TimeSource,
 	concurrencyServiceClient fcpb.ConcurrencyServiceClient,
+	config readinessConfig,
 ) *Readiness {
 	r := &Readiness{
 		timeSource:               timeSource,
 		concurrencyServiceClient: concurrencyServiceClient,
 		seed:                     maphash.MakeSeed(),
-		config: readinessConfig{
-			cleanupOptions:           dynamicconfig.GetTypedPropertyFn(defaultCleanupOptions),
-			concurrencyRetention:     dynamicconfig.GetDurationPropertyFn(concurrencyBlockedRetention),
-			cancelReservationTimeout: dynamicconfig.GetDurationPropertyFn(defaultCancelReservationTimeout),
-		},
+		config:                   config,
 	}
-	r.lifecycleCtx, r.lifecycleCancel = context.WithCancel(context.Background())
 	for i := range r.shards {
 		rs := &r.shards[i]
 		rs.r = r
@@ -157,12 +151,14 @@ func (r *Readiness) getShard(nsID namespace.ID) *readinessShard {
 }
 
 func (r *Readiness) Start() {
-	r.cleanupWG.Go(func() { r.cleanupLoop(r.lifecycleCtx) })
+	r.cleanupHandle = goro.NewHandle(context.Background()).Go(r.cleanupLoop)
 }
 
 func (r *Readiness) Stop() {
-	r.lifecycleCancel()
-	r.cleanupWG.Wait()
+	if r.cleanupHandle != nil {
+		r.cleanupHandle.Cancel()
+		<-r.cleanupHandle.Done()
+	}
 	for i := range r.shards {
 		r.shards[i].stop()
 	}

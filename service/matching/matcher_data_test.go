@@ -56,7 +56,7 @@ func (s *MatcherDataSuite) SetupTest() {
 	rateLimitManager := newRateLimitManager(s.ts, userDataManager, cfg, enumspb.TASK_QUEUE_TYPE_ACTIVITY)
 	rateLimitManager.Start()
 	s.rateLimitedCount.Store(0)
-	s.fcReadiness = fc.NewReadiness(s.ts, nil)
+	s.fcReadiness = fc.NewReadiness(s.ts, nil, fc.NewReadinessConfig(dynamicconfig.NewNoopCollection()))
 	s.fcManager = newFCManager(taskQueue.RootPartition(), cfg, userDataManager, rateLimitManager, s.fcReadiness)
 	s.md = newMatcherData(
 		cfg,
@@ -1099,7 +1099,7 @@ func FuzzMatcherData(f *testing.F) {
 			ts,
 			true,
 			rateLimitManager,
-			newFCManager(taskQueue.RootPartition(), cfg, userDataManager, rateLimitManager, fc.NewReadiness(ts, nil)),
+			newFCManager(taskQueue.RootPartition(), cfg, userDataManager, rateLimitManager, fc.NewReadiness(ts, nil, fc.NewReadinessConfig(dynamicconfig.NewNoopCollection()))),
 			func(syncMatchOutcome) {},
 		)
 

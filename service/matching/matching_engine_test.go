@@ -271,7 +271,7 @@ func newMatchingEngine(
 		timeSource:          ts,
 		visibilityManager:   mockVisibilityManager,
 		nexusEndpointClient: newEndpointClient(config.NexusEndpointsRefreshInterval, nexusEndpointManager),
-		fcReadiness:         fc.NewReadiness(ts, nil),
+		fcReadiness:         fc.NewReadiness(ts, nil, fc.NewReadinessConfig(dynamicconfig.NewNoopCollection())),
 	}
 	e.nexusEndpointsOwnershipLostCh.Store(make(chan struct{}))
 	return e

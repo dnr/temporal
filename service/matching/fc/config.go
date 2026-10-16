@@ -51,7 +51,7 @@ type readinessConfig struct {
 	cancelReservationTimeout dynamicconfig.DurationPropertyFn
 }
 
-func newReadinessConfig(dc *dynamicconfig.Collection) readinessConfig {
+func NewReadinessConfig(dc *dynamicconfig.Collection) readinessConfig {
 	return readinessConfig{
 		cleanupOptions:           ReadinessCleanupOptions.Get(dc),
 		concurrencyRetention:     ReadinessConcurrencyBlockedRetention.Get(dc),

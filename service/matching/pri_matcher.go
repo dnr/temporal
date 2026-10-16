@@ -315,7 +315,7 @@ func (tm *priTaskMatcher) forwardPolls(
 		}
 
 		res := tm.data.EnqueueTaskAndWait(ctxs, forwarderTask)
-		forwarderTask.fcTx.Finish()
+		forwarderTask.fcTx.Close()
 		if res.ctxErr != nil {
 			return // task queue closing
 		}

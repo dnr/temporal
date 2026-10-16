@@ -82,7 +82,7 @@ func (s *PriMatcherSuite) TestValidatorWorksOnRoot() {
 		s.logger,
 		metrics.NoopMetricsHandler,
 		rateLimitManager,
-		newFCManager(partition, cfg, userDataManager, rateLimitManager, fc.NewReadiness(ts, nil)),
+		newFCManager(partition, cfg, userDataManager, rateLimitManager, fc.NewReadiness(ts, nil, fc.NewReadinessConfig(dynamicconfig.NewNoopCollection()))),
 		func(syncMatchOutcome) {}, // onRateLimited
 		func() {},                 // markAlive
 	)
@@ -180,7 +180,7 @@ func (s *PriMatcherSuite) TestForwardPollRetriesOnResourceExhausted() {
 			s.logger,
 			metrics.NoopMetricsHandler,
 			rateLimitManager,
-			newFCManager(childPartition, cfg, userDataManager, rateLimitManager, fc.NewReadiness(ts, nil)),
+			newFCManager(childPartition, cfg, userDataManager, rateLimitManager, fc.NewReadiness(ts, nil, fc.NewReadinessConfig(dynamicconfig.NewNoopCollection()))),
 			func(syncMatchOutcome) {},
 			func() {},
 		)
@@ -251,7 +251,7 @@ func (s *PriMatcherSuite) TestValidatorDrop_SetsDropReason() {
 				s.logger,
 				metrics.NoopMetricsHandler,
 				rateLimitManager,
-				newFCManager(partition, cfg, userDataManager, rateLimitManager, fc.NewReadiness(ts, nil)),
+				newFCManager(partition, cfg, userDataManager, rateLimitManager, fc.NewReadiness(ts, nil, fc.NewReadinessConfig(dynamicconfig.NewNoopCollection()))),
 				func(syncMatchOutcome) {},
 				func() {},
 			)

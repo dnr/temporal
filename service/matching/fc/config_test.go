@@ -42,21 +42,21 @@ func TestReadinessDynamicConfig(t *testing.T) {
 }
 
 func TestCancellationTimeoutReleasesPin(t *testing.T) {
-	finished := make(chan error, 1)
+	closed := make(chan error, 1)
 	client := &testClient{batch: func(ctx context.Context, _ *fcpb.ConcurrencyServiceBatchRequest) (*fcpb.ConcurrencyServiceBatchResponse, error) {
 		<-ctx.Done()
-		finished <- ctx.Err()
+		closed <- ctx.Err()
 		return nil, ctx.Err()
 	}}
 	r, _ := newTestReadiness(t, client)
 	dc := dynamicconfig.NewCollection(dynamicconfig.StaticClient{
 		ReadinessCancelReservationTimeout.Key(): time.Millisecond,
 	}, log.NewNoopLogger())
-	r.config = newReadinessConfig(dc)
+	r.config = NewReadinessConfig(dc)
 	lim := r.getConcurrencyLimiter(namespace.ID("ns"), "key")
 	lim.cancelReserve(context.Background(), "slot")
 	lim.unpin()
-	require.ErrorIs(t, <-finished, context.DeadlineExceeded)
+	require.ErrorIs(t, <-closed, context.DeadlineExceeded)
 	await.RequireTrue(t, func() bool {
 		lim.rs.lock.Lock()
 		defer lim.rs.lock.Unlock()

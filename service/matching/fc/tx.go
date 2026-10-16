@@ -25,7 +25,7 @@ var errInvalidTxState = serviceerror.NewInternal("invalid fc tx state")
 //   - tx.LimiterRefs() to get refs to pass to history (for releasing later)
 //   - history.RecordTaskStarted(refs) -> on error call tx.Rollback()
 //   - tx.Commit(ctx) -> on error DROP the task
-//   - tx.Finish() -> release limiter pins (also called by Rollback)
+//   - tx.Close() -> release limiter pins (also called by Rollback)
 //
 // A nil *Tx is valid and all operations are no-ops.
 // Tx is not safe for concurrent use.
@@ -90,7 +90,7 @@ type Tx struct {
 	refs     []*taskqueuespb.LimiterRef
 	cb       ReadinessCallback
 	state    [MaxLimiters]txState
-	finished bool
+	closed   bool
 }
 
 type limiterTx interface {
@@ -99,7 +99,7 @@ type limiterTx interface {
 	reserve(context.Context) error
 	commit(context.Context) error
 	cancelReserve(context.Context)
-	finish()
+	close()
 }
 
 type txState int8 // just so we can pack these in an array
@@ -130,7 +130,7 @@ func (tx *Tx) LimiterRefs() []*taskqueuespb.LimiterRef {
 func (tx *Tx) Check() (retErr error) {
 	if tx == nil {
 		return nil // no limiters
-	} else if tx.finished {
+	} else if tx.closed {
 		return errInvalidTxState
 	}
 	defer func() {
@@ -156,7 +156,7 @@ func (tx *Tx) Check() (retErr error) {
 func (tx *Tx) Reserve(ctx context.Context) (retErr error) {
 	if tx == nil {
 		return nil // no limiters
-	} else if tx.finished {
+	} else if tx.closed {
 		return errInvalidTxState
 	}
 	defer func() {
@@ -183,7 +183,7 @@ func (tx *Tx) Reserve(ctx context.Context) (retErr error) {
 func (tx *Tx) Commit(ctx context.Context) (retErr error) {
 	if tx == nil {
 		return nil // no limiters
-	} else if tx.finished {
+	} else if tx.closed {
 		return errInvalidTxState
 	}
 	defer func() {
@@ -224,10 +224,10 @@ func (tx *Tx) Commit(ctx context.Context) (retErr error) {
 // Rollback cancels checks and reservations on any limiters that have been made and not
 // committed so far. ctx may be nil only if Reserve has not been called yet.
 func (tx *Tx) Rollback(ctx context.Context) {
-	if tx == nil || tx.finished {
+	if tx == nil || tx.closed {
 		return
 	}
-	defer tx.Finish()
+	defer tx.Close()
 	for i, lim := range tx.limiters {
 		switch tx.state[i] {
 		case txStateReserved:
@@ -241,14 +241,14 @@ func (tx *Tx) Rollback(ctx context.Context) {
 	}
 }
 
-// Finish releases limiter pins. Call Rollback first if the transaction needs to be canceled.
-func (tx *Tx) Finish() {
-	if tx == nil || tx.finished {
+// Close releases limiter pins. Call Rollback first if the transaction needs to be canceled.
+func (tx *Tx) Close() {
+	if tx == nil || tx.closed {
 		return
 	}
-	tx.finished = true
+	tx.closed = true
 	for _, lim := range tx.limiters {
-		lim.finish()
+		lim.close()
 	}
 }
 
@@ -259,4 +259,4 @@ func (noopLimiterTx) cancelCheck()                     {}
 func (noopLimiterTx) reserve(context.Context) error    { return nil }
 func (noopLimiterTx) commit(context.Context) error     { return nil }
 func (noopLimiterTx) cancelReserve(context.Context)    {}
-func (noopLimiterTx) finish()                          {}
+func (noopLimiterTx) close()                           {}
