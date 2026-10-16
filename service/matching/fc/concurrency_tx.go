@@ -53,6 +53,6 @@ func (ct *concurrencyTx) cancelReserve(ctx context.Context) {
 	ct.cs.cancelReserve(ctx, ct.slotID)
 }
 
-func (ct *concurrencyTx) finish() {
+func (ct *concurrencyTx) close() {
 	ct.cs.unpin()
 }

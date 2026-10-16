@@ -9,6 +9,7 @@ import (
 	enumsspb "go.temporal.io/server/api/enums/v1"
 	fcpb "go.temporal.io/server/chasm/lib/flowcontrol/gen/flowcontrolpb/v1"
 	"go.temporal.io/server/common/clock"
+	"go.temporal.io/server/common/dynamicconfig"
 	"go.temporal.io/server/common/namespace"
 	"go.temporal.io/server/common/testing/await"
 	"go.temporal.io/server/service/matching/simplelimiter"
@@ -37,7 +38,7 @@ func newTestReadiness(t *testing.T, client fcpb.ConcurrencyServiceClient) (*Read
 	t.Helper()
 	ts := clock.NewEventTimeSource().Update(time.Now())
 	ts.UseAsyncTimers(true)
-	r := NewReadiness(ts, client)
+	r := NewReadiness(ts, client, NewReadinessConfig(dynamicconfig.NewNoopCollection()))
 	t.Cleanup(r.Stop)
 	return r, ts
 }
@@ -66,11 +67,11 @@ func TestTransactionPins(t *testing.T) {
 			case "finish":
 				require.NoError(t, tx.Reserve(context.Background()))
 				require.NoError(t, tx.Commit(context.Background()))
-				tx.Finish()
+				tx.Close()
 			default:
 				require.Equal(t, "check only", name)
 			}
-			tx.Finish()
+			tx.Close()
 			tx.Rollback(context.Background())
 			requirePins(t, lim, 0)
 			require.ErrorIs(t, tx.Check(), errInvalidTxState)
@@ -247,7 +248,11 @@ func TestCleanupWorkerStops(t *testing.T) {
 	r, _ := newTestReadiness(t, nil)
 	r.Start()
 	r.Stop()
-	require.ErrorIs(t, r.lifecycleCtx.Err(), context.Canceled)
+	select {
+	case <-r.cleanupHandle.Done():
+	default:
+		t.Fatal("cleanup worker has not exited")
+	}
 }
 
 type testTask struct {
@@ -282,7 +287,7 @@ func TestOptimisticConcurrencyReserve(t *testing.T) {
 				Type: enumsspb.LIMITER_TYPE_CONCURRENCY, Source: LimiterSourceConfig, Key: "key",
 			}}}}
 			tx := r.NewTx(namespace.ID("ns"), task, &testCallback{})
-			defer tx.Finish()
+			defer tx.Close()
 			lim := tx.limiters[0].(*concurrencyTx).cs
 			require.EqualValues(t, 1, lim.tokens)
 			require.NoError(t, tx.Check())
@@ -297,7 +302,7 @@ func TestOptimisticConcurrencyReserve(t *testing.T) {
 				require.Equal(t, 1, batches)
 				require.Zero(t, lim.tokens)
 			}
-			tx.Finish()
+			tx.Close()
 			requirePins(t, lim, 0)
 		})
 	}
@@ -359,7 +364,7 @@ func (t *pendingTimer) Stop() bool {
 
 func TestPendingTimerCallbackRetainsPin(t *testing.T) {
 	ts := &pendingTimerClock{TimeSource: clock.NewEventTimeSource().Update(time.Now())}
-	r := NewReadiness(ts, nil)
+	r := NewReadiness(ts, nil, NewReadinessConfig(dynamicconfig.NewNoopCollection()))
 	t.Cleanup(r.Stop)
 	ns := namespace.ID("ns")
 	lim := r.getLocalLimiter(ns, "key")

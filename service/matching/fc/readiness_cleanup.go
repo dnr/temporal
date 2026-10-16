@@ -14,12 +14,13 @@ type cleanupState struct {
 	nextSweep time.Time
 }
 
-func (r *Readiness) cleanupLoop(ctx context.Context) {
+func (r *Readiness) cleanupLoop(ctx context.Context) error {
 	var state cleanupState
 	interval := r.config.cleanup().IdleInterval
 	for util.InterruptibleSleep(ctx, interval) == nil {
 		interval = r.cleanupPass(&state)
 	}
+	return nil
 }
 
 func (r *Readiness) cleanupPass(state *cleanupState) time.Duration {
