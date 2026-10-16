@@ -2,8 +2,10 @@ package fc
 
 import (
 	"context"
+	"math"
 	"testing"
 	"time"
+	"unsafe"
 
 	"github.com/stretchr/testify/require"
 	enumsspb "go.temporal.io/server/api/enums/v1"
@@ -48,7 +50,7 @@ func requirePins(t *testing.T, lim limiterState, pins int) {
 	b := lim.base()
 	b.rs.lock.Lock()
 	defer b.rs.lock.Unlock()
-	require.Equal(t, pins, b.pins)
+	require.Equal(t, int32(pins), b.pins)
 }
 
 func TestTransactionPins(t *testing.T) {
@@ -58,7 +60,7 @@ func TestTransactionPins(t *testing.T) {
 			lim := r.getLocalLimiter(namespace.ID("ns"), "key")
 			tx := &Tx{limiters: []limiterTx{newLocalLimiterTx(lim, simplelimiter.NoLimit(), 0)}}
 			requirePins(t, lim, 1)
-			lim.rs.cleanup(1000)
+			lim.rs.cleanup(1000, r.gcParameters())
 			require.Len(t, lim.rs.localLimiters, 1)
 			require.NoError(t, tx.Check())
 			switch name {
@@ -76,7 +78,7 @@ func TestTransactionPins(t *testing.T) {
 			requirePins(t, lim, 0)
 			require.ErrorIs(t, tx.Check(), errInvalidTxState)
 			ts.Advance(time.Nanosecond)
-			lim.rs.cleanup(1000)
+			lim.rs.cleanup(1000, r.gcParameters())
 			require.Empty(t, lim.rs.localLimiters)
 		})
 	}
@@ -122,7 +124,7 @@ func TestCanceledWaitRetainsPinUntilExit(t *testing.T) {
 	r.CancelAllCallbacks(ns, cb)
 	<-canceled
 	requirePins(t, lim, 1)
-	lim.rs.cleanup(1000)
+	lim.rs.cleanup(1000, r.gcParameters())
 	require.Len(t, lim.rs.concurrencyLimiters, 1)
 	close(exit)
 	await.RequireTrue(t, func() bool {
@@ -131,7 +133,7 @@ func TestCanceledWaitRetainsPinUntilExit(t *testing.T) {
 		return lim.pins == 0
 	}, time.Second, time.Millisecond)
 	ts.Advance(concurrencyBlockedRetention)
-	lim.rs.cleanup(1000)
+	lim.rs.cleanup(1000, r.gcParameters())
 	require.Empty(t, lim.rs.concurrencyLimiters)
 }
 
@@ -154,7 +156,7 @@ func TestCancelReservationOwnsPinAndDeadline(t *testing.T) {
 	lim.unpin()
 	<-started
 	requirePins(t, lim, 1)
-	lim.rs.cleanup(1000)
+	lim.rs.cleanup(1000, r.gcParameters())
 	require.Len(t, lim.rs.concurrencyLimiters, 1)
 	close(exit)
 	await.RequireTrue(t, func() bool {
@@ -182,37 +184,37 @@ func TestTimerPins(t *testing.T) {
 	}, time.Second, time.Millisecond)
 }
 
-func TestCandidateMembership(t *testing.T) {
+func TestGCListMembership(t *testing.T) {
 	r, _ := newTestReadiness(t, nil)
 	ns := namespace.ID("ns")
 	first := r.getLocalLimiter(ns, "first")
 	second := r.getLocalLimiter(ns, "second")
 	rs := first.rs
 	require.EqualValues(t, 2, rs.created)
-	require.Zero(t, rs.candidates.len)
+	require.Zero(t, rs.gcList.len)
 	first.unpin()
 	second.unpin()
-	require.Equal(t, 2, rs.candidates.len)
-	require.Same(t, first, rs.candidates.head)
-	require.Same(t, second, rs.candidates.tail)
+	require.Equal(t, 2, rs.gcList.len)
+	require.Same(t, first.base(), rs.gcList.head)
+	require.Same(t, second.base(), rs.gcList.tail)
 	first = r.getLocalLimiter(ns, "first")
 	require.EqualValues(t, 2, rs.created)
-	require.Same(t, second, rs.candidates.head)
+	require.Same(t, second.base(), rs.gcList.head)
 	cb := &testCallback{}
 	rs.lock.Lock()
 	rs.addEdgeLocked(first, cb, 0)
 	rs.lock.Unlock()
 	first.unpin()
-	require.Equal(t, 1, rs.candidates.len)
+	require.Equal(t, 1, rs.gcList.len)
 	r.CancelAllCallbacks(ns, cb)
-	require.Equal(t, 2, rs.candidates.len)
-	require.Same(t, first, rs.candidates.tail)
+	require.Equal(t, 2, rs.gcList.len)
+	require.Same(t, first.base(), rs.gcList.tail)
 	second = r.getLocalLimiter(ns, "second")
-	require.Same(t, first, rs.candidates.head)
-	require.Same(t, first, rs.candidates.tail)
+	require.Same(t, first.base(), rs.gcList.head)
+	require.Same(t, first.base(), rs.gcList.tail)
 	second.unpin()
 	r.Stop()
-	require.Zero(t, rs.candidates.len)
+	require.Zero(t, rs.gcList.len)
 }
 
 func TestCleanupCandidates(t *testing.T) {
@@ -230,17 +232,17 @@ func TestCleanupCandidates(t *testing.T) {
 	free.unpin()
 	zero.unpin()
 	rs := debt.rs
-	rs.cleanup(1000)
+	rs.cleanup(1000, r.gcParameters())
 	require.Len(t, rs.localLimiters, 2)
 	require.Same(t, debt, rs.localLimiters[debt.mapKey])
 	require.Same(t, pinned, rs.localLimiters[pinned.mapKey])
-	require.Equal(t, 1, rs.candidates.len)
+	require.Equal(t, 1, rs.gcList.len)
 	ts.Advance(2 * time.Second)
-	rs.cleanup(1000)
-	require.Equal(t, 0, rs.candidates.len)
+	rs.cleanup(1000, r.gcParameters())
+	require.Equal(t, 0, rs.gcList.len)
 	require.Len(t, rs.localLimiters, 1)
 	pinned.unpin()
-	rs.cleanup(1000)
+	rs.cleanup(1000, r.gcParameters())
 	require.Empty(t, rs.localLimiters)
 }
 
@@ -314,24 +316,24 @@ func TestBlockedConcurrencyRetention(t *testing.T) {
 	lim := r.getConcurrencyLimiter(ns, "key")
 	lim.tokens = 0
 	lim.unpin()
-	lim.rs.cleanup(1000)
+	lim.rs.cleanup(1000, r.gcParameters())
 	require.Len(t, lim.rs.concurrencyLimiters, 1)
 	ts.Advance(concurrencyBlockedRetention / 2)
 	reused := r.getConcurrencyLimiter(ns, "key")
 	require.Same(t, lim, reused)
 	reused.unpin()
 	ts.Advance(concurrencyBlockedRetention / 2)
-	lim.rs.cleanup(1000)
+	lim.rs.cleanup(1000, r.gcParameters())
 	require.Len(t, lim.rs.concurrencyLimiters, 1)
 	ts.Advance(concurrencyBlockedRetention / 2)
-	lim.rs.cleanup(1000)
+	lim.rs.cleanup(1000, r.gcParameters())
 	require.Empty(t, lim.rs.concurrencyLimiters)
 
 	recreated := r.getConcurrencyLimiter(ns, "key")
 	require.NotSame(t, lim, recreated)
 	require.EqualValues(t, 1, recreated.tokens)
 	recreated.unpin()
-	recreated.rs.cleanup(1000)
+	recreated.rs.cleanup(1000, r.gcParameters())
 	require.Empty(t, recreated.rs.concurrencyLimiters)
 }
 
@@ -380,8 +382,54 @@ func TestPendingTimerCallbackRetainsPin(t *testing.T) {
 	r.CancelAllCallbacks(ns, cb)
 	lim.unpin()
 	requirePins(t, lim, 1)
-	require.Zero(t, lim.rs.candidates.len)
+	require.Zero(t, lim.rs.gcList.len)
 	ts.timer.callback()
 	requirePins(t, lim, 0)
-	require.Equal(t, 1, lim.rs.candidates.len)
+	require.Equal(t, 1, lim.rs.gcList.len)
+}
+
+func TestLocalLimiterDroppableFullBurst(t *testing.T) {
+	r, ts := newTestReadiness(t, nil)
+	lim := r.getLocalLimiter(namespace.ID("ns"), "key")
+	params := simplelimiter.MakeParams(1, 2*time.Second)
+	for range 3 {
+		require.NoError(t, lim.check(params, &testCallback{}, 0))
+	}
+	lim.unpin()
+	ts.Advance(time.Second)
+	require.Zero(t, lim.lim.Delay(ts.Now().UnixNano()))
+	require.False(t, lim.droppableLocked(r.gcParameters()))
+	ts.Advance(2*time.Second - time.Nanosecond)
+	require.False(t, lim.droppableLocked(r.gcParameters()))
+	ts.Advance(time.Nanosecond)
+	require.True(t, lim.droppableLocked(r.gcParameters()))
+}
+
+func TestLimiterIdentityAndGC(t *testing.T) {
+	r, _ := newTestReadiness(t, nil)
+	ns := namespace.ID("01234567-89ab-cdef-0123-456789abcdef")
+	cs := r.getConcurrencyLimiter(ns, "same-key")
+	lls := r.getLocalLimiter(ns, "same-key")
+	require.Equal(t, ns, cs.namespaceID())
+	require.Equal(t, "same-key", cs.limiterKey())
+	require.Equal(t, cs.mapKey, lls.mapKey)
+	cs.unpin()
+	lls.unpin()
+	require.Equal(t, 2, cs.rs.cleanup(1000, r.gcParameters()))
+	require.Empty(t, cs.rs.concurrencyLimiters)
+	require.Empty(t, cs.rs.localLimiters)
+	t.Logf("concurrency state: %d bytes; local limiter state: %d bytes", unsafe.Sizeof(*cs), unsafe.Sizeof(*lls))
+}
+
+func TestConcurrencyRetentionSecondsWrap(t *testing.T) {
+	r, ts := newTestReadiness(t, nil)
+	ts.Advance(time.Duration(math.MaxInt32-20) * time.Second)
+	lim := r.getConcurrencyLimiter(namespace.ID("ns"), "key")
+	lim.tokens = 0
+	lim.unpin()
+	ts.Advance(concurrencyBlockedRetention - time.Second)
+	require.Negative(t, r.elapsedSeconds(ts.Now()))
+	require.False(t, lim.droppableLocked(r.gcParameters()))
+	ts.Advance(time.Second)
+	require.True(t, lim.droppableLocked(r.gcParameters()))
 }

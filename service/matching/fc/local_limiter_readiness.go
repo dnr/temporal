@@ -41,7 +41,7 @@ func (rs *readinessShard) getLocalLimiter(nsID namespace.ID, key string) *localL
 		return lls
 	}
 	lls := &localLimiterState{
-		limiterStateBase: limiterStateBase{rs: rs, pins: 1, mapKey: mapkey},
+		limiterStateBase: limiterStateBase{rs: rs, pins: 1, mapKey: mapkey, namespaceLen: uint16(len(nsID))},
 		params:           simplelimiter.NoLimit(),
 	}
 	rs.localLimiters[mapkey] = lls
@@ -123,18 +123,14 @@ func (lls *localLimiterState) onTimer() {
 	lls.rs.update(lls, notifySync, func() error { return nil })
 }
 
-func (lls *localLimiterState) droppableLocked() bool {
+func (lls *localLimiterState) droppableLocked(params gcParameters) bool {
 	// A localLimiterState is droppable if it would be initialized in the same effective state
 	// that it's in now. That's trivially true if it's completely blocked (Never) or has no
 	// limit (!Limited). For a positive non-infinite limit, it would be initialized with a full
 	// burst allowed, so return true if a full burst would be allowed right now.
-	return lls.params.Never() || !lls.params.Limited() || lls.lim.Delay(lls.now()) <= -lls.params.Burst
+	return lls.params.Never() || !lls.params.Limited() || lls.lim.Delay(params.now.UnixNano()) <= -lls.params.Burst
 }
 
 func (lls *localLimiterState) unpin() {
 	lls.rs.unpin(lls)
-}
-
-func (lls *localLimiterState) deleteLocked() {
-	delete(lls.rs.localLimiters, lls.mapKey)
 }

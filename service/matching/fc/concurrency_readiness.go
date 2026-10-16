@@ -23,11 +23,8 @@ var ErrConcurrencyBlocked = serviceerror.NewFailedPrecondition("blocked by concu
 type concurrencyState struct {
 	limiterStateBase
 
-	nsID namespace.ID
-	key  string
-
-	lastUsed   int64
 	generation int64
+	lastUsed   int32
 	tokens     int32
 	// tokensSeq is incremented whenever tokens is overwritten from a server hint. When we take
 	// a token in check, we record the sequence number, so that in cancelCheck, we can avoid
@@ -50,17 +47,15 @@ func (rs *readinessShard) getConcurrencyLimiter(nsID namespace.ID, key string) *
 	mapkey := nsID.String() + key
 	if cs, ok := rs.concurrencyLimiters[mapkey]; ok {
 		rs.pinLocked(cs)
-		cs.lastUsed = rs.r.timeSource.Now().UnixNano()
+		cs.lastUsed = rs.r.elapsedSeconds(rs.r.timeSource.Now())
 		return cs
 	}
 	cs := &concurrencyState{
-		limiterStateBase: limiterStateBase{rs: rs, pins: 1, mapKey: mapkey},
-		nsID:             nsID,
-		key:              key,
+		limiterStateBase: limiterStateBase{rs: rs, pins: 1, mapKey: mapkey, namespaceLen: uint16(len(nsID)), concurrency: true},
 		// optimistically assume unknown limiter has one slot, so we call Reserve first.
 		// we'll get the real number of slots as a hint.
 		tokens:   1,
-		lastUsed: rs.r.timeSource.Now().UnixNano(),
+		lastUsed: rs.r.elapsedSeconds(rs.r.timeSource.Now()),
 	}
 	rs.concurrencyLimiters[mapkey] = cs
 	rs.created++
@@ -104,8 +99,8 @@ func (cs *concurrencyState) reserve(
 ) error {
 	// TODO(fc): consider doing this from history to make invalid tasks cheaper to invalidate
 	res, err := cs.rs.r.concurrencyServiceClient.Batch(ctx, &fcpb.ConcurrencyServiceBatchRequest{
-		NamespaceId:         cs.nsID.String(),
-		Key:                 cs.key,
+		NamespaceId:         cs.namespaceID().String(),
+		Key:                 cs.limiterKey(),
 		ReserveSlots:        []string{slotID},
 		ConfigUpdate:        configUpdate,
 		ConfigUpdateVersion: configUpdateVersion,
@@ -122,8 +117,8 @@ func (cs *concurrencyState) reserve(
 
 func (cs *concurrencyState) commit(ctx context.Context, slotID string) error {
 	res, err := cs.rs.r.concurrencyServiceClient.Batch(ctx, &fcpb.ConcurrencyServiceBatchRequest{
-		NamespaceId: cs.nsID.String(),
-		Key:         cs.key,
+		NamespaceId: cs.namespaceID().String(),
+		Key:         cs.limiterKey(),
 		CommitSlots: []string{slotID},
 	})
 	if err != nil {
@@ -146,8 +141,8 @@ func (cs *concurrencyState) cancelReserve(ctx context.Context, slotID string) {
 		defer cs.unpin()
 		defer cancel()
 		res, err := cs.rs.r.concurrencyServiceClient.Batch(ctx, &fcpb.ConcurrencyServiceBatchRequest{
-			NamespaceId:            cs.nsID.String(),
-			Key:                    cs.key,
+			NamespaceId:            cs.namespaceID().String(),
+			Key:                    cs.limiterKey(),
 			CancelReservationSlots: []string{slotID},
 		})
 		if err == nil {
@@ -197,7 +192,7 @@ func (cs *concurrencyState) syncLocked(rsu *readinessSyncUpdate) {
 	}
 
 	ctx := headers.SetCallerInfo(context.Background(), headers.NewCallerInfo(
-		cs.nsID.String(), // TODO(fc): use namespace name instead of id
+		cs.namespaceID().String(), // TODO(fc): use namespace name instead of id
 		headers.CallerTypeBackgroundHigh,
 		"",
 	))
@@ -221,8 +216,8 @@ func (cs *concurrencyState) makeWaitRequest() *fcpb.ConcurrencyServiceWaitReques
 
 	cs.waiterWakePriority = waiters[0].pri
 	return &fcpb.ConcurrencyServiceWaitRequest{
-		NamespaceId:         cs.nsID.String(),
-		Key:                 cs.key,
+		NamespaceId:         cs.namespaceID().String(),
+		Key:                 cs.limiterKey(),
 		Generation:          cs.generation,
 		WakePriority:        int64(cs.waiterWakePriority),
 		RequestedWakeTokens: int32(len(waiters)),
@@ -265,14 +260,12 @@ func (cs *concurrencyState) callWait(ctx context.Context) {
 	}
 }
 
-func (cs *concurrencyState) droppableLocked() bool {
-	return cs.tokens > 0 || cs.rs.r.timeSource.Now().UnixNano()-cs.lastUsed >= int64(cs.rs.r.config.concurrencyRetention())
+func (cs *concurrencyState) droppableLocked(params gcParameters) bool {
+	// Subtract in int32 so recent ages remain valid across the seconds counter wrapping.
+	age := cs.rs.r.elapsedSeconds(params.now) - cs.lastUsed
+	return cs.tokens > 0 || time.Duration(age)*time.Second >= params.concurrencyRetention
 }
 
 func (cs *concurrencyState) unpin() {
 	cs.rs.unpin(cs)
-}
-
-func (cs *concurrencyState) deleteLocked() {
-	delete(cs.rs.concurrencyLimiters, cs.mapKey)
 }

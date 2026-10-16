@@ -7,6 +7,7 @@ import (
 	"reflect"
 	"slices"
 	"sync"
+	"time"
 
 	fcpb "go.temporal.io/server/chasm/lib/flowcontrol/gen/flowcontrolpb/v1"
 	"go.temporal.io/server/common/clock"
@@ -24,6 +25,7 @@ type (
 		timeSource               clock.TimeSource
 		concurrencyServiceClient fcpb.ConcurrencyServiceClient
 		config                   readinessConfig
+		createdAt                time.Time
 
 		// Readiness state sharding and locking:
 		//
@@ -59,15 +61,13 @@ type (
 		// reverse map, sorted by <pointer(limiter)>
 		rev map[ReadinessCallback][]revMapEntry
 
-		candidates limiterList
-		created    uint64
-		stopped    bool
+		gcList  limiterGCList
+		created uint64
+		stopped bool
 
 		// TODO(fc): clean up caches of idle/stale state
 		// TODO(fc): gauges for size of cache
 		// TODO(fc): limit active waiters, add suspended state, etc.
-
-		_ [128 - 6*8 - 40 - 8 - 1]byte // force to different cache lines to avoid false sharing
 	}
 
 	fwdMapEntry struct {
@@ -80,10 +80,13 @@ type (
 	}
 	limiterStateBase struct {
 		rs     *readinessShard
-		pins   int
 		mapKey string
-		prev   limiterState
-		next   limiterState
+		prev   *limiterStateBase
+		next   *limiterStateBase
+		pins   int32
+		// Namespace IDs are UUIDs; keep their boundary so RPCs can share the map key storage.
+		namespaceLen uint16
+		concurrency  bool
 	}
 
 	limiterState interface {
@@ -98,8 +101,7 @@ type (
 		// droppableLocked should return true if this limiter can be dropped without disruption
 		// or information loss. It will only be called on limiters that have no waiters and no
 		// pins.
-		droppableLocked() bool
-		deleteLocked()
+		droppableLocked(gcParameters) bool
 	}
 
 	readinessSyncUpdate struct {
@@ -130,6 +132,7 @@ func NewReadiness(
 		concurrencyServiceClient: concurrencyServiceClient,
 		seed:                     maphash.MakeSeed(),
 		config:                   config,
+		createdAt:                timeSource.Now(),
 	}
 	for i := range r.shards {
 		rs := &r.shards[i]
@@ -180,8 +183,8 @@ func (rs *readinessShard) stop() {
 		v.syncLocked(&rsu)
 	}
 	clear(rs.localLimiters)
-	for rs.candidates.head != nil {
-		rs.candidates.remove(rs.candidates.head)
+	for rs.gcList.head != nil {
+		rs.gcList.remove(rs.gcList.head)
 	}
 }
 
@@ -221,7 +224,7 @@ func (rs *readinessShard) syncLimiter(limiter limiterState, toNotify *deferedNot
 		rs.removeEdgeLocked(limiter, fEnt.cb)
 		toNotify.add(fEnt.cb)
 	}
-	rs.updateCandidateLocked(limiter)
+	rs.updateGCListLocked(limiter)
 }
 
 func (rs *readinessShard) addEdgeLocked(limiter limiterState, cb ReadinessCallback, pri wakePriority) {
@@ -342,8 +345,8 @@ func (b *limiterStateBase) base() *limiterStateBase {
 
 func (rs *readinessShard) pinLocked(limiter limiterState) {
 	b := limiter.base()
-	if b.prev != nil || rs.candidates.head == limiter {
-		rs.candidates.remove(limiter)
+	if b.prev != nil || rs.gcList.head == b {
+		rs.gcList.remove(b)
 	}
 	b.pins++
 }
@@ -352,16 +355,43 @@ func (rs *readinessShard) unpin(limiter limiterState) {
 	rs.lock.Lock()
 	defer rs.lock.Unlock()
 	limiter.base().pins--
-	rs.updateCandidateLocked(limiter)
+	rs.updateGCListLocked(limiter)
 }
 
-func (rs *readinessShard) updateCandidateLocked(limiter limiterState) {
+func (rs *readinessShard) updateGCListLocked(limiter limiterState) {
 	b := limiter.base()
-	listed := b.prev != nil || rs.candidates.head == limiter
+	listed := b.prev != nil || rs.gcList.head == b
 	eligible := !rs.stopped && b.pins == 0 && len(rs.fwd[limiter]) == 0
 	if eligible && !listed {
-		rs.candidates.pushBack(limiter)
+		rs.gcList.pushBack(b)
 	} else if !eligible && listed {
-		rs.candidates.remove(limiter)
+		rs.gcList.remove(b)
+	}
+}
+
+func (r *Readiness) elapsedSeconds(now time.Time) int32 {
+	return int32(now.Sub(r.createdAt) / time.Second)
+}
+
+func (b *limiterStateBase) namespaceID() namespace.ID {
+	return namespace.ID(b.mapKey[:b.namespaceLen])
+}
+
+func (b *limiterStateBase) limiterKey() string {
+	return b.mapKey[b.namespaceLen:]
+}
+
+func (b *limiterStateBase) limiterLocked() limiterState {
+	if b.concurrency {
+		return b.rs.concurrencyLimiters[b.mapKey]
+	}
+	return b.rs.localLimiters[b.mapKey]
+}
+
+func (b *limiterStateBase) deleteLocked() {
+	if b.concurrency {
+		delete(b.rs.concurrencyLimiters, b.mapKey)
+	} else {
+		delete(b.rs.localLimiters, b.mapKey)
 	}
 }
