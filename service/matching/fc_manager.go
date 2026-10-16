@@ -51,6 +51,9 @@ func (m *fcManager) CancelAllCallbacks(cb fc.ReadinessCallback) {
 }
 
 func (m *fcManager) UpdateLimitersFromConfig(limiters *fc.Limiters, task *internalTask) *fc.Limiters {
+	if task.isPollForwarder() {
+		return nil
+	}
 	userData, _, err := m.userDataManager.GetUserData()
 	if err != nil {
 		return nil
