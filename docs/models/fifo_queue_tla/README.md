@@ -29,8 +29,11 @@ task ids and the db's `maxReadLevel`.
   slow for the routine suite).
 - `PriQueue_caughtup.cfg` — writes never fail; adds `EventuallyCaughtUp`
   (the reader always reaches the max read level and persists it). Used both
-  as a real-model check and, with `WriteErrors = TRUE` or
-  `Expirable = {2}`, to reproduce findings.md #1 and #2.
+  as a real-model check and, with `WriteErrors = TRUE`, to reproduce
+  finding #1. With `Expirable = {2}`, it checks the resolved expiry finding #2.
+- `PriQueue_expired.cfg` — all three ids are initially available and may
+  expire; checks safety, delivery, quiescence and persisted catch-up without
+  relying on a subsequent write.
 - `run.sh` — translate, check the real model, then check every mutation and
   verify TLC catches it, and reproduce the confirmed finding.
 
@@ -44,6 +47,12 @@ java -XX:+UseParallelGC -cp ~/tla2tools.jar tlc2.TLC -workers auto PriQueue.tla
 ```
 
 `JAR=/path/to/tla2tools.jar ./run.sh` if the jar isn't at `~/tla2tools.jar`.
+The named-property diagnostics in `run.sh` require TLA+ tools v1.8.0 or
+newer. `WORKERS=4` limits parallelism; `JAVA_TOOL_OPTIONS=-Xmx4g` limits
+Java heap. `LOG_DIR=/absolute/path` saves each configuration and its full
+TLC output there (default: ignored `tlc-results/`). The runner works with
+both BSD and GNU `sed`.
+
 Always translate with `-nocfg` or `pcal.trans` clobbers the hand-written
 `.cfg`.
 
@@ -107,20 +116,21 @@ Liveness:
   acked, and the reader ends up holding nothing.
 - `ReaderQuiesce`: the reader eventually stops reading and signalling
   itself — catches both a stuck reader and a busy re-read loop.
-- `EventuallyCaughtUp` (only in `PriQueue_caughtup.cfg`): the reader
+- `EventuallyCaughtUp` (in `PriQueue_caughtup.cfg` and `PriQueue_expired.cfg`): the reader
   reaches the max read level and persists that ack level, so the next load
   of the queue doesn't re-scan. NOT a property of the current code when
-  writes can fail (findings.md #1) or when a read batch comes back entirely
-  expired (findings.md #2); `run.sh` reproduces both.
+  writes can fail (findings.md #1). It now holds when reads drop expired
+  tasks (resolved finding #2); `run.sh` checks both outcomes.
 
 ## Mutation tests
 
 Each `Mut*` constant re-introduces one bug; `run.sh` checks that TLC finds
-the expected violation for each. All flags FALSE = current code (as of
-e0a4751c).
+the expected violation for each. With all flags FALSE, the model represents
+e0a4751c plus the acknowledgement fix in temporalio/temporal#12595.
 
-The three flags that model the code *before* e0a4751c, one per hunk of that
-commit:
+The three historical flags restore individual hunks of e0a4751c. The
+historical checks use no expiry, where the new gap condition and the old
+equality condition are equivalent:
 
 | flag | code | model result |
 | --- | --- | --- |
@@ -147,3 +157,47 @@ worth keeping. The remaining flags are seeded bugs that exercise the rest of the
 `MutNoGapSignal`, `MutNoReloadSignal`, `MutDrainedAckIgnoresOutstanding`,
 plus `MutNoRoomCheck`, which is documented as *not* caught at this model
 size.
+
+## Expired-tail acknowledgement update
+
+Source: `dnr/temporal` branch `fairmodels`, commit
+`3173ca3473f79bae4bae6cf1b5fa08ba03909de7`. This local copy updates `RGap`
+to match temporalio/temporal#12595: after rejecting stale scan levels,
+advance and persist acknowledgement when `Outstanding = {}` rather than
+requiring `ackLevel = readLevel`. `Outstanding` includes both `loaded` and
+`ackedInMem`, matching all entries of the Go map.
+
+`MutGapAckRequiresEqualLevels` restores the old condition. With expiry and
+successful writes it must violate `EventuallyCaughtUp`; the same fixture
+must pass with the flag disabled. Additional checks cover all-expired
+backlogs, valid tasks followed by expired tails without further writes,
+expiry concurrent with writes and read errors, and unfinished lower tasks
+with out-of-order acknowledgements. Existing properties and fairness
+assumptions are unchanged.
+
+These are exhaustive checks of finite configurations, not an unbounded
+proof of the Go implementation. Safety is checked through MaxLevel=4;
+liveness is checked at MaxLevel=3. The model omits backlog counters and
+uses unfair GC: it checks safe deletion and acknowledgement progress, not
+eventual row deletion. Failed-write finding #1 remains an expected
+liveness violation and is outside this change.
+
+## Local verification — 2026-10-19
+
+TLA+ tools 1.8.0 with Temurin Java 21 completed all 29 runner checks with
+the expected outcomes. Safety checks passed through MaxLevel=4, including
+expiry with concurrent writes/read errors and unfinished lower tasks.
+The MaxLevel=3 liveness checks passed, including all-expired backlogs,
+valid-then-expired tails, and persisted acknowledgement catch-up.
+
+The original model reproduces the expired-tail `EventuallyCaughtUp`
+violation. The updated model passes that fixture; restoring the old
+condition with `MutGapAckRequiresEqualLevels` reproduces the violation.
+The standard configuration explores the same 812,282 distinct states
+before and after the change. The separate failed-write finding #1 remains
+an expected violation.
+
+Local evidence: `tlc-results/verification.json` records every configuration,
+state count and log; `tlc-results/baseline/` preserves the unchanged-model
+runs; `tlc-results/model-change.patch` is the patch against the pinned
+source above. The evidence directory is ignored by Git.

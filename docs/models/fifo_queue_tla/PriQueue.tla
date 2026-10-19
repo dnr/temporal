@@ -58,9 +58,9 @@
 (*   counter, throttling/backoff durations, task forwarding.               *)
 (*                                                                         *)
 (* Mutation flags "Mut...": each TRUE re-introduces a bug, to validate     *)
-(* that the properties catch it. All FALSE models the code as of           *)
-(* e0a4751c ("Fix read and ack levels moving backwards in priTaskReader"); *)
-(* the three historical flags together model the code before that fix.     *)
+(* that the properties catch it. All FALSE models the acknowledgement fix *)
+(* in temporalio/temporal#12595 on top of e0a4751c. The historical flags    *)
+(* restore the individual regressions described in run.sh.                *)
 (* See run.sh.                                                             *)
 (***************************************************************************)
 EXTENDS Naturals, FiniteSets, TLC
@@ -101,7 +101,8 @@ CONSTANTS
   MutGcReadLevel,        \* GC deletes up to readLevel instead of ackLevel
   MutNoGapSignal,        \* pump skips the !isReadBatchDone signal
   MutNoReloadSignal,     \* completeTask skips the loadedTasks==ReloadAt signal
-  MutDrainedAckIgnoresOutstanding \* isDrained ignores outstandingTasks
+  MutDrainedAckIgnoresOutstanding, \* isDrained ignores outstandingTasks
+  MutGapAckRequiresEqualLevels \* restore the expired-tail acknowledgement stall
 
 ASSUME ReloadAt < BatchSize
 ASSUME MaxLevel >= 1 /\ InitLevels <= MaxLevel
@@ -241,9 +242,13 @@ RGap:
           notify := TRUE;
         end if;
       else
-        if ackLevel = readLevel then
-          \* nothing outstanding and nothing in the scanned range: everything
-          \* up to scanRl is acked
+        if IF MutGapAckRequiresEqualLevels
+           THEN ackLevel = readLevel
+           ELSE Outstanding = {}
+        then
+          \* The stale-read guard ran first. Tasks through readLevel were
+          \* acked, expired, or added to Outstanding; an empty map permits
+          \* acknowledging through the scanned range, including expired tails.
           ackLevel := scanRl;
           dbUpdateAck(scanRl);
         end if;
@@ -461,7 +466,7 @@ AckLoop:
 end process;
 
 end algorithm; *)
-\* BEGIN TRANSLATION (chksum(pcal) = "5fdbbbe" /\ chksum(tla) = "ffefa082")
+\* BEGIN TRANSLATION (chksum(pcal) = "cef8879a" /\ chksum(tla) = "483e8572")
 VARIABLES pc, dbTasks, dbMaxReadLevel, dbAckLevel, rdState, rdFrom, rdTo, 
           rdResult, rdOk, wrState, wrBatch, wrBefore, wrOk, gcState, gcFrom, 
           loaded, ackedInMem, readLevel, ackLevel, notify, backoffTimer, 
@@ -632,7 +637,9 @@ RGap == /\ pc["reader"] = "RGap"
                               /\ UNCHANGED notify
                    /\ UNCHANGED << dbAckLevel, readLevel, ackLevel, 
                                    dbAckAssert >>
-              ELSE /\ IF ackLevel = readLevel
+              ELSE /\ IF IF MutGapAckRequiresEqualLevels
+                         THEN ackLevel = readLevel
+                         ELSE Outstanding = {}
                          THEN /\ ackLevel' = scanRl
                               /\ dbAckAssert' = (dbAckAssert \/ scanRl < dbAckLevel)
                               /\ dbAckLevel' = (IF scanRl < dbAckLevel /\ ~MutDbAckBackwards

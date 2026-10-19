@@ -6,10 +6,14 @@ set -uo pipefail
 cd "$(dirname "$0")"
 
 JAR=${JAR:-$HOME/tla2tools.jar}
-TLC() { java -XX:+UseParallelGC -cp "$JAR" tlc2.TLC -workers auto "$@"; }
+TLC() { java -XX:+UseParallelGC -cp "$JAR" tlc2.TLC -workers "${WORKERS:-auto}" "$@"; }
+LOG_DIR=${LOG_DIR:-tlc-results}
+mkdir -p "$LOG_DIR"
+LOG_DIR=$(cd "$LOG_DIR" && pwd)
+check_count=0
 
 echo "=== translating ==="
-java -cp "$JAR" pcal.trans -nocfg PriQueue.tla || exit 1
+java -cp "$JAR" pcal.trans -nocfg PriQueue.tla > "$LOG_DIR/translation.log" 2>&1 || { cat "$LOG_DIR/translation.log"; exit 1; }
 
 fail=0
 
@@ -17,30 +21,35 @@ fail=0
 # Each sed-expr edits a copy of the base cfg (normally to flip a Mut* flag).
 check() {
   local desc=$1 expect=$2 base=$3 pattern=$4; shift 4
-  local cfg=mut_tmp.cfg e
+  check_count=$((check_count + 1))
+  local prefix cfg log e status
+  printf -v prefix '%02d' "$check_count"
+  cfg="$LOG_DIR/$prefix.cfg"
+  log="$LOG_DIR/$prefix.log"
+  printf '%s\n' "$desc" > "$LOG_DIR/$prefix.description"
   cp "$base" "$cfg"
-  for e in "$@"; do sed -i "$e" "$cfg"; done
+  for e in "$@"; do
+    sed "$e" "$cfg" > "$cfg.next" && mv "$cfg.next" "$cfg" || { fail=1; return; }
+  done
   if [[ $# -gt 0 ]] && cmp -s "$cfg" "$base"; then
     echo "FAIL: $desc: cfg edit changed nothing (flag renamed?)"; fail=1; return
   fi
-  local out status
-  out=$(TLC -config "$cfg" PriQueue.tla 2>&1)
+  TLC -config "$cfg" PriQueue.tla > "$log" 2>&1
   status=$?
   if [[ $expect == pass && $status -ne 0 ]]; then
     echo "FAIL: $desc: expected pass, TLC found an error:"
-    echo "$out" | grep -E "^Error:" | head -3
+    grep -E "^Error:" "$log" | head -3
     fail=1
   elif [[ $expect == fail && $status -eq 0 ]]; then
     echo "FAIL: $desc: expected TLC to find a violation, but it passed"
     fail=1
-  elif ! echo "$out" | grep -qE "$pattern"; then
+  elif ! grep -qE "$pattern" "$log"; then
     echo "FAIL: $desc: output did not match /$pattern/:"
-    echo "$out" | grep -E "^Error:" | head -3
+    grep -E "^Error:" "$log" | head -3
     fail=1
   else
     echo "ok: $desc"
   fi
-  rm -f "$cfg"
 }
 
 on()   { echo "s/^  $1 = FALSE$/  $1 = TRUE/"; }
@@ -56,6 +65,17 @@ check "real model, with expiring tasks" \
   pass PriQueue.cfg "No error has been found" 's/Expirable = {}/Expirable = {2}/'
 check "real model, safety only, MaxLevel=4" \
   pass PriQueue_safety4.cfg "No error has been found"
+check "expired tasks in any position, safety + liveness and catch-up" \
+  pass PriQueue_expired.cfg "No error has been found"
+check "valid tasks followed by an expired tail, no further writes" \
+  pass PriQueue_expired.cfg "No error has been found" \
+  's/Expirable = {1, 2, 3}/Expirable = {2, 3}/'
+check "expiry with writes and read errors, safety only, MaxLevel=4" \
+  pass PriQueue_safety4.cfg "No error has been found" 's/Expirable = {}/Expirable = {2, 4}/'
+check "unfinished lower task and out-of-order acknowledgements, safety only" \
+  pass PriQueue_safety4.cfg "No error has been found" \
+  's/MaxLevel = 4/MaxLevel = 3/' 's/InitLevels = 2/InitLevels = 3/' \
+  's/AckableLevels = {1, 2, 3, 4}/AckableLevels = {2, 3}/' 's/Expirable = {}/Expirable = {3}/'
 
 echo "=== e0a4751c: the bugs this model was built for (expect violations) ==="
 # The code before e0a4751c: all three hunks reverted. The damage is that the
@@ -145,18 +165,19 @@ echo "=== not caught at this model size (expect pass) ==="
 check "MutNoRoomCheck: memory bound only, unreachable at this size" \
   pass PriQueue.cfg "No error has been found" "$(on MutNoRoomCheck)"
 
-echo "=== findings regression (expected violation on the REAL model) ==="
+echo "=== findings and expired-tail regression ==="
 # findings.md #1: a failed CreateTasks moves the db's max read level but never
 # signals the reader, so the reader can stop below it forever.
 check "finding #1: no read is triggered after a failed write" \
   fail PriQueue_caughtup.cfg "Temporal property EventuallyCaughtUp was violated" \
   "$(on WriteErrors)"
-# findings.md #2: a read batch that is entirely expired raises the read level
-# without any ack bookkeeping, and the ack level can then never catch up -- so
-# the expired rows are never GCed.
-check "finding #2: an all-expired batch strands the ack level" \
-  fail PriQueue_caughtup.cfg "Temporal property EventuallyCaughtUp was violated" \
+# Finding #2 is fixed by checking Outstanding rather than equal levels.
+check "finding #2 fixed: acknowledgement catches up after expired tasks" \
+  pass PriQueue_caughtup.cfg "No error has been found" \
   's/Expirable = {}/Expirable = {2}/'
+check "MutGapAckRequiresEqualLevels: the expired tail strands acknowledgement" \
+  fail PriQueue_caughtup.cfg "Temporal property EventuallyCaughtUp was violated" \
+  's/Expirable = {}/Expirable = {2}/' "$(on MutGapAckRequiresEqualLevels)"
 
 if [[ $fail -ne 0 ]]; then echo "=== FAILURES ==="; exit 1; fi
 echo "=== all checks passed ==="

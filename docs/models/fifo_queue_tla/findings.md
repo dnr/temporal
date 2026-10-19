@@ -49,11 +49,15 @@ has no equivalent.
 Fix shape: call `signalReaders`/`SignalTaskLoading` on the CreateTasks error
 path too (the max read level moved, so there is something to catch up to).
 
-## 2. A batch of expired tasks leaves the ack level stuck behind (candidate)
+## 2. A batch of expired tasks leaves the ack level stuck behind (resolved)
 
-Status: **model-confirmed against current code**, independent of #1 (it
-reproduces with `WriteErrors = FALSE`): `PriQueue_caughtup.cfg` with
-`Expirable = {2}` violates `EventuallyCaughtUp`. `run.sh` reproduces it.
+Status: **fixed by the acknowledgement change in temporalio/temporal#12595**.
+The source model before this update violates `EventuallyCaughtUp` with
+`PriQueue_caughtup.cfg`, `WriteErrors = FALSE`, and `Expirable = {2}`,
+independently of #1. `RGap` now checks `Outstanding = {}` after the stale-read
+guard. `run.sh` requires this expiry fixture to pass and requires
+`MutGapAckRequiresEqualLevels` (the original condition) to reproduce the
+liveness failure. The following describes the original bug.
 
 `processTaskBatch` drops tasks that are already expired when they are read
 (`IsTaskExpired` → `slices.DeleteFunc`). Dropping raises `tr.readLevel` past
@@ -97,6 +101,9 @@ Fix shapes: treat expired-on-read tasks like acked ones (insert and
 immediately ack, so the existing machinery advances the level and the count),
 or relax `setReadLevelAfterGap` to advance the ack level whenever
 `outstandingTasks` is empty rather than only when `ackLevel == readLevel`.
+The latter is the change modeled here. It makes expired rows eligible for
+later GC; eventual GC and the approximate backlog counter are not verified
+by this model.
 
 ## 3. Spec clarifications (not bugs)
 
