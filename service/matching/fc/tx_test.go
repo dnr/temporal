@@ -15,7 +15,7 @@ import (
 	"go.temporal.io/server/common/dynamicconfig"
 	"go.temporal.io/server/common/namespace"
 	serviceerrors "go.temporal.io/server/common/serviceerror"
-	"go.temporal.io/server/common/stream_batcher"
+	"go.temporal.io/server/common/streambatcher"
 	"go.temporal.io/server/service/matching/simplelimiter"
 )
 
@@ -154,8 +154,8 @@ func TestHints_SharedByBatchedCallers(t *testing.T) {
 		return &fcpb.ConcurrencyServiceBatchResponse{Generation: 4, AvailableSlotsHint: 0, ReserveSuccess: []bool{true, false}}
 	})
 	cfg := NewReadinessConfig(dynamicconfig.NewNoopCollection())
-	cfg.clientBatcherOptions = func() stream_batcher.BatcherOptions {
-		return stream_batcher.BatcherOptions{MaxItems: 2, MinDelay: time.Minute, MaxDelay: time.Minute, IdleTime: time.Minute}
+	cfg.clientBatcherOptions = func() streambatcher.BatcherOptions {
+		return streambatcher.BatcherOptions{MaxItems: 2, MinDelay: time.Minute, MaxDelay: time.Minute, IdleTime: time.Minute}
 	}
 	r := NewReadiness(clock.NewRealTimeSource(), client, cfg)
 	defer r.Stop()

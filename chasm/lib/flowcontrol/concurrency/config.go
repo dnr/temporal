@@ -4,17 +4,17 @@ import (
 	"time"
 
 	"go.temporal.io/server/common/dynamicconfig"
-	"go.temporal.io/server/common/stream_batcher"
+	"go.temporal.io/server/common/streambatcher"
 )
 
-var defaultServerBatcherOptions = stream_batcher.BatcherOptions{
+var defaultServerBatcherOptions = streambatcher.BatcherOptions{
 	MaxItems:      100,
 	MinDelay:      5 * time.Millisecond,
 	MaxDelay:      10 * time.Millisecond,
 	IdleTime:      time.Minute,
 	ClearInterval: time.Hour,
 }
-var defaultClientBatcherOptions = stream_batcher.BatcherOptions{
+var defaultClientBatcherOptions = streambatcher.BatcherOptions{
 	MaxItems:      50,
 	MinDelay:      5 * time.Millisecond,
 	MaxDelay:      10 * time.Millisecond,

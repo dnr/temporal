@@ -7,7 +7,7 @@ import (
 	"go.temporal.io/api/serviceerror"
 	fcpb "go.temporal.io/server/chasm/lib/flowcontrol/gen/flowcontrolpb/v1"
 	"go.temporal.io/server/common/clock"
-	"go.temporal.io/server/common/stream_batcher"
+	"go.temporal.io/server/common/streambatcher"
 	"google.golang.org/grpc"
 )
 
@@ -38,18 +38,18 @@ type BatchingClient struct {
 	fcpb.ConcurrencyServiceClient
 
 	hintHandler HintHandler
-	batchers    *stream_batcher.KeyedBatcher[clientBatchKey, clientBatchItem, clientBatchResult]
+	batchers    *streambatcher.KeyedBatcher[clientBatchKey, clientBatchItem, clientBatchResult]
 }
 
 // NewBatchingClient returns a BatchingClient. hintHandler may be nil.
 func NewBatchingClient(
 	client fcpb.ConcurrencyServiceClient,
-	opts stream_batcher.BatcherOptions,
+	opts streambatcher.BatcherOptions,
 	timeSource clock.TimeSource,
 	hintHandler HintHandler,
 ) *BatchingClient {
 	c := &BatchingClient{ConcurrencyServiceClient: client, hintHandler: hintHandler}
-	c.batchers = stream_batcher.NewKeyedBatcherWithPerItemResults(c.applyBatch, opts, timeSource)
+	c.batchers = streambatcher.NewKeyedBatcherWithPerItemResults(c.applyBatch, opts, timeSource)
 	return c
 }
 

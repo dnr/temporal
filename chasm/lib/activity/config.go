@@ -6,7 +6,7 @@ import (
 	"go.temporal.io/server/common"
 	"go.temporal.io/server/common/dynamicconfig"
 	"go.temporal.io/server/common/retrypolicy"
-	"go.temporal.io/server/common/stream_batcher"
+	"go.temporal.io/server/common/streambatcher"
 )
 
 var (
@@ -66,7 +66,7 @@ type Config struct {
 	MaxUserMetadataSummarySize                dynamicconfig.IntPropertyFnWithNamespaceFilter
 	StartDelayEnabled                         dynamicconfig.BoolPropertyFnWithNamespaceFilter
 	VisibilityMaxPageSize                     dynamicconfig.IntPropertyFnWithNamespaceFilter
-	FlowControlClientBatcherOptions           dynamicconfig.TypedPropertyFn[stream_batcher.BatcherOptions]
+	FlowControlClientBatcherOptions           dynamicconfig.TypedPropertyFn[streambatcher.BatcherOptions]
 }
 
 func ConfigProvider(dc *dynamicconfig.Collection) *Config {

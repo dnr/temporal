@@ -54,7 +54,7 @@ import (
 	"go.temporal.io/server/common/searchattribute"
 	serviceerrors "go.temporal.io/server/common/serviceerror"
 	"go.temporal.io/server/common/softassert"
-	"go.temporal.io/server/common/stream_batcher"
+	"go.temporal.io/server/common/streambatcher"
 	"go.temporal.io/server/common/taskqueue"
 	"go.temporal.io/server/common/tasktoken"
 	"go.temporal.io/server/common/testing/testhooks"
@@ -197,7 +197,7 @@ type (
 		// Lock to serialize replication queue updates.
 		replicationLock sync.Mutex
 		// Serialize and batch user data updates by namespace.
-		userDataUpdateBatcher *stream_batcher.KeyedBatcher[namespace.ID, *userDataUpdate, error]
+		userDataUpdateBatcher *streambatcher.KeyedBatcher[namespace.ID, *userDataUpdate, error]
 		// Stores results of reachability queries to visibility
 		reachabilityCache reachabilityCache
 		// Rate limiter to limit the task dispatch
@@ -252,7 +252,7 @@ var (
 	nexusEndpointsTablePartitionRoutingKey, _ = tqid.MustNormalPartitionFromRpcName("not-applicable", "not-applicable", enumspb.TASK_QUEUE_TYPE_UNSPECIFIED).RoutingKey(0)
 
 	// Options for batching user data updates.
-	userDataBatcherOptions = stream_batcher.BatcherOptions{
+	userDataBatcherOptions = streambatcher.BatcherOptions{
 		MaxItems:      100,
 		MinDelay:      100 * time.Millisecond,
 		MaxDelay:      500 * time.Millisecond,
@@ -336,7 +336,7 @@ func NewEngine(
 		partitionScalerFactory:    partitionScalerFactory,
 		fcReadiness:               fcReadiness,
 	}
-	e.userDataUpdateBatcher = stream_batcher.NewKeyedBatcher(
+	e.userDataUpdateBatcher = streambatcher.NewKeyedBatcher(
 		e.applyUserDataUpdateBatch,
 		userDataBatcherOptions,
 		e.timeSource,

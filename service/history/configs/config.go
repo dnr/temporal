@@ -9,7 +9,7 @@ import (
 	"go.temporal.io/server/common/health"
 	"go.temporal.io/server/common/namespace"
 	"go.temporal.io/server/common/retrypolicy"
-	"go.temporal.io/server/common/stream_batcher"
+	"go.temporal.io/server/common/streambatcher"
 )
 
 // Config represents configuration for history service
@@ -179,7 +179,7 @@ type Config struct {
 	TransferProcessorPollBackoffInterval                dynamicconfig.DurationPropertyFn
 	TransferProcessorEnsureCloseBeforeDelete            dynamicconfig.BoolPropertyFn
 	TransferQueueMaxReaderCount                         dynamicconfig.IntPropertyFn
-	FlowControlClientBatcherOptions                     dynamicconfig.TypedPropertyFn[stream_batcher.BatcherOptions]
+	FlowControlClientBatcherOptions                     dynamicconfig.TypedPropertyFn[streambatcher.BatcherOptions]
 
 	// OutboundQueueProcessor settings
 	OutboundTaskBatchSize                               dynamicconfig.IntPropertyFn

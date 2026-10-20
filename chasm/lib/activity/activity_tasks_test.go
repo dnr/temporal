@@ -20,7 +20,7 @@ import (
 	"go.temporal.io/server/common/metrics"
 	"go.temporal.io/server/common/metrics/metricstest"
 	"go.temporal.io/server/common/retrypolicy"
-	"go.temporal.io/server/common/stream_batcher"
+	"go.temporal.io/server/common/streambatcher"
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/types/known/durationpb"
 	"google.golang.org/protobuf/types/known/timestamppb"
@@ -54,7 +54,7 @@ func TestReleaseLimiterTaskExecute(t *testing.T) {
 			}
 			return &fcpb.ConcurrencyServiceBatchResponse{}, nil
 		},
-	}, &Config{FlowControlClientBatcherOptions: dynamicconfig.GetTypedPropertyFn(stream_batcher.BatcherOptions{
+	}, &Config{FlowControlClientBatcherOptions: dynamicconfig.GetTypedPropertyFn(streambatcher.BatcherOptions{
 		MaxItems: 1,
 		IdleTime: time.Minute,
 	})})

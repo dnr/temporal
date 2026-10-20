@@ -13,7 +13,7 @@ import (
 	"go.temporal.io/server/common/clock"
 	"go.temporal.io/server/common/dynamicconfig"
 	"go.temporal.io/server/common/namespace"
-	"go.temporal.io/server/common/stream_batcher"
+	"go.temporal.io/server/common/streambatcher"
 	"go.temporal.io/server/common/testing/await"
 	"go.temporal.io/server/service/matching/simplelimiter"
 	"google.golang.org/grpc"
@@ -43,8 +43,8 @@ func newTestReadiness(t *testing.T, client fcpb.ConcurrencyServiceClient) (*Read
 	ts.UseAsyncTimers(true)
 	cfg := NewReadinessConfig(dynamicconfig.NewNoopCollection())
 	// one item per batch, so batching doesn't wait on the fake clock
-	cfg.clientBatcherOptions = func() stream_batcher.BatcherOptions {
-		return stream_batcher.BatcherOptions{MaxItems: 1, IdleTime: time.Minute}
+	cfg.clientBatcherOptions = func() streambatcher.BatcherOptions {
+		return streambatcher.BatcherOptions{MaxItems: 1, IdleTime: time.Minute}
 	}
 	r := NewReadiness(ts, client, cfg)
 	t.Cleanup(r.Stop)

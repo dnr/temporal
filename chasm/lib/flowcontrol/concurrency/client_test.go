@@ -14,7 +14,7 @@ import (
 	taskqueuepb "go.temporal.io/api/taskqueue/v1"
 	fcpb "go.temporal.io/server/chasm/lib/flowcontrol/gen/flowcontrolpb/v1"
 	"go.temporal.io/server/common/clock"
-	"go.temporal.io/server/common/stream_batcher"
+	"go.temporal.io/server/common/streambatcher"
 	"google.golang.org/grpc"
 )
 
@@ -53,7 +53,7 @@ func TestBatchingClient(t *testing.T) {
 			}
 			return res, nil
 		}},
-		stream_batcher.BatcherOptions{
+		streambatcher.BatcherOptions{
 			MaxItems: 2,
 			MinDelay: time.Second,
 			MaxDelay: time.Second,
@@ -258,7 +258,7 @@ func TestBatchingClientDoesNotCombineDifferentLimiters(t *testing.T) {
 			keys <- req.NamespaceId + "/" + req.Key
 			return &fcpb.ConcurrencyServiceBatchResponse{}, nil
 		}},
-		stream_batcher.BatcherOptions{
+		streambatcher.BatcherOptions{
 			MaxItems: 2,
 			MinDelay: time.Millisecond,
 			MaxDelay: time.Millisecond,

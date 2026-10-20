@@ -16,7 +16,7 @@ import (
 	"go.temporal.io/server/common/contextutil"
 	"go.temporal.io/server/common/dynamicconfig"
 	"go.temporal.io/server/common/log"
-	"go.temporal.io/server/common/stream_batcher"
+	"go.temporal.io/server/common/streambatcher"
 )
 
 type batchKey struct {
@@ -70,7 +70,7 @@ type Handler struct {
 	longPollOpts   dynamicconfig.TypedPropertyFn[WaitLongPollOptions]
 	reserveTimeout dynamicconfig.DurationPropertyFn
 	stagedWake     dynamicconfig.TypedPropertyFn[StagedWakeOptions]
-	batchers       *stream_batcher.KeyedBatcher[batchKey, batchReq, batchRes]
+	batchers       *streambatcher.KeyedBatcher[batchKey, batchReq, batchRes]
 
 	waiterSeed   maphash.Seed
 	waiterShards [numWaiterShards]waiterShard
@@ -90,7 +90,7 @@ func NewHandler(
 	for i := range h.waiterShards {
 		h.waiterShards[i].waiters = make(map[batchKey]*waiterEntries)
 	}
-	h.batchers = stream_batcher.NewKeyedBatcherWithPerItemResults(
+	h.batchers = streambatcher.NewKeyedBatcherWithPerItemResults(
 		h.applyBatch,
 		ServerBatcherOptions.Get(dc)(),
 		clock.NewRealTimeSource(),
