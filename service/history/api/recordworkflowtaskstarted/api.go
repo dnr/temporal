@@ -181,12 +181,12 @@ func Invoke(
 			}
 
 			if workflowTask.Type == enumsspb.WORKFLOW_TASK_TYPE_SPECULATIVE {
-				// Persist limiter refs so a history process restart cannot lose the release obligation.
-				updateAction.Noop = !slices.ContainsFunc(req.GetLimiters(), commontaskqueue.NeedsRelease)
+				// Persist dirty state and limiter refs so a history restart cannot lose the release obligation.
+				updateAction.Noop = !mutableState.IsDirty() && !slices.ContainsFunc(req.GetLimiters(), commontaskqueue.NeedsRelease)
 			} else {
-				// If the wft is speculative MS changes are not persisted, so the possibly started
-				// transition by the StartDeploymentTransition call above won't be persisted. This is OK
-				// because once the speculative task completes the transition will be applied
+				// Start the deployment transition here only for a normal WFT. For a speculative WFT,
+				// even when dirty mutable state causes the start to be persisted, the transition can
+				// wait because once the speculative task completes it will be applied
 				// automatically based on wft completion info. If the speculative task fails or times
 				// out, future wft will be redirected by matching again and the transition will
 				// eventually happen. If an activity starts while the speculative is also started on the
@@ -212,6 +212,11 @@ func Invoke(
 			workflowScheduleToStartLatency := workflowTask.StartedTime.Sub(workflowTask.ScheduledTime)
 			namespaceName := namespaceEntry.Name()
 			tqPartition := tqid.UnsafePartitionFromProto(workflowTask.TaskQueue, req.GetNamespaceId(), enumspb.TASK_QUEUE_TYPE_WORKFLOW)
+			breakdownMetricsByBuildID := config.BreakdownMetricsByBuildID(
+				namespaceName.String(),
+				tqPartition.TaskQueue().Name(),
+				enumspb.TASK_QUEUE_TYPE_WORKFLOW,
+			)
 			metrics.TaskScheduleToStartLatency.With(
 				metrics.GetPerTaskQueuePartitionTypeScope(
 					metricsScope,
@@ -219,7 +224,11 @@ func Invoke(
 					tqPartition,
 					config.BreakdownMetricsByTaskQueue(namespaceName.String(), tqPartition.TaskQueue().Name(), enumspb.TASK_QUEUE_TYPE_WORKFLOW),
 				),
-			).Record(workflowScheduleToStartLatency)
+			).Record(
+				workflowScheduleToStartLatency,
+				metrics.WorkerDeploymentNameTag(pollerDeployment.GetSeriesName(), breakdownMetricsByBuildID),
+				metrics.WorkerDeploymentBuildIDTag(pollerDeployment.GetBuildId(), breakdownMetricsByBuildID),
+			)
 
 			resp, err = CreateRecordWorkflowTaskStartedResponseWithRawHistory(
 				ctx,
@@ -285,8 +294,7 @@ func setHistoryForRecordWfTaskStartedResp(
 	//  when data inconsistency occurs
 	//  long term solution should check event batch pointing backwards within history store
 	defer func() {
-		var dataLossErr *serviceerror.DataLoss
-		if errors.As(retError, &dataLossErr) {
+		if _, ok := errors.AsType[*serviceerror.DataLoss](retError); ok {
 			api.TrimHistoryNode(
 				ctx,
 				shardContext,

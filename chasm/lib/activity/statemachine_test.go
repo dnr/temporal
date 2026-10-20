@@ -197,6 +197,50 @@ func TestTransitionScheduled(t *testing.T) {
 	}
 }
 
+func TestTransitionEagerStarted(t *testing.T) {
+	ctx := &chasm.MockMutableContext{
+		MockContext: chasm.MockContext{
+			HandleNow: func(chasm.Component) time.Time { return defaultTime },
+			GoCtx:     headers.SetVersionsForTests(context.Background(), temporal.SDKVersion, headers.ClientNameGoSDK, "", ""),
+		},
+	}
+	attempt := &activitypb.ActivityAttemptState{}
+	activity := &Activity{
+		ActivityState: &activitypb.ActivityState{
+			ActivityType:           &commonpb.ActivityType{Name: "test-activity-type"},
+			ScheduleTime:           timestamppb.New(defaultTime),
+			ScheduleToCloseTimeout: durationpb.New(defaultScheduleToCloseTimeout),
+			ScheduleToStartTimeout: durationpb.New(defaultScheduleToStartTimeout),
+			StartToCloseTimeout:    durationpb.New(defaultStartToCloseTimeout),
+			HeartbeatTimeout:       durationpb.New(time.Minute),
+			Status:                 activitypb.ACTIVITY_EXECUTION_STATUS_UNSPECIFIED,
+			TaskQueue:              &taskqueuepb.TaskQueue{Name: "test-task-queue"},
+		},
+		LastAttempt: chasm.NewDataField(ctx, attempt),
+		Outcome:     chasm.NewDataField(ctx, &activitypb.ActivityOutcome{}),
+	}
+
+	err := TransitionEagerStarted.Apply(activity, ctx, eagerStartEvent{
+		requestID: "start-request-id",
+		identity:  "starter",
+	})
+	require.NoError(t, err)
+	require.Equal(t, activitypb.ACTIVITY_EXECUTION_STATUS_STARTED, activity.GetStatus())
+	require.True(t, activity.GetEagerExecutionAccepted())
+	require.EqualValues(t, 1, attempt.GetCount())
+	require.EqualValues(t, 1, attempt.GetStamp())
+	require.EqualValues(t, 1, attempt.GetStartedStamp())
+	require.Equal(t, "start-request-id", attempt.GetStartRequestId())
+	require.Equal(t, "starter", attempt.GetLastWorkerIdentity())
+	require.Equal(t, headers.ClientNameGoSDK, attempt.GetSdkName())
+	require.Equal(t, temporal.SDKVersion, attempt.GetSdkVersion())
+
+	require.Len(t, ctx.Tasks, 3)
+	require.IsType(t, &activitypb.ScheduleToCloseTimeoutTask{}, ctx.Tasks[0].Payload)
+	require.IsType(t, &activitypb.StartToCloseTimeoutTask{}, ctx.Tasks[1].Payload)
+	require.IsType(t, &activitypb.HeartbeatTimeoutTask{}, ctx.Tasks[2].Payload)
+}
+
 func TestTransitionRescheduled(t *testing.T) {
 	testCases := []struct {
 		name                     string
@@ -366,6 +410,53 @@ func TestTransitionRescheduled(t *testing.T) {
 				}
 
 			}
+		})
+	}
+}
+
+func TestPauseUnpauseReplacesDispatch(t *testing.T) {
+	testCases := []struct {
+		attemptCount   int32
+		expectedReason activitypb.DispatchReason
+	}{
+		{attemptCount: 1, expectedReason: activitypb.DISPATCH_REASON_IMMEDIATE},
+		{attemptCount: 3, expectedReason: activitypb.DISPATCH_REASON_RETRY},
+	}
+
+	for _, tc := range testCases {
+		t.Run(fmt.Sprintf("attempt=%d", tc.attemptCount), func(t *testing.T) {
+			ctx := &chasm.MockMutableContext{}
+			ctx.HandleNow = func(chasm.Component) time.Time { return defaultTime }
+			attemptState := &activitypb.ActivityAttemptState{Count: tc.attemptCount, Stamp: 7}
+			activity := &Activity{
+				ActivityState: &activitypb.ActivityState{
+					Status:       activitypb.ACTIVITY_EXECUTION_STATUS_SCHEDULED,
+					ScheduleTime: timestamppb.New(defaultTime),
+				},
+				LastAttempt: chasm.NewDataField(ctx, attemptState),
+			}
+			handler := newActivityDispatchTaskHandler(activityDispatchTaskHandlerOptions{})
+			oldTask := &activitypb.ActivityDispatchTask{Stamp: 7}
+
+			err := TransitionPaused.Apply(activity, ctx, pauseEvent{metricsHandler: metrics.NoopMetricsHandler})
+			require.NoError(t, err)
+			require.Equal(t, activitypb.ACTIVITY_EXECUTION_STATUS_PAUSED, activity.GetStatus())
+			valid, err := handler.Validate(ctx, activity, chasm.TaskInvocation{}, oldTask)
+			require.NoError(t, err)
+			require.False(t, valid)
+
+			err = TransitionUnpaused.Apply(activity, ctx, unpauseEvent{
+				req: &workflowservice.UnpauseActivityExecutionRequest{},
+			})
+			require.NoError(t, err)
+			require.Equal(t, tc.attemptCount, attemptState.GetCount())
+			require.Len(t, ctx.Tasks, 1)
+			dispatchTask := ctx.Tasks[0].Payload.(*activitypb.ActivityDispatchTask)
+			require.Equal(t, int32(9), dispatchTask.GetStamp())
+			require.Equal(t, tc.expectedReason, dispatchTask.GetDispatchReason())
+			valid, err = handler.Validate(ctx, activity, chasm.TaskInvocation{}, dispatchTask)
+			require.NoError(t, err)
+			require.True(t, valid)
 		})
 	}
 }
@@ -1136,6 +1227,8 @@ func TestTransitionResetHeartbeat(t *testing.T) {
 				metricsHandler: metrics.NoopMetricsHandler,
 			})
 			require.NoError(t, err)
+			dispatchTask := ctx.Tasks[len(ctx.Tasks)-1].Payload.(*activitypb.ActivityDispatchTask)
+			require.Equal(t, activitypb.DISPATCH_REASON_IMMEDIATE, dispatchTask.GetDispatchReason())
 			if resetHeartbeat {
 				require.Nil(t, act.LastHeartbeat.Get(ctx).GetDetails())
 				require.Nil(t, act.LastHeartbeat.Get(ctx).GetRecordedTime())
@@ -1222,6 +1315,10 @@ func TestDeferredResetHeartbeat(t *testing.T) {
 					require.Equal(t, timestamppb.New(defaultTime), act.LastHeartbeat.Get(ctx).GetRecordedTime())
 				}
 				require.Len(t, ctx.Tasks, tc.expectedTaskCount)
+				if tc.expectedTaskCount > 0 {
+					dispatchTask := ctx.Tasks[tc.expectedTaskCount-1].Payload.(*activitypb.ActivityDispatchTask)
+					require.Equal(t, activitypb.DISPATCH_REASON_IMMEDIATE, dispatchTask.GetDispatchReason())
+				}
 			})
 		}
 	}
@@ -1282,38 +1379,114 @@ func TestTransitionResetFromPaused(t *testing.T) {
 			require.Len(t, ctx.Tasks, tc.expectedTaskCount)
 
 			// Last task is always the dispatch task
-			_, ok := ctx.Tasks[tc.expectedTaskCount-1].Payload.(*activitypb.ActivityDispatchTask)
+			dispatchTask, ok := ctx.Tasks[tc.expectedTaskCount-1].Payload.(*activitypb.ActivityDispatchTask)
 			require.True(t, ok, "expected ActivityDispatchTask as last task")
+			require.Equal(t, activitypb.DISPATCH_REASON_IMMEDIATE, dispatchTask.GetDispatchReason())
 		})
 	}
 }
 
-// TestTransitionResetClearsCurrentRetryInterval verifies that TransitionReset clears the retry
-// interval so a reset activity is not delayed by a previous backoff period.
-func TestTransitionResetClearsCurrentRetryInterval(t *testing.T) {
+// TestResetDuringRetryBackoff verifies that a reset during retry backoff clears the retry interval,
+// restarts at attempt 1, and replaces the pending retry dispatch with an immediate one.
+func TestResetDuringRetryBackoff(t *testing.T) {
 	ctx := &chasm.MockMutableContext{}
 	ctx.HandleNow = func(chasm.Component) time.Time { return defaultTime }
 	attemptState := &activitypb.ActivityAttemptState{
 		Count:                2,
+		Stamp:                7,
 		CurrentRetryInterval: durationpb.New(30 * time.Second),
 	}
 
 	act := &Activity{
 		ActivityState: &activitypb.ActivityState{
-			ActivityType:           &commonpb.ActivityType{Name: "test-activity-type"},
-			RetryPolicy:            defaultRetryPolicy,
-			ScheduleToCloseTimeout: durationpb.New(defaultScheduleToCloseTimeout),
-			ScheduleToStartTimeout: durationpb.New(defaultScheduleToStartTimeout),
-			StartToCloseTimeout:    durationpb.New(defaultStartToCloseTimeout),
-			Status:                 activitypb.ACTIVITY_EXECUTION_STATUS_SCHEDULED,
-			TaskQueue:              &taskqueuepb.TaskQueue{Name: "test-task-queue"},
+			ActivityType:            &commonpb.ActivityType{Name: "test-activity-type"},
+			RetryPolicy:             defaultRetryPolicy,
+			ScheduleToCloseTimeout:  durationpb.New(defaultScheduleToCloseTimeout),
+			ScheduleToStartTimeout:  durationpb.New(defaultScheduleToStartTimeout),
+			StartToCloseTimeout:     durationpb.New(defaultStartToCloseTimeout),
+			Status:                  activitypb.ACTIVITY_EXECUTION_STATUS_SCHEDULED,
+			TaskQueue:               &taskqueuepb.TaskQueue{Name: "test-task-queue"},
+			FirstAttemptStartedTime: timestamppb.New(defaultTime.Add(-time.Minute)),
 		},
 		LastAttempt: chasm.NewDataField(ctx, attemptState),
 		Outcome:     chasm.NewDataField(ctx, &activitypb.ActivityOutcome{}),
 	}
+	handler := newActivityDispatchTaskHandler(activityDispatchTaskHandlerOptions{})
+	oldTask := &activitypb.ActivityDispatchTask{Stamp: 7}
 
 	err := TransitionReset.Apply(act, ctx, resetEvent{resetTime: defaultTime, metricsHandler: metrics.NoopMetricsHandler})
 	require.NoError(t, err)
-	require.Nil(t, attemptState.GetCurrentRetryInterval(), "TransitionReset must clear CurrentRetryInterval")
-	require.Equal(t, int32(1), attemptState.Count, "TransitionReset must reset Count to 1")
+	require.Nil(t, attemptState.GetCurrentRetryInterval())
+	require.Equal(t, int32(1), attemptState.GetCount())
+
+	dispatchTask := ctx.Tasks[len(ctx.Tasks)-1].Payload.(*activitypb.ActivityDispatchTask)
+	require.Equal(t, int32(8), dispatchTask.GetStamp())
+	require.Equal(t, activitypb.DISPATCH_REASON_IMMEDIATE, dispatchTask.GetDispatchReason())
+	valid, err := handler.Validate(ctx, act, chasm.TaskInvocation{}, oldTask)
+	require.NoError(t, err)
+	require.False(t, valid)
+	valid, err = handler.Validate(ctx, act, chasm.TaskInvocation{}, dispatchTask)
+	require.NoError(t, err)
+	require.True(t, valid)
+}
+
+func TestAttemptExitReleasesLimiters(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name   string
+		status activitypb.ActivityExecutionStatus
+		apply  func(*Activity, chasm.MutableContext) error
+	}{
+		{"complete", activitypb.ACTIVITY_EXECUTION_STATUS_STARTED, func(a *Activity, ctx chasm.MutableContext) error {
+			return TransitionCompleted.Apply(a, ctx, completeEvent{baseHandler: metrics.NoopMetricsHandler, enrichedHandler: metrics.NoopMetricsHandler})
+		}},
+		{"fail", activitypb.ACTIVITY_EXECUTION_STATUS_STARTED, func(a *Activity, ctx chasm.MutableContext) error {
+			return TransitionFailed.Apply(a, ctx, failedEvent{baseHandler: metrics.NoopMetricsHandler, enrichedHandler: metrics.NoopMetricsHandler})
+		}},
+		{"terminate", activitypb.ACTIVITY_EXECUTION_STATUS_STARTED, func(a *Activity, ctx chasm.MutableContext) error {
+			return TransitionTerminated.Apply(a, ctx, terminateEvent{metricsHandler: metrics.NoopMetricsHandler})
+		}},
+		{"cancel", activitypb.ACTIVITY_EXECUTION_STATUS_CANCEL_REQUESTED, func(a *Activity, ctx chasm.MutableContext) error {
+			return TransitionCanceled.Apply(a, ctx, cancelEvent{metricsHandler: metrics.NoopMetricsHandler})
+		}},
+		{"schedule to close timeout", activitypb.ACTIVITY_EXECUTION_STATUS_STARTED, func(a *Activity, ctx chasm.MutableContext) error {
+			return TransitionTimedOut.Apply(a, ctx, timeoutEvent{timeoutType: enumspb.TIMEOUT_TYPE_SCHEDULE_TO_CLOSE, metricsHandler: metrics.NoopMetricsHandler})
+		}},
+		{"retry", activitypb.ACTIVITY_EXECUTION_STATUS_STARTED, func(a *Activity, ctx chasm.MutableContext) error {
+			return TransitionRescheduled.Apply(a, ctx, rescheduleEvent{retryInterval: time.Second})
+		}},
+		{"pause after failure", activitypb.ACTIVITY_EXECUTION_STATUS_PAUSE_REQUESTED, func(a *Activity, ctx chasm.MutableContext) error {
+			return TransitionAttemptFailedWhilePauseRequested.Apply(a, ctx, rescheduleEvent{})
+		}},
+		{"reset to paused", activitypb.ACTIVITY_EXECUTION_STATUS_RESET_REQUESTED, func(a *Activity, ctx chasm.MutableContext) error {
+			return TransitionResetAttemptFailedToPaused.Apply(a, ctx, rescheduleEvent{})
+		}},
+		{"reset to scheduled", activitypb.ACTIVITY_EXECUTION_STATUS_RESET_REQUESTED, func(a *Activity, ctx chasm.MutableContext) error {
+			return TransitionResetAttemptFailedToScheduled.Apply(a, ctx, rescheduleEvent{})
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			ctx := &chasm.MockMutableContext{}
+			ctx.HandleNow = func(chasm.Component) time.Time { return defaultTime }
+			injectActivityContext(t, ctx)
+			limiters := []*taskqueuespb.LimiterRef{{LimiterType: enumsspb.LIMITER_TYPE_CONCURRENCY, Key: "queue", SlotId: "slot"}}
+			attempt := &activitypb.ActivityAttemptState{Count: 1, Limiters: limiters}
+			activity := &Activity{
+				ActivityState: &activitypb.ActivityState{Status: tc.status},
+				LastAttempt:   chasm.NewDataField(ctx, attempt),
+				Outcome:       chasm.NewDataField(ctx, &activitypb.ActivityOutcome{}),
+			}
+			require.NoError(t, tc.apply(activity, ctx))
+			require.Empty(t, attempt.GetLimiters())
+			var releases []*activitypb.ReleaseLimiterTask
+			for _, task := range ctx.Tasks {
+				if release, ok := task.Payload.(*activitypb.ReleaseLimiterTask); ok {
+					releases = append(releases, release)
+				}
+			}
+			require.Len(t, releases, 1)
+			protorequire.ProtoEqual(t, &activitypb.ReleaseLimiterTask{Limiters: limiters}, releases[0])
+		})
+	}
 }

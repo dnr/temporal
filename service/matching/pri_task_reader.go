@@ -25,18 +25,18 @@ import (
 )
 
 const (
-	// TODO(pri): old matcher cleanup, move to here
-	// taskReaderThrottleRetryDelay = 3 * time.Second
+	taskReaderThrottleRetryDelay = 3 * time.Second
 
 	concurrentAddRetries = 10
 )
 
 type (
 	priTaskReader struct {
-		backlogMgr *priBacklogManagerImpl
-		subqueue   subqueueIndex
-		notifyC    chan struct{} // Used as signal to notify pump of new tasks
-		logger     log.Logger
+		backlogMgr      *priBacklogManagerImpl
+		subqueue        subqueueIndex
+		notifyC         chan struct{} // Used as signal to notify pump of new tasks
+		logger          log.Logger
+		throttledLogger log.ThrottledLogger
 
 		lock sync.Mutex
 
@@ -68,11 +68,13 @@ func newPriTaskReader(
 	subqueue subqueueIndex,
 	initialAckLevel int64,
 ) *priTaskReader {
+	subqueueTag := tag.Int("subqueue-id", int(subqueue))
 	return &priTaskReader{
-		backlogMgr: backlogMgr,
-		subqueue:   subqueue,
-		notifyC:    make(chan struct{}, 1),
-		logger:     backlogMgr.logger,
+		backlogMgr:      backlogMgr,
+		subqueue:        subqueue,
+		notifyC:         make(chan struct{}, 1),
+		logger:          log.With(backlogMgr.logger, subqueueTag),
+		throttledLogger: log.With(backlogMgr.throttledLogger, subqueueTag),
 		retrier: backoff.NewRetrier(
 			common.CreateReadTaskRetryPolicy(),
 			clock.NewRealTimeSource(),
@@ -198,12 +200,11 @@ func (tr *priTaskReader) getTasksPump() {
 	}
 }
 
-// TODO(pri): old matcher cleanup: move here
-// type getTasksBatchResponse struct {
-// 	tasks           []*persistencespb.AllocatedTaskInfo
-// 	readLevel       int64
-// 	isReadBatchDone bool
-// }
+type getTasksBatchResponse struct {
+	tasks           []*persistencespb.AllocatedTaskInfo
+	readLevel       int64
+	isReadBatchDone bool
+}
 
 // Returns a batch of tasks from persistence starting form current read level.
 // Also return a number that can be used to update readLevel
@@ -260,9 +261,8 @@ func (tr *priTaskReader) processTaskBatch(tasks []*persistencespb.AllocatedTaskI
 		// It's even possible for a task from signalNewTasks to be acked, and the ack level
 		// advanced, before we see it here. This would show up as a task below the ack level.
 		if t.TaskId <= tr.ackLevel {
-			tr.backlogMgr.throttledLogger.Info("ignoring already-acked task read from persistence",
+			tr.throttledLogger.Info("ignoring already-acked task read from persistence",
 				tag.TaskID(t.TaskId),
-				tag.Int("subqueue-id", int(tr.subqueue)),
 				tag.Any("ack-level", tr.ackLevel))
 			return true
 		}
@@ -335,18 +335,17 @@ func (tr *priTaskReader) addErrorBehavior(err error) (drop, retry bool) {
 		// retry here. if tqCtx is closing, addTaskToMatcher will give up.
 		return false, true
 	}
-	var stickyUnavailable *serviceerrors.StickyWorkerUnavailable
-	if errors.As(err, &stickyUnavailable) {
+	if _, ok := errors.AsType[*serviceerrors.StickyWorkerUnavailable](err); ok {
 		return true, false // drop the task
 	}
 	var invalid *serviceerror.InvalidArgument
 	var internal *serviceerror.Internal
 	if errors.As(err, &invalid) || errors.As(err, &internal) {
-		tr.backlogMgr.throttledLogger.Error("nonretryable error processing spooled task", tag.Error(err))
+		tr.throttledLogger.Error("nonretryable error processing spooled task", tag.Error(err))
 		return true, false // drop the task
 	}
 	// For any other error (this should be very rare), we can retry.
-	tr.backlogMgr.throttledLogger.Error("retryable error processing spooled task", tag.Error(err))
+	tr.throttledLogger.Error("retryable error processing spooled task", tag.Error(err))
 	return false, true
 }
 

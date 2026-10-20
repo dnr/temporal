@@ -1,6 +1,9 @@
 package simplelimiter
 
-import "time"
+import (
+	"math"
+	"time"
+)
 
 // Ready and Params implement a "GCRA" limiter.
 // A Ready is "ready" if its value is <= now (as unix nanos).
@@ -37,16 +40,28 @@ func MakeParams(rate float64, burstDuration time.Duration) Params {
 	}
 }
 
-func (p Params) Never() bool   { return p.Interval < 0 }
+// Never returns true if the params will never allow a token.
+func (p Params) Never() bool { return p.Interval < 0 }
+
+// Limited returns true if there is any limit at all.
 func (p Params) Limited() bool { return p.Interval > 0 }
 
-// delay returns the time until the limiter is ready.
+// DivideInterval returns new Params that limit the rate to a fraction of the original rate.
+func (p Params) DivideInterval(by float32) Params {
+	return Params{
+		Interval: time.Duration(float32(p.Interval) / by),
+		Burst:    p.Burst,
+	}
+}
+
+// Delay returns the time until the limiter is ready.
 // If the return value is <= 0 then the limiter can go now.
 func (ready Ready) Delay(now int64) time.Duration {
 	return time.Duration(int64(ready) - now)
 }
 
-// consume updates ready based on the current time and number of new tokens consumed.
+// Consume updates ready based on the current time and number of new tokens consumed.
+// Note the result has to be assigned back to the state.
 func (ready Ready) Consume(p Params, now int64, tokens int64) Ready {
 	// This is a slight variation of the normal GCRA: instead of tracking the end of the
 	// allowed interval (the theoretical arrival time), ready tracks the beginning of it, and
@@ -70,7 +85,8 @@ func (ready Ready) Consume(p Params, now int64, tokens int64) Ready {
 	return Ready(clippedReady + tokens*p.Interval.Nanoseconds())
 }
 
-// clip updates ready to an allowable range based on the given parameters.
+// Clip updates ready to an allowable range based on the given parameters.
+// Note the result has to be assigned back to the state.
 func (ready Ready) Clip(p Params, now int64, maxTokens int64) Ready {
 	if p.Never() {
 		return never
@@ -79,4 +95,15 @@ func (ready Ready) Clip(p Params, now int64, maxTokens int64) Ready {
 	// clip it back to now + maxTokens*interval + burst.
 	maxDelay := maxTokens*p.Interval.Nanoseconds() + p.Burst.Nanoseconds()
 	return min(ready, Ready(now+maxDelay))
+}
+
+// Available returns the number of tokens that are ready to be consumed now.
+func (ready Ready) Available(params Params, now int64) int32 {
+	if params.Never() || ready.Delay(now) > 0 {
+		return 0
+	} else if !params.Limited() {
+		return math.MaxInt32
+	}
+	clippedReady := max(now, int64(ready)+params.Burst.Nanoseconds()) - params.Burst.Nanoseconds()
+	return int32(min((now-clippedReady)/params.Interval.Nanoseconds()+1, math.MaxInt32))
 }

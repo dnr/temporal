@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/google/uuid"
+	otellog "go.opentelemetry.io/otel/log"
 	"go.temporal.io/server/api/historyservice/v1"
 	persistencespb "go.temporal.io/server/api/persistence/v1"
 	"go.temporal.io/server/chasm"
@@ -44,8 +46,9 @@ func NewTestContextWithTimeSource(
 	shardInfo *persistencespb.ShardInfo,
 	config *configs.Config,
 	timeSource clock.TimeSource,
+	eventLogger ...otellog.Logger,
 ) *ContextTest {
-	result := NewTestContext(ctrl, shardInfo, config)
+	result := NewTestContext(ctrl, shardInfo, config, eventLogger...)
 	result.timeSource = timeSource
 	result.taskKeyManager.generator.timeSource = timeSource
 	result.Resource.TimeSource = timeSource
@@ -56,15 +59,21 @@ func NewTestContext(
 	ctrl *gomock.Controller,
 	shardInfo *persistencespb.ShardInfo,
 	config *configs.Config,
+	eventLogger ...otellog.Logger,
 ) *ContextTest {
+	var logger otellog.Logger
+	if len(eventLogger) > 0 {
+		logger = eventLogger[0]
+	}
 	resourceTest := resourcetest.NewTest(ctrl, primitives.HistoryService)
 	eventsCache := events.NewMockCache(ctrl)
 	shard := newTestContext(
 		resourceTest,
 		eventsCache,
 		ContextConfigOverrides{
-			ShardInfo: shardInfo,
-			Config:    config,
+			ShardInfo:   shardInfo,
+			Config:      config,
+			EventLogger: logger,
 		},
 	)
 	return &ContextTest{
@@ -80,6 +89,7 @@ type ContextConfigOverrides struct {
 	Registry         namespace.Registry
 	ClusterMetadata  cluster.Metadata
 	ExecutionManager persistence.ExecutionManager
+	EventLogger      otellog.Logger
 }
 
 type StubContext struct {
@@ -128,9 +138,15 @@ func newTestContext(t *resourcetest.Test, eventsCache events.Cache, config Conte
 	taskCategoryRegistry := tasks.NewDefaultTaskCategoryRegistry()
 	taskCategoryRegistry.AddCategory(tasks.CategoryArchival)
 
+	// A real shard context always has an owner unique to that instance.
+	owner := fmt.Sprintf("test-shard-owner-%v-%v", config.ShardInfo.GetShardId(), uuid.NewString())
+	if configured := config.ShardInfo.GetOwner(); configured != "" {
+		owner = configured
+	}
+
 	ctx := &ContextImpl{
 		shardID:             config.ShardInfo.GetShardId(),
-		owner:               config.ShardInfo.GetOwner(),
+		owner:               owner,
 		stringRepr:          fmt.Sprintf("Shard(%d)", config.ShardInfo.GetShardId()),
 		executionManager:    executionManager,
 		metricsHandler:      t.MetricsHandler,
@@ -141,6 +157,7 @@ func newTestContext(t *resourcetest.Test, eventsCache events.Cache, config Conte
 		lifecycleCtx:        lifecycleCtx,
 		lifecycleCancel:     lifecycleCancel,
 		queueMetricEmitter:  sync.Once{},
+		eventLogger:         config.EventLogger,
 
 		state:              contextStateAcquired,
 		engineFuture:       future.NewFuture[historyi.Engine](),

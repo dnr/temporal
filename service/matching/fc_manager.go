@@ -43,6 +43,9 @@ func newFCManager(
 }
 
 func (m *fcManager) TaskReady(task *internalTask, cb fc.ReadinessCallback) error {
+	// Worker-supplied rates can change while a task is queued, including from zero
+	// to a positive rate. Refresh before checking so the task can make progress.
+	task.updateLimitersFromConfig(m)
 	nsID := namespace.ID(m.partition.NamespaceId())
 	tx := m.readiness.NewTx(nsID, task, cb)
 	task.fcTx = tx // attach to task so we can use it in matching engine
@@ -59,6 +62,22 @@ func (m *fcManager) TaskReady(task *internalTask, cb fc.ReadinessCallback) error
 func (m *fcManager) CancelAllCallbacks(cb fc.ReadinessCallback) {
 	nsID := namespace.ID(m.partition.NamespaceId())
 	m.readiness.CancelAllCallbacks(nsID, cb)
+}
+
+func (m *fcManager) grantEagerTokens(priority *commonpb.Priority, requested int32) int32 {
+	userData, _, err := m.userDataManager.GetUserData()
+	if err != nil {
+		return 0
+	}
+	cfg := userData.GetData().GetPerType()[int32(m.partition.TaskType())].GetConfig()
+	// Eager grants do not carry limiter refs back to history, so they cannot hold
+	// concurrency slots that must be released when the task finishes.
+	if cfg.GetQueueConcurrencyLimit().GetConcurrencyLimit() != nil {
+		return 0
+	}
+	limiters := m.updateLocalRateLimiter(nil)
+	limiters = m.updateFairnessRateLimiter(limiters, priority)
+	return m.readiness.GrantLocalTokens(namespace.ID(m.partition.NamespaceId()), limiters, requested)
 }
 
 func (m *fcManager) UpdateLimitersFromConfig(limiters *fc.Limiters, task *internalTask) *fc.Limiters {

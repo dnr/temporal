@@ -12,7 +12,6 @@ import (
 	"go.temporal.io/server/common/sdk"
 	ctasks "go.temporal.io/server/common/tasks"
 	"go.temporal.io/server/common/telemetry"
-	"go.temporal.io/server/common/testing/testhooks"
 	"go.temporal.io/server/common/worker_versioning"
 	historyi "go.temporal.io/server/service/history/interfaces"
 	"go.temporal.io/server/service/history/queues"
@@ -37,7 +36,6 @@ type (
 		ConcurrencyServiceClient fcpb.ConcurrencyServiceClient
 		VisibilityManager        manager.VisibilityManager
 		VersionMembershipCache   worker_versioning.VersionMembershipAndReactivationStatusCache
-		TestHooks                testhooks.TestHooks
 	}
 
 	transferQueueFactory struct {
@@ -161,6 +159,8 @@ func (f *transferQueueFactory) CreateQueue(
 		activeExecutor,
 		standbyExecutor,
 		logger,
+		metricsHandler,
+		f.TestHooks,
 	)
 	if f.ExecutorWrapper != nil {
 		executor = f.ExecutorWrapper.Wrap(executor)
@@ -200,6 +200,7 @@ func (f *transferQueueFactory) CreateQueue(
 			MonitorOptions: queues.MonitorOptions{
 				PendingTasksCriticalCount:   f.Config.QueuePendingTaskCriticalCount,
 				ReaderStuckCriticalAttempts: f.Config.QueueReaderStuckCriticalAttempts,
+				ReaderStuckShadowMode:       f.Config.QueueReaderStuckShadowMode,
 				SliceCountCriticalThreshold: f.Config.QueueCriticalSlicesCount,
 			},
 			MaxPollRPS:                          f.Config.TransferProcessorMaxPollRPS,
