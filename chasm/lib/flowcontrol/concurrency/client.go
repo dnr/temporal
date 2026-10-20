@@ -26,19 +26,29 @@ type clientBatchResult struct {
 	err error
 }
 
+// HintSink receives the limiter state (generation and available slots) from a Batch response.
+type HintSink func(namespaceID, key string, generation int64, availableSlots int32)
+
 // BatchingClient batches calls to ConcurrencyService.Batch by limiter.
+//
+// Limiter state in Batch responses is passed to the HintSink once per rpc, before any caller
+// receives its result, so callers see the updated state as soon as their call returns. The
+// responses returned to callers contain only their own results.
 type BatchingClient struct {
 	fcpb.ConcurrencyServiceClient
 
+	hintSink HintSink
 	batchers *stream_batcher.KeyedBatcher[clientBatchKey, clientBatchItem, clientBatchResult]
 }
 
+// NewBatchingClient returns a BatchingClient. hintSink may be nil.
 func NewBatchingClient(
 	client fcpb.ConcurrencyServiceClient,
 	opts stream_batcher.BatcherOptions,
 	timeSource clock.TimeSource,
+	hintSink HintSink,
 ) *BatchingClient {
-	c := &BatchingClient{ConcurrencyServiceClient: client}
+	c := &BatchingClient{ConcurrencyServiceClient: client, hintSink: hintSink}
 	c.batchers = stream_batcher.NewKeyedBatcherWithPerItemResults(c.applyBatch, opts, timeSource)
 	return c
 }
@@ -49,7 +59,17 @@ func (c *BatchingClient) Batch(
 	opts ...grpc.CallOption,
 ) (*fcpb.ConcurrencyServiceBatchResponse, error) {
 	if len(opts) > 0 {
-		return c.ConcurrencyServiceClient.Batch(ctx, req, opts...)
+		res, err := c.ConcurrencyServiceClient.Batch(ctx, req, opts...)
+		if err != nil {
+			return nil, err
+		} else if res == nil {
+			return nil, serviceerror.NewInternal("nil response")
+		}
+		c.reportHint(req.GetNamespaceId(), req.GetKey(), res)
+		return &fcpb.ConcurrencyServiceBatchResponse{
+			ReserveSuccess: res.ReserveSuccess,
+			CommitSuccess:  res.CommitSuccess,
+		}, nil
 	}
 	res, err := c.batchers.Add(ctx, clientBatchKey{
 		namespaceID: req.GetNamespaceId(),
@@ -121,25 +141,27 @@ func (c *BatchingClient) applyBatch(key clientBatchKey, items []clientBatchItem)
 		return slices.Repeat([]clientBatchResult{{err: err}}, len(items))
 	}
 
+	// Report state once for the whole batch, before any caller sees its result.
+	c.reportHint(key.namespaceID, key.key, res)
+
 	results := make([]clientBatchResult, len(items))
 	reserveOff := 0
 	commitOff := 0
 	for i, item := range items {
 		reserveLen := len(item.req.GetReserveSlots())
 		commitLen := len(item.req.GetCommitSlots())
-		slotsHint := int32(-1)
-		if i == 0 {
-			// pass hint to first batch result only so we don't refill tokens multiple times
-			slotsHint = res.AvailableSlotsHint
-		}
 		results[i].res = &fcpb.ConcurrencyServiceBatchResponse{
-			Generation:         res.Generation,
-			AvailableSlotsHint: slotsHint,
-			ReserveSuccess:     res.ReserveSuccess[reserveOff : reserveOff+reserveLen],
-			CommitSuccess:      res.CommitSuccess[commitOff : commitOff+commitLen],
+			ReserveSuccess: res.ReserveSuccess[reserveOff : reserveOff+reserveLen],
+			CommitSuccess:  res.CommitSuccess[commitOff : commitOff+commitLen],
 		}
 		reserveOff += reserveLen
 		commitOff += commitLen
 	}
 	return results
+}
+
+func (c *BatchingClient) reportHint(namespaceID, key string, res *fcpb.ConcurrencyServiceBatchResponse) {
+	if c.hintSink != nil {
+		c.hintSink(namespaceID, key, res.GetGeneration(), res.GetAvailableSlotsHint())
+	}
 }

@@ -31,6 +31,7 @@ func newReleaseLimiterTaskHandler(
 			concurrencyServiceClient,
 			config.FlowControlClientBatcherOptions(),
 			clock.NewRealTimeSource(),
+			nil, // history only releases, it doesn't cache limiter state
 		),
 	}
 }

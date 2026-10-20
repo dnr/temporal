@@ -56,6 +56,7 @@ func NewTransferQueueFactory(
 			params.ConcurrencyServiceClient,
 			params.Config.FlowControlClientBatcherOptions(),
 			params.TimeSource,
+			nil, // history only releases, it doesn't cache limiter state
 		),
 		QueueFactoryBase: QueueFactoryBase{
 			HostScheduler: queues.NewScheduler(

@@ -246,7 +246,10 @@ type ConcurrencyServiceBatchResponse struct {
 	Generation int64 `protobuf:"varint,1,opt,name=generation,proto3" json:"generation,omitempty"`
 	// Hint for how many more slots are available after processing a batch of updates.
 	// Callers may use this to decide whether to optimistically call Reserve or call Wait first.
-	// Zero means no more slots are available, -1 means don't update cached state.
+	// Zero means no more slots are available.
+	// Generation and available_slots_hint describe limiter state, not the results of this
+	// request: matching's BatchingClient passes them to its cache out of band, once per rpc, and
+	// doesn't return them to individual callers.
 	AvailableSlotsHint int32 `protobuf:"varint,2,opt,name=available_slots_hint,json=availableSlotsHint,proto3" json:"available_slots_hint,omitempty"`
 	// Corresponds 1:1 with ConcurrencyBatchRequest.reserve_slots.
 	ReserveSuccess []bool `protobuf:"varint,3,rep,packed,name=reserve_success,json=reserveSuccess,proto3" json:"reserve_success,omitempty"`

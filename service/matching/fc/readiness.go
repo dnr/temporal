@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"go.temporal.io/server/chasm/lib/flowcontrol/concurrency"
 	fcpb "go.temporal.io/server/chasm/lib/flowcontrol/gen/flowcontrolpb/v1"
 	"go.temporal.io/server/common/clock"
 	"go.temporal.io/server/common/goro"
@@ -128,11 +129,18 @@ func NewReadiness(
 	config readinessConfig,
 ) *Readiness {
 	r := &Readiness{
-		timeSource:               timeSource,
-		concurrencyServiceClient: concurrencyServiceClient,
-		seed:                     maphash.MakeSeed(),
-		config:                   config,
-		createdAt:                timeSource.Now(),
+		timeSource: timeSource,
+		seed:       maphash.MakeSeed(),
+		config:     config,
+		createdAt:  timeSource.Now(),
+	}
+	if concurrencyServiceClient != nil {
+		r.concurrencyServiceClient = concurrency.NewBatchingClient(
+			concurrencyServiceClient,
+			config.clientBatcherOptions(),
+			timeSource,
+			r.reportStateHint,
+		)
 	}
 	for i := range r.shards {
 		rs := &r.shards[i]

@@ -26,7 +26,7 @@ var errInvalidTxState = serviceerror.NewInternal("invalid fc tx state")
 //   - history.RecordTaskStarted(refs) -> on error call tx.Rollback()
 //   - tx.Commit(ctx) -> on error DROP the task
 //   - tx.Close() -> release limiter pins (also called by Rollback)
-//   - tx.Hints() to pass back to the partition that forwarded the task, if any
+//   - tx.Hints() after Close, to pass back to the partition that forwarded the task, if any
 //
 // If the task is forwarded to another partition after Check, call tx.ApplyHints() with the hints
 // that the other partition returns, and then tx.Rollback() if the forward failed.
@@ -96,6 +96,8 @@ type Tx struct {
 	state        [MaxLimiters]txState
 	closed       bool
 	skippedCheck bool // true if SkipCheck was used, so there are no local tokens to return.
+	// hints is a snapshot of cached limiter state taken at Close, for forwarded tasks.
+	hints []*taskqueuespb.LimiterHint
 }
 
 type limiterTx interface {
@@ -283,24 +285,28 @@ func (tx *Tx) Close() {
 		return
 	}
 	tx.closed = true
+	if tx.skippedCheck {
+		// This is a forwarded task, so the forwarding partition will want our latest state.
+		// Take it now, while limiters are still pinned.
+		for _, lim := range tx.limiters {
+			if hint := lim.hint(); hint != nil {
+				tx.hints = append(tx.hints, hint)
+			}
+		}
+	}
 	for _, lim := range tx.limiters {
 		lim.close()
 	}
 }
 
-// Hints returns the latest known state of the shared limiters in this tx, from the results of
-// Reserve and Commit, or from ApplyHints. It may be called after Close.
+// Hints returns the state of the shared limiters in this tx, as of when it was closed, to pass
+// back to the partition that forwarded the task. It returns nil if the tx is not closed or
+// wasn't for a forwarded task (SkipCheck).
 func (tx *Tx) Hints() []*taskqueuespb.LimiterHint {
 	if tx == nil {
 		return nil // no limiters
 	}
-	var hints []*taskqueuespb.LimiterHint
-	for _, lim := range tx.limiters {
-		if hint := lim.hint(); hint != nil {
-			hints = append(hints, hint)
-		}
-	}
-	return hints
+	return tx.hints
 }
 
 // ApplyHints updates cached limiter state from hints returned by another partition. Hints for

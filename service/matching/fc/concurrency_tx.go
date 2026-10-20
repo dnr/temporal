@@ -15,8 +15,6 @@ type concurrencyTx struct {
 	configUpdateVersion int64
 	pri                 wakePriority
 	checkSeq            int64
-	// latest known limiter state, from reserve, commit, or applyHint
-	lastHint *taskqueuespb.LimiterHint
 }
 
 func newConcurrencyTx(
@@ -46,15 +44,11 @@ func (ct *concurrencyTx) cancelCheck() {
 }
 
 func (ct *concurrencyTx) reserve(ctx context.Context) error {
-	hint, err := ct.cs.reserve(ctx, ct.slotID, ct.configUpdate, ct.configUpdateVersion)
-	ct.recordHint(hint)
-	return err
+	return ct.cs.reserve(ctx, ct.slotID, ct.configUpdate, ct.configUpdateVersion)
 }
 
 func (ct *concurrencyTx) commit(ctx context.Context) error {
-	hint, err := ct.cs.commit(ctx, ct.slotID)
-	ct.recordHint(hint)
-	return err
+	return ct.cs.commit(ctx, ct.slotID)
 }
 
 func (ct *concurrencyTx) cancelReserve(ctx context.Context) {
@@ -66,19 +60,12 @@ func (ct *concurrencyTx) close() {
 }
 
 func (ct *concurrencyTx) hint() *taskqueuespb.LimiterHint {
-	return ct.lastHint
+	return ct.cs.getStateHint()
 }
 
 func (ct *concurrencyTx) applyHint(hint *taskqueuespb.LimiterHint) {
 	if hint.GetLimiterType() != enumsspb.LIMITER_TYPE_CONCURRENCY || hint.GetKey() != ct.cs.limiterKey() {
 		return
 	}
-	ct.cs.reportSlotsHint(hint.GetGeneration(), hint.GetAvailableSlotsHint(), notifyAsync)
-	ct.recordHint(hint)
-}
-
-func (ct *concurrencyTx) recordHint(hint *taskqueuespb.LimiterHint) {
-	if hint != nil {
-		ct.lastHint = hint
-	}
+	ct.cs.reportStateHint(hint.GetGeneration(), hint.GetAvailableSlotsHint(), notifyAsync)
 }

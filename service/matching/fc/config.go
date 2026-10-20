@@ -3,7 +3,9 @@ package fc
 import (
 	"time"
 
+	"go.temporal.io/server/chasm/lib/flowcontrol/concurrency"
 	"go.temporal.io/server/common/dynamicconfig"
+	"go.temporal.io/server/common/stream_batcher"
 )
 
 const defaultCancelReservationTimeout = 5 * time.Second
@@ -49,6 +51,7 @@ type readinessConfig struct {
 	cleanupOptions           dynamicconfig.TypedPropertyFn[CleanupOptions]
 	concurrencyRetention     dynamicconfig.DurationPropertyFn
 	cancelReservationTimeout dynamicconfig.DurationPropertyFn
+	clientBatcherOptions     dynamicconfig.TypedPropertyFn[stream_batcher.BatcherOptions]
 }
 
 func NewReadinessConfig(dc *dynamicconfig.Collection) readinessConfig {
@@ -56,6 +59,7 @@ func NewReadinessConfig(dc *dynamicconfig.Collection) readinessConfig {
 		cleanupOptions:           ReadinessCleanupOptions.Get(dc),
 		concurrencyRetention:     ReadinessConcurrencyBlockedRetention.Get(dc),
 		cancelReservationTimeout: ReadinessCancelReservationTimeout.Get(dc),
+		clientBatcherOptions:     concurrency.MatchingClientBatcherOptions.Get(dc),
 	}
 }
 

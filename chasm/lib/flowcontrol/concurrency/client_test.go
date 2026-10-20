@@ -3,7 +3,9 @@ package concurrency
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -32,6 +34,8 @@ func (c *testClient) Batch(
 func TestBatchingClient(t *testing.T) {
 	callCount := 0
 	batchedRequests := make(chan *fcpb.ConcurrencyServiceBatchRequest, 1)
+	var hints []string
+	var hintCount atomic.Int32
 	client := NewBatchingClient(
 		&testClient{batch: func(
 			_ context.Context,
@@ -40,7 +44,7 @@ func TestBatchingClient(t *testing.T) {
 		) (*fcpb.ConcurrencyServiceBatchResponse, error) {
 			callCount++
 			batchedRequests <- req
-			res := &fcpb.ConcurrencyServiceBatchResponse{Generation: 42}
+			res := &fcpb.ConcurrencyServiceBatchResponse{Generation: 42, AvailableSlotsHint: 7}
 			for _, slotID := range req.ReserveSlots {
 				res.ReserveSuccess = append(res.ReserveSuccess, slotID == "reserve-1")
 			}
@@ -56,11 +60,16 @@ func TestBatchingClient(t *testing.T) {
 			IdleTime: time.Minute,
 		},
 		clock.NewRealTimeSource(),
+		func(namespaceID, key string, generation int64, availableSlots int32) {
+			hints = append(hints, fmt.Sprintf("%s/%s/%d/%d", namespaceID, key, generation, availableSlots))
+			hintCount.Add(1)
+		},
 	)
 
 	type result struct {
-		res *fcpb.ConcurrencyServiceBatchResponse
-		err error
+		res             *fcpb.ConcurrencyServiceBatchResponse
+		err             error
+		hintsBeforeDone int32
 	}
 	requests := []*fcpb.ConcurrencyServiceBatchRequest{
 		{
@@ -87,7 +96,7 @@ func TestBatchingClient(t *testing.T) {
 	for i, req := range requests {
 		wg.Go(func() {
 			res, err := client.Batch(t.Context(), req)
-			results[i] = result{res: res, err: err}
+			results[i] = result{res: res, err: err, hintsBeforeDone: hintCount.Load()}
 		})
 	}
 	wg.Wait()
@@ -102,9 +111,13 @@ func TestBatchingClient(t *testing.T) {
 	require.Equal(t, []string{"release-1"}, batchedRequest.GetReleaseSlots())
 	require.Equal(t, int64(2), batchedRequest.GetConfigUpdateVersion())
 	require.Equal(t, int32(20), batchedRequest.GetConfigUpdate().GetConcurrentTasks())
+	// state is reported once per rpc, before any caller gets its result, and not returned to callers
+	require.Equal(t, []string{"namespace-id/limiter-key/42/7"}, hints)
 	for _, result := range results {
 		require.NoError(t, result.err)
-		require.Equal(t, int64(42), result.res.GetGeneration())
+		require.Equal(t, int32(1), result.hintsBeforeDone)
+		require.Zero(t, result.res.GetGeneration())
+		require.Zero(t, result.res.GetAvailableSlotsHint())
 	}
 	require.Equal(t, []bool{true}, results[0].res.ReserveSuccess)
 	require.Empty(t, results[0].res.CommitSuccess)
@@ -210,19 +223,27 @@ func TestBatchingClientUsesActiveRequestContext(t *testing.T) {
 
 func TestBatchingClientCallOptionsBypassBatching(t *testing.T) {
 	callCount := 0
-	client := &BatchingClient{ConcurrencyServiceClient: &testClient{batch: func(
-		_ context.Context,
-		_ *fcpb.ConcurrencyServiceBatchRequest,
-		opts ...grpc.CallOption,
-	) (*fcpb.ConcurrencyServiceBatchResponse, error) {
-		callCount++
-		require.Len(t, opts, 1)
-		return &fcpb.ConcurrencyServiceBatchResponse{Generation: 42}, nil
-	}}}
+	var hintGeneration int64
+	client := &BatchingClient{
+		ConcurrencyServiceClient: &testClient{batch: func(
+			_ context.Context,
+			_ *fcpb.ConcurrencyServiceBatchRequest,
+			opts ...grpc.CallOption,
+		) (*fcpb.ConcurrencyServiceBatchResponse, error) {
+			callCount++
+			require.Len(t, opts, 1)
+			return &fcpb.ConcurrencyServiceBatchResponse{Generation: 42, ReserveSuccess: []bool{true}}, nil
+		}},
+		hintSink: func(_, _ string, generation int64, _ int32) {
+			hintGeneration = generation
+		},
+	}
 
 	res, err := client.Batch(t.Context(), &fcpb.ConcurrencyServiceBatchRequest{}, grpc.WaitForReady(true))
 	require.NoError(t, err)
-	require.Equal(t, int64(42), res.Generation)
+	require.Equal(t, int64(42), hintGeneration)
+	require.Zero(t, res.Generation)
+	require.Equal(t, []bool{true}, res.ReserveSuccess)
 	require.Equal(t, 1, callCount)
 }
 
@@ -244,6 +265,7 @@ func TestBatchingClientDoesNotCombineDifferentLimiters(t *testing.T) {
 			IdleTime: time.Millisecond,
 		},
 		clock.NewRealTimeSource(),
+		nil,
 	)
 
 	var wg sync.WaitGroup

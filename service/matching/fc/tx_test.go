@@ -2,14 +2,20 @@ package fc
 
 import (
 	"context"
+	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	enumsspb "go.temporal.io/server/api/enums/v1"
 	taskqueuespb "go.temporal.io/server/api/taskqueue/v1"
 	fcpb "go.temporal.io/server/chasm/lib/flowcontrol/gen/flowcontrolpb/v1"
+	"go.temporal.io/server/common/clock"
+	"go.temporal.io/server/common/dynamicconfig"
 	"go.temporal.io/server/common/namespace"
 	serviceerrors "go.temporal.io/server/common/serviceerror"
+	"go.temporal.io/server/common/stream_batcher"
 	"go.temporal.io/server/service/matching/simplelimiter"
 )
 
@@ -118,39 +124,13 @@ func TestHints_FromReserveAndCommit(t *testing.T) {
 
 	tx := r.NewTx(testNsID, newConcurrencyTestTask(), &testCallback{})
 	require.NoError(t, tx.SkipCheck())
-	require.Empty(t, tx.Hints())
-
 	require.NoError(t, tx.Reserve(context.Background()))
-	require.Equal(t, []*taskqueuespb.LimiterHint{concurrencyHint(7, 3)}, tx.Hints())
-
+	require.Equal(t, int32(3), getTokens(r))
 	require.NoError(t, tx.Commit(context.Background()))
+	require.Nil(t, tx.Hints(), "hints are only available after Close")
+
+	tx.Close()
 	require.Equal(t, []*taskqueuespb.LimiterHint{concurrencyHint(7, 2)}, tx.Hints())
-	tx.Close()
-}
-
-func TestHints_UnknownSlotsOmitted(t *testing.T) {
-	reserveSlots := int32(-1)
-	r, _ := newTestReadiness(t, newHintTestClient(func(req *fcpb.ConcurrencyServiceBatchRequest) *fcpb.ConcurrencyServiceBatchResponse {
-		if len(req.ReserveSlots) > 0 {
-			return &fcpb.ConcurrencyServiceBatchResponse{Generation: 5, AvailableSlotsHint: reserveSlots, ReserveSuccess: []bool{true}}
-		}
-		return &fcpb.ConcurrencyServiceBatchResponse{Generation: 6, AvailableSlotsHint: -1, CommitSuccess: []bool{true}}
-	}))
-
-	tx := r.NewTx(testNsID, newConcurrencyTestTask(), &testCallback{})
-	require.NoError(t, tx.SkipCheck())
-	require.NoError(t, tx.Reserve(context.Background()))
-	require.Empty(t, tx.Hints())
-	tx.Rollback(context.Background())
-
-	// commit with unknown slots doesn't replace the hint from reserve
-	reserveSlots = 3
-	tx = r.NewTx(testNsID, newConcurrencyTestTask(), &testCallback{})
-	require.NoError(t, tx.SkipCheck())
-	require.NoError(t, tx.Reserve(context.Background()))
-	require.NoError(t, tx.Commit(context.Background()))
-	require.Equal(t, []*taskqueuespb.LimiterHint{concurrencyHint(5, 3)}, tx.Hints())
-	tx.Close()
 }
 
 func TestHints_FromBlockedReserve(t *testing.T) {
@@ -163,8 +143,69 @@ func TestHints_FromBlockedReserve(t *testing.T) {
 	err := tx.Reserve(context.Background())
 	var blocked *serviceerrors.FlowControlBlocked
 	require.ErrorAs(t, err, &blocked)
-	// still available after Reserve's implicit Rollback
+	// Reserve's implicit Rollback closes the tx
 	require.Equal(t, []*taskqueuespb.LimiterHint{concurrencyHint(4, 0)}, tx.Hints())
+}
+
+func TestHints_SharedByBatchedCallers(t *testing.T) {
+	var calls atomic.Int32
+	client := newHintTestClient(func(req *fcpb.ConcurrencyServiceBatchRequest) *fcpb.ConcurrencyServiceBatchResponse {
+		calls.Add(1)
+		return &fcpb.ConcurrencyServiceBatchResponse{Generation: 4, AvailableSlotsHint: 0, ReserveSuccess: []bool{true, false}}
+	})
+	cfg := NewReadinessConfig(dynamicconfig.NewNoopCollection())
+	cfg.clientBatcherOptions = func() stream_batcher.BatcherOptions {
+		return stream_batcher.BatcherOptions{MaxItems: 2, MinDelay: time.Minute, MaxDelay: time.Minute, IdleTime: time.Minute}
+	}
+	r := NewReadiness(clock.NewRealTimeSource(), client, cfg)
+	defer r.Stop()
+
+	// Both reserves go in one rpc, and both see the state from it.
+	txs := []*Tx{
+		r.NewTx(testNsID, newConcurrencyTestTask(), &testCallback{}),
+		r.NewTx(testNsID, newConcurrencyTestTask(), &testCallback{}),
+	}
+	var wg sync.WaitGroup
+	for _, tx := range txs {
+		require.NoError(t, tx.SkipCheck())
+		wg.Go(func() {
+			_ = tx.Reserve(context.Background())
+			tx.Close()
+		})
+	}
+	wg.Wait()
+
+	require.Equal(t, int32(1), calls.Load())
+	for _, tx := range txs {
+		require.Equal(t, []*taskqueuespb.LimiterHint{concurrencyHint(4, 0)}, tx.Hints())
+	}
+}
+
+func TestHints_OnlyForForwardedTasks(t *testing.T) {
+	r, _ := newTestReadiness(t, newHintTestClient(func(req *fcpb.ConcurrencyServiceBatchRequest) *fcpb.ConcurrencyServiceBatchResponse {
+		if len(req.ReserveSlots) > 0 {
+			return &fcpb.ConcurrencyServiceBatchResponse{Generation: 7, AvailableSlotsHint: 3, ReserveSuccess: []bool{true}}
+		}
+		return &fcpb.ConcurrencyServiceBatchResponse{Generation: 7, AvailableSlotsHint: 2, CommitSuccess: []bool{true}}
+	}))
+
+	tx := r.NewTx(testNsID, newConcurrencyTestTask(), &testCallback{})
+	require.NoError(t, tx.Check())
+	require.NoError(t, tx.Reserve(context.Background()))
+	require.NoError(t, tx.Commit(context.Background()))
+	tx.Close()
+	require.Nil(t, tx.Hints())
+}
+
+func TestHints_ExcludeWaitResults(t *testing.T) {
+	r, _ := newTestReadiness(t, nil)
+	// wake tokens from Wait are for this node only
+	setTokens(r, 3, 1)
+
+	tx := r.NewTx(testNsID, newConcurrencyTestTask(), &testCallback{})
+	require.NoError(t, tx.SkipCheck())
+	tx.Close()
+	require.Nil(t, tx.Hints())
 }
 
 func TestApplyHints_SupersedesCheckToken(t *testing.T) {
@@ -182,8 +223,18 @@ func TestApplyHints_SupersedesCheckToken(t *testing.T) {
 	// rollback after a failed forward must not return the check token
 	tx.Rollback(context.Background())
 	require.Equal(t, int32(0), getTokens(r))
+}
 
-	// hints are recorded so they can be passed further down a forwarding chain
+func TestApplyHints_PassedOnByMiddleHop(t *testing.T) {
+	r, _ := newTestReadiness(t, nil)
+
+	// task forwarded to us, and we forwarded it further
+	tx := r.NewTx(testNsID, newConcurrencyTestTask(), &testCallback{})
+	require.NoError(t, tx.SkipCheck())
+	tx.ApplyHints([]*taskqueuespb.LimiterHint{concurrencyHint(2, 0)})
+	require.Equal(t, int32(0), getTokens(r))
+	tx.Rollback(context.Background())
+
 	require.Equal(t, []*taskqueuespb.LimiterHint{concurrencyHint(2, 0)}, tx.Hints())
 }
 

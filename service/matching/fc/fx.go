@@ -2,7 +2,6 @@ package fc
 
 import (
 	"go.temporal.io/server/chasm/lib/flowcontrol"
-	"go.temporal.io/server/chasm/lib/flowcontrol/concurrency"
 	fcpb "go.temporal.io/server/chasm/lib/flowcontrol/gen/flowcontrolpb/v1"
 	"go.temporal.io/server/common/clock"
 	"go.temporal.io/server/common/dynamicconfig"
@@ -22,13 +21,5 @@ func readinessProvider(
 	concurrencyServiceClient fcpb.ConcurrencyServiceClient,
 	dc *dynamicconfig.Collection,
 ) *Readiness {
-	return NewReadiness(
-		timeSource,
-		concurrency.NewBatchingClient(
-			concurrencyServiceClient,
-			concurrency.MatchingClientBatcherOptions.Get(dc)(),
-			timeSource,
-		),
-		NewReadinessConfig(dc),
-	)
+	return NewReadiness(timeSource, concurrencyServiceClient, NewReadinessConfig(dc))
 }
