@@ -60,12 +60,15 @@ func (ct *concurrencyTx) close() {
 }
 
 func (ct *concurrencyTx) hint() *taskqueuespb.LimiterHint {
-	return ct.cs.getStateHint()
+	return ct.cs.getSlotsHint()
 }
 
 func (ct *concurrencyTx) applyHint(hint *taskqueuespb.LimiterHint) {
 	if hint.GetLimiterType() != enumsspb.LIMITER_TYPE_CONCURRENCY || hint.GetKey() != ct.cs.limiterKey() {
 		return
+	} else if hint.GetAvailableSlotsHint() < 0 {
+		// invalid: negative tokens would never block in check
+		return
 	}
-	ct.cs.reportStateHint(hint.GetGeneration(), hint.GetAvailableSlotsHint(), notifyAsync)
+	ct.cs.reportSlotsHint(hint.GetGeneration(), hint.GetAvailableSlotsHint(), notifyAsync)
 }

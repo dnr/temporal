@@ -139,7 +139,7 @@ func NewReadiness(
 			concurrencyServiceClient,
 			config.clientBatcherOptions(),
 			timeSource,
-			r.reportStateHint,
+			r.reportConcurrencySlotsHint,
 		)
 	}
 	for i := range r.shards {

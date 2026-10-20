@@ -26,29 +26,29 @@ type clientBatchResult struct {
 	err error
 }
 
-// HintSink receives the limiter state (generation and available slots) from a Batch response.
-type HintSink func(namespaceID, key string, generation int64, availableSlots int32)
+// HintHandler is called with the limiter state (generation and available slots) from a Batch response.
+type HintHandler func(namespaceID, key string, generation int64, availableSlots int32)
 
 // BatchingClient batches calls to ConcurrencyService.Batch by limiter.
 //
-// Limiter state in Batch responses is passed to the HintSink once per rpc, before any caller
+// Limiter state in Batch responses is passed to the HintHandler once per rpc, before any caller
 // receives its result, so callers see the updated state as soon as their call returns. The
 // responses returned to callers contain only their own results.
 type BatchingClient struct {
 	fcpb.ConcurrencyServiceClient
 
-	hintSink HintSink
-	batchers *stream_batcher.KeyedBatcher[clientBatchKey, clientBatchItem, clientBatchResult]
+	hintHandler HintHandler
+	batchers    *stream_batcher.KeyedBatcher[clientBatchKey, clientBatchItem, clientBatchResult]
 }
 
-// NewBatchingClient returns a BatchingClient. hintSink may be nil.
+// NewBatchingClient returns a BatchingClient. hintHandler may be nil.
 func NewBatchingClient(
 	client fcpb.ConcurrencyServiceClient,
 	opts stream_batcher.BatcherOptions,
 	timeSource clock.TimeSource,
-	hintSink HintSink,
+	hintHandler HintHandler,
 ) *BatchingClient {
-	c := &BatchingClient{ConcurrencyServiceClient: client, hintSink: hintSink}
+	c := &BatchingClient{ConcurrencyServiceClient: client, hintHandler: hintHandler}
 	c.batchers = stream_batcher.NewKeyedBatcherWithPerItemResults(c.applyBatch, opts, timeSource)
 	return c
 }
@@ -161,7 +161,7 @@ func (c *BatchingClient) applyBatch(key clientBatchKey, items []clientBatchItem)
 }
 
 func (c *BatchingClient) reportHint(namespaceID, key string, res *fcpb.ConcurrencyServiceBatchResponse) {
-	if c.hintSink != nil {
-		c.hintSink(namespaceID, key, res.GetGeneration(), res.GetAvailableSlotsHint())
+	if c.hintHandler != nil {
+		c.hintHandler(namespaceID, key, res.GetGeneration(), res.GetAvailableSlotsHint())
 	}
 }

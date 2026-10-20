@@ -234,7 +234,7 @@ func TestBatchingClientCallOptionsBypassBatching(t *testing.T) {
 			require.Len(t, opts, 1)
 			return &fcpb.ConcurrencyServiceBatchResponse{Generation: 42, ReserveSuccess: []bool{true}}, nil
 		}},
-		hintSink: func(_, _ string, generation int64, _ int32) {
+		hintHandler: func(_, _ string, generation int64, _ int32) {
 			hintGeneration = generation
 		},
 	}

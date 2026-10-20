@@ -36,11 +36,13 @@ type concurrencyState struct {
 	// (for now, until we add eviction)
 	goroCancel         context.CancelFunc
 	waiterWakePriority wakePriority // wake priority in use by current call
-	// stateHint is the latest limiter state reported by the concurrency service, either
+	// The slots hint is the latest limiter state reported by the concurrency service, either
 	// directly or passed on by another partition. Unlike tokens, it doesn't include Wait
-	// results, which are wake signals for this node only, or tokens taken locally since. This
+	// responses, which are wake signals for this node only, or tokens taken locally since. This
 	// is what we pass on to other partitions.
-	stateHint *taskqueuespb.LimiterHint
+	slotsHintGeneration int64
+	slotsHint           int32
+	hasSlotsHint        bool
 }
 
 func (r *Readiness) getConcurrencyLimiter(nsID namespace.ID, key string) *concurrencyState {
@@ -104,7 +106,8 @@ func (cs *concurrencyState) reserve(
 	configUpdate *taskqueuepb.ConcurrencyLimit,
 	configUpdateVersion int64,
 ) error {
-	// Note that the BatchingClient reports limiter state from the response to reportStateHint.
+	// Note that the BatchingClient reports limiter state from the response to
+	// reportConcurrencySlotsHint.
 	// TODO(fc): consider doing this from history to make invalid tasks cheaper to invalidate
 	res, err := cs.rs.r.concurrencyServiceClient.Batch(ctx, &fcpb.ConcurrencyServiceBatchRequest{
 		NamespaceId:         cs.namespaceID().String(),
@@ -155,60 +158,65 @@ func (cs *concurrencyState) cancelReserve(ctx context.Context, slotID string) {
 	}()
 }
 
-// reportStateHint is the BatchingClient's HintSink. Callers of Batch hold pins on the limiter,
-// so we don't need to create it if it's missing.
-func (r *Readiness) reportStateHint(namespaceID, key string, gen int64, slots int32) {
+// reportConcurrencySlotsHint is the BatchingClient's HintHandler. Callers of Batch hold pins on
+// the limiter, so we don't need to create it if it's missing.
+func (r *Readiness) reportConcurrencySlotsHint(namespaceID, key string, gen int64, slots int32) {
 	rs := r.getShard(namespace.ID(namespaceID))
 	rs.lock.Lock()
 	cs := rs.concurrencyLimiters[namespaceID+key]
 	rs.lock.Unlock()
 	if cs != nil {
-		cs.reportStateHint(gen, slots, notifyAsync)
+		cs.reportSlotsHint(gen, slots, notifyAsync)
 	}
 }
 
-// reportStateHint updates cached state from limiter state reported by the concurrency service,
-// either directly or passed on by another partition.
-func (cs *concurrencyState) reportStateHint(gen int64, slots int32, mode notifyMode) {
+// reportSlotsHint updates cached state from available slots reported by the concurrency
+// service, either directly or passed on by another partition.
+func (cs *concurrencyState) reportSlotsHint(gen int64, slots int32, mode notifyMode) {
 	_ = cs.rs.update(cs, mode, func() error {
-		if cs.updateTokensLocked(gen, slots) && slots >= 0 {
-			cs.stateHint = &taskqueuespb.LimiterHint{
-				LimiterType:        enumsspb.LIMITER_TYPE_CONCURRENCY,
-				Key:                cs.limiterKey(),
-				Generation:         gen,
-				AvailableSlotsHint: slots,
-			}
+		if cs.updateTokensLocked(gen, slots) {
+			cs.slotsHintGeneration = gen
+			cs.slotsHint = slots
+			cs.hasSlotsHint = true
 		}
 		return nil
 	})
 }
 
-// reportSlotsHint updates cached state from a Wait result.
-func (cs *concurrencyState) reportSlotsHint(gen int64, slots int32, mode notifyMode) {
+// reportWaitResponse updates cached state from a Wait response. Wake tokens are a signal to
+// this node only, so they don't update the slots hint that we pass on to other partitions.
+func (cs *concurrencyState) reportWaitResponse(gen int64, wakeTokens int32, mode notifyMode) {
 	_ = cs.rs.update(cs, mode, func() error {
-		cs.updateTokensLocked(gen, slots)
+		cs.updateTokensLocked(gen, wakeTokens)
 		return nil
 	})
 }
 
-// updateTokensLocked returns false if gen is older than our current state. Negative slots are
-// treated as unknown.
-func (cs *concurrencyState) updateTokensLocked(gen int64, slots int32) bool {
+// updateTokensLocked returns false if gen is older than our current state.
+func (cs *concurrencyState) updateTokensLocked(gen int64, tokens int32) bool {
 	if gen < cs.generation {
 		return false
 	}
 	cs.generation = gen
-	if slots >= 0 {
-		cs.tokens = slots
-		cs.tokensSeq++
-	}
+	cs.tokens = tokens
+	cs.tokensSeq++
 	return true
 }
 
-func (cs *concurrencyState) getStateHint() *taskqueuespb.LimiterHint {
+// getSlotsHint returns the slots hint to pass on to other partitions, or nil if we don't have
+// one.
+func (cs *concurrencyState) getSlotsHint() *taskqueuespb.LimiterHint {
 	cs.rs.lock.Lock()
 	defer cs.rs.lock.Unlock()
-	return cs.stateHint
+	if !cs.hasSlotsHint {
+		return nil
+	}
+	return &taskqueuespb.LimiterHint{
+		LimiterType:        enumsspb.LIMITER_TYPE_CONCURRENCY,
+		Key:                cs.limiterKey(),
+		Generation:         cs.slotsHintGeneration,
+		AvailableSlotsHint: cs.slotsHint,
+	}
 }
 
 func (cs *concurrencyState) syncLocked(rsu *readinessSyncUpdate) {
@@ -241,7 +249,7 @@ func (cs *concurrencyState) syncLocked(rsu *readinessSyncUpdate) {
 	))
 	ctx, cs.goroCancel = context.WithCancel(ctx)
 	cs.waiterWakePriority = rsu.waiters[0].pri // set here so we have a not-stale value before callWait runs
-	// Wait result will be reported back through reportSlotsHint
+	// Wait result will be reported back through reportWaitResponse
 	cs.pins++
 	go cs.callWait(ctx)
 
@@ -297,7 +305,7 @@ func (cs *concurrencyState) callWait(ctx context.Context) {
 		}
 		retrier.Reset()
 
-		cs.reportSlotsHint(res.Generation, res.WakeTokens, notifySync)
+		cs.reportWaitResponse(res.Generation, res.WakeTokens, notifySync)
 		// note: If we have satisfied all our waiters, then ctx
 		// will be canceled before we continue this loop.
 	}

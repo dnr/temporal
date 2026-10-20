@@ -44,11 +44,11 @@ func newHintTestClient(batch func(*fcpb.ConcurrencyServiceBatchRequest) *fcpb.Co
 	}
 }
 
-// setTokens sets the cached state of the test concurrency limiter.
+// setTokens sets the cached tokens of the test concurrency limiter, as a Wait response would.
 func setTokens(r *Readiness, gen int64, tokens int32) {
 	cs := r.getConcurrencyLimiter(testNsID, testConKey)
 	defer cs.unpin()
-	cs.reportSlotsHint(gen, tokens, notifySync)
+	cs.reportWaitResponse(gen, tokens, notifySync)
 }
 
 func getTokens(r *Readiness) int32 {
@@ -253,7 +253,7 @@ func TestApplyHints_StaleGenerationIgnored(t *testing.T) {
 	require.Equal(t, int32(5), getTokens(r))
 }
 
-func TestApplyHints_UnknownLimiterIgnored(t *testing.T) {
+func TestApplyHints_UnknownOrInvalidIgnored(t *testing.T) {
 	r, _ := newTestReadiness(t, nil)
 	setTokens(r, 1, 5)
 
@@ -264,7 +264,8 @@ func TestApplyHints_UnknownLimiterIgnored(t *testing.T) {
 	otherKey.Key = "otherkey"
 	otherType := concurrencyHint(2, 0)
 	otherType.LimiterType = enumsspb.LIMITER_TYPE_LOCAL_RATE_LIMIT
-	tx.ApplyHints([]*taskqueuespb.LimiterHint{otherKey, otherType})
+	negative := concurrencyHint(2, -1)
+	tx.ApplyHints([]*taskqueuespb.LimiterHint{otherKey, otherType, negative})
 
 	require.Equal(t, int32(4), getTokens(r))
 	require.Empty(t, tx.Hints())
