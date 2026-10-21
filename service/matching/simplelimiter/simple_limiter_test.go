@@ -2,7 +2,6 @@
 package simplelimiter
 
 import (
-	"math"
 	"math/rand"
 	"testing"
 	"time"
@@ -134,12 +133,4 @@ func TestSimpleLimiterLowToHigh(t *testing.T) {
 		// ready within one minute
 		require.Less(t, ready.Delay(now+time.Minute.Nanoseconds()), time.Duration(0))
 	}
-}
-
-func TestAvailableSimpleLimiterTokens(t *testing.T) {
-	nowNs := time.Now().UnixNano()
-	require.Equal(t, int32(11), Ready(0).Available(MakeParams(10, time.Second), nowNs))
-	require.Equal(t, int32(0), Ready(nowNs+1).Available(MakeParams(10, time.Second), nowNs))
-	require.Equal(t, int32(0), Ready(0).Available(MakeParams(0, time.Second), nowNs))
-	require.Equal(t, int32(math.MaxInt32), Ready(0).Available(MakeParams(1e12, 0), nowNs))
 }

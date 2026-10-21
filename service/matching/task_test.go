@@ -9,26 +9,41 @@ import (
 
 func TestTaskFinishResult(t *testing.T) {
 	t.Parallel()
+
+	// success
+	task := &internalTask{responseC: make(chan taskResponse, 1)}
+	task.finish(nil)
+	got, ok := task.getResponse()
+	require.True(t, ok)
+	require.Equal(t, taskResponse{}, got)
+
+	// start error
+	task = &internalTask{responseC: make(chan taskResponse, 1)}
 	startErr := errors.New("start failed")
+	task.finish(startErr)
+	got, ok = task.getResponse()
+	require.True(t, ok)
+	require.Equal(t, taskResponse{startErr: startErr}, got)
+
+	// drop
+	task = &internalTask{responseC: make(chan taskResponse, 1)}
+	task.finish(dropReasonInvalid)
+	got, ok = task.getResponse()
+	require.True(t, ok)
+	require.Equal(t, taskResponse{dropReason: dropReasonInvalid}, got)
+
+	// forward success
+	task = &internalTask{responseC: make(chan taskResponse, 1)}
+	task.finishForward("response", nil)
+	got, ok = task.getResponse()
+	require.True(t, ok)
+	require.Equal(t, taskResponse{forwarded: true, forwardRes: "response"}, got)
+
+	// forward error
+	task = &internalTask{responseC: make(chan taskResponse, 1)}
 	forwardErr := errors.New("forward failed")
-	for _, tc := range []struct {
-		name   string
-		finish func(*internalTask)
-		want   taskResponse
-	}{
-		{"success", func(task *internalTask) { task.finish(nil) }, taskResponse{}},
-		{"start error", func(task *internalTask) { task.finish(startErr) }, taskResponse{startErr: startErr}},
-		{"drop", func(task *internalTask) { task.finish(dropReasonInvalid) }, taskResponse{dropReason: dropReasonInvalid}},
-		{"forward success", func(task *internalTask) { task.finishForward("response", nil) }, taskResponse{forwarded: true, forwardRes: "response"}},
-		{"forward error", func(task *internalTask) { task.finishForward(nil, forwardErr) }, taskResponse{forwarded: true, forwardErr: forwardErr}},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			task := &internalTask{responseC: make(chan taskResponse, 1)}
-			tc.finish(task)
-			got, ok := task.getResponse()
-			require.True(t, ok)
-			require.Equal(t, tc.want, got)
-		})
-	}
+	task.finishForward(nil, forwardErr)
+	got, ok = task.getResponse()
+	require.True(t, ok)
+	require.Equal(t, taskResponse{forwarded: true, forwardErr: forwardErr}, got)
 }

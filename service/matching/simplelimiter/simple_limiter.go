@@ -1,9 +1,6 @@
 package simplelimiter
 
-import (
-	"math"
-	"time"
-)
+import "time"
 
 // Ready and Params implement a "GCRA" limiter.
 // A Ready is "ready" if its value is <= now (as unix nanos).
@@ -95,15 +92,4 @@ func (ready Ready) Clip(p Params, now int64, maxTokens int64) Ready {
 	// clip it back to now + maxTokens*interval + burst.
 	maxDelay := maxTokens*p.Interval.Nanoseconds() + p.Burst.Nanoseconds()
 	return min(ready, Ready(now+maxDelay))
-}
-
-// Available returns the number of tokens that are ready to be consumed now.
-func (ready Ready) Available(params Params, now int64) int32 {
-	if params.Never() || ready.Delay(now) > 0 {
-		return 0
-	} else if !params.Limited() {
-		return math.MaxInt32
-	}
-	clippedReady := max(now, int64(ready)+params.Burst.Nanoseconds()) - params.Burst.Nanoseconds()
-	return int32(min((now-clippedReady)/params.Interval.Nanoseconds()+1, math.MaxInt32))
 }

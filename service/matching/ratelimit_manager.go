@@ -214,6 +214,8 @@ func (r *rateLimitManager) GetPerKeyLimit(pri *commonpb.Priority) simplelimiter.
 
 // Updates the API-configured RPS based on the latest user data
 // and applies the new rate limit if the effective RPS has changed.
+// This does not invoke onRateLimitChanged: the partition manager already notifies
+// queues of user-data changes, including changes unrelated to rate limits.
 func (r *rateLimitManager) UserDataChanged() {
 	r.mu.Lock()
 	defer r.mu.Unlock()

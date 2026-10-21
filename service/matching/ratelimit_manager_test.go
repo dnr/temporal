@@ -252,6 +252,42 @@ func (s *RateLimitManagerSuite) TestFractionScaling_ZeroFraction() {
 	s.Equal(enumspb.RATE_LIMIT_SOURCE_API, source)
 }
 
+func TestUserDataRateLimitChangeDoesNotNotify(t *testing.T) {
+	t.Parallel()
+	r := &rateLimitManager{
+		userDataManager: &mockUserDataManager{
+			data: &persistencespb.VersionedTaskQueueUserData{
+				Data: &persistencespb.TaskQueueUserData{
+					PerType: map[int32]*persistencespb.TaskQueueTypeUserData{
+						int32(enumspb.TASK_QUEUE_TYPE_ACTIVITY): {
+							Config: &taskqueuepb.TaskQueueConfig{
+								QueueRateLimit: &taskqueuepb.RateLimitConfig{
+									RateLimit: &taskqueuepb.RateLimit{RequestsPerSecond: 20},
+								},
+								FairnessKeysRateLimitDefault: &taskqueuepb.RateLimitConfig{
+									RateLimit: &taskqueuepb.RateLimit{RequestsPerSecond: 4},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+		config:        &taskQueueConfig{RateLimitFraction: func() float64 { return 1 }},
+		taskQueueType: enumspb.TASK_QUEUE_TYPE_ACTIVITY,
+		adminNsRate:   100, adminTqRate: 100, numReadPartitions: 2,
+		effectiveRPS: 100, wholeQueueLimit: simplelimiter.MakeParams(100, defaultBurstDuration),
+	}
+	notifications := 0
+	r.onRateLimitChanged = func() { notifications++ }
+
+	r.UserDataChanged()
+
+	require.Equal(t, simplelimiter.MakeParams(10, defaultBurstDuration), r.GetWholeQueueLimit())
+	require.Equal(t, simplelimiter.MakeParams(2, defaultBurstDuration), r.GetPerKeyLimit(nil))
+	require.Zero(t, notifications)
+}
+
 func TestRateLimitChangeNotifications(t *testing.T) {
 	t.Parallel()
 	r := &rateLimitManager{
