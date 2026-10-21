@@ -43,21 +43,16 @@ func (r *Readiness) NewTx(nsID namespace.ID, task fcTask, cb ReadinessCallback) 
 	}
 	sortLimiters(lims)
 
-	limiterTxs := make([]limiterTx, len(lims))
-	refs := make([]*taskqueuespb.LimiterRef, 0, len(lims))
-	for i, lim := range lims {
+	tx := &Tx{cb: cb}
+	tx.limiters = tx.limitersBuf[:0]
+	for _, lim := range lims {
 		ltx, ref := r.makeLimiterTx(nsID, task, lim)
-		limiterTxs[i] = ltx
+		tx.limiters = append(tx.limiters, txEntry{limiterTx: ltx})
 		if ref != nil {
-			refs = append(refs, ref)
+			tx.refs = append(tx.refs, ref)
 		}
 	}
-
-	return &Tx{
-		limiters: limiterTxs,
-		refs:     refs,
-		cb:       cb,
-	}
+	return tx
 }
 
 func (r *Readiness) makeLimiterTx(nsID namespace.ID, task fcTask, lim Limiter) (limiterTx, *taskqueuespb.LimiterRef) {
@@ -92,10 +87,10 @@ func (r *Readiness) makeLimiterTx(nsID namespace.ID, task fcTask, lim Limiter) (
 
 // Holds state for an invocation of the flow control commit protocol. See Readiness.NewTx.
 type Tx struct {
-	limiters     []limiterTx
+	limiters     []txEntry // points into limitersBuf unless there are more than MaxLimiters
+	limitersBuf  [MaxLimiters]txEntry
 	refs         []*taskqueuespb.LimiterRef
 	cb           ReadinessCallback
-	state        [MaxLimiters]txState
 	closed       bool
 	skippedCheck bool // true if SkipCheck was used, so there are no local tokens to return.
 	// hints is a snapshot of cached limiter state taken at Close, for forwarded tasks.
@@ -113,7 +108,13 @@ type limiterTx interface {
 	applyHint(*taskqueuespb.LimiterHint)
 }
 
-type txState int8 // just so we can pack these in an array
+// txEntry is the part of a Tx for one limiter.
+type txEntry struct {
+	limiterTx
+	state txState
+}
+
+type txState int8
 
 const (
 	txStateInit txState = iota
@@ -150,14 +151,15 @@ func (tx *Tx) Check() (retErr error) {
 		}
 	}()
 
-	for i, lim := range tx.limiters {
-		if tx.state[i] != txStateInit {
+	for i := range tx.limiters {
+		lim := &tx.limiters[i]
+		if lim.state != txStateInit {
 			return errInvalidTxState
 		}
 		if err := lim.check(tx.cb); err != nil {
 			return err
 		}
-		tx.state[i] = txStateChecked
+		lim.state = txStateChecked
 	}
 	return nil
 }
@@ -178,12 +180,12 @@ func (tx *Tx) SkipCheck() (retErr error) {
 	}()
 
 	for i := range tx.limiters {
-		if tx.state[i] != txStateInit {
+		if tx.limiters[i].state != txStateInit {
 			return errInvalidTxState
 		}
 	}
 	for i := range tx.limiters {
-		tx.state[i] = txStateChecked
+		tx.limiters[i].state = txStateChecked
 	}
 	tx.skippedCheck = true
 	return nil
@@ -204,14 +206,15 @@ func (tx *Tx) Reserve(ctx context.Context) (retErr error) {
 	}()
 
 	// reserve must be sequential
-	for i, lim := range tx.limiters {
-		if tx.state[i] != txStateChecked {
+	for i := range tx.limiters {
+		lim := &tx.limiters[i]
+		if lim.state != txStateChecked {
 			return errInvalidTxState
 		}
 		if err := lim.reserve(ctx); err != nil {
 			return err
 		}
-		tx.state[i] = txStateReserved
+		lim.state = txStateReserved
 	}
 	return nil
 }
@@ -231,7 +234,7 @@ func (tx *Tx) Commit(ctx context.Context) (retErr error) {
 	}()
 
 	for i := range tx.limiters {
-		if tx.state[i] != txStateReserved {
+		if tx.limiters[i].state != txStateReserved {
 			return errInvalidTxState
 		}
 	}
@@ -239,13 +242,14 @@ func (tx *Tx) Commit(ctx context.Context) (retErr error) {
 	// commit all concurrently
 	var wg sync.WaitGroup
 	errs := make([]error, len(tx.limiters))
-	for i, lim := range tx.limiters {
+	for i := range tx.limiters {
+		lim := &tx.limiters[i]
 		f := func() {
 			errs[i] = lim.commit(ctx)
 			if errs[i] != nil {
-				tx.state[i] = txStateCommitFailed
+				lim.state = txStateCommitFailed
 			} else {
-				tx.state[i] = txStateCommitted
+				lim.state = txStateCommitted
 			}
 		}
 		if i == len(tx.limiters)-1 {
@@ -266,8 +270,9 @@ func (tx *Tx) Rollback(ctx context.Context) {
 		return
 	}
 	defer tx.Close()
-	for i, lim := range tx.limiters {
-		switch tx.state[i] {
+	for i := range tx.limiters {
+		lim := &tx.limiters[i]
+		switch lim.state {
 		case txStateReserved:
 			// this is best-effort, reservations have timeouts so it's okay if we fail to cancel
 			lim.cancelReserve(ctx)
@@ -276,7 +281,9 @@ func (tx *Tx) Rollback(ctx context.Context) {
 			if !tx.skippedCheck {
 				lim.cancelCheck()
 			}
-			tx.state[i] = txStateCanceled
+			lim.state = txStateCanceled
+		default:
+			// nothing to cancel
 		}
 	}
 }

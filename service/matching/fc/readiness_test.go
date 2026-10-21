@@ -64,7 +64,7 @@ func TestTransactionPins(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			r, ts := newTestReadiness(t, nil)
 			lim := r.getLocalLimiter(namespace.ID("ns"), "key")
-			tx := &Tx{limiters: []limiterTx{newLocalLimiterTx(lim, simplelimiter.NoLimit(), 0)}}
+			tx := &Tx{limiters: []txEntry{{limiterTx: newLocalLimiterTx(lim, simplelimiter.NoLimit(), 0)}}}
 			requirePins(t, lim, 1)
 			lim.rs.cleanup(1000, r.gcParameters())
 			require.Len(t, lim.rs.localLimiters, 1)
@@ -96,9 +96,9 @@ func TestFailedCheckReleasesAllTransactionPins(t *testing.T) {
 	first := r.getLocalLimiter(ns, "first")
 	second := r.getLocalLimiter(ns, "second")
 	cb := &testCallback{}
-	tx := &Tx{cb: cb, limiters: []limiterTx{
-		newLocalLimiterTx(first, simplelimiter.MakeParams(0, 0), 0),
-		newLocalLimiterTx(second, simplelimiter.NoLimit(), 0),
+	tx := &Tx{cb: cb, limiters: []txEntry{
+		{limiterTx: newLocalLimiterTx(first, simplelimiter.MakeParams(0, 0), 0)},
+		{limiterTx: newLocalLimiterTx(second, simplelimiter.NoLimit(), 0)},
 	}}
 	require.ErrorIs(t, tx.Check(), ErrLocalLimiterBlocked)
 	requirePins(t, first, 1) // timer
@@ -296,7 +296,7 @@ func TestOptimisticConcurrencyReserve(t *testing.T) {
 			}}}
 			tx := r.NewTx(namespace.ID("ns"), task, &testCallback{})
 			defer tx.Close()
-			lim := tx.limiters[0].(*concurrencyTx).cs
+			lim := tx.limiters[0].limiterTx.(*concurrencyTx).cs
 			require.EqualValues(t, 1, lim.tokens)
 			require.NoError(t, tx.Check())
 			require.Zero(t, batches)
