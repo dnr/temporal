@@ -2,6 +2,7 @@ package matching
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -40,14 +41,14 @@ func TestPollForwardersBypassFlowControl(t *testing.T) {
 			readiness := fc.NewReadiness(ts, nil, fc.NewReadinessConfig(dc))
 			t.Cleanup(readiness.Stop)
 			userData := &mockUserDataManager{}
-			rateLimit := newRateLimitManager(ts, userData, cfg, enumspb.TASK_QUEUE_TYPE_WORKFLOW)
+			rateLimit := newRateLimitManager(userData, cfg, enumspb.TASK_QUEUE_TYPE_WORKFLOW)
 			rateLimit.Start()
 			t.Cleanup(rateLimit.Stop)
 			rateLimit.SetEffectiveRPSAndSourceForTesting(0, enumspb.RATE_LIMIT_SOURCE_API)
 			rateLimit.UpdateSimpleRateLimitWithBurstForTesting(0)
 			rateLimit.SetFairnessKeyRateLimitDefaultForTesting(0)
-			manager := newFCManager(taskQueue.RootPartition(), cfg, userData, rateLimit, readiness)
-			data := newMatcherData(cfg, log.NewNoopLogger(), ts, true, rateLimit, manager, func(syncMatchOutcome) {})
+			manager := newFCManager(taskQueue.RootPartition(), userData, rateLimit, readiness)
+			data := newMatcherData(cfg, log.NewNoopLogger(), ts, true, manager, func(syncMatchOutcome) {})
 			t.Cleanup(data.Stop)
 			task := newPollForwarderTask(pollForwarderPriority, tc.kind)
 			task.limiters = &fc.Limiters{Limiters: [fc.MaxLimiters]fc.Limiter{{
@@ -129,10 +130,10 @@ func TestFCManagerInitialGrants(t *testing.T) {
 				NewConfig(dynamicconfig.NewCollection(configClient, log.NewNoopLogger())),
 				"test-namespace",
 			)
-			manager := newRateLimitManager(clock.NewEventTimeSource().Update(time.Now()), nil, config, enumspb.TASK_QUEUE_TYPE_ACTIVITY)
+			manager := newRateLimitManager(nil, config, enumspb.TASK_QUEUE_TYPE_ACTIVITY)
 			manager.Start()
 			t.Cleanup(manager.Stop)
-			fcManager := newGrantTestFCManager(t, manager)
+			fcManager := newGrantTestFCManager(t, manager, clock.NewEventTimeSource().Update(time.Now()))
 
 			require.Equal(t, test.granted, fcManager.grantEagerTokens(nil, 20))
 			require.Zero(t, fcManager.grantEagerTokens(nil, 1))
@@ -144,11 +145,10 @@ func TestFCManagerGrantTokens(t *testing.T) {
 	t.Run("new matcher applies the whole queue limit", func(t *testing.T) {
 		manager := &rateLimitManager{
 			config:          &taskQueueConfig{},
-			timeSource:      clock.NewEventTimeSource().Update(time.Now()),
 			wholeQueueLimit: simplelimiter.MakeParams(2, 500*time.Millisecond),
 		}
 
-		fcManager := newGrantTestFCManager(t, manager)
+		fcManager := newGrantTestFCManager(t, manager, clock.NewEventTimeSource().Update(time.Now()))
 		granted := fcManager.grantEagerTokens(nil, 5)
 		require.Equal(t, int32(2), granted)
 		granted = fcManager.grantEagerTokens(nil, 1)
@@ -159,14 +159,13 @@ func TestFCManagerGrantTokens(t *testing.T) {
 		timeSource := clock.NewEventTimeSource().Update(time.Now())
 		manager := &rateLimitManager{
 			config:          &taskQueueConfig{},
-			timeSource:      timeSource,
 			wholeQueueLimit: simplelimiter.NoLimit(),
 			perKeyLimit:     simplelimiter.MakeParams(1, 0),
 		}
 
 		keyOne := &commonpb.Priority{FairnessKey: "one"}
 		keyTwo := &commonpb.Priority{FairnessKey: "two"}
-		fcManager := newGrantTestFCManager(t, manager)
+		fcManager := newGrantTestFCManager(t, manager, timeSource)
 		granted := fcManager.grantEagerTokens(keyOne, 20)
 		require.Equal(t, int32(1), granted)
 		granted = fcManager.grantEagerTokens(keyOne, 1)
@@ -180,12 +179,12 @@ func TestFCManagerGrantTokens(t *testing.T) {
 	})
 }
 
-func newGrantTestFCManager(t *testing.T, rateLimit *rateLimitManager) *fcManager {
+func newGrantTestFCManager(t *testing.T, rateLimit *rateLimitManager, timeSource clock.TimeSource) *fcManager {
 	t.Helper()
 	partition := tqid.UnsafeTaskQueueFamily("test-namespace", "test-task-queue").TaskQueue(enumspb.TASK_QUEUE_TYPE_ACTIVITY).RootPartition()
-	readiness := fc.NewReadiness(rateLimit.timeSource, nil, fc.NewReadinessConfig(dynamicconfig.NewNoopCollection()))
+	readiness := fc.NewReadiness(timeSource, nil, fc.NewReadinessConfig(dynamicconfig.NewNoopCollection()))
 	t.Cleanup(readiness.Stop)
-	return newFCManager(partition, rateLimit.config, &mockUserDataManager{}, rateLimit, readiness)
+	return newFCManager(partition, &mockUserDataManager{}, rateLimit, readiness)
 }
 
 type eagerTestCallback struct{}
@@ -202,12 +201,13 @@ func TestEagerDispatchSharesRateTokens(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 			rateLimit := &rateLimitManager{
-				timeSource:      clock.NewEventTimeSource().Update(time.Now()),
 				wholeQueueLimit: simplelimiter.MakeParams(1, 0),
 			}
-			manager := newGrantTestFCManager(t, rateLimit)
+			manager := newGrantTestFCManager(t, rateLimit, clock.NewEventTimeSource().Update(time.Now()))
 			task := newInternalTaskForSyncMatch(&persistencespb.TaskInfo{CreateTime: timestamppb.Now()}, nil, 0, nil)
-			task.limiters = manager.UpdateLimitersFromConfig(nil, task)
+			var err error
+			task.limiters, err = manager.UpdateLimitersFromConfig(nil, task)
+			require.NoError(t, err)
 			cb := &eagerTestCallback{}
 			t.Cleanup(func() { manager.CancelAllCallbacks(cb) })
 			if eagerFirst {
@@ -225,9 +225,8 @@ func TestEagerDispatchSharesRateTokens(t *testing.T) {
 func TestEagerDispatchBlocksConcurrencyLimitedQueues(t *testing.T) {
 	t.Parallel()
 	manager := newGrantTestFCManager(t, &rateLimitManager{
-		timeSource:      clock.NewEventTimeSource().Update(time.Now()),
 		wholeQueueLimit: simplelimiter.MakeParams(1, 0),
-	})
+	}, clock.NewEventTimeSource().Update(time.Now()))
 	userData := &mockUserDataManager{}
 	manager.userDataManager = userData
 	userData.data = &persistencespb.VersionedTaskQueueUserData{Data: &persistencespb.TaskQueueUserData{
@@ -245,10 +244,9 @@ func TestEagerDispatchBlocksConcurrencyLimitedQueues(t *testing.T) {
 func TestEagerDispatchFairnessGrantPreservesOtherKeysCapacity(t *testing.T) {
 	t.Parallel()
 	manager := newGrantTestFCManager(t, &rateLimitManager{
-		timeSource:      clock.NewEventTimeSource().Update(time.Now()),
 		wholeQueueLimit: simplelimiter.MakeParams(2, 500*time.Millisecond),
 		perKeyLimit:     simplelimiter.MakeParams(1, 0),
-	})
+	}, clock.NewEventTimeSource().Update(time.Now()))
 	first := &commonpb.Priority{FairnessKey: "first"}
 	second := &commonpb.Priority{FairnessKey: "second"}
 	require.Equal(t, int32(1), manager.grantEagerTokens(first, 10))
@@ -260,9 +258,8 @@ func TestEagerDispatchFairnessGrantPreservesOtherKeysCapacity(t *testing.T) {
 func TestEagerDispatchConcurrentGrants(t *testing.T) {
 	t.Parallel()
 	manager := newGrantTestFCManager(t, &rateLimitManager{
-		timeSource:      clock.NewEventTimeSource().Update(time.Now()),
 		wholeQueueLimit: simplelimiter.MakeParams(10, time.Second),
-	})
+	}, clock.NewEventTimeSource().Update(time.Now()))
 	const callers = 16
 	results := make(chan int32, callers)
 	for range callers {
@@ -273,4 +270,29 @@ func TestEagerDispatchConcurrentGrants(t *testing.T) {
 		total += <-results
 	}
 	require.Equal(t, int32(11), total)
+}
+
+type eagerUserDataError struct{ userDataManager }
+
+func (*eagerUserDataError) GetUserData() (*persistencespb.VersionedTaskQueueUserData, chan struct{}, error) {
+	return nil, nil, errors.New("user data unavailable")
+}
+
+func TestEagerDispatchRejectsUnavailableConfig(t *testing.T) {
+	t.Parallel()
+	manager := newGrantTestFCManager(t, &rateLimitManager{wholeQueueLimit: simplelimiter.NoLimit()}, clock.NewEventTimeSource().Update(time.Now()))
+	manager.userDataManager = &eagerUserDataError{}
+	require.Zero(t, manager.grantEagerTokens(nil, 1))
+}
+
+func TestTaskReadyUsesPreparedLimiters(t *testing.T) {
+	t.Parallel()
+	manager := newGrantTestFCManager(t, &rateLimitManager{}, clock.NewEventTimeSource().Update(time.Now()))
+	manager.userDataManager = &eagerUserDataError{}
+	task := newInternalTaskForSyncMatch(&persistencespb.TaskInfo{CreateTime: timestamppb.Now()}, nil, 0, nil)
+	task.limiters = &fc.Limiters{Limiters: [fc.MaxLimiters]fc.Limiter{{
+		Type: enumsspb.LIMITER_TYPE_LOCAL_RATE_LIMIT,
+		Key:  "prepared", Source: fc.LimiterSourceConfig, Config: simplelimiter.MakeParams(0, 0),
+	}}}
+	require.ErrorIs(t, manager.TaskReady(task, nil), fc.ErrLocalLimiterBlocked)
 }

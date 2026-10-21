@@ -76,8 +76,7 @@ func (s *PartitionManagerTestSuite) newEagerDispatchPartitionManagerWithMetrics(
 		true,
 		metrics.OperationTag(metrics.MatchingTaskQueuePartitionManagerScope),
 	)
-	partitionMgr.rateLimitManager = newRateLimitManager(clock.NewEventTimeSource().Update(time.Now()), partitionMgr.userDataManager, partitionMgr.config, partitionMgr.partition.TaskType())
-	partitionMgr.rateLimitManager.timeSource = clock.NewEventTimeSource().Update(time.Now())
+	partitionMgr.rateLimitManager = newRateLimitManager(partitionMgr.userDataManager, partitionMgr.config, partitionMgr.partition.TaskType())
 	partitionMgr.fcManager = s.newEagerDispatchFCManager(partitionMgr)
 	return partitionMgr, capture, func() { captureHandler.StopCapture(capture) }
 }
@@ -309,8 +308,8 @@ func (s *PartitionManagerTestSuite) TestGrantEagerDispatchReturnsPartialRateLimi
 func (s *PartitionManagerTestSuite) TestGrantEagerDispatchGrantsHigherPriorityFirst() {
 	partitionMgr := s.newEagerDispatchPartitionManager(0, nil)
 	partitionMgr.rateLimitManager = &rateLimitManager{
-		config:          partitionMgr.config,
-		timeSource:      clock.NewEventTimeSource().Update(time.Now()),
+		config: partitionMgr.config,
+
 		wholeQueueLimit: simplelimiter.MakeParams(1, 0),
 	}
 	partitionMgr.fcManager = s.newEagerDispatchFCManager(partitionMgr)
@@ -2961,8 +2960,7 @@ func (s *PartitionManagerTestSuite) newEagerDispatchPhysicalQueue(backlogPriorit
 
 func (s *PartitionManagerTestSuite) newRateLimitedEagerDispatchPartitionManager() *taskQueuePartitionManagerImpl {
 	partitionMgr := s.newEagerDispatchPartitionManager(0, nil)
-	limiter := newRateLimitManager(clock.NewEventTimeSource().Update(time.Now()), partitionMgr.userDataManager, partitionMgr.config, partitionMgr.partition.TaskQueue().TaskType())
-	limiter.timeSource = clock.NewEventTimeSource().Update(time.Now())
+	limiter := newRateLimitManager(partitionMgr.userDataManager, partitionMgr.config, partitionMgr.partition.TaskQueue().TaskType())
 	limiter.wholeQueueLimit = simplelimiter.MakeParams(1, 0)
 	partitionMgr.rateLimitManager = limiter
 	partitionMgr.fcManager = s.newEagerDispatchFCManager(partitionMgr)
@@ -2970,7 +2968,7 @@ func (s *PartitionManagerTestSuite) newRateLimitedEagerDispatchPartitionManager(
 }
 
 func (s *PartitionManagerTestSuite) newEagerDispatchFCManager(pm *taskQueuePartitionManagerImpl) *fcManager {
-	readiness := fc.NewReadiness(pm.rateLimitManager.timeSource, nil, fc.NewReadinessConfig(dynamicconfig.NewNoopCollection()))
+	readiness := fc.NewReadiness(clock.NewEventTimeSource().Update(time.Now()), nil, fc.NewReadinessConfig(dynamicconfig.NewNoopCollection()))
 	s.T().Cleanup(readiness.Stop)
-	return newFCManager(pm.partition, pm.config, pm.userDataManager, pm.rateLimitManager, readiness)
+	return newFCManager(pm.partition, pm.userDataManager, pm.rateLimitManager, readiness)
 }

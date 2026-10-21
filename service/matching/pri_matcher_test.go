@@ -87,7 +87,7 @@ func (s *PriMatcherSuite) newTestMatcher(ctx context.Context, opts testMatcherOp
 	}
 	userDataManager := &mockUserDataManager{}
 	ts := clock.NewRealTimeSource()
-	rateLimitManager := newRateLimitManager(ts, userDataManager, cfg, enumspb.TASK_QUEUE_TYPE_WORKFLOW)
+	rateLimitManager := newRateLimitManager(userDataManager, cfg, enumspb.TASK_QUEUE_TYPE_WORKFLOW)
 	rateLimitManager.Start()
 	s.T().Cleanup(rateLimitManager.Stop)
 	readiness := fc.NewReadiness(ts, nil, fc.NewReadinessConfig(dynamicconfig.NewNoopCollection()))
@@ -101,8 +101,7 @@ func (s *PriMatcherSuite) newTestMatcher(ctx context.Context, opts testMatcherOp
 		opts.validator,
 		s.logger,
 		metrics.NoopMetricsHandler,
-		rateLimitManager,
-		newFCManager(partition, cfg, userDataManager, rateLimitManager, readiness),
+		newFCManager(partition, userDataManager, rateLimitManager, readiness),
 		func(syncMatchOutcome) {}, // onBlocked
 		func() {},                 // markAlive
 	)
@@ -327,11 +326,11 @@ func (s *PriMatcherSuite) TestForwardTaskAppliesLimiterHints() {
 			},
 		}}
 		ts := clock.NewRealTimeSource()
-		rateLimitManager := newRateLimitManager(ts, userDataManager, cfg, enumspb.TASK_QUEUE_TYPE_WORKFLOW)
+		rateLimitManager := newRateLimitManager(userDataManager, cfg, enumspb.TASK_QUEUE_TYPE_WORKFLOW)
 		rateLimitManager.Start()
 		readiness := fc.NewReadiness(ts, &testConcurrencyClient{}, fc.NewReadinessConfig(dynamicconfig.NewNoopCollection()))
 		defer readiness.Stop()
-		fcManager := newFCManager(childPartition, cfg, userDataManager, rateLimitManager, readiness)
+		fcManager := newFCManager(childPartition, userDataManager, rateLimitManager, readiness)
 
 		// parent has no slots available
 		hints, err := proto.Marshal(&taskqueuespb.LimiterHints{Hints: []*taskqueuespb.LimiterHint{{
@@ -366,7 +365,6 @@ func (s *PriMatcherSuite) TestForwardTaskAppliesLimiterHints() {
 			nil, // no validator needed on child
 			s.logger,
 			metrics.NoopMetricsHandler,
-			rateLimitManager,
 			fcManager,
 			func(syncMatchOutcome) {},
 			func() {},
@@ -908,12 +906,12 @@ func (s *PriMatcherSuite) TestValidatorRunsOnChildBehindForwardedHead() {
 
 		userDataManager := &mockUserDataManager{}
 		ts := clock.NewRealTimeSource()
-		rateLimitManager := newRateLimitManager(ts, userDataManager, cfg, enumspb.TASK_QUEUE_TYPE_WORKFLOW)
+		rateLimitManager := newRateLimitManager(userDataManager, cfg, enumspb.TASK_QUEUE_TYPE_WORKFLOW)
 		rateLimitManager.Start()
 		tm := newPriTaskMatcher(
 			ctx, cfg, childPartition, fwdr, mockClient, mockValidator,
-			s.logger, metrics.NoopMetricsHandler, rateLimitManager,
-			newFCManager(childPartition, cfg, userDataManager, rateLimitManager, fc.NewReadiness(ts, nil, fc.NewReadinessConfig(dynamicconfig.NewNoopCollection()))), func(syncMatchOutcome) {}, func() {},
+			s.logger, metrics.NoopMetricsHandler,
+			newFCManager(childPartition, userDataManager, rateLimitManager, fc.NewReadiness(ts, nil, fc.NewReadinessConfig(dynamicconfig.NewNoopCollection()))), func(syncMatchOutcome) {}, func() {},
 		)
 		tm.Start()
 		defer tm.Stop()
@@ -981,11 +979,11 @@ func (s *PriMatcherSuite) TestForwardTasksIndependentBackoff() {
 		require.NoError(t, err)
 		userDataManager := &mockUserDataManager{}
 		ts := clock.NewRealTimeSource()
-		manager := newRateLimitManager(ts, userDataManager, cfg, enumspb.TASK_QUEUE_TYPE_WORKFLOW)
+		manager := newRateLimitManager(userDataManager, cfg, enumspb.TASK_QUEUE_TYPE_WORKFLOW)
 		manager.Start()
 		tm := newPriTaskMatcher(ctx, cfg, child, fwdr, client, nil,
-			s.logger, metrics.NoopMetricsHandler, manager,
-			newFCManager(child, cfg, userDataManager, manager, fc.NewReadiness(ts, nil, fc.NewReadinessConfig(dynamicconfig.NewNoopCollection()))), func(syncMatchOutcome) {}, func() {})
+			s.logger, metrics.NoopMetricsHandler,
+			newFCManager(child, userDataManager, manager, fc.NewReadiness(ts, nil, fc.NewReadinessConfig(dynamicconfig.NewNoopCollection()))), func(syncMatchOutcome) {}, func() {})
 		defer tm.Stop()
 		done := make(chan taskResponse, workers)
 		addTasks := func(firstID int64) {
@@ -1043,8 +1041,8 @@ func (s *PriMatcherSuite) TestValidatorBatchBypassesFlowControl() {
 				config:    func(cfg *taskQueueConfig) { cfg.ValidatorBatchSize = func() int { return 2 } },
 			})
 			defer tm.Stop()
-			tm.rateLimitManager.SetEffectiveRPSAndSourceForTesting(tc.rate, enumspb.RATE_LIMIT_SOURCE_API)
-			tm.rateLimitManager.UpdateSimpleRateLimitWithBurstForTesting(0)
+			tm.data.fcManager.rateLimitManager.SetEffectiveRPSAndSourceForTesting(tc.rate, enumspb.RATE_LIMIT_SOURCE_API)
+			tm.data.fcManager.rateLimitManager.UpdateSimpleRateLimitWithBurstForTesting(0)
 			done := make(chan taskResponse, 2)
 			for id := int64(1); id <= 2; id++ {
 				s.Require().NoError(tm.AddTask(s.newBacklogTask(id, done)))
@@ -1059,7 +1057,7 @@ func (s *PriMatcherSuite) TestValidatorBatchBypassesFlowControl() {
 				}
 			}
 			if tc.valid {
-				s.Equal(int32(1), tm.fcManager.grantEagerTokens(nil, 1))
+				s.Equal(int32(1), tm.data.fcManager.grantEagerTokens(nil, 1))
 			}
 		})
 	}

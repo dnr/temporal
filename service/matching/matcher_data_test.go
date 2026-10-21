@@ -55,17 +55,16 @@ func (s *MatcherDataSuite) SetupTest() {
 	s.ts = clock.NewEventTimeSource().Update(time.Now())
 	s.ts.UseAsyncTimers(true)
 	userDataManager := &mockUserDataManager{}
-	rateLimitManager := newRateLimitManager(s.ts, userDataManager, cfg, enumspb.TASK_QUEUE_TYPE_ACTIVITY)
+	rateLimitManager := newRateLimitManager(userDataManager, cfg, enumspb.TASK_QUEUE_TYPE_ACTIVITY)
 	rateLimitManager.Start()
 	s.rateLimitedCount.Store(0)
 	s.fcReadiness = fc.NewReadiness(s.ts, nil, fc.NewReadinessConfig(dynamicconfig.NewNoopCollection()))
-	s.fcManager = newFCManager(taskQueue.RootPartition(), cfg, userDataManager, rateLimitManager, s.fcReadiness)
+	s.fcManager = newFCManager(taskQueue.RootPartition(), userDataManager, rateLimitManager, s.fcReadiness)
 	s.md = newMatcherData(
 		cfg,
 		logger,
 		s.ts,
 		true,
-		rateLimitManager,
 		s.fcManager,
 		func(syncMatchOutcome) { s.rateLimitedCount.Add(1) },
 	)
@@ -236,8 +235,8 @@ func (s *MatcherDataSuite) TestMatchTaskImmediately() {
 
 func (s *MatcherDataSuite) TestMatchTaskImmediatelyRateLimited() {
 	// Set rate limit to zero — blocks all matches.
-	s.md.rateLimitManager.SetEffectiveRPSAndSourceForTesting(0, enumspb.RATE_LIMIT_SOURCE_API)
-	s.md.rateLimitManager.UpdateSimpleRateLimitWithBurstForTesting(0)
+	s.fcManager.rateLimitManager.SetEffectiveRPSAndSourceForTesting(0, enumspb.RATE_LIMIT_SOURCE_API)
+	s.fcManager.rateLimitManager.UpdateSimpleRateLimitWithBurstForTesting(0)
 
 	// Add a waiting poller.
 	go func() {
@@ -253,8 +252,8 @@ func (s *MatcherDataSuite) TestMatchTaskImmediatelyRateLimited() {
 
 func (s *MatcherDataSuite) TestSyncMatchRateLimitedIncrementsStats() {
 	// Set a rate limit (1 RPS, no burst) so that a single dispatch makes the limiter block.
-	s.md.rateLimitManager.SetEffectiveRPSAndSourceForTesting(1.0, enumspb.RATE_LIMIT_SOURCE_API)
-	s.md.rateLimitManager.UpdateSimpleRateLimitWithBurstForTesting(0)
+	s.fcManager.rateLimitManager.SetEffectiveRPSAndSourceForTesting(1.0, enumspb.RATE_LIMIT_SOURCE_API)
+	s.fcManager.rateLimitManager.UpdateSimpleRateLimitWithBurstForTesting(0)
 
 	// Consume the token with one successful sync match.
 	go func() {
@@ -282,8 +281,8 @@ func (s *MatcherDataSuite) TestSyncMatchRateLimitedIncrementsStats() {
 
 func (s *MatcherDataSuite) TestBacklogRateLimitedIncrementsStats() {
 	// Set a rate limit (1 RPS, no burst) so that a single dispatch makes the limiter block.
-	s.md.rateLimitManager.SetEffectiveRPSAndSourceForTesting(1.0, enumspb.RATE_LIMIT_SOURCE_API)
-	s.md.rateLimitManager.UpdateSimpleRateLimitWithBurstForTesting(0)
+	s.fcManager.rateLimitManager.SetEffectiveRPSAndSourceForTesting(1.0, enumspb.RATE_LIMIT_SOURCE_API)
+	s.fcManager.rateLimitManager.UpdateSimpleRateLimitWithBurstForTesting(0)
 
 	// Consume the token by dispatching one backlog task.
 	t1 := s.newBacklogTask(1, 0, nil)
@@ -422,8 +421,8 @@ func (s *MatcherDataSuite) TestTaskForward() {
 
 func (s *MatcherDataSuite) TestForwardedTaskSkipsFlowControlCheck() {
 	// Set rate limit to zero — blocks all matches of local tasks.
-	s.md.rateLimitManager.SetEffectiveRPSAndSourceForTesting(0, enumspb.RATE_LIMIT_SOURCE_API)
-	s.md.rateLimitManager.UpdateSimpleRateLimitWithBurstForTesting(0)
+	s.fcManager.rateLimitManager.SetEffectiveRPSAndSourceForTesting(0, enumspb.RATE_LIMIT_SOURCE_API)
+	s.fcManager.rateLimitManager.UpdateSimpleRateLimitWithBurstForTesting(0)
 
 	pollDone := make(chan *matchResult)
 	go func() { pollDone <- s.pollFakeTime(time.Second) }()
@@ -442,8 +441,8 @@ func (s *MatcherDataSuite) TestForwardedTaskSkipsFlowControlCheck() {
 
 func (s *MatcherDataSuite) TestValidatorSkipsFlowControl() {
 	// Set rate limit to zero — blocks all matches of local tasks.
-	s.md.rateLimitManager.SetEffectiveRPSAndSourceForTesting(0, enumspb.RATE_LIMIT_SOURCE_API)
-	s.md.rateLimitManager.UpdateSimpleRateLimitWithBurstForTesting(0)
+	s.fcManager.rateLimitManager.SetEffectiveRPSAndSourceForTesting(0, enumspb.RATE_LIMIT_SOURCE_API)
+	s.fcManager.rateLimitManager.UpdateSimpleRateLimitWithBurstForTesting(0)
 
 	t := s.newBacklogTask(1, 0, nil)
 	s.Require().NoError(s.md.EnqueueTaskNoWait(t))
@@ -456,8 +455,8 @@ func (s *MatcherDataSuite) TestValidatorSkipsFlowControl() {
 }
 
 func (s *MatcherDataSuite) TestRateLimitedBacklog() {
-	s.md.rateLimitManager.SetEffectiveRPSAndSourceForTesting(10.0, enumspb.RATE_LIMIT_SOURCE_API)
-	s.md.rateLimitManager.UpdateSimpleRateLimitWithBurstForTesting(300 * time.Millisecond)
+	s.fcManager.rateLimitManager.SetEffectiveRPSAndSourceForTesting(10.0, enumspb.RATE_LIMIT_SOURCE_API)
+	s.fcManager.rateLimitManager.UpdateSimpleRateLimitWithBurstForTesting(300 * time.Millisecond)
 
 	// register some backlog with old tasks
 	for i := range 100 {
@@ -497,8 +496,8 @@ func (s *MatcherDataSuite) TestRateLimitedBacklog() {
 }
 
 func (s *MatcherDataSuite) TestPerKeyRateLimit() {
-	s.md.rateLimitManager.SetFairnessKeyRateLimitDefaultForTesting(10.0)
-	s.md.rateLimitManager.UpdatePerKeySimpleRateLimitWithBurstForTesting(300 * time.Millisecond)
+	s.fcManager.rateLimitManager.SetFairnessKeyRateLimitDefaultForTesting(10.0)
+	s.fcManager.rateLimitManager.UpdatePerKeySimpleRateLimitWithBurstForTesting(300 * time.Millisecond)
 	// register some backlog with three keys
 	keys := []string{"key1", "key2", "key3"}
 	for i := range 300 {
@@ -544,8 +543,8 @@ func (s *MatcherDataSuite) TestPerKeyRateLimit() {
 // prevent a ready task for key2 from being dispatched, even when key2's task has lower priority.
 func (s *MatcherDataSuite) TestPerKeyRateLimitDoesNotBlockOtherKeys() {
 	// Set per-key limit low (1 RPS) so consuming one token puts key1 well into the future.
-	s.md.rateLimitManager.SetFairnessKeyRateLimitDefaultForTesting(1.0)
-	s.md.rateLimitManager.UpdatePerKeySimpleRateLimitWithBurstForTesting(0)
+	s.fcManager.rateLimitManager.SetFairnessKeyRateLimitDefaultForTesting(1.0)
+	s.fcManager.rateLimitManager.UpdatePerKeySimpleRateLimitWithBurstForTesting(0)
 
 	key1 := &commonpb.Priority{PriorityKey: 1, FairnessKey: "key1"}
 	key2 := &commonpb.Priority{PriorityKey: 2, FairnessKey: "key2"}
@@ -573,8 +572,8 @@ func (s *MatcherDataSuite) TestPerKeyRateLimitDoesNotBlockOtherKeys() {
 func (s *MatcherDataSuite) TestPerKeyRateLimitCancelWakesBlockedMatch() {
 	// Set low per-key limit (1 RPS, no burst) so consuming one token for a key puts its
 	// next allowed dispatch a full second into the future.
-	s.md.rateLimitManager.SetFairnessKeyRateLimitDefaultForTesting(1.0)
-	s.md.rateLimitManager.UpdatePerKeySimpleRateLimitWithBurstForTesting(0)
+	s.fcManager.rateLimitManager.SetFairnessKeyRateLimitDefaultForTesting(1.0)
+	s.fcManager.rateLimitManager.UpdatePerKeySimpleRateLimitWithBurstForTesting(0)
 
 	key1 := &commonpb.Priority{PriorityKey: 1, FairnessKey: "key1"}
 
@@ -620,8 +619,8 @@ func (s *MatcherDataSuite) TestPerKeyRateLimitCancelWakesBlockedMatch() {
 func (s *MatcherDataSuite) TestRateLimitCancelWakesBlockedMatch() {
 	// Set low rate limit (1 RPS, no burst) so consuming one token for a key puts its
 	// next allowed dispatch a full second into the future.
-	s.md.rateLimitManager.SetEffectiveRPSAndSourceForTesting(1.0, enumspb.RATE_LIMIT_SOURCE_API)
-	s.md.rateLimitManager.UpdateSimpleRateLimitWithBurstForTesting(0)
+	s.fcManager.rateLimitManager.SetEffectiveRPSAndSourceForTesting(1.0, enumspb.RATE_LIMIT_SOURCE_API)
+	s.fcManager.rateLimitManager.UpdateSimpleRateLimitWithBurstForTesting(0)
 
 	// Dispatch one key1 task to consume the key's token. For flow control, reserve but don't
 	// commit it yet.
@@ -1098,8 +1097,7 @@ func (s *MatcherDataSuite) TestFindMatch() {
 
 			// Call findMatch
 			s.md.lock.Lock()
-			now := s.ts.Now().UnixNano()
-			foundTask, foundPoller, _ := s.md.findMatch(tc.allowForwarding, now)
+			foundTask, foundPoller, _ := s.md.findMatch(tc.allowForwarding)
 			s.md.lock.Unlock()
 
 			if tc.shouldMatch {
@@ -1156,15 +1154,14 @@ func FuzzMatcherData(f *testing.F) {
 		ts.UseAsyncTimers(true)
 		logger := log.NewNoopLogger()
 		userDataManager := &mockUserDataManager{}
-		rateLimitManager := newRateLimitManager(ts, userDataManager, cfg, enumspb.TASK_QUEUE_TYPE_ACTIVITY)
+		rateLimitManager := newRateLimitManager(userDataManager, cfg, enumspb.TASK_QUEUE_TYPE_ACTIVITY)
 		rateLimitManager.Start()
 		md := newMatcherData(
 			cfg,
 			logger,
 			ts,
 			true,
-			rateLimitManager,
-			newFCManager(taskQueue.RootPartition(), cfg, userDataManager, rateLimitManager, fc.NewReadiness(ts, nil, fc.NewReadinessConfig(dynamicconfig.NewNoopCollection()))),
+			newFCManager(taskQueue.RootPartition(), userDataManager, rateLimitManager, fc.NewReadiness(ts, nil, fc.NewReadinessConfig(dynamicconfig.NewNoopCollection()))),
 			func(syncMatchOutcome) {},
 		)
 

@@ -225,7 +225,6 @@ func newPhysicalTaskQueueManager(
 		pqMgr.taskValidator,
 		pqMgr.logger,
 		taggedMetricsHandler,
-		partitionMgr.rateLimitManager,
 		partitionMgr.fcManager,
 		pqMgr.onBlocked,
 		pqMgr.MarkAlive,

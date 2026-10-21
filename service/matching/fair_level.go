@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"math"
 
-	"github.com/emirpasic/gods/maps/treemap"
 	persistencespb "go.temporal.io/server/api/persistence/v1"
 	taskqueuespb "go.temporal.io/server/api/taskqueue/v1"
 )
@@ -28,18 +27,6 @@ func (a fairLevel) String() string {
 // Returns true if a < b lexicographically.
 func (a fairLevel) less(b fairLevel) bool {
 	return a.pass < b.pass || a.pass == b.pass && a.id < b.id
-}
-
-func newFairLevelTreeMap() *treemap.Map {
-	return treemap.NewWith(func(aany, bany any) int {
-		a, b := aany.(fairLevel), bany.(fairLevel) // nolint:revive
-		if a.less(b) {
-			return -1
-		} else if b.less(a) {
-			return 1
-		}
-		return 0
-	})
 }
 
 // Returns the max of a and b.

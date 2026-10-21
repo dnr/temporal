@@ -644,13 +644,6 @@ func (e *matchingEngineImpl) loggerAndMetricsForPartition(
 	return logger, throttledLogger, metricsHandler
 }
 
-// For use in tests
-func (e *matchingEngineImpl) updateTaskQueue(partition tqid.Partition, mgr taskQueuePartitionManager) {
-	e.partitionsLock.Lock()
-	defer e.partitionsLock.Unlock()
-	e.partitions[partition.Key()] = mgr
-}
-
 func (e *matchingEngineImpl) AddWorkflowTask(
 	ctx context.Context,
 	addRequest *matchingservice.AddWorkflowTaskRequest,

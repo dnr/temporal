@@ -7,7 +7,6 @@ import (
 
 	commonpb "go.temporal.io/api/common/v1"
 	enumspb "go.temporal.io/api/enums/v1"
-	"go.temporal.io/server/common/clock"
 	"go.temporal.io/server/service/matching/simplelimiter"
 )
 
@@ -16,7 +15,6 @@ type (
 		mu sync.Mutex
 
 		// Dependencies
-		timeSource      clock.TimeSource
 		userDataManager userDataManager       // User data manager to fetch user data for task queue configurations.
 		config          *taskQueueConfig      // Dynamic configuration for task queues set by system.
 		taskQueueType   enumspb.TaskQueueType // Task queue type
@@ -31,7 +29,6 @@ type (
 
 		// Derived from the above sources.
 		effectiveRPS    float64                 // Min of api/worker set RPS and system defaults. Always reflects the per-partition wise task queue RPS.
-		systemRPS       float64                 // Min of partition level dispatch rates times the number of read partitions.
 		rateLimitSource enumspb.RateLimitSource // Source of the rate limit, can be set via API, worker or system default.
 		// Derived from the `defaultTaskDispatchRPS`.
 		// Fairness tasks rate limiter.
@@ -46,6 +43,8 @@ type (
 		perKeyLimit     simplelimiter.Params
 		perKeyOverrides fairnessWeightOverrides
 		cancels         []func()
+		// Set before Start. Called outside mu when effective limiter parameters change.
+		onRateLimitChanged func()
 	}
 )
 
@@ -60,13 +59,11 @@ const (
 // dynamic config subscriptions are registered in Start, so an unstarted manager holds
 // no external references and can simply be garbage collected.
 func newRateLimitManager(
-	timeSource clock.TimeSource,
 	userDataManager userDataManager,
 	config *taskQueueConfig,
 	taskQueueType enumspb.TaskQueueType,
 ) *rateLimitManager {
 	return &rateLimitManager{
-		timeSource:      timeSource,
 		userDataManager: userDataManager,
 		config:          config,
 		taskQueueType:   taskQueueType,
@@ -92,24 +89,33 @@ func (r *rateLimitManager) Start() {
 
 func (r *rateLimitManager) setAdminNsRate(rps float64) {
 	r.mu.Lock()
-	defer r.mu.Unlock()
 	r.adminNsRate = rps
-	r.computeAndApplyRateLimitLocked()
+	changed := r.computeAndApplyRateLimitLocked()
+	r.mu.Unlock()
+	if changed && r.onRateLimitChanged != nil {
+		r.onRateLimitChanged()
+	}
 }
 
 func (r *rateLimitManager) setAdminTqRate(rps float64) {
 	r.mu.Lock()
-	defer r.mu.Unlock()
 	r.adminTqRate = rps
-	r.computeAndApplyRateLimitLocked()
+	changed := r.computeAndApplyRateLimitLocked()
+	r.mu.Unlock()
+	if changed && r.onRateLimitChanged != nil {
+		r.onRateLimitChanged()
+	}
 }
 
 func (r *rateLimitManager) setNumReadPartitions(val int) {
 	r.mu.Lock()
-	defer r.mu.Unlock()
 	// Defaulting to 1 partition if misconfigured
 	r.numReadPartitions = max(val, 1)
-	r.computeAndApplyRateLimitLocked()
+	changed := r.computeAndApplyRateLimitLocked()
+	r.mu.Unlock()
+	if changed && r.onRateLimitChanged != nil {
+		r.onRateLimitChanged()
+	}
 }
 
 // Computes the effectiveRPS and its source by evaluating all possible rate limit configurations.
@@ -126,7 +132,6 @@ func (r *rateLimitManager) computeEffectiveRPSAndSourceLocked() {
 		r.adminNsRate,
 		r.adminTqRate,
 	)
-	r.systemRPS = systemRPS
 	fraction := r.config.RateLimitFraction()
 	switch {
 	case r.apiConfigRPS != nil:
@@ -137,16 +142,17 @@ func (r *rateLimitManager) computeEffectiveRPSAndSourceLocked() {
 		rateLimitSource = enumspb.RATE_LIMIT_SOURCE_WORKER
 	}
 
-	if effectiveRPS < r.systemRPS {
+	if effectiveRPS < systemRPS {
 		r.effectiveRPS = effectiveRPS
 		r.rateLimitSource = rateLimitSource
 	} else {
-		r.effectiveRPS = r.systemRPS
+		r.effectiveRPS = systemRPS
 		r.rateLimitSource = enumspb.RATE_LIMIT_SOURCE_SYSTEM
 	}
 }
 
-func (r *rateLimitManager) computeAndApplyRateLimitLocked() {
+func (r *rateLimitManager) computeAndApplyRateLimitLocked() bool {
+	oldQueueLimit, oldKeyLimit := r.wholeQueueLimit, r.perKeyLimit
 	oldRPS := r.effectiveRPS
 	r.computeEffectiveRPSAndSourceLocked()
 	newRPS := r.effectiveRPS
@@ -156,6 +162,7 @@ func (r *rateLimitManager) computeAndApplyRateLimitLocked() {
 	}
 	// Internally, checks if the per-key rate limit has changed and updates it accordingly.
 	r.updatePerKeySimpleRateLimitWithBurstLocked(defaultBurstDuration)
+	return oldQueueLimit != r.wholeQueueLimit || oldKeyLimit != r.perKeyLimit
 }
 
 // Lazy injection of poll metadata.
@@ -163,7 +170,6 @@ func (r *rateLimitManager) computeAndApplyRateLimitLocked() {
 // This allows the rate limit manager to adjust its rate limits based on any updates right before polling happens.
 func (r *rateLimitManager) InjectWorkerRPS(meta *pollMetadata) {
 	r.mu.Lock()
-	defer r.mu.Unlock()
 	var rps *float64
 	if meta != nil && meta.taskQueueMetadata != nil {
 		if workerRPS := meta.taskQueueMetadata.GetMaxTasksPerSecond(); workerRPS != nil {
@@ -172,7 +178,11 @@ func (r *rateLimitManager) InjectWorkerRPS(meta *pollMetadata) {
 		}
 	}
 	r.workerRPS = rps
-	r.computeAndApplyRateLimitLocked()
+	changed := r.computeAndApplyRateLimitLocked()
+	r.mu.Unlock()
+	if changed && r.onRateLimitChanged != nil {
+		r.onRateLimitChanged()
+	}
 }
 
 // Return the effective RPS and its source together.

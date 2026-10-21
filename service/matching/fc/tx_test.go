@@ -279,3 +279,31 @@ func TestNilTx(t *testing.T) {
 	require.Nil(t, tx.Hints())
 	tx.ApplyHints([]*taskqueuespb.LimiterHint{concurrencyHint(1, 1)})
 }
+
+func TestCheckWithoutCallbackRollsBackWithoutRegisteringWaiters(t *testing.T) {
+	t.Parallel()
+	r, _ := newTestReadiness(t, nil)
+	task := &testTask{limiters: Limiters{Limiters: [MaxLimiters]Limiter{
+		{Type: enumsspb.LIMITER_TYPE_LOCAL_RATE_LIMIT, Key: "first", Source: LimiterSourceConfig, Config: simplelimiter.MakeParams(1, 0)},
+		{Type: enumsspb.LIMITER_TYPE_LOCAL_RATE_LIMIT, Key: "second", Source: LimiterSourceConfig, Config: simplelimiter.MakeParams(0, 0)},
+	}}}
+	tx := r.NewTx(testNsID, task, nil)
+	require.ErrorIs(t, tx.Check(), ErrLocalLimiterBlocked)
+	require.True(t, tx.closed)
+	rs := r.getShard(testNsID)
+	func() {
+		rs.lock.Lock()
+		defer rs.lock.Unlock()
+		require.Empty(t, rs.fwd)
+		require.Empty(t, rs.rev)
+		for _, state := range rs.localLimiters {
+			require.Zero(t, state.pins)
+		}
+	}()
+
+	// The first limiter's token must have been returned when the second blocked.
+	task.limiters.Limiters[1] = Limiter{}
+	tx = r.NewTx(testNsID, task, nil)
+	require.NoError(t, tx.Check())
+	tx.Close()
+}

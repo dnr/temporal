@@ -13,7 +13,6 @@ import (
 	enumspb "go.temporal.io/api/enums/v1"
 	taskqueuepb "go.temporal.io/api/taskqueue/v1"
 	enumsspb "go.temporal.io/server/api/enums/v1"
-	"go.temporal.io/server/api/matchingservicemock/v1"
 	persistencespb "go.temporal.io/server/api/persistence/v1"
 	taskqueuespb "go.temporal.io/server/api/taskqueue/v1"
 	"go.temporal.io/server/common"
@@ -122,7 +121,6 @@ type PhysicalTaskQueueManagerTestSuite struct {
 	config               *Config
 	controller           *gomock.Controller
 	physicalTaskQueueKey *PhysicalTaskQueueKey
-	matchingClientMock   *matchingservicemock.MockMatchingServiceClient
 	tqMgr                *physicalTaskQueueManagerImpl
 }
 

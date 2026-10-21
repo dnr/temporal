@@ -38,15 +38,13 @@ type priTaskMatcher struct {
 	// Background context used for forwarding tasks. Closed when task queue is closed.
 	tqCtx context.Context
 
-	partition        tqid.Partition
-	fwdr             *priForwarder
-	client           matchingservice.MatchingServiceClient
-	validator        taskValidator
-	rateLimitManager *rateLimitManager
-	fcManager        *fcManager
-	metricsHandler   metrics.Handler // namespace metric scope
-	logger           log.Logger
-	markAlive        func() // function to mark the physical task queue alive
+	partition      tqid.Partition
+	fwdr           *priForwarder
+	client         matchingservice.MatchingServiceClient
+	validator      taskValidator
+	metricsHandler metrics.Handler // namespace metric scope
+	logger         log.Logger
+	markAlive      func() // function to mark the physical task queue alive
 
 	priorityBacklogForwarders *goro.KeyedSet[remotePriorityBacklog]
 }
@@ -102,7 +100,6 @@ func newPriTaskMatcher(
 	validator taskValidator,
 	logger log.Logger,
 	metricsHandler metrics.Handler,
-	rateLimitManager *rateLimitManager,
 	fcManager *fcManager,
 	onBlocked func(syncMatchOutcome),
 	markAlive func(),
@@ -114,7 +111,6 @@ func newPriTaskMatcher(
 			logger,
 			clock.NewRealTimeSource(),
 			fwdr != nil,
-			rateLimitManager,
 			fcManager,
 			onBlocked,
 		),
@@ -125,8 +121,6 @@ func newPriTaskMatcher(
 		fwdr:                      fwdr,
 		client:                    client,
 		validator:                 validator,
-		rateLimitManager:          rateLimitManager,
-		fcManager:                 fcManager,
 		markAlive:                 markAlive,
 		priorityBacklogForwarders: goro.NewKeyedSet[remotePriorityBacklog](tqCtx),
 	}

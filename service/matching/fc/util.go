@@ -48,9 +48,3 @@ func canonicalLimiters(task fcTask) []Limiter {
 	})
 	return out
 }
-
-func notifyWaiters(cbs []ReadinessCallback) {
-	for _, cb := range cbs {
-		cb.OnReady()
-	}
-}

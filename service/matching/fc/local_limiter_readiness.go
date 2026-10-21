@@ -2,62 +2,10 @@ package fc
 
 import (
 	"go.temporal.io/api/serviceerror"
-	enumsspb "go.temporal.io/server/api/enums/v1"
 	"go.temporal.io/server/common/clock"
 	"go.temporal.io/server/common/namespace"
 	"go.temporal.io/server/service/matching/simplelimiter"
 )
-
-// GrantLocalTokens consumes up to requested tokens from all local rate limiters atomically.
-// Eager dispatch uses this to share rate-limit capacity with regular dispatch.
-func (r *Readiness) GrantLocalTokens(nsID namespace.ID, limiters *Limiters, requested int32) int32 {
-	if requested <= 0 {
-		return 0
-	}
-	rs := r.getShard(nsID)
-	var states []*localLimiterState
-	var configs []simplelimiter.Params
-	defer func() {
-		for _, lls := range states {
-			lls.unpin()
-		}
-	}()
-	if limiters != nil {
-		for _, lim := range limiters.Limiters {
-			if !lim.Valid() || lim.Type != enumsspb.LIMITER_TYPE_LOCAL_RATE_LIMIT {
-				continue
-			}
-			lls := rs.getLocalLimiter(nsID, lim.Key)
-			states = append(states, lls)
-			config, ok := lim.Config.(simplelimiter.Params)
-			if !ok {
-				config = simplelimiter.NoLimit()
-			}
-			configs = append(configs, config)
-		}
-	}
-	var toNotify deferedNotify
-	defer toNotify.notify(notifyAsync)
-	rs.lock.Lock()
-	defer rs.lock.Unlock()
-	if rs.stopped {
-		return 0
-	}
-	now := r.timeSource.Now().UnixNano()
-	granted := requested
-	for i, lls := range states {
-		lls.params = configs[i]
-		lls.lim = lls.lim.Clip(lls.params, now, maxLocalLimiterTokens)
-		granted = min(granted, lls.lim.Available(lls.params, now))
-	}
-	for _, lls := range states {
-		if granted > 0 {
-			lls.lim = lls.lim.Consume(lls.params, now, int64(granted))
-		}
-		rs.syncLimiter(lls, &toNotify)
-	}
-	return granted
-}
 
 // maxLocalLimiterTokens is the maximum number of tokens we might consume at a time for
 // simplelimiter.Limiter. This is used to update ready times after a rate is changed from very

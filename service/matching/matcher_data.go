@@ -211,18 +211,16 @@ func (b *taskBTree) ForEachTask(pred func(*internalTask) bool, post func(*intern
 }
 
 type matcherData struct {
-	config           *taskQueueConfig
-	logger           log.Logger
-	timeSource       clock.TimeSource
-	canForward       bool
-	rateLimitManager *rateLimitManager
-	fcManager        *fcManager
+	config     *taskQueueConfig
+	logger     log.Logger
+	timeSource clock.TimeSource
+	canForward bool
+	fcManager  *fcManager
 	// onBlocked is called when a dispatch is blocked by flow control
 	onBlocked func(syncMatchOutcome)
 
 	lock sync.Mutex // covers everything below, and all fields in any waitableMatchResult
 
-	rateLimitTimer         resettableTimer
 	reconsiderForwardTimer resettableTimer
 
 	// waiting pollers and tasks
@@ -235,27 +233,25 @@ type matcherData struct {
 	stopped bool // if true, reject new tasks
 }
 
-// newMatcherData creates a new matcherData. onRateLimited is called each time a dispatch
-// is blocked by the rate limiter (whole-queue or per-key).
+// newMatcherData creates a new matcherData. onBlocked is called when a dispatch
+// is blocked by a rate or concurrency limit.
 func newMatcherData(
 	config *taskQueueConfig,
 	logger log.Logger,
 	timeSource clock.TimeSource,
 	canForward bool,
-	rateLimitManager *rateLimitManager,
 	fcManager *fcManager,
 	onBlocked func(syncMatchOutcome),
 ) matcherData {
 	return matcherData{
-		config:           config,
-		logger:           logger,
-		timeSource:       timeSource,
-		canForward:       canForward,
-		rateLimitManager: rateLimitManager,
-		fcManager:        fcManager,
-		onBlocked:        onBlocked,
-		pollers:          pollerList{logger: logger},
-		tasks:            newTaskBTree(),
+		config:     config,
+		logger:     logger,
+		timeSource: timeSource,
+		canForward: canForward,
+		fcManager:  fcManager,
+		onBlocked:  onBlocked,
+		pollers:    pollerList{logger: logger},
+		tasks:      newTaskBTree(),
 	}
 }
 
@@ -459,7 +455,7 @@ func (d *matcherData) ReprocessTasks(pred func(*internalTask) bool) []*internalT
 // may be blocked for different reasons.)
 // call with lock held
 // nolint:revive // will improve later
-func (d *matcherData) findMatch(allowForwarding bool, now int64) (
+func (d *matcherData) findMatch(allowForwarding bool) (
 	matchedTask *internalTask,
 	matchedPoller *waitingPoller,
 	blockedBy syncMatchOutcome,
@@ -573,11 +569,9 @@ func (d *matcherData) allowForwarding() (allowForwarding bool) {
 func (d *matcherData) findAndWakeMatches() syncMatchOutcome {
 	allowForwarding := d.canForward && d.allowForwarding()
 
-	now := d.timeSource.Now().UnixNano()
-
 	for {
 		// find one match. findMatch does not return matches that are blocked by flow control.
-		task, poller, blockedBy := d.findMatch(allowForwarding, now)
+		task, poller, blockedBy := d.findMatch(allowForwarding)
 		if task == nil || poller == nil {
 			if blockedBy != syncMatchNoPoller {
 				d.onBlocked(blockedBy)

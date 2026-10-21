@@ -9,10 +9,11 @@ import (
 	enumspb "go.temporal.io/api/enums/v1"
 	taskqueuepb "go.temporal.io/api/taskqueue/v1"
 	persistencespb "go.temporal.io/server/api/persistence/v1"
-	"go.temporal.io/server/common/clock"
 	"go.temporal.io/server/common/dynamicconfig"
 	"go.temporal.io/server/common/namespace"
 	"go.temporal.io/server/common/tqid"
+	"go.temporal.io/server/service/matching/simplelimiter"
+	"google.golang.org/protobuf/types/known/wrapperspb"
 )
 
 type RateLimitManagerSuite struct {
@@ -39,7 +40,7 @@ func (s *RateLimitManagerSuite) TestPerKeyLimitClearedWhenFairnessKeyRateLimitDe
 			RateLimit: &taskqueuepb.RateLimit{RequestsPerSecond: 10},
 		}),
 	}
-	rlm := newRateLimitManager(clock.NewRealTimeSource(), udm, config, enumspb.TASK_QUEUE_TYPE_ACTIVITY)
+	rlm := newRateLimitManager(udm, config, enumspb.TASK_QUEUE_TYPE_ACTIVITY)
 	rlm.Start()
 	defer rlm.Stop()
 
@@ -163,8 +164,7 @@ func (s *RateLimitManagerSuite) TestFractionScaling_ApiConfigRPS() {
 		tqid.UnsafeTaskQueueFamily("test-ns", "test-tq").TaskQueue(enumspb.TASK_QUEUE_TYPE_WORKFLOW),
 		cfg, "test-ns",
 	)
-	ts := clock.NewRealTimeSource()
-	rlm := newRateLimitManager(ts, &mockUserDataManager{}, config, enumspb.TASK_QUEUE_TYPE_WORKFLOW)
+	rlm := newRateLimitManager(&mockUserDataManager{}, config, enumspb.TASK_QUEUE_TYPE_WORKFLOW)
 	rlm.Start()
 	defer rlm.Stop()
 
@@ -183,8 +183,7 @@ func (s *RateLimitManagerSuite) TestFractionScaling_WorkerRPS() {
 		tqid.UnsafeTaskQueueFamily("test-ns", "test-tq").TaskQueue(enumspb.TASK_QUEUE_TYPE_WORKFLOW),
 		cfg, "test-ns",
 	)
-	ts := clock.NewRealTimeSource()
-	rlm := newRateLimitManager(ts, &mockUserDataManager{}, config, enumspb.TASK_QUEUE_TYPE_WORKFLOW)
+	rlm := newRateLimitManager(&mockUserDataManager{}, config, enumspb.TASK_QUEUE_TYPE_WORKFLOW)
 	rlm.Start()
 	defer rlm.Stop()
 
@@ -220,8 +219,7 @@ func (s *RateLimitManagerSuite) TestFractionScaling_FairnessKeyRateLimitDefault(
 			},
 		},
 	}
-	ts := clock.NewRealTimeSource()
-	rlm := newRateLimitManager(ts, udm, config, enumspb.TASK_QUEUE_TYPE_WORKFLOW)
+	rlm := newRateLimitManager(udm, config, enumspb.TASK_QUEUE_TYPE_WORKFLOW)
 	rlm.Start()
 	defer rlm.Stop()
 
@@ -243,8 +241,7 @@ func (s *RateLimitManagerSuite) TestFractionScaling_ZeroFraction() {
 		tqid.UnsafeTaskQueueFamily("test-ns", "test-tq").TaskQueue(enumspb.TASK_QUEUE_TYPE_WORKFLOW),
 		cfg, "test-ns",
 	)
-	ts := clock.NewRealTimeSource()
-	rlm := newRateLimitManager(ts, &mockUserDataManager{}, config, enumspb.TASK_QUEUE_TYPE_WORKFLOW)
+	rlm := newRateLimitManager(&mockUserDataManager{}, config, enumspb.TASK_QUEUE_TYPE_WORKFLOW)
 	rlm.Start()
 	defer rlm.Stop()
 
@@ -253,4 +250,41 @@ func (s *RateLimitManagerSuite) TestFractionScaling_ZeroFraction() {
 	rps, source := rlm.GetEffectiveRPSAndSource()
 	s.InDelta(0.0, rps, 0.0)
 	s.Equal(enumspb.RATE_LIMIT_SOURCE_API, source)
+}
+
+func TestRateLimitChangeNotifications(t *testing.T) {
+	t.Parallel()
+	r := &rateLimitManager{
+		config:      &taskQueueConfig{RateLimitFraction: func() float64 { return 1 }},
+		adminNsRate: 100, adminTqRate: 100, numReadPartitions: 1,
+		effectiveRPS: 100, wholeQueueLimit: simplelimiter.MakeParams(100, defaultBurstDuration),
+	}
+	notifications := 0
+	r.onRateLimitChanged = func() {
+		notifications++
+		// Callers can read the new parameters: notification must run outside r.mu.
+		_ = r.GetWholeQueueLimit()
+	}
+	workerRate := func(rate float64) *pollMetadata {
+		return &pollMetadata{taskQueueMetadata: &taskqueuepb.TaskQueueMetadata{MaxTasksPerSecond: wrapperspb.Double(rate)}}
+	}
+	for _, tc := range []struct {
+		name   string
+		update func()
+		want   int
+	}{
+		{"worker stops dispatch", func() { r.InjectWorkerRPS(workerRate(0)) }, 1},
+		{"same worker rate", func() { r.InjectWorkerRPS(workerRate(0)) }, 1},
+		{"worker resumes dispatch", func() { r.InjectWorkerRPS(workerRate(10)) }, 2},
+		{"namespace cap", func() { r.setAdminNsRate(5) }, 3},
+		{"task queue cap", func() { r.setAdminTqRate(4) }, 4},
+		{"partition count unchanged effective rate", func() { r.setNumReadPartitions(2) }, 4},
+		{"partition count reduces rate", func() { r.setNumReadPartitions(4) }, 5},
+		{"worker removes rate", func() { r.InjectWorkerRPS(nil) }, 6},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tc.update()
+			require.Equal(t, tc.want, notifications)
+		})
+	}
 }

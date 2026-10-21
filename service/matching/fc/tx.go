@@ -31,6 +31,7 @@ var errInvalidTxState = serviceerror.NewInternal("invalid fc tx state")
 // If the task is forwarded to another partition after Check, call tx.ApplyHints() with the hints
 // that the other partition returns, and then tx.Rollback() if the forward failed.
 //
+// A nil callback checks readiness without registering for notifications.
 // A nil *Tx is valid and all operations are no-ops.
 // Tx is not safe for concurrent use.
 // TODO(fc): consider getting rid of fcTask and passing []Limiters and (int32,time.Time)?

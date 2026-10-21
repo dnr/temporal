@@ -6014,31 +6014,6 @@ func defaultTestConfig() *Config {
 	return config
 }
 
-type (
-	dynamicRateBurstWrapper struct {
-		quotas.MutableRateBurst
-		*quotas.RateLimiterImpl
-	}
-)
-
-func (d *dynamicRateBurstWrapper) SetRPS(rps float64) {
-	d.MutableRateBurst.SetRPS(rps)
-	d.RateLimiterImpl.SetRPS(rps)
-}
-
-func (d *dynamicRateBurstWrapper) SetBurst(burst int) {
-	d.MutableRateBurst.SetBurst(burst)
-	d.RateLimiterImpl.SetBurst(burst)
-}
-
-func (d *dynamicRateBurstWrapper) Rate() float64 {
-	return d.RateLimiterImpl.Rate()
-}
-
-func (d *dynamicRateBurstWrapper) Burst() int {
-	return d.RateLimiterImpl.Burst()
-}
-
 func useFairness(config *Config) {
 	config.EnableFairnessSub = staticTrueChange
 }
@@ -6992,4 +6967,11 @@ func TestFairnessConfigOverridesPersistedV0(t *testing.T) {
 	require.NoError(t, err)
 
 	require.True(t, pm.config.EnableFairness)
+}
+
+// For use in tests
+func (e *matchingEngineImpl) updateTaskQueue(partition tqid.Partition, mgr taskQueuePartitionManager) {
+	e.partitionsLock.Lock()
+	defer e.partitionsLock.Unlock()
+	e.partitions[partition.Key()] = mgr
 }

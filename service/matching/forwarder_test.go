@@ -222,11 +222,6 @@ func (t *ForwarderTestSuite) TestForwardQueryTaskRateNotEnforced() {
 	t.NoError(err) // no rate limiting should be enforced for query task
 }
 
-func (t *ForwarderTestSuite) TestForwardPollError() {
-	_, err := t.fwdr.ForwardPoll(context.Background(), &pollMetadata{})
-	t.Equal(tqid.ErrNoParent, err)
-}
-
 func (t *ForwarderTestSuite) TestForwardPollWorkflowTaskQueue() {
 	t.usingTaskqueuePartition(enumspb.TASK_QUEUE_TYPE_WORKFLOW)
 
@@ -244,7 +239,7 @@ func (t *ForwarderTestSuite) TestForwardPollWorkflowTaskQueue() {
 		},
 	).Return(resp, nil)
 
-	task, err := t.fwdr.ForwardPoll(ctx, &pollMetadata{})
+	task, err := ForwardPollWithTarget(ctx, &pollMetadata{}, t.client, t.partition, mustParent(t.partition, 20))
 	t.NoError(err)
 	t.NotNil(task)
 	t.NotNil(request)
@@ -275,9 +270,9 @@ func (t *ForwarderTestSuite) TestForwardPollWorkflowTaskQueuePreservesWorkerInst
 		},
 	).Return(resp, nil)
 
-	task, err := t.fwdr.ForwardPoll(ctx, &pollMetadata{
+	task, err := ForwardPollWithTarget(ctx, &pollMetadata{
 		workerInstanceKey: workerInstanceKey,
-	})
+	}, t.client, t.partition, mustParent(t.partition, 20))
 	t.Require().NoError(err)
 	t.NotNil(task)
 	t.NotNil(request)
@@ -302,7 +297,7 @@ func (t *ForwarderTestSuite) TestForwardPollForActivity() {
 		},
 	).Return(resp, nil)
 
-	task, err := t.fwdr.ForwardPoll(ctx, &pollMetadata{})
+	task, err := ForwardPollWithTarget(ctx, &pollMetadata{}, t.client, t.partition, mustParent(t.partition, 20))
 	t.Require().NoError(err)
 	t.NotNil(task)
 	t.NotNil(request)
@@ -333,9 +328,9 @@ func (t *ForwarderTestSuite) TestForwardPollForActivityPreservesWorkerInstanceKe
 		},
 	).Return(resp, nil)
 
-	task, err := t.fwdr.ForwardPoll(ctx, &pollMetadata{
+	task, err := ForwardPollWithTarget(ctx, &pollMetadata{
 		workerInstanceKey: workerInstanceKey,
-	})
+	}, t.client, t.partition, mustParent(t.partition, 20))
 	t.Require().NoError(err)
 	t.NotNil(task)
 	t.NotNil(request)
@@ -363,9 +358,9 @@ func (t *ForwarderTestSuite) TestForwardPollForNexusPreservesWorkerInstanceKey()
 		},
 	).Return(resp, nil)
 
-	task, err := t.fwdr.ForwardPoll(ctx, &pollMetadata{
+	task, err := ForwardPollWithTarget(ctx, &pollMetadata{
 		workerInstanceKey: workerInstanceKey,
-	})
+	}, t.client, t.partition, mustParent(t.partition, 20))
 	t.Require().NoError(err)
 	t.NotNil(task)
 	t.NotNil(request)

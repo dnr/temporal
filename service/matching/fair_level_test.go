@@ -3,6 +3,7 @@ package matching
 import (
 	"testing"
 
+	"github.com/emirpasic/gods/maps/treemap"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -28,4 +29,16 @@ func TestFairLevelMax(t *testing.T) {
 	assert.Equal(t, fairLevel{pass: 10, id: 100}, fairLevel{pass: 10, id: 100}.max(fairLevel{pass: 10, id: 100}))
 	assert.Equal(t, fairLevel{pass: 11, id: 100}, fairLevel{pass: 10, id: 100}.max(fairLevel{pass: 11, id: 100}))
 	assert.Equal(t, fairLevel{pass: 10, id: 100}, fairLevel{pass: 10, id: 100}.max(fairLevel{pass: 5, id: 105}))
+}
+
+func newFairLevelTreeMap() *treemap.Map {
+	return treemap.NewWith(func(aany, bany any) int {
+		a, b := aany.(fairLevel), bany.(fairLevel) // nolint:revive
+		if a.less(b) {
+			return -1
+		} else if b.less(a) {
+			return 1
+		}
+		return 0
+	})
 }

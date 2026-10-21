@@ -139,13 +139,6 @@ func (db *taskQueueDB) getMaxFairReadLevelLocked(subqueue subqueueIndex) fairLev
 	return fairLevelFromProto(db.subqueues[subqueue].FairMaxReadLevel)
 }
 
-// This is only exposed for testing!
-func (db *taskQueueDB) setMaxReadLevelForTesting(subqueue subqueueIndex, level int64) {
-	db.Lock()
-	defer db.Unlock()
-	db.subqueues[subqueue].maxReadLevel = level
-}
-
 // RenewLease renews the lease on a taskqueue. If there is no previous lease,
 // this method will attempt to steal taskqueue from current owner
 func (db *taskQueueDB) RenewLease(

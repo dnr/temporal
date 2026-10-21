@@ -236,6 +236,9 @@ func (rs *readinessShard) syncLimiter(limiter limiterState, toNotify *deferedNot
 }
 
 func (rs *readinessShard) addEdgeLocked(limiter limiterState, cb ReadinessCallback, pri wakePriority) {
+	if cb == nil {
+		return
+	}
 	// fwd is sorted by pri, so if cb is already present with a different pri, we have to
 	// remove the old entry first or we'll leave a stale one behind.
 	rs.removeEdgeLocked(limiter, cb)

@@ -9,6 +9,7 @@ import (
 	commonpb "go.temporal.io/api/common/v1"
 	taskqueuepb "go.temporal.io/api/taskqueue/v1"
 	enumsspb "go.temporal.io/server/api/enums/v1"
+	persistencespb "go.temporal.io/server/api/persistence/v1"
 	taskqueuespb "go.temporal.io/server/api/taskqueue/v1"
 	"go.temporal.io/server/common/namespace"
 	"go.temporal.io/server/common/tqid"
@@ -16,11 +17,11 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 type fcManager struct {
 	partition        tqid.Partition
-	config           *taskQueueConfig
 	userDataManager  userDataManager
 	rateLimitManager *rateLimitManager
 	readiness        *fc.Readiness
@@ -28,14 +29,12 @@ type fcManager struct {
 
 func newFCManager(
 	partition tqid.Partition,
-	config *taskQueueConfig,
 	userDataManager userDataManager,
 	rateLimitManager *rateLimitManager,
 	readiness *fc.Readiness,
 ) *fcManager {
 	return &fcManager{
 		partition:        partition,
-		config:           config,
 		userDataManager:  userDataManager,
 		rateLimitManager: rateLimitManager,
 		readiness:        readiness,
@@ -43,9 +42,6 @@ func newFCManager(
 }
 
 func (m *fcManager) TaskReady(task *internalTask, cb fc.ReadinessCallback) error {
-	// Worker-supplied rates can change while a task is queued, including from zero
-	// to a positive rate. Refresh before checking so the task can make progress.
-	task.updateLimitersFromConfig(m)
 	nsID := namespace.ID(m.partition.NamespaceId())
 	tx := m.readiness.NewTx(nsID, task, cb)
 	task.fcTx = tx // attach to task so we can use it in matching engine
@@ -65,31 +61,50 @@ func (m *fcManager) CancelAllCallbacks(cb fc.ReadinessCallback) {
 }
 
 func (m *fcManager) grantEagerTokens(priority *commonpb.Priority, requested int32) int32 {
-	userData, _, err := m.userDataManager.GetUserData()
+	if requested <= 0 {
+		return 0
+	}
+	task := newInternalTaskForSyncMatch(&persistencespb.TaskInfo{
+		Priority:   priority,
+		CreateTime: timestamppb.Now(),
+	}, nil, 0, nil)
+	var err error
+	task.limiters, err = m.UpdateLimitersFromConfig(nil, task)
 	if err != nil {
 		return 0
 	}
-	cfg := userData.GetData().GetPerType()[int32(m.partition.TaskType())].GetConfig()
-	// Eager grants do not carry limiter refs back to history, so they cannot hold
-	// concurrency slots that must be released when the task finishes.
-	if cfg.GetQueueConcurrencyLimit().GetConcurrencyLimit() != nil {
-		return 0
+	if task.limiters == nil {
+		return requested
 	}
-	limiters := m.updateLocalRateLimiter(nil)
-	limiters = m.updateFairnessRateLimiter(limiters, priority)
-	return m.readiness.GrantLocalTokens(namespace.ID(m.partition.NamespaceId()), limiters, requested)
+	for _, lim := range task.limiters.Limiters {
+		if lim.Valid() && lim.Type != enumsspb.LIMITER_TYPE_LOCAL_RATE_LIMIT {
+			return 0
+		}
+	}
+	// TODO(fc): Support the full flow control protocol for eager tasks, carrying
+	// limiter refs to History. History may need to perform the final Commit.
+	nsID := namespace.ID(m.partition.NamespaceId())
+	for granted := int32(0); granted < requested; granted++ {
+		tx := m.readiness.NewTx(nsID, task, nil)
+		if err := tx.Check(); err != nil {
+			// Check rolls back failed transactions.
+			return granted
+		}
+		tx.Close()
+	}
+	return requested
 }
 
-func (m *fcManager) UpdateLimitersFromConfig(limiters *fc.Limiters, task *internalTask) *fc.Limiters {
+func (m *fcManager) UpdateLimitersFromConfig(limiters *fc.Limiters, task *internalTask) (*fc.Limiters, error) {
 	if task.isPollForwarder() {
-		return nil
+		return nil, nil
 	}
 	// TODO(fc): decide which limiters should apply to query and nexus tasks. Currently they get
 	// the same ones as workflow/activity tasks, but their dispatch paths only do Check, not
 	// Reserve/Commit/release (see TODO(fc) in matchingEngineImpl).
 	userData, _, err := m.userDataManager.GetUserData()
 	if err != nil {
-		return nil
+		return nil, err
 	}
 	tqType := m.partition.TaskType()
 	cfg := userData.GetData().GetPerType()[int32(tqType)].GetConfig()
@@ -97,7 +112,7 @@ func (m *fcManager) UpdateLimitersFromConfig(limiters *fc.Limiters, task *intern
 	limiters = m.updateWholeQueueConcurrencyLimiter(cfg, cfgVersion, limiters)
 	limiters = m.updateLocalRateLimiter(limiters)
 	limiters = m.updateFairnessRateLimiter(limiters, task.getPriority())
-	return limiters
+	return limiters, nil
 }
 
 func (m *fcManager) updateWholeQueueConcurrencyLimiter(cfg *taskqueuepb.TaskQueueConfig, cfgVersion int64, limiters *fc.Limiters) *fc.Limiters {

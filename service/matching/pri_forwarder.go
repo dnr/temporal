@@ -207,18 +207,6 @@ func (f *priForwarder) ForwardNexusTask(ctx context.Context, task *internalTask)
 	return resp, err
 }
 
-// ForwardPoll forwards a poll request to parent task queue partition if it exist
-// TODO(pri): remove this and update tests to call ForwardPollWithTarget directly
-func (f *priForwarder) ForwardPoll(ctx context.Context, pollMetadata *pollMetadata) (*internalTask, error) {
-	degree := f.cfg.ForwarderMaxChildrenPerNode()
-	target, err := f.partition.ParentPartition(degree)
-	if err != nil {
-		return nil, err
-	}
-
-	return ForwardPollWithTarget(ctx, pollMetadata, f.client, f.partition, target)
-}
-
 // ForwardPollWithTarget forwards a poll request to another partition
 func ForwardPollWithTarget(
 	ctx context.Context,

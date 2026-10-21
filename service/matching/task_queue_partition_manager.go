@@ -131,14 +131,12 @@ func newTaskQueuePartitionManager(
 	userDataManager userDataManager,
 ) (*taskQueuePartitionManagerImpl, error) {
 	rateLimitManager := newRateLimitManager(
-		e.timeSource,
 		userDataManager,
 		tqConfig,
 		partition.TaskQueue().TaskType(),
 	)
 	fcManager := newFCManager(
 		partition,
-		tqConfig,
 		userDataManager,
 		rateLimitManager,
 		e.fcReadiness,
@@ -200,6 +198,7 @@ func newTaskQueuePartitionManager(
 		defaultQueueFuture: future.NewFuture[physicalTaskQueueManager](),
 		taskHooks:          taskHooks,
 	}
+	pm.rateLimitManager.onRateLimitChanged = pm.notifyQueuesOfConfigChange
 	pm.initCtx, pm.initCancel = context.WithCancel(context.Background())
 
 	if pm.partition.IsRoot() {
@@ -2542,7 +2541,12 @@ func (pm *taskQueuePartitionManagerImpl) getPerTypeUserData() (*persistencespb.T
 func (pm *taskQueuePartitionManagerImpl) userDataChanged(_ *persistencespb.VersionedTaskQueueUserData) {
 	// Update rateLimits if any change is userData.
 	pm.rateLimitManager.UserDataChanged()
+	pm.notifyQueuesOfConfigChange()
+}
 
+// notifyQueuesOfConfigChange refreshes queued tasks after API, worker, or system limit changes.
+// The rate limit manager calls it after releasing its lock.
+func (pm *taskQueuePartitionManagerImpl) notifyQueuesOfConfigChange() {
 	// Do not use defaultQueue() because that treats
 	// not being ready as an error, which is expected during bringup here.
 	defaultQ, err := pm.defaultQueueFuture.GetIfReady()
