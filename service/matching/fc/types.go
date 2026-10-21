@@ -21,9 +21,12 @@ const (
 // Limiter identifies one flow control limiter attached to a task, with optional configuration.
 // Limiter is implicitly scoped to one namespace by the task that it's attached to.
 type Limiter struct {
-	Key           string
-	Type          enumsspb.LimiterType
-	Source        LimiterSource
+	Key    string
+	Type   enumsspb.LimiterType
+	Source LimiterSource
+	// Config is *taskqueuepb.ConcurrencyLimit for LIMITER_TYPE_CONCURRENCY or
+	// *simplelimiter.Params for LIMITER_TYPE_LOCAL_RATE_LIMIT. These are pointers so that
+	// storing them in an `any` doesn't allocate. The pointed-to values must not be modified.
 	Config        any
 	ConfigVersion int64
 }

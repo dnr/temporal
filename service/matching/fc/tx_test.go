@@ -88,7 +88,7 @@ func TestSkipCheck_DoesNotBlock(t *testing.T) {
 		Type:   enumsspb.LIMITER_TYPE_LOCAL_RATE_LIMIT,
 		Key:    "ratekey",
 		Source: LimiterSourceConfig,
-		Config: simplelimiter.MakeParams(0, 0),
+		Config: new(simplelimiter.MakeParams(0, 0)),
 	})
 	cb := &testCallback{}
 	defer r.CancelAllCallbacks(testNsID, cb)
@@ -284,8 +284,8 @@ func TestCheckWithoutCallbackRollsBackWithoutRegisteringWaiters(t *testing.T) {
 	t.Parallel()
 	r, _ := newTestReadiness(t, nil)
 	task := &testTask{limiters: []Limiter{
-		{Type: enumsspb.LIMITER_TYPE_LOCAL_RATE_LIMIT, Key: "first", Source: LimiterSourceConfig, Config: simplelimiter.MakeParams(1, 0)},
-		{Type: enumsspb.LIMITER_TYPE_LOCAL_RATE_LIMIT, Key: "second", Source: LimiterSourceConfig, Config: simplelimiter.MakeParams(0, 0)},
+		{Type: enumsspb.LIMITER_TYPE_LOCAL_RATE_LIMIT, Key: "first", Source: LimiterSourceConfig, Config: new(simplelimiter.MakeParams(1, 0))},
+		{Type: enumsspb.LIMITER_TYPE_LOCAL_RATE_LIMIT, Key: "second", Source: LimiterSourceConfig, Config: new(simplelimiter.MakeParams(0, 0))},
 	}}
 	tx := r.NewTx(testNsID, task, nil)
 	require.ErrorIs(t, tx.Check(), ErrLocalLimiterBlocked)

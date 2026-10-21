@@ -152,8 +152,8 @@ func (m *fcManager) updateLocalRateLimiter(limiters []fc.Limiter) []fc.Limiter {
 		Source: fc.LimiterSourceConfig,
 	}
 	wholeQueueLimit := m.rateLimitManager.GetWholeQueueLimit()
-	if !wholeQueueLimit.Limited() && !wholeQueueLimit.Never() {
-		// currently there is always some whole queue limit, so this is unreachable
+	if wholeQueueLimit == nil || !wholeQueueLimit.Limited() && !wholeQueueLimit.Never() {
+		// currently there is always some whole queue limit (after Start), so this is unreachable
 		return m.removeLimiter(lim, limiters)
 	}
 	lim.Config = wholeQueueLimit
@@ -170,7 +170,7 @@ func (m *fcManager) updateFairnessRateLimiter(limiters []fc.Limiter, pri *common
 	if !fkeyLimit.Limited() && !fkeyLimit.Never() {
 		return m.removeLimiter(lim, limiters)
 	}
-	lim.Config = fkeyLimit
+	lim.Config = &fkeyLimit
 	return m.addOrUpdateLimiter(lim, limiters)
 }
 

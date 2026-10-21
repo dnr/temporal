@@ -32,7 +32,9 @@ type (
 		rateLimitSource enumspb.RateLimitSource // Source of the rate limit, can be set via API, worker or system default.
 		// Derived from the `defaultTaskDispatchRPS`.
 		// Fairness tasks rate limiter.
-		wholeQueueLimit simplelimiter.Params
+		// This is a pointer so that fcManager can store it in fc.Limiter.Config (an `any`) on
+		// every task without allocating. The Params immutable; replace the pointer instead.
+		wholeQueueLimit *simplelimiter.Params
 		// Rate limiter for individual fairness keys.
 		// Note that we currently have only one limit for all keys, which is scaled by the key's
 		// weight. If we do this, we can assume that all keys are either at or below their rate
@@ -194,7 +196,9 @@ func (r *rateLimitManager) GetEffectiveRPSAndSource() (float64, enumspb.RateLimi
 	return r.effectiveRPS * float64(r.numReadPartitions), r.rateLimitSource
 }
 
-func (r *rateLimitManager) GetWholeQueueLimit() simplelimiter.Params {
+// GetWholeQueueLimit returns the current whole-queue limit. The returned value must not be
+// modified. It may be nil before Start.
+func (r *rateLimitManager) GetWholeQueueLimit() *simplelimiter.Params {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return r.wholeQueueLimit
@@ -258,7 +262,9 @@ func (r *rateLimitManager) trySetRPSFromUserDataLocked() {
 // UpdateSimpleRateLimit updates the overall queue rate limits for the simpleRateLimiter implementation
 func (r *rateLimitManager) updateSimpleRateLimitWithBurstLocked(burstDuration time.Duration) {
 	newRPS := r.effectiveRPS
-	r.wholeQueueLimit = simplelimiter.MakeParams(newRPS, burstDuration)
+	if p := simplelimiter.MakeParams(newRPS, burstDuration); r.wholeQueueLimit == nil || p != *r.wholeQueueLimit {
+		r.wholeQueueLimit = &p
+	}
 }
 
 // UpdatePerKeySimpleRateLimit updates the per-key rate limit for the simpleRateLimit implementation

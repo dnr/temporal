@@ -310,7 +310,7 @@ func (s *PartitionManagerTestSuite) TestGrantEagerDispatchGrantsHigherPriorityFi
 	partitionMgr.rateLimitManager = &rateLimitManager{
 		config: partitionMgr.config,
 
-		wholeQueueLimit: simplelimiter.MakeParams(1, 0),
+		wholeQueueLimit: new(simplelimiter.MakeParams(1, 0)),
 	}
 	partitionMgr.fcManager = s.newEagerDispatchFCManager(partitionMgr)
 
@@ -356,7 +356,7 @@ func (s *PartitionManagerTestSuite) TestGrantEagerDispatchMetrics() {
 		{
 			name: "general rate limit",
 			configure: func(rateLimitManager *rateLimitManager) {
-				rateLimitManager.wholeQueueLimit = simplelimiter.MakeParams(1, 0)
+				rateLimitManager.wholeQueueLimit = new(simplelimiter.MakeParams(1, 0))
 			},
 			items: []*matchingservice.GrantEagerDispatchRequest_Item{
 				{Count: 3},
@@ -2961,7 +2961,7 @@ func (s *PartitionManagerTestSuite) newEagerDispatchPhysicalQueue(backlogPriorit
 func (s *PartitionManagerTestSuite) newRateLimitedEagerDispatchPartitionManager() *taskQueuePartitionManagerImpl {
 	partitionMgr := s.newEagerDispatchPartitionManager(0, nil)
 	limiter := newRateLimitManager(partitionMgr.userDataManager, partitionMgr.config, partitionMgr.partition.TaskQueue().TaskType())
-	limiter.wholeQueueLimit = simplelimiter.MakeParams(1, 0)
+	limiter.wholeQueueLimit = new(simplelimiter.MakeParams(1, 0))
 	partitionMgr.rateLimitManager = limiter
 	partitionMgr.fcManager = s.newEagerDispatchFCManager(partitionMgr)
 	return partitionMgr

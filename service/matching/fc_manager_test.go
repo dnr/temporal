@@ -144,7 +144,7 @@ func TestFCManagerGrantTokens(t *testing.T) {
 	t.Run("new matcher applies the whole queue limit", func(t *testing.T) {
 		manager := &rateLimitManager{
 			config:          &taskQueueConfig{},
-			wholeQueueLimit: simplelimiter.MakeParams(2, 500*time.Millisecond),
+			wholeQueueLimit: new(simplelimiter.MakeParams(2, 500*time.Millisecond)),
 		}
 
 		fcManager := newGrantTestFCManager(t, manager, clock.NewEventTimeSource().Update(time.Now()))
@@ -158,7 +158,7 @@ func TestFCManagerGrantTokens(t *testing.T) {
 		timeSource := clock.NewEventTimeSource().Update(time.Now())
 		manager := &rateLimitManager{
 			config:          &taskQueueConfig{},
-			wholeQueueLimit: simplelimiter.NoLimit(),
+			wholeQueueLimit: new(simplelimiter.NoLimit()),
 			perKeyLimit:     simplelimiter.MakeParams(1, 0),
 		}
 
@@ -200,7 +200,7 @@ func TestEagerDispatchSharesRateTokens(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 			rateLimit := &rateLimitManager{
-				wholeQueueLimit: simplelimiter.MakeParams(1, 0),
+				wholeQueueLimit: new(simplelimiter.MakeParams(1, 0)),
 			}
 			manager := newGrantTestFCManager(t, rateLimit, clock.NewEventTimeSource().Update(time.Now()))
 			task := newInternalTaskForSyncMatch(&persistencespb.TaskInfo{CreateTime: timestamppb.Now()}, nil, 0, nil)
@@ -224,7 +224,7 @@ func TestEagerDispatchSharesRateTokens(t *testing.T) {
 func TestEagerDispatchBlocksConcurrencyLimitedQueues(t *testing.T) {
 	t.Parallel()
 	manager := newGrantTestFCManager(t, &rateLimitManager{
-		wholeQueueLimit: simplelimiter.MakeParams(1, 0),
+		wholeQueueLimit: new(simplelimiter.MakeParams(1, 0)),
 	}, clock.NewEventTimeSource().Update(time.Now()))
 	userData := &mockUserDataManager{}
 	manager.userDataManager = userData
@@ -243,7 +243,7 @@ func TestEagerDispatchBlocksConcurrencyLimitedQueues(t *testing.T) {
 func TestEagerDispatchFairnessGrantPreservesOtherKeysCapacity(t *testing.T) {
 	t.Parallel()
 	manager := newGrantTestFCManager(t, &rateLimitManager{
-		wholeQueueLimit: simplelimiter.MakeParams(2, 500*time.Millisecond),
+		wholeQueueLimit: new(simplelimiter.MakeParams(2, 500*time.Millisecond)),
 		perKeyLimit:     simplelimiter.MakeParams(1, 0),
 	}, clock.NewEventTimeSource().Update(time.Now()))
 	first := &commonpb.Priority{FairnessKey: "first"}
@@ -257,7 +257,7 @@ func TestEagerDispatchFairnessGrantPreservesOtherKeysCapacity(t *testing.T) {
 func TestEagerDispatchConcurrentGrants(t *testing.T) {
 	t.Parallel()
 	manager := newGrantTestFCManager(t, &rateLimitManager{
-		wholeQueueLimit: simplelimiter.MakeParams(10, time.Second),
+		wholeQueueLimit: new(simplelimiter.MakeParams(10, time.Second)),
 	}, clock.NewEventTimeSource().Update(time.Now()))
 	const callers = 16
 	results := make(chan int32, callers)

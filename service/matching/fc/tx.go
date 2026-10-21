@@ -65,7 +65,10 @@ func (r *Readiness) makeLimiterTx(nsID namespace.ID, task fcTask, lim Limiter) l
 		lls := r.getLocalLimiter(nsID, lim.Key)
 
 		// if config is missing or wrong type, zero params means "no limit"
-		config, _ := lim.Config.(simplelimiter.Params)
+		var config simplelimiter.Params
+		if p, ok := lim.Config.(*simplelimiter.Params); ok && p != nil {
+			config = *p
+		}
 		pri := makeWakePriority(task.PriorityAndAge())
 
 		return newLocalLimiterTx(lls, config, pri)

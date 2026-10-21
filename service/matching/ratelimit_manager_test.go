@@ -276,14 +276,14 @@ func TestUserDataRateLimitChangeDoesNotNotify(t *testing.T) {
 		config:        &taskQueueConfig{RateLimitFraction: func() float64 { return 1 }},
 		taskQueueType: enumspb.TASK_QUEUE_TYPE_ACTIVITY,
 		adminNsRate:   100, adminTqRate: 100, numReadPartitions: 2,
-		effectiveRPS: 100, wholeQueueLimit: simplelimiter.MakeParams(100, defaultBurstDuration),
+		effectiveRPS: 100, wholeQueueLimit: new(simplelimiter.MakeParams(100, defaultBurstDuration)),
 	}
 	notifications := 0
 	r.onRateLimitChanged = func() { notifications++ }
 
 	r.UserDataChanged()
 
-	require.Equal(t, simplelimiter.MakeParams(10, defaultBurstDuration), r.GetWholeQueueLimit())
+	require.Equal(t, simplelimiter.MakeParams(10, defaultBurstDuration), *r.GetWholeQueueLimit())
 	require.Equal(t, simplelimiter.MakeParams(2, defaultBurstDuration), r.GetPerKeyLimit(nil))
 	require.Zero(t, notifications)
 }
@@ -293,7 +293,7 @@ func TestRateLimitChangeNotifications(t *testing.T) {
 	r := &rateLimitManager{
 		config:      &taskQueueConfig{RateLimitFraction: func() float64 { return 1 }},
 		adminNsRate: 100, adminTqRate: 100, numReadPartitions: 1,
-		effectiveRPS: 100, wholeQueueLimit: simplelimiter.MakeParams(100, defaultBurstDuration),
+		effectiveRPS: 100, wholeQueueLimit: new(simplelimiter.MakeParams(100, defaultBurstDuration)),
 	}
 	notifications := 0
 	r.onRateLimitChanged = func() {
