@@ -66,6 +66,10 @@ type (
 		created uint64
 		stopped bool
 
+		// syncScratch is reused by syncLimiter to avoid an allocation per call. It's only used
+		// with lock held, and syncLocked must not hold on to it.
+		syncScratch readinessSyncUpdate
+
 		// TODO(fc): clean up caches of idle/stale state
 		// TODO(fc): gauges for size of cache
 		// TODO(fc): limit active waiters, add suspended state, etc.
@@ -221,12 +225,14 @@ func (rs *readinessShard) cancelAllCallbacks(cb ReadinessCallback) {
 func (rs *readinessShard) syncLimiter(limiter limiterState, toNotify *deferedNotify) {
 	// call syncLocked with current waiter set
 	fEnts := rs.fwd[limiter]
-	rsu := readinessSyncUpdate{waiters: fEnts}
+	rsu := &rs.syncScratch
+	rsu.waiters = fEnts
 	// syncLocked may call rsu.wake(), which will remove elements from the front of rsu.waiters
-	limiter.syncLocked(&rsu)
+	limiter.syncLocked(rsu)
 
 	// record and remove the ones that we're going to notify
 	woke := len(fEnts) - len(rsu.waiters)
+	rsu.waiters = nil
 	// note: clone slice before iterating over it, removeEdgeLocked may modify slices
 	for _, fEnt := range slices.Clone(fEnts[:woke]) {
 		rs.removeEdgeLocked(limiter, fEnt.cb)
