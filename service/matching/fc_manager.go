@@ -25,6 +25,10 @@ type fcManager struct {
 	userDataManager  userDataManager
 	rateLimitManager *rateLimitManager
 	readiness        *fc.Readiness
+
+	// cached limiter keys
+	wholeQueueConcurrencyKey string
+	localKey                 string
 }
 
 func newFCManager(
@@ -33,12 +37,15 @@ func newFCManager(
 	rateLimitManager *rateLimitManager,
 	readiness *fc.Readiness,
 ) *fcManager {
-	return &fcManager{
+	m := &fcManager{
 		partition:        partition,
 		userDataManager:  userDataManager,
 		rateLimitManager: rateLimitManager,
 		readiness:        readiness,
 	}
+	m.wholeQueueConcurrencyKey = m.wholeQueueConcurrencyLimiterKey()
+	m.localKey = m.localLimiterKey()
+	return m
 }
 
 func (m *fcManager) TaskReady(task *internalTask, cb fc.ReadinessCallback) error {
@@ -127,7 +134,7 @@ func (m *fcManager) UpdateLimitersFromConfig(limiters []fc.Limiter, task *intern
 func (m *fcManager) updateWholeQueueConcurrencyLimiter(cfg *taskqueuepb.TaskQueueConfig, cfgVersion int64, limiters []fc.Limiter) []fc.Limiter {
 	lim := fc.Limiter{
 		Type:   enumsspb.LIMITER_TYPE_CONCURRENCY,
-		Key:    m.wholeQueueConcurrencyLimiterKey(),
+		Key:    m.wholeQueueConcurrencyKey,
 		Source: fc.LimiterSourceConfig,
 	}
 	if limit := cfg.GetQueueConcurrencyLimit().GetConcurrencyLimit(); limit != nil {
@@ -141,7 +148,7 @@ func (m *fcManager) updateWholeQueueConcurrencyLimiter(cfg *taskqueuepb.TaskQueu
 func (m *fcManager) updateLocalRateLimiter(limiters []fc.Limiter) []fc.Limiter {
 	lim := fc.Limiter{
 		Type:   enumsspb.LIMITER_TYPE_LOCAL_RATE_LIMIT,
-		Key:    m.localLimiterKey(),
+		Key:    m.localKey,
 		Source: fc.LimiterSourceConfig,
 	}
 	wholeQueueLimit := m.rateLimitManager.GetWholeQueueLimit()
