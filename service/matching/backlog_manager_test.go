@@ -148,6 +148,12 @@ func (s *BacklogManagerTestSuite) capturedTasks() []*internalTask {
 	return slices.Clone(s.capturedTasksSlice)
 }
 
+func (s *BacklogManagerTestSuite) setDBMaxReadLevel(db *taskQueueDB, subqueue subqueueIndex, level int64) {
+	db.Lock()
+	defer db.Unlock()
+	db.subqueues[subqueue].maxReadLevel = level
+}
+
 func (s *BacklogManagerTestSuite) TestTaskWriterShutdown() {
 	s.blm.Start()
 	defer s.blm.Stop()
@@ -312,7 +318,7 @@ func (s *BacklogManagerTestSuite) TestApproximateBacklogCount_ResetOnDrained() {
 	// Advance maxReadLevel past all task IDs to simulate a range renewal.
 	// After direct-add, readLevel == old maxReadLevel == last task ID.
 	maxRL := db.GetMaxReadLevel(subqueueZero) + 100
-	db.setMaxReadLevelForTesting(subqueueZero, maxRL)
+	s.setDBMaxReadLevel(db, subqueueZero, maxRL)
 
 	// Signal the reader pump to scan through the empty range up to the
 	// new maxReadLevel, advancing readLevel.
@@ -363,7 +369,7 @@ func (s *BacklogManagerTestSuite) TestApproximateBacklogCount_ResetOnGapDrain() 
 	// Advance maxReadLevel past the ack level to simulate a range renewal that left a gap of
 	// task IDs that were never actually written.
 	maxRL := db.GetMaxReadLevel(subqueueZero) + 100
-	db.setMaxReadLevelForTesting(subqueueZero, maxRL)
+	s.setDBMaxReadLevel(db, subqueueZero, maxRL)
 
 	// Drive a reader through the empty range exactly as getTasksPump does, but synchronously.
 	// Each empty batch advances the ack level via setReadLevelAfterGap.
@@ -593,7 +599,7 @@ func (s *BacklogManagerTestSuite) TestGetTaskBatch_ReadsInRangeSizedChunks() {
 	blm, tr, start := s.initPriReaderAtEnd()
 	blm.config.RangeSize = rangeSize
 	maxRL := start + 12*rangeSize
-	blm.db.setMaxReadLevelForTesting(subqueueZero, maxRL)
+	s.setDBMaxReadLevel(blm.db, subqueueZero, maxRL)
 
 	batch, err := tr.getTaskBatch(blm.tqCtx)
 	s.Require().NoError(err)
