@@ -46,3 +46,7 @@ func (llt *localLimiterTx) hint() *taskqueuespb.LimiterHint {
 
 func (llt *localLimiterTx) applyHint(*taskqueuespb.LimiterHint) {
 }
+
+func (llt *localLimiterTx) ref() *taskqueuespb.LimiterRef {
+	return nil // local limiters don't need to be released by history
+}

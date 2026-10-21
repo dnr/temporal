@@ -3,6 +3,7 @@ package fc
 import (
 	"context"
 
+	"github.com/google/uuid"
 	taskqueuepb "go.temporal.io/api/taskqueue/v1"
 	enumsspb "go.temporal.io/server/api/enums/v1"
 	taskqueuespb "go.temporal.io/server/api/taskqueue/v1"
@@ -10,7 +11,7 @@ import (
 
 type concurrencyTx struct {
 	cs                  *concurrencyState
-	slotID              string
+	slotID              string // generated lazily, use getSlotID
 	configUpdate        *taskqueuepb.ConcurrencyLimit
 	configUpdateVersion int64
 	pri                 wakePriority
@@ -19,18 +20,26 @@ type concurrencyTx struct {
 
 func newConcurrencyTx(
 	cs *concurrencyState,
-	slotID string,
 	configUpdate *taskqueuepb.ConcurrencyLimit,
 	configUpdateVersion int64,
 	pri wakePriority,
 ) *concurrencyTx {
 	return &concurrencyTx{
 		cs:                  cs,
-		slotID:              slotID,
 		configUpdate:        configUpdate,
 		configUpdateVersion: configUpdateVersion,
 		pri:                 pri,
 	}
+}
+
+// getSlotID returns the slot id for this tx. It's generated lazily so we don't create it until
+// we get to Reserve.
+func (ct *concurrencyTx) getSlotID() string {
+	if ct.slotID == "" {
+		// TODO(fc): consider deriving slot id from task to fix some nongraceful failover situations
+		ct.slotID = uuid.NewString()
+	}
+	return ct.slotID
 }
 
 func (ct *concurrencyTx) check(cb ReadinessCallback) error {
@@ -44,15 +53,15 @@ func (ct *concurrencyTx) cancelCheck() {
 }
 
 func (ct *concurrencyTx) reserve(ctx context.Context) error {
-	return ct.cs.reserve(ctx, ct.slotID, ct.configUpdate, ct.configUpdateVersion)
+	return ct.cs.reserve(ctx, ct.getSlotID(), ct.configUpdate, ct.configUpdateVersion)
 }
 
 func (ct *concurrencyTx) commit(ctx context.Context) error {
-	return ct.cs.commit(ctx, ct.slotID)
+	return ct.cs.commit(ctx, ct.getSlotID())
 }
 
 func (ct *concurrencyTx) cancelReserve(ctx context.Context) {
-	ct.cs.cancelReserve(ctx, ct.slotID)
+	ct.cs.cancelReserve(ctx, ct.getSlotID())
 }
 
 func (ct *concurrencyTx) close() {
@@ -71,4 +80,12 @@ func (ct *concurrencyTx) applyHint(hint *taskqueuespb.LimiterHint) {
 		return
 	}
 	ct.cs.reportSlotsHint(hint.GetGeneration(), hint.GetAvailableSlotsHint(), notifyAsync)
+}
+
+func (ct *concurrencyTx) ref() *taskqueuespb.LimiterRef {
+	return &taskqueuespb.LimiterRef{
+		LimiterType: enumsspb.LIMITER_TYPE_CONCURRENCY,
+		Key:         ct.cs.limiterKey(),
+		SlotId:      ct.getSlotID(),
+	}
 }

@@ -5,7 +5,6 @@ import (
 	"errors"
 	"sync"
 
-	"github.com/google/uuid"
 	"go.temporal.io/api/serviceerror"
 	taskqueuepb "go.temporal.io/api/taskqueue/v1"
 	enumsspb "go.temporal.io/server/api/enums/v1"
@@ -46,16 +45,12 @@ func (r *Readiness) NewTx(nsID namespace.ID, task fcTask, cb ReadinessCallback) 
 	tx := &Tx{cb: cb}
 	tx.limiters = tx.limitersBuf[:0]
 	for _, lim := range lims {
-		ltx, ref := r.makeLimiterTx(nsID, task, lim)
-		tx.limiters = append(tx.limiters, txEntry{limiterTx: ltx})
-		if ref != nil {
-			tx.refs = append(tx.refs, ref)
-		}
+		tx.limiters = append(tx.limiters, txEntry{limiterTx: r.makeLimiterTx(nsID, task, lim)})
 	}
 	return tx
 }
 
-func (r *Readiness) makeLimiterTx(nsID namespace.ID, task fcTask, lim Limiter) (limiterTx, *taskqueuespb.LimiterRef) {
+func (r *Readiness) makeLimiterTx(nsID namespace.ID, task fcTask, lim Limiter) limiterTx {
 	switch lim.Type {
 	case enumsspb.LIMITER_TYPE_CONCURRENCY:
 		cs := r.getConcurrencyLimiter(nsID, lim.Key)
@@ -63,12 +58,8 @@ func (r *Readiness) makeLimiterTx(nsID namespace.ID, task fcTask, lim Limiter) (
 		// if config is missing or wrong type, just leave it out
 		config, _ := lim.Config.(*taskqueuepb.ConcurrencyLimit)
 		pri := makeWakePriority(task.PriorityAndAge())
-		// TODO(fc): consider deriving slot id from task to fix some nongraceful failover situations
-		slotID := uuid.NewString()
 
-		tx := newConcurrencyTx(cs, slotID, config, lim.ConfigVersion, pri)
-		ref := &taskqueuespb.LimiterRef{LimiterType: lim.Type, Key: lim.Key, SlotId: slotID}
-		return tx, ref
+		return newConcurrencyTx(cs, config, lim.ConfigVersion, pri)
 
 	case enumsspb.LIMITER_TYPE_LOCAL_RATE_LIMIT:
 		lls := r.getLocalLimiter(nsID, lim.Key)
@@ -77,11 +68,11 @@ func (r *Readiness) makeLimiterTx(nsID namespace.ID, task fcTask, lim Limiter) (
 		config, _ := lim.Config.(simplelimiter.Params)
 		pri := makeWakePriority(task.PriorityAndAge())
 
-		return newLocalLimiterTx(lls, config, pri), nil
+		return newLocalLimiterTx(lls, config, pri)
 
 	default:
 		// TODO(fc): log or notify here
-		return noopLimiterTx{}, nil
+		return noopLimiterTx{}
 	}
 }
 
@@ -89,7 +80,7 @@ func (r *Readiness) makeLimiterTx(nsID namespace.ID, task fcTask, lim Limiter) (
 type Tx struct {
 	limiters     []txEntry // points into limitersBuf unless there are more than MaxLimiters
 	limitersBuf  [MaxLimiters]txEntry
-	refs         []*taskqueuespb.LimiterRef
+	refs         []*taskqueuespb.LimiterRef // built lazily by LimiterRefs
 	cb           ReadinessCallback
 	closed       bool
 	skippedCheck bool // true if SkipCheck was used, so there are no local tokens to return.
@@ -106,6 +97,7 @@ type limiterTx interface {
 	close()
 	hint() *taskqueuespb.LimiterHint
 	applyHint(*taskqueuespb.LimiterHint)
+	ref() *taskqueuespb.LimiterRef
 }
 
 // txEntry is the part of a Tx for one limiter.
@@ -130,6 +122,12 @@ const (
 func (tx *Tx) LimiterRefs() []*taskqueuespb.LimiterRef {
 	if tx == nil {
 		return nil
+	} else if tx.refs == nil {
+		for _, lim := range tx.limiters {
+			if ref := lim.ref(); ref != nil {
+				tx.refs = append(tx.refs, ref)
+			}
+		}
 	}
 	return tx.refs
 }
@@ -342,3 +340,4 @@ func (noopLimiterTx) cancelReserve(context.Context)       {}
 func (noopLimiterTx) close()                              {}
 func (noopLimiterTx) hint() *taskqueuespb.LimiterHint     { return nil }
 func (noopLimiterTx) applyHint(*taskqueuespb.LimiterHint) {}
+func (noopLimiterTx) ref() *taskqueuespb.LimiterRef       { return nil }
