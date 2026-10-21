@@ -44,15 +44,23 @@ func newFCManager(
 func (m *fcManager) TaskReady(task *internalTask, cb fc.ReadinessCallback) error {
 	nsID := namespace.ID(m.partition.NamespaceId())
 	tx := m.readiness.NewTx(nsID, task, cb)
-	task.fcTx = tx // attach to task so we can use it in matching engine
 
+	var err error
 	if task.isForwarded() {
 		// The partition that forwarded this task already did Check (on the parentTaskForwarder
 		// match), so we shouldn't block it again here. If we record it as started, we still do
 		// Reserve and Commit, and pass hints back to the forwarding partition.
-		return tx.SkipCheck()
+		err = tx.SkipCheck()
+	} else {
+		err = tx.Check()
 	}
-	return tx.Check()
+	if err != nil {
+		// tx is closed on error. Don't keep it on the task, which may stay in the matcher for a
+		// while, so that it and the limiter state it references can be garbage collected.
+		tx = nil
+	}
+	task.fcTx = tx // attach to task so we can use it in matching engine
+	return err
 }
 
 func (m *fcManager) CancelAllCallbacks(cb fc.ReadinessCallback) {
