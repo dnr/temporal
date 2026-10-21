@@ -83,8 +83,7 @@ type (
 
 		// Flow control fields:
 		// After construction, limiters should only be accessed under matcherData lock.
-		// TODO(fc): make this a slice since every task will have the local limiter
-		limiters *fc.Limiters
+		limiters []fc.Limiter
 		fcTx     *fc.Tx
 
 		// The following fields are for use by priMatcher/matcherData:
@@ -288,7 +287,7 @@ func (task *internalTask) workflowExecution() *commonpb.WorkflowExecution {
 }
 
 // Limiters implements fc.fcTask interface.
-func (task *internalTask) Limiters() *fc.Limiters {
+func (task *internalTask) Limiters() []fc.Limiter {
 	return task.limiters
 }
 

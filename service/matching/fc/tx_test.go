@@ -25,11 +25,11 @@ const (
 )
 
 func newConcurrencyTestTask() *testTask {
-	return &testTask{limiters: Limiters{Limiters: [MaxLimiters]Limiter{{
+	return &testTask{limiters: []Limiter{{
 		Type:   enumsspb.LIMITER_TYPE_CONCURRENCY,
 		Key:    testConKey,
 		Source: LimiterSourceConfig,
-	}}}}
+	}}}
 }
 
 func newHintTestClient(batch func(*fcpb.ConcurrencyServiceBatchRequest) *fcpb.ConcurrencyServiceBatchResponse) *testClient {
@@ -84,12 +84,12 @@ func TestSkipCheck_DoesNotBlock(t *testing.T) {
 	setTokens(r, 1, 0)
 	task := newConcurrencyTestTask()
 	// a local rate limiter that's always blocked
-	task.limiters.Limiters[1] = Limiter{
+	task.limiters = append(task.limiters, Limiter{
 		Type:   enumsspb.LIMITER_TYPE_LOCAL_RATE_LIMIT,
 		Key:    "ratekey",
 		Source: LimiterSourceConfig,
 		Config: simplelimiter.MakeParams(0, 0),
-	}
+	})
 	cb := &testCallback{}
 	defer r.CancelAllCallbacks(testNsID, cb)
 
@@ -283,10 +283,10 @@ func TestNilTx(t *testing.T) {
 func TestCheckWithoutCallbackRollsBackWithoutRegisteringWaiters(t *testing.T) {
 	t.Parallel()
 	r, _ := newTestReadiness(t, nil)
-	task := &testTask{limiters: Limiters{Limiters: [MaxLimiters]Limiter{
+	task := &testTask{limiters: []Limiter{
 		{Type: enumsspb.LIMITER_TYPE_LOCAL_RATE_LIMIT, Key: "first", Source: LimiterSourceConfig, Config: simplelimiter.MakeParams(1, 0)},
 		{Type: enumsspb.LIMITER_TYPE_LOCAL_RATE_LIMIT, Key: "second", Source: LimiterSourceConfig, Config: simplelimiter.MakeParams(0, 0)},
-	}}}
+	}}
 	tx := r.NewTx(testNsID, task, nil)
 	require.ErrorIs(t, tx.Check(), ErrLocalLimiterBlocked)
 	require.True(t, tx.closed)
@@ -302,7 +302,7 @@ func TestCheckWithoutCallbackRollsBackWithoutRegisteringWaiters(t *testing.T) {
 	}()
 
 	// The first limiter's token must have been returned when the second blocked.
-	task.limiters.Limiters[1] = Limiter{}
+	task.limiters = task.limiters[:1]
 	tx = r.NewTx(testNsID, task, nil)
 	require.NoError(t, tx.Check())
 	tx.Close()

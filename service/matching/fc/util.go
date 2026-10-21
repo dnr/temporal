@@ -4,8 +4,6 @@ import (
 	"cmp"
 	"slices"
 	"time"
-
-	"go.temporal.io/server/common/util"
 )
 
 // Maximum total limiters that can apply to any task. (Currently this includes whole-queue
@@ -32,19 +30,13 @@ func betterWakePriority(a, b wakePriority) bool {
 	return b-a > wakePriority(betterWakePriorityThreshold.Milliseconds())
 }
 
-// canonicalLimiters returns and orders the limiters of a task in a canonical order, so two
-// partitions don't get in a quasi-deadlock by using opposite orders.
-func canonicalLimiters(task fcTask) []Limiter {
-	limiters := task.Limiters()
-	if limiters == nil {
-		return nil
-	}
-	out := util.FilterSlice(limiters.Limiters[:], Limiter.Valid)
-	slices.SortFunc(out, func(a, b Limiter) int {
+// sortLimiters sorts limiters in place into a canonical order, so two partitions don't get in
+// a quasi-deadlock by using opposite orders.
+func sortLimiters(limiters []Limiter) {
+	slices.SortFunc(limiters, func(a, b Limiter) int {
 		if v := cmp.Compare(a.Type, b.Type); v != 0 {
 			return v
 		}
 		return cmp.Compare(a.Key, b.Key)
 	})
-	return out
 }

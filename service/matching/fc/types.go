@@ -28,19 +28,12 @@ type Limiter struct {
 	ConfigVersion int64
 }
 
-func (lim Limiter) Valid() bool {
-	return lim.Type != enumsspb.LIMITER_TYPE_UNSPECIFIED && lim.Source != LimiterSourceInvalid
-}
-
-// matching.internalTask owns a *Limiters
-type Limiters struct {
-	Limiters [MaxLimiters]Limiter
-}
-
 // fcTask is the interface that flow control needs from a task.
 // *matching.internalTask implements this.
 type fcTask interface {
-	Limiters() *Limiters
+	// Limiters returns the limiters that apply to the task. NewTx may reorder the returned
+	// slice in place, so the caller must have exclusive access to it.
+	Limiters() []Limiter
 	PriorityAndAge() (int32, time.Time) // TODO(fc): consider moving to ReadinessCallback
 }
 

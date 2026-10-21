@@ -264,10 +264,10 @@ func TestCleanupWorkerStops(t *testing.T) {
 }
 
 type testTask struct {
-	limiters Limiters
+	limiters []Limiter
 }
 
-func (t *testTask) Limiters() *Limiters { return &t.limiters }
+func (t *testTask) Limiters() []Limiter { return t.limiters }
 
 func (*testTask) PriorityAndAge() (int32, time.Time) { return 1, time.Time{} }
 
@@ -291,9 +291,9 @@ func TestOptimisticConcurrencyReserve(t *testing.T) {
 				return res, nil
 			}}
 			r, _ := newTestReadiness(t, client)
-			task := &testTask{limiters: Limiters{Limiters: [MaxLimiters]Limiter{{
+			task := &testTask{limiters: []Limiter{{
 				Type: enumsspb.LIMITER_TYPE_CONCURRENCY, Source: LimiterSourceConfig, Key: "key",
-			}}}}
+			}}}
 			tx := r.NewTx(namespace.ID("ns"), task, &testCallback{})
 			defer tx.Close()
 			lim := tx.limiters[0].(*concurrencyTx).cs

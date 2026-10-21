@@ -72,14 +72,14 @@ func (m *fcManager) grantEagerTokens(priority *commonpb.Priority, requested int3
 	if err != nil {
 		return 0
 	}
-	if task.limiters == nil {
+	if len(task.limiters) == 0 {
 		return requested
 	}
 	// For now, any limiters besides local rate limits are not supported for eager dispatch.
 	// TODO(fc): Support full flow control for eager dispatch (e.g. call Reserve here, return
 	// limiter refs to history, history calls Commit after committing its own transaction)
-	for _, lim := range task.limiters.Limiters {
-		if lim.Valid() && lim.Type != enumsspb.LIMITER_TYPE_LOCAL_RATE_LIMIT {
+	for _, lim := range task.limiters {
+		if lim.Type != enumsspb.LIMITER_TYPE_LOCAL_RATE_LIMIT {
 			return 0
 		}
 	}
@@ -96,7 +96,7 @@ func (m *fcManager) grantEagerTokens(priority *commonpb.Priority, requested int3
 	return granted
 }
 
-func (m *fcManager) UpdateLimitersFromConfig(limiters *fc.Limiters, task *internalTask) (*fc.Limiters, error) {
+func (m *fcManager) UpdateLimitersFromConfig(limiters []fc.Limiter, task *internalTask) ([]fc.Limiter, error) {
 	if task.isPollForwarder() {
 		return nil, nil
 	}
@@ -116,7 +116,7 @@ func (m *fcManager) UpdateLimitersFromConfig(limiters *fc.Limiters, task *intern
 	return limiters, nil
 }
 
-func (m *fcManager) updateWholeQueueConcurrencyLimiter(cfg *taskqueuepb.TaskQueueConfig, cfgVersion int64, limiters *fc.Limiters) *fc.Limiters {
+func (m *fcManager) updateWholeQueueConcurrencyLimiter(cfg *taskqueuepb.TaskQueueConfig, cfgVersion int64, limiters []fc.Limiter) []fc.Limiter {
 	lim := fc.Limiter{
 		Type:   enumsspb.LIMITER_TYPE_CONCURRENCY,
 		Key:    m.wholeQueueConcurrencyLimiterKey(),
@@ -130,7 +130,7 @@ func (m *fcManager) updateWholeQueueConcurrencyLimiter(cfg *taskqueuepb.TaskQueu
 	return m.removeLimiter(lim, limiters)
 }
 
-func (m *fcManager) updateLocalRateLimiter(limiters *fc.Limiters) *fc.Limiters {
+func (m *fcManager) updateLocalRateLimiter(limiters []fc.Limiter) []fc.Limiter {
 	lim := fc.Limiter{
 		Type:   enumsspb.LIMITER_TYPE_LOCAL_RATE_LIMIT,
 		Key:    m.localLimiterKey(),
@@ -145,7 +145,7 @@ func (m *fcManager) updateLocalRateLimiter(limiters *fc.Limiters) *fc.Limiters {
 	return m.addOrUpdateLimiter(lim, limiters)
 }
 
-func (m *fcManager) updateFairnessRateLimiter(limiters *fc.Limiters, pri *commonpb.Priority) *fc.Limiters {
+func (m *fcManager) updateFairnessRateLimiter(limiters []fc.Limiter, pri *commonpb.Priority) []fc.Limiter {
 	lim := fc.Limiter{
 		Type:   enumsspb.LIMITER_TYPE_LOCAL_RATE_LIMIT,
 		Key:    m.localLimiterFairnessKey(pri.GetFairnessKey()),
@@ -159,43 +159,33 @@ func (m *fcManager) updateFairnessRateLimiter(limiters *fc.Limiters, pri *common
 	return m.addOrUpdateLimiter(lim, limiters)
 }
 
-func (*fcManager) addOrUpdateLimiter(newLim fc.Limiter, limiters *fc.Limiters) *fc.Limiters {
+func (*fcManager) addOrUpdateLimiter(newLim fc.Limiter, limiters []fc.Limiter) []fc.Limiter {
 	match := func(l fc.Limiter) bool {
 		return l.Key == newLim.Key && l.Type == newLim.Type && l.Source == newLim.Source
 	}
-	if limiters == nil {
-		limiters = &fc.Limiters{}
+	if i := slices.IndexFunc(limiters, match); i >= 0 {
+		// we found the one we previously set, update config
+		limiters[i].Config = newLim.Config
+		limiters[i].ConfigVersion = newLim.ConfigVersion
+		return limiters
+	} else if len(limiters) >= fc.MaxLimiters {
+		// We get here if we already have the maximum number of limiters set and we also try
+		// to add another from config. This should be an error, but it's quite awkward to
+		// handle an error at our call sites. Even if we could "handle" the error, the behavior
+		// would be to either drop the task or to block it forever, both of which are not
+		// good. Ideally we should detect and surface this at a higher level. For now, at this
+		// level, we just ignore the new limiter.
+		// TODO(fc): surface this error at a higher level somehow
+		return limiters
 	}
-	for i, lim := range limiters.Limiters[:] {
-		if !lim.Valid() {
-			// add it in empty slot
-			limiters.Limiters[i] = newLim
-			return limiters
-		} else if match(lim) {
-			// we found the one we previously set, update config
-			limiters.Limiters[i].Config = newLim.Config
-			limiters.Limiters[i].ConfigVersion = newLim.ConfigVersion
-			return limiters
-		}
-	}
-	// We get here if we already have three per-task limiters set and we also try to add
-	// another from config. This should be an error, but it's quite awkward to handle an error
-	// at our call sites. Even if we could "handle" the error, the behavior would be to either
-	// drop the task or to block it forever, both of which are not good. Ideally we should
-	// detect and surface this at a higher level. For now, at this level, we just ignore the
-	// whole-queue limiter.
-	// TODO(fc): surface this error at a higher level somehow
-	return limiters
+	return append(limiters, newLim)
 }
 
-func (*fcManager) removeLimiter(oldLim fc.Limiter, limiters *fc.Limiters) *fc.Limiters {
+func (*fcManager) removeLimiter(oldLim fc.Limiter, limiters []fc.Limiter) []fc.Limiter {
 	match := func(l fc.Limiter) bool {
 		return l.Key == oldLim.Key && l.Type == oldLim.Type && l.Source == oldLim.Source
 	}
-	if limiters != nil {
-		_ = slices.DeleteFunc(limiters.Limiters[:], match)
-	}
-	return limiters
+	return slices.DeleteFunc(limiters, match)
 }
 
 func (m *fcManager) wholeQueueConcurrencyLimiterKey() string {

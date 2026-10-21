@@ -50,9 +50,9 @@ func TestPollForwardersBypassFlowControl(t *testing.T) {
 			data := newMatcherData(cfg, log.NewNoopLogger(), ts, true, manager, func(syncMatchOutcome) {})
 			t.Cleanup(data.Stop)
 			task := newPollForwarderTask(pollForwarderPriority, tc.kind)
-			task.limiters = &fc.Limiters{Limiters: [fc.MaxLimiters]fc.Limiter{{
+			task.limiters = []fc.Limiter{{
 				Key: "existing", Type: enumsspb.LIMITER_TYPE_CONCURRENCY, Source: fc.LimiterSourceConfig,
-			}}}
+			}}
 			require.NoError(t, data.EnqueueTaskNoWait(task))
 			require.Nil(t, task.limiters)
 			poller := &waitingPoller{startTime: ts.Now(), forwardCtx: context.Background()}

@@ -34,13 +34,14 @@ var errInvalidTxState = serviceerror.NewInternal("invalid fc tx state")
 // A nil callback checks readiness without registering for notifications.
 // A nil *Tx is valid and all operations are no-ops.
 // Tx is not safe for concurrent use.
-// TODO(fc): consider getting rid of fcTask and passing []Limiters and (int32,time.Time)?
+// TODO(fc): consider getting rid of fcTask and passing []Limiter and (int32,time.Time)?
 // but may need task identity for choosing slot id
 func (r *Readiness) NewTx(nsID namespace.ID, task fcTask, cb ReadinessCallback) *Tx {
-	lims := canonicalLimiters(task)
+	lims := task.Limiters()
 	if len(lims) == 0 {
 		return nil
 	}
+	sortLimiters(lims)
 
 	limiterTxs := make([]limiterTx, len(lims))
 	refs := make([]*taskqueuespb.LimiterRef, 0, len(lims))
