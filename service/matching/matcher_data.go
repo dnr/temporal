@@ -274,7 +274,7 @@ func (d *matcherData) EnqueueTaskNoWait(task *internalTask) error {
 	}
 
 	task.initMatch(d)
-	task.updateLimitersFromConfig(d.fcManager)
+	_ = task.updateLimitersFromConfig(d.fcManager)
 	d.tasks.Add(task)
 	d.findAndWakeMatches()
 	return nil
@@ -299,7 +299,7 @@ func (d *matcherData) EnqueueTaskAndWait(ctxs []context.Context, task *internalT
 
 	// add and look for match
 	task.initMatch(d)
-	task.updateLimitersFromConfig(d.fcManager)
+	_ = task.updateLimitersFromConfig(d.fcManager)
 	d.tasks.Add(task)
 	d.findAndWakeMatches()
 
@@ -396,7 +396,7 @@ func (d *matcherData) MatchTaskImmediately(task *internalTask) syncMatchOutcome 
 	}
 
 	task.initMatch(d)
-	task.updateLimitersFromConfig(d.fcManager)
+	_ = task.updateLimitersFromConfig(d.fcManager)
 	d.tasks.Add(task)
 	outcome := d.findAndWakeMatches()
 	// don't wait, check if match() picked this one already
@@ -433,7 +433,7 @@ func (d *matcherData) ReprocessTasks(pred func(*internalTask) bool) []*internalT
 	// This is called when userdata changes, which includes the whole-queue concurrency limit
 	// in task queue config. We should update limiters on all tasks that we have already.
 	d.tasks.ForEachTask(func(task *internalTask) bool {
-		task.updateLimitersFromConfig(d.fcManager)
+		_ = task.updateLimitersFromConfig(d.fcManager)
 		return false
 	}, nil)
 

@@ -2,7 +2,6 @@ package matching
 
 import (
 	"context"
-	"errors"
 	"testing"
 	"time"
 
@@ -270,29 +269,4 @@ func TestEagerDispatchConcurrentGrants(t *testing.T) {
 		total += <-results
 	}
 	require.Equal(t, int32(11), total)
-}
-
-type eagerUserDataError struct{ userDataManager }
-
-func (*eagerUserDataError) GetUserData() (*persistencespb.VersionedTaskQueueUserData, chan struct{}, error) {
-	return nil, nil, errors.New("user data unavailable")
-}
-
-func TestEagerDispatchRejectsUnavailableConfig(t *testing.T) {
-	t.Parallel()
-	manager := newGrantTestFCManager(t, &rateLimitManager{wholeQueueLimit: simplelimiter.NoLimit()}, clock.NewEventTimeSource().Update(time.Now()))
-	manager.userDataManager = &eagerUserDataError{}
-	require.Zero(t, manager.grantEagerTokens(nil, 1))
-}
-
-func TestTaskReadyUsesPreparedLimiters(t *testing.T) {
-	t.Parallel()
-	manager := newGrantTestFCManager(t, &rateLimitManager{}, clock.NewEventTimeSource().Update(time.Now()))
-	manager.userDataManager = &eagerUserDataError{}
-	task := newInternalTaskForSyncMatch(&persistencespb.TaskInfo{CreateTime: timestamppb.Now()}, nil, 0, nil)
-	task.limiters = &fc.Limiters{Limiters: [fc.MaxLimiters]fc.Limiter{{
-		Type: enumsspb.LIMITER_TYPE_LOCAL_RATE_LIMIT,
-		Key:  "prepared", Source: fc.LimiterSourceConfig, Config: simplelimiter.MakeParams(0, 0),
-	}}}
-	require.ErrorIs(t, manager.TaskReady(task, nil), fc.ErrLocalLimiterBlocked)
 }

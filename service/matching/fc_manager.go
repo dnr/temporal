@@ -68,31 +68,32 @@ func (m *fcManager) grantEagerTokens(priority *commonpb.Priority, requested int3
 		Priority:   priority,
 		CreateTime: timestamppb.Now(),
 	}, nil, 0, nil)
-	var err error
-	task.limiters, err = m.UpdateLimitersFromConfig(nil, task)
+	err := task.updateLimitersFromConfig(m)
 	if err != nil {
 		return 0
 	}
 	if task.limiters == nil {
 		return requested
 	}
+	// For now, any limiters besides local rate limits are not supported for eager dispatch.
+	// TODO(fc): Support full flow control for eager dispatch (e.g. call Reserve here, return
+	// limiter refs to history, history calls Commit after committing its own transaction)
 	for _, lim := range task.limiters.Limiters {
 		if lim.Valid() && lim.Type != enumsspb.LIMITER_TYPE_LOCAL_RATE_LIMIT {
 			return 0
 		}
 	}
-	// TODO(fc): Support the full flow control protocol for eager tasks, carrying
-	// limiter refs to History. History may need to perform the final Commit.
 	nsID := namespace.ID(m.partition.NamespaceId())
-	for granted := int32(0); granted < requested; granted++ {
+	// TODO(fc): Consider: optimize this to Check a batch at once instead of once at a time?
+	granted := int32(0)
+	for ; granted < requested; granted++ {
 		tx := m.readiness.NewTx(nsID, task, nil)
 		if err := tx.Check(); err != nil {
-			// Check rolls back failed transactions.
-			return granted
+			break
 		}
 		tx.Close()
 	}
-	return requested
+	return granted
 }
 
 func (m *fcManager) UpdateLimitersFromConfig(limiters *fc.Limiters, task *internalTask) (*fc.Limiters, error) {

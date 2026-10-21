@@ -48,6 +48,8 @@ type (
 	// internalTask represents an activity, workflow, query or started (received from another host).
 	// this struct is more like a union and only one of [ query, event, forwarded ] is
 	// non-nil for any given task
+	// TODO(pri): after deprecating classic matcher, we can consolidate backlogCountHint
+	// and removeFromMatcher into a single *physicalTaskQueueManager field.
 	internalTask struct {
 		event            *genericTaskInfo // non-nil for activity or workflow task that's locally generated
 		query            *queryTaskInfo   // non-nil for a query task that's locally sync matched
@@ -297,8 +299,9 @@ func (task *internalTask) PriorityAndAge() (int32, time.Time) {
 	return pri, createTime
 }
 
-func (task *internalTask) updateLimitersFromConfig(manager *fcManager) {
-	task.limiters, _ = manager.UpdateLimitersFromConfig(task.limiters, task)
+func (task *internalTask) updateLimitersFromConfig(manager *fcManager) (err error) {
+	task.limiters, err = manager.UpdateLimitersFromConfig(task.limiters, task)
+	return
 }
 
 // pollWorkflowTaskQueueResponse returns the poll response for a workflow task that is
