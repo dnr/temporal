@@ -40,6 +40,9 @@ type concurrencyState struct {
 	// directly or passed on by another partition. Unlike tokens, it doesn't include Wait
 	// responses, which are wake signals for this node only, or tokens taken locally since. This
 	// is what we pass on to other partitions.
+	// TODO(fc): generation is not enough to really exclude stale hints, it only updates when
+	// slots goes to zero. we could use a server-side "hintSeq" that has more granularity than
+	// generation.
 	slotsHintGeneration int64
 	slotsHint           int32
 	hasSlotsHint        bool
