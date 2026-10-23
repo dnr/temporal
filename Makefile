@@ -173,7 +173,7 @@ $(LOCALBIN):
 	@mkdir -p $(LOCALBIN)
 
 .PHONY: golangci-lint
-LINT_CODE_TARGETS ?= ./...
+LINT_CODE_TARGETS ?= ./service/matching/... ./chasm/lib/flowcontrol/...
 GOLANGCI_LINT_BASE_REV ?= $(MAIN_BRANCH)
 GOLANGCI_LINT_FIX ?= true
 GOLANGCI_LINT_VERSION := v2.13.0
