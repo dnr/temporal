@@ -53,6 +53,7 @@ func (h *releaseLimiterTaskHandler) Execute(
 			_, err := h.concurrencyServiceClient.Batch(ctx, &fcpb.ConcurrencyServiceBatchRequest{
 				NamespaceId:  activityRef.NamespaceID,
 				Key:          limiter.GetKey(),
+				RunId:        limiter.GetRunId(),
 				ReleaseSlots: []string{limiter.GetSlotId()},
 			})
 			if err != nil {

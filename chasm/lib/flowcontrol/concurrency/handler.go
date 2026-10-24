@@ -2,6 +2,7 @@ package concurrency
 
 import (
 	"context"
+	"errors"
 	"hash/maphash"
 	"sync"
 	"time"
@@ -35,7 +36,14 @@ type chasmReq struct {
 	stagedWake     StagedWakeOptions
 	getWakeLevel   func(wantTokens int32) (wakeUpTo int64, wakeAll bool)
 	applied        *appliedSeqs
+	// byRunID is true when the execution was addressed by a run id from a previous response.
+	// In that case updateFn rejects a closed execution with errStaleRun, so that we fall back
+	// to the current run.
+	byRunID bool
 }
+
+// errStaleRun is returned (internally) when a limiter execution addressed by run id is closed.
+var errStaleRun = serviceerror.NewNotFound("limiter run is closed")
 
 type batchRes struct {
 	res *fcpb.ConcurrencyServiceBatchResponse
@@ -157,6 +165,9 @@ func initFn(_ chasm.MutableContext, creq chasmReq) (*Component, error) {
 }
 
 func updateFn(c *Component, cctx chasm.MutableContext, creq chasmReq) ([]*fcpb.ConcurrencyServiceBatchResponse, error) {
+	if creq.byRunID && !cctx.ExecutionInfo().CloseTime.IsZero() {
+		return nil, errStaleRun
+	}
 	now := cctx.Now(c)
 
 	// allocate new protos for responses
@@ -230,6 +241,7 @@ func updateFn(c *Component, cctx chasm.MutableContext, creq chasmReq) ([]*fcpb.C
 	for i, it := range creq.items {
 		ress[i].Generation = c.Generation
 		ress[i].AvailableSlotsHint = availableSlots
+		ress[i].RunId = cctx.ExecutionKey().RunID
 		ak := appliedKey{batchKey: key, clientID: it.req.GetClientId()}
 		ress[i].AppliedReserveSeq = creq.applied.update(ak, it.req.GetReserveSeq())
 	}
@@ -243,8 +255,15 @@ func (h *Handler) applyBatch(
 ) []batchRes {
 	needStart := false
 	canSpeculate := true
+	runID := ""
 
 	for _, it := range items {
+		// Callers that know the run id pass it. They should all agree; if not, we use the
+		// first one and fall back to the current run if it's stale.
+		if runID == "" {
+			runID = it.req.GetRunId()
+		}
+
 		// only Reserve needs UpdateWithStart, other calls can assume it exists
 		needStart = needStart || len(it.req.GetReserveSlots()) > 0
 
@@ -263,6 +282,29 @@ func (h *Handler) applyBatch(
 		stagedWake:     h.stagedWake(),
 		getWakeLevel:   func(wantTokens int32) (int64, bool) { return h.getWakeLevel(key, wantTokens) },
 		applied:        &h.applied,
+	}
+
+	// If we know the run id, address the execution directly. This avoids looking up the
+	// current run (a persistence read under the current-execution lock) on every batch, and
+	// lets reserves skip UpdateWithStart in the common case where the limiter exists.
+	if runID != "" {
+		creq.byRunID = true
+		ress, _, err := chasm.UpdateComponent(
+			items[0].ctx,
+			chasm.NewComponentRef[*Component](chasm.ExecutionKey{
+				NamespaceID: key.namespaceID,
+				BusinessID:  key.key,
+				RunID:       runID,
+			}),
+			updateFn,
+			creq,
+			opts...,
+		)
+		if !isNotFound(err) {
+			return makeBatchResults(len(items), ress, err)
+		}
+		// The run is gone or closed: fall back to the current run, or create one.
+		creq.byRunID = false
 	}
 
 	if needStart {
@@ -353,6 +395,11 @@ func (h *Handler) Wait(ctx context.Context, req *fcpb.ConcurrencyServiceWaitRequ
 	h.registerWaiter(k, req.WakePriority, req.RequestedWakeTokens)
 	defer h.unregisterWaiter(k, req.WakePriority, req.RequestedWakeTokens)
 
+	// knownRunID is the limiter run the caller (or a previous iteration) knows about. If the
+	// limiter execution was recreated, generations of the old and new runs aren't comparable,
+	// so we return the new run's generation and retry with it.
+	knownRunID := req.RunId
+
 	// loop to do internal retries with increased generation
 	for {
 		// CHASM requires that PollComponent be monotonic: if it returns true at some state,
@@ -362,13 +409,25 @@ func (h *Handler) Wait(ctx context.Context, req *fcpb.ConcurrencyServiceWaitRequ
 		// some time in the past, so that everyone is blocked again. So we need to add a
 		// "generation" on top of the timestamps. Essentially, the state moves the pair
 		// <generation, wake_up_to> monotonically.
+		//
+		// If we know the run id, we address the execution directly, which avoids looking up
+		// the current run each time the predicate is checked.
 		res, _, err := chasm.PollComponent(
 			ctx,
 			chasm.NewComponentRef[*Component](chasm.ExecutionKey{
 				NamespaceID: req.NamespaceId,
 				BusinessID:  req.Key,
+				RunID:       req.RunId,
 			}),
 			func(c *Component, cctx chasm.Context, req *fcpb.ConcurrencyServiceWaitRequest) (*fcpb.ConcurrencyServiceWaitResponse, bool, error) {
+				if req.RunId != "" && !cctx.ExecutionInfo().CloseTime.IsZero() {
+					return nil, false, errStaleRun
+				}
+				runID := cctx.ExecutionKey().RunID
+				if knownRunID != "" && runID != knownRunID {
+					// limiter was recreated: return its generation so we retry with it
+					return &fcpb.ConcurrencyServiceWaitResponse{Generation: c.Generation, RunId: runID}, true, nil
+				}
 				applied := h.applied.get(appliedKey{batchKey: k, clientID: req.ClientId})
 				unreflected := int32(min(max(0, req.PendingReserveSeq-applied), 1e6))
 				if req.ClientId == "" {
@@ -378,21 +437,32 @@ func (h *Handler) Wait(ctx context.Context, req *fcpb.ConcurrencyServiceWaitRequ
 				if !ready {
 					return nil, false, nil
 				}
-				return &fcpb.ConcurrencyServiceWaitResponse{Generation: generation, WakeTokens: tokens, AppliedReserveSeq: applied}, true, nil
+				return &fcpb.ConcurrencyServiceWaitResponse{
+					Generation:        generation,
+					WakeTokens:        tokens,
+					AppliedReserveSeq: applied,
+					RunId:             runID,
+				}, true, nil
 			},
 			req,
 		)
 		if err != nil {
-			if common.IsContextDeadlineExceededErr(err) {
+			if req.RunId != "" && isNotFound(err) {
+				// run is gone or closed: try again with the current run
+				req.RunId = ""
+				continue
+			} else if common.IsContextDeadlineExceededErr(err) {
 				// timed out without becoming ready
-				return &fcpb.ConcurrencyServiceWaitResponse{Generation: req.Generation}, nil
+				return &fcpb.ConcurrencyServiceWaitResponse{Generation: req.Generation, RunId: knownRunID}, nil
 			}
 			return nil, err
 		} else if res == nil {
 			// chasm-imposed timeout
-			return &fcpb.ConcurrencyServiceWaitResponse{Generation: req.Generation}, nil
-		} else if res.Generation != req.Generation {
-			// try again on server with new generation
+			return &fcpb.ConcurrencyServiceWaitResponse{Generation: req.Generation, RunId: knownRunID}, nil
+		} else if (knownRunID != "" && res.RunId != knownRunID) || res.Generation != req.Generation {
+			// try again on server with new run and/or generation
+			knownRunID = res.RunId
+			req.RunId = res.RunId
 			req.Generation = res.Generation
 			continue
 		}
@@ -492,4 +562,9 @@ func (h *Handler) getWakeLevel(key batchKey, wantTokens int32) (wakeUpTo int64, 
 	}
 	// otherwise wake all
 	return 0, true
+}
+
+func isNotFound(err error) bool {
+	_, ok := errors.AsType[*serviceerror.NotFound](err)
+	return ok
 }

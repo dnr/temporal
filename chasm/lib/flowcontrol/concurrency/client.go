@@ -32,14 +32,15 @@ type clientBatchResult struct {
 
 // HintHandler is called with the limiter state (generation and available slots) from a Batch
 // response. appliedReserveSeq is the highest reserve_seq from this client that the server has
-// applied (see ConcurrencyServiceBatchRequest.reserve_seq).
-type HintHandler func(namespaceID, key string, generation int64, availableSlots int32, appliedReserveSeq int64)
+// applied (see ConcurrencyServiceBatchRequest.reserve_seq). runID is the limiter run that
+// produced the state.
+type HintHandler func(namespaceID, key string, generation int64, availableSlots int32, appliedReserveSeq int64, runID string)
 
 // BatchingClient batches calls to ConcurrencyService.Batch by limiter.
 //
 // Limiter state in Batch responses is passed to the HintHandler once per rpc, before any caller
 // receives its result, so callers see the updated state as soon as their call returns. The
-// responses returned to callers contain only their own results.
+// responses returned to callers contain only their own results, plus the limiter run id.
 type BatchingClient struct {
 	fcpb.ConcurrencyServiceClient
 
@@ -95,6 +96,7 @@ func (c *BatchingClient) Batch(
 		return &fcpb.ConcurrencyServiceBatchResponse{
 			ReserveSuccess: res.ReserveSuccess,
 			CommitSuccess:  res.CommitSuccess,
+			RunId:          res.RunId,
 		}, nil
 	}
 	res, err := c.batchers.Add(ctx, clientBatchKey{
@@ -113,6 +115,7 @@ func (c *BatchingClient) Batch(
 func (c *BatchingClient) applyBatch(key clientBatchKey, items []clientBatchItem) []clientBatchResult {
 	var reserveCount, cancelCount, commitCount, releaseCount int
 	var counted int32
+	var runID string
 	var configItem *clientBatchItem
 	for i := range items {
 		item := &items[i]
@@ -121,6 +124,9 @@ func (c *BatchingClient) applyBatch(key clientBatchKey, items []clientBatchItem)
 		commitCount += len(item.req.GetCommitSlots())
 		releaseCount += len(item.req.GetReleaseSlots())
 		counted += item.req.GetCountedReserves()
+		if runID == "" {
+			runID = item.req.GetRunId()
+		}
 		if item.req.GetConfigUpdate() != nil &&
 			(configItem == nil || item.req.GetConfigUpdateVersion() > configItem.req.GetConfigUpdateVersion()) {
 			configItem = item
@@ -132,6 +138,7 @@ func (c *BatchingClient) applyBatch(key clientBatchKey, items []clientBatchItem)
 		Key:         key.key,
 		ClientId:    c.clientID,
 		ReserveSeq:  c.nextReserveSeq(key, counted),
+		RunId:       runID,
 	}
 	if reserveCount > 0 {
 		req.ReserveSlots = make([]string, 0, reserveCount)
@@ -183,6 +190,7 @@ func (c *BatchingClient) applyBatch(key clientBatchKey, items []clientBatchItem)
 		results[i].res = &fcpb.ConcurrencyServiceBatchResponse{
 			ReserveSuccess: res.ReserveSuccess[reserveOff : reserveOff+reserveLen],
 			CommitSuccess:  res.CommitSuccess[commitOff : commitOff+commitLen],
+			RunId:          res.RunId,
 		}
 		reserveOff += reserveLen
 		commitOff += commitLen
@@ -192,6 +200,6 @@ func (c *BatchingClient) applyBatch(key clientBatchKey, items []clientBatchItem)
 
 func (c *BatchingClient) reportHint(namespaceID, key string, res *fcpb.ConcurrencyServiceBatchResponse) {
 	if c.hintHandler != nil {
-		c.hintHandler(namespaceID, key, res.GetGeneration(), res.GetAvailableSlotsHint(), res.GetAppliedReserveSeq())
+		c.hintHandler(namespaceID, key, res.GetGeneration(), res.GetAvailableSlotsHint(), res.GetAppliedReserveSeq(), res.GetRunId())
 	}
 }

@@ -1069,7 +1069,9 @@ type LimiterRef struct {
 	LimiterType v14.LimiterType        `protobuf:"varint,1,opt,name=limiter_type,json=limiterType,proto3,enum=temporal.server.api.enums.v1.LimiterType" json:"limiter_type,omitempty"`
 	Key         string                 `protobuf:"bytes,2,opt,name=key,proto3" json:"key,omitempty"`
 	// Identifier for the reserved or committed slot. Empty for limiters that don't allocate slots.
-	SlotId        string `protobuf:"bytes,3,opt,name=slot_id,json=slotId,proto3" json:"slot_id,omitempty"`
+	SlotId string `protobuf:"bytes,3,opt,name=slot_id,json=slotId,proto3" json:"slot_id,omitempty"`
+	// Run id of the limiter execution, if known, so the release can address it directly.
+	RunId         string `protobuf:"bytes,4,opt,name=run_id,json=runId,proto3" json:"run_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1121,6 +1123,13 @@ func (x *LimiterRef) GetKey() string {
 func (x *LimiterRef) GetSlotId() string {
 	if x != nil {
 		return x.SlotId
+	}
+	return ""
+}
+
+func (x *LimiterRef) GetRunId() string {
+	if x != nil {
+		return x.RunId
 	}
 	return ""
 }
@@ -1441,12 +1450,13 @@ const file_temporal_server_api_taskqueue_v1_message_proto_rawDesc = "" +
 	"\x05write\x18\x02 \x01(\x05R\x05write\x12#\n" +
 	"\rbacklog_count\x18\x03 \x01(\fR\fbacklogCount\x12\x1f\n" +
 	"\vbacklog_cap\x18\x04 \x01(\x05R\n" +
-	"backlogCap\"\x85\x01\n" +
+	"backlogCap\"\x9c\x01\n" +
 	"\n" +
 	"LimiterRef\x12L\n" +
 	"\flimiter_type\x18\x01 \x01(\x0e2).temporal.server.api.enums.v1.LimiterTypeR\vlimiterType\x12\x10\n" +
 	"\x03key\x18\x02 \x01(\tR\x03key\x12\x17\n" +
-	"\aslot_id\x18\x03 \x01(\tR\x06slotId\"\xbf\x01\n" +
+	"\aslot_id\x18\x03 \x01(\tR\x06slotId\x12\x15\n" +
+	"\x06run_id\x18\x04 \x01(\tR\x05runId\"\xbf\x01\n" +
 	"\vLimiterHint\x12L\n" +
 	"\flimiter_type\x18\x01 \x01(\x0e2).temporal.server.api.enums.v1.LimiterTypeR\vlimiterType\x12\x10\n" +
 	"\x03key\x18\x02 \x01(\tR\x03key\x12\x1e\n" +

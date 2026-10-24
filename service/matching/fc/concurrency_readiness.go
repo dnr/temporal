@@ -39,6 +39,9 @@ type concurrencyState struct {
 	// claimed slots that aren't reflected in server state yet.
 	outstanding int32
 	completed   int64
+	// runID is the run id of the limiter execution, learned from responses. We pass it on
+	// requests so the server can address the execution directly.
+	runID string
 	// invariant: {len(waiters) > 0} == {Wait goroutine is running} == {goroCancel != nil}
 	// (for now, until we add eviction)
 	goroCancel         context.CancelFunc
@@ -131,6 +134,7 @@ func (cs *concurrencyState) reserve(
 	res, err := cs.rs.r.concurrencyServiceClient.Batch(ctx, &fcpb.ConcurrencyServiceBatchRequest{
 		NamespaceId:         cs.namespaceID().String(),
 		Key:                 cs.limiterKey(),
+		RunId:               cs.getRunID(),
 		ReserveSlots:        []string{slotID},
 		CountedReserves:     counted,
 		ConfigUpdate:        configUpdate,
@@ -149,6 +153,7 @@ func (cs *concurrencyState) commit(ctx context.Context, slotID string) error {
 	res, err := cs.rs.r.concurrencyServiceClient.Batch(ctx, &fcpb.ConcurrencyServiceBatchRequest{
 		NamespaceId: cs.namespaceID().String(),
 		Key:         cs.limiterKey(),
+		RunId:       cs.getRunID(),
 		CommitSlots: []string{slotID},
 	})
 	if err != nil {
@@ -173,6 +178,7 @@ func (cs *concurrencyState) cancelReserve(ctx context.Context, slotID string) {
 		_, _ = cs.rs.r.concurrencyServiceClient.Batch(ctx, &fcpb.ConcurrencyServiceBatchRequest{
 			NamespaceId:            cs.namespaceID().String(),
 			Key:                    cs.limiterKey(),
+			RunId:                  cs.getRunID(),
 			CancelReservationSlots: []string{slotID},
 		})
 	}()
@@ -194,6 +200,26 @@ func (cs *concurrencyState) dropOutstanding() {
 	cs.outstanding = max(0, cs.outstanding-1)
 }
 
+// getRunID returns the cached limiter run id, or "" if unknown.
+func (cs *concurrencyState) getRunID() string {
+	cs.rs.lock.Lock()
+	defer cs.rs.lock.Unlock()
+	return cs.runID
+}
+
+// noteRunIDLocked records the limiter run id from a response. If the run changed (the limiter
+// execution was recreated), generations of the old and new runs aren't comparable, so we
+// forget our generation and accept the new run's state.
+func (cs *concurrencyState) noteRunIDLocked(runID string) {
+	if runID == "" || runID == cs.runID {
+		return
+	}
+	if cs.runID != "" {
+		cs.generation = -1
+	}
+	cs.runID = runID
+}
+
 // claimedLocked returns the number of reserves claimed by this node (see outstanding).
 func (cs *concurrencyState) claimedLocked() int64 {
 	return int64(cs.outstanding) + cs.completed
@@ -201,26 +227,27 @@ func (cs *concurrencyState) claimedLocked() int64 {
 
 // reportConcurrencySlotsHint is the BatchingClient's HintHandler. Callers of Batch hold pins on
 // the limiter, so we don't need to create it if it's missing.
-func (r *Readiness) reportConcurrencySlotsHint(namespaceID, key string, gen int64, slots int32, appliedSeq int64) {
+func (r *Readiness) reportConcurrencySlotsHint(namespaceID, key string, gen int64, slots int32, appliedSeq int64, runID string) {
 	rs := r.getShard(namespace.ID(namespaceID))
 	rs.lock.Lock()
 	cs := rs.concurrencyLimiters[namespaceID+key]
 	rs.lock.Unlock()
 	if cs != nil {
-		cs.reportSlotsHintWithApplied(gen, slots, appliedSeq, notifyAsync)
+		cs.reportSlotsHintWithApplied(gen, slots, appliedSeq, runID, notifyAsync)
 	}
 }
 
 // reportSlotsHint updates cached state from available slots reported by the concurrency
 // service, either directly or passed on by another partition.
 func (cs *concurrencyState) reportSlotsHint(gen int64, slots int32, mode notifyMode) {
-	cs.reportSlotsHintWithApplied(gen, slots, -1, mode)
+	cs.reportSlotsHintWithApplied(gen, slots, -1, "", mode)
 }
 
 // reportSlotsHintWithApplied is like reportSlotsHint, where appliedSeq is the server's applied
 // reserve seq for this node, or -1 if the hint came from another node.
-func (cs *concurrencyState) reportSlotsHintWithApplied(gen int64, slots int32, appliedSeq int64, mode notifyMode) {
+func (cs *concurrencyState) reportSlotsHintWithApplied(gen int64, slots int32, appliedSeq int64, runID string, mode notifyMode) {
 	_ = cs.rs.update(cs, mode, func() error {
+		cs.noteRunIDLocked(runID)
 		// Our claimed reserves that the server hasn't applied aren't reflected in slots.
 		unreflected := int64(cs.outstanding)
 		if appliedSeq >= 0 {
@@ -238,8 +265,9 @@ func (cs *concurrencyState) reportSlotsHintWithApplied(gen int64, slots int32, a
 
 // reportWaitResponse updates cached state from a Wait response. Wake tokens are a signal to
 // this node only, so they don't update the slots hint that we pass on to other partitions.
-func (cs *concurrencyState) reportWaitResponse(gen int64, wakeTokens int32, sentClaimed int64, mode notifyMode) {
+func (cs *concurrencyState) reportWaitResponse(gen int64, wakeTokens int32, sentClaimed int64, runID string, mode notifyMode) {
 	_ = cs.rs.update(cs, mode, func() error {
+		cs.noteRunIDLocked(runID)
 		// The server already subtracted our unreflected claims as of when we sent the request.
 		// Subtract any claims we've made since then.
 		cs.updateTokensLocked(gen, int32(max(0, int64(wakeTokens)-(cs.claimedLocked()-sentClaimed))))
@@ -332,6 +360,7 @@ func (cs *concurrencyState) makeWaitRequest() *fcpb.ConcurrencyServiceWaitReques
 		WakePriority:        int64(cs.waiterWakePriority),
 		RequestedWakeTokens: demand,
 		ClientId:            cs.rs.r.clientID,
+		RunId:               cs.runID,
 		PendingReserveSeq:   cs.claimedLocked(),
 	}
 }
@@ -366,7 +395,7 @@ func (cs *concurrencyState) callWait(ctx context.Context) {
 		}
 		retrier.Reset()
 
-		cs.reportWaitResponse(res.Generation, res.WakeTokens, req.PendingReserveSeq, notifySync)
+		cs.reportWaitResponse(res.Generation, res.WakeTokens, req.PendingReserveSeq, res.RunId, notifySync)
 		// note: If we have satisfied all our waiters, then ctx
 		// will be canceled before we continue this loop.
 	}

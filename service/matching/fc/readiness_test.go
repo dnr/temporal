@@ -316,6 +316,35 @@ func TestOptimisticConcurrencyReserve(t *testing.T) {
 	}
 }
 
+func TestConcurrencyRunIDCaching(t *testing.T) {
+	var gotRunIDs []string
+	client := &testClient{batch: func(_ context.Context, req *fcpb.ConcurrencyServiceBatchRequest) (*fcpb.ConcurrencyServiceBatchResponse, error) {
+		gotRunIDs = append(gotRunIDs, req.RunId)
+		res := &fcpb.ConcurrencyServiceBatchResponse{RunId: "run-1", AvailableSlotsHint: 10}
+		if len(req.ReserveSlots) > 0 {
+			res.ReserveSuccess = []bool{true}
+		}
+		if len(req.CommitSlots) > 0 {
+			res.CommitSuccess = []bool{true}
+		}
+		return res, nil
+	}}
+	r, _ := newTestReadiness(t, client)
+	task := &testTask{limiters: []Limiter{{
+		Type: enumsspb.LIMITER_TYPE_CONCURRENCY, Source: LimiterSourceConfig, Key: "key",
+	}}}
+	tx := r.NewTx(namespace.ID("ns"), task, &testCallback{})
+	require.NoError(t, tx.Check())
+	require.NoError(t, tx.Reserve(context.Background()))
+	// learned the run id from the reserve response: pass it to history and on later calls
+	refs := tx.LimiterRefs()
+	require.Len(t, refs, 1)
+	require.Equal(t, "run-1", refs[0].RunId)
+	require.NoError(t, tx.Commit(context.Background()))
+	tx.Close()
+	require.Equal(t, []string{"", "run-1"}, gotRunIDs)
+}
+
 func TestBlockedConcurrencyRetention(t *testing.T) {
 	r, ts := newTestReadiness(t, nil)
 	ns := namespace.ID("ns")

@@ -74,6 +74,11 @@ message ConcurrencyServiceBatchRequest {
   // Number of reserve_slots that are counted in reserve_seq. Used between the caller and the
   // batching client only.
   int32 counted_reserves = 11;
+
+  // Run id of the limiter execution, if known (from a previous response). Addressing the
+  // execution by run id avoids a current-run lookup on every call. If the run is gone or
+  // closed, the server falls back to the current run (or creates one, for reserves).
+  string run_id = 12;
 }
 
 message ConcurrencyServiceBatchResponse {
@@ -97,6 +102,9 @@ message ConcurrencyServiceBatchResponse {
 
   // Highest reserve_seq applied for the requesting client_id.
   int64 applied_reserve_seq = 5;
+
+  // Run id of the limiter execution that processed this batch.
+  string run_id = 6;
 }
 
 message ConcurrencyServiceWaitRequest {
@@ -121,6 +129,9 @@ message ConcurrencyServiceWaitRequest {
   // been sent or applied yet. The server subtracts (pending_reserve_seq - applied_reserve_seq)
   // from available slots before deciding to wake this waiter.
   int64 pending_reserve_seq = 7;
+
+  // See ConcurrencyServiceBatchRequest.run_id.
+  string run_id = 8;
 }
 
 message ConcurrencyServiceWaitResponse {
@@ -133,6 +144,9 @@ message ConcurrencyServiceWaitResponse {
   int32 wake_tokens = 2;
   // Highest reserve_seq applied for the requesting client_id.
   int64 applied_reserve_seq = 3;
+
+  // Run id of the limiter execution, if the response came from one.
+  string run_id = 4;
 }
 
 service ConcurrencyService {

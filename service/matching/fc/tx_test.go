@@ -51,7 +51,7 @@ func setTokens(r *Readiness, gen int64, tokens int32) {
 	cs.rs.lock.Lock()
 	claimed := cs.claimedLocked()
 	cs.rs.lock.Unlock()
-	cs.reportWaitResponse(gen, tokens, claimed, notifySync)
+	cs.reportWaitResponse(gen, tokens, claimed, "", notifySync)
 }
 
 func getTokens(r *Readiness) int32 {

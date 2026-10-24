@@ -159,8 +159,12 @@ type ConcurrencyServiceBatchRequest struct {
 	// Number of reserve_slots that are counted in reserve_seq. Used between the caller and the
 	// batching client only.
 	CountedReserves int32 `protobuf:"varint,11,opt,name=counted_reserves,json=countedReserves,proto3" json:"counted_reserves,omitempty"`
-	unknownFields   protoimpl.UnknownFields
-	sizeCache       protoimpl.SizeCache
+	// Run id of the limiter execution, if known (from a previous response). Addressing the
+	// execution by run id avoids a current-run lookup on every call. If the run is gone or
+	// closed, the server falls back to the current run (or creates one, for reserves).
+	RunId         string `protobuf:"bytes,12,opt,name=run_id,json=runId,proto3" json:"run_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *ConcurrencyServiceBatchRequest) Reset() {
@@ -270,6 +274,13 @@ func (x *ConcurrencyServiceBatchRequest) GetCountedReserves() int32 {
 	return 0
 }
 
+func (x *ConcurrencyServiceBatchRequest) GetRunId() string {
+	if x != nil {
+		return x.RunId
+	}
+	return ""
+}
+
 type ConcurrencyServiceBatchResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Generation of limiter state.
@@ -288,8 +299,10 @@ type ConcurrencyServiceBatchResponse struct {
 	CommitSuccess []bool `protobuf:"varint,4,rep,packed,name=commit_success,json=commitSuccess,proto3" json:"commit_success,omitempty"` // Note: we don't need a release_success, it's always considered successful.
 	// Highest reserve_seq applied for the requesting client_id.
 	AppliedReserveSeq int64 `protobuf:"varint,5,opt,name=applied_reserve_seq,json=appliedReserveSeq,proto3" json:"applied_reserve_seq,omitempty"`
-	unknownFields     protoimpl.UnknownFields
-	sizeCache         protoimpl.SizeCache
+	// Run id of the limiter execution that processed this batch.
+	RunId         string `protobuf:"bytes,6,opt,name=run_id,json=runId,proto3" json:"run_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *ConcurrencyServiceBatchResponse) Reset() {
@@ -357,6 +370,13 @@ func (x *ConcurrencyServiceBatchResponse) GetAppliedReserveSeq() int64 {
 	return 0
 }
 
+func (x *ConcurrencyServiceBatchResponse) GetRunId() string {
+	if x != nil {
+		return x.RunId
+	}
+	return ""
+}
+
 type ConcurrencyServiceWaitRequest struct {
 	state       protoimpl.MessageState `protogen:"open.v1"`
 	NamespaceId string                 `protobuf:"bytes,1,opt,name=namespace_id,json=namespaceId,proto3" json:"namespace_id,omitempty"`
@@ -379,8 +399,10 @@ type ConcurrencyServiceWaitRequest struct {
 	// been sent or applied yet. The server subtracts (pending_reserve_seq - applied_reserve_seq)
 	// from available slots before deciding to wake this waiter.
 	PendingReserveSeq int64 `protobuf:"varint,7,opt,name=pending_reserve_seq,json=pendingReserveSeq,proto3" json:"pending_reserve_seq,omitempty"`
-	unknownFields     protoimpl.UnknownFields
-	sizeCache         protoimpl.SizeCache
+	// See ConcurrencyServiceBatchRequest.run_id.
+	RunId         string `protobuf:"bytes,8,opt,name=run_id,json=runId,proto3" json:"run_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *ConcurrencyServiceWaitRequest) Reset() {
@@ -462,6 +484,13 @@ func (x *ConcurrencyServiceWaitRequest) GetPendingReserveSeq() int64 {
 	return 0
 }
 
+func (x *ConcurrencyServiceWaitRequest) GetRunId() string {
+	if x != nil {
+		return x.RunId
+	}
+	return ""
+}
+
 type ConcurrencyServiceWaitResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Generation of limiter state.
@@ -473,8 +502,10 @@ type ConcurrencyServiceWaitResponse struct {
 	WakeTokens int32 `protobuf:"varint,2,opt,name=wake_tokens,json=wakeTokens,proto3" json:"wake_tokens,omitempty"`
 	// Highest reserve_seq applied for the requesting client_id.
 	AppliedReserveSeq int64 `protobuf:"varint,3,opt,name=applied_reserve_seq,json=appliedReserveSeq,proto3" json:"applied_reserve_seq,omitempty"`
-	unknownFields     protoimpl.UnknownFields
-	sizeCache         protoimpl.SizeCache
+	// Run id of the limiter execution, if the response came from one.
+	RunId         string `protobuf:"bytes,4,opt,name=run_id,json=runId,proto3" json:"run_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *ConcurrencyServiceWaitResponse) Reset() {
@@ -526,6 +557,13 @@ func (x *ConcurrencyServiceWaitResponse) GetAppliedReserveSeq() int64 {
 		return x.AppliedReserveSeq
 	}
 	return 0
+}
+
+func (x *ConcurrencyServiceWaitResponse) GetRunId() string {
+	if x != nil {
+		return x.RunId
+	}
+	return ""
 }
 
 type ConcurrencyState_Slot struct {
@@ -612,7 +650,7 @@ const file_temporal_server_chasm_lib_flowcontrol_proto_v1_concurrency_proto_rawD
 	"\x04Slot\x12\x17\n" +
 	"\aslot_id\x18\x01 \x01(\tR\x06slotId\x12\x1c\n" +
 	"\tcommitted\x18\x02 \x01(\bR\tcommitted\x124\n" +
-	"\aexpires\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampR\aexpires\"\xeb\x03\n" +
+	"\aexpires\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampR\aexpires\"\x82\x04\n" +
 	"\x1eConcurrencyServiceBatchRequest\x12!\n" +
 	"\fnamespace_id\x18\x01 \x01(\tR\vnamespaceId\x12\x10\n" +
 	"\x03key\x18\x02 \x01(\tR\x03key\x12#\n" +
@@ -626,7 +664,8 @@ const file_temporal_server_chasm_lib_flowcontrol_proto_v1_concurrency_proto_rawD
 	"\vreserve_seq\x18\n" +
 	" \x01(\x03R\n" +
 	"reserveSeq\x12)\n" +
-	"\x10counted_reserves\x18\v \x01(\x05R\x0fcountedReserves\"\xf3\x01\n" +
+	"\x10counted_reserves\x18\v \x01(\x05R\x0fcountedReserves\x12\x15\n" +
+	"\x06run_id\x18\f \x01(\tR\x05runId\"\x8a\x02\n" +
 	"\x1fConcurrencyServiceBatchResponse\x12\x1e\n" +
 	"\n" +
 	"generation\x18\x01 \x01(\x03R\n" +
@@ -634,7 +673,8 @@ const file_temporal_server_chasm_lib_flowcontrol_proto_v1_concurrency_proto_rawD
 	"\x14available_slots_hint\x18\x02 \x01(\x05R\x12availableSlotsHint\x12'\n" +
 	"\x0freserve_success\x18\x03 \x03(\bR\x0ereserveSuccess\x12%\n" +
 	"\x0ecommit_success\x18\x04 \x03(\bR\rcommitSuccess\x12.\n" +
-	"\x13applied_reserve_seq\x18\x05 \x01(\x03R\x11appliedReserveSeq\"\x9a\x02\n" +
+	"\x13applied_reserve_seq\x18\x05 \x01(\x03R\x11appliedReserveSeq\x12\x15\n" +
+	"\x06run_id\x18\x06 \x01(\tR\x05runId\"\xb1\x02\n" +
 	"\x1dConcurrencyServiceWaitRequest\x12!\n" +
 	"\fnamespace_id\x18\x01 \x01(\tR\vnamespaceId\x12\x10\n" +
 	"\x03key\x18\x02 \x01(\tR\x03key\x12\x1e\n" +
@@ -644,14 +684,16 @@ const file_temporal_server_chasm_lib_flowcontrol_proto_v1_concurrency_proto_rawD
 	"\rwake_priority\x18\x04 \x01(\x03R\fwakePriority\x122\n" +
 	"\x15requested_wake_tokens\x18\x05 \x01(\x05R\x13requestedWakeTokens\x12\x1b\n" +
 	"\tclient_id\x18\x06 \x01(\tR\bclientId\x12.\n" +
-	"\x13pending_reserve_seq\x18\a \x01(\x03R\x11pendingReserveSeq\"\x91\x01\n" +
+	"\x13pending_reserve_seq\x18\a \x01(\x03R\x11pendingReserveSeq\x12\x15\n" +
+	"\x06run_id\x18\b \x01(\tR\x05runId\"\xa8\x01\n" +
 	"\x1eConcurrencyServiceWaitResponse\x12\x1e\n" +
 	"\n" +
 	"generation\x18\x01 \x01(\x03R\n" +
 	"generation\x12\x1f\n" +
 	"\vwake_tokens\x18\x02 \x01(\x05R\n" +
 	"wakeTokens\x12.\n" +
-	"\x13applied_reserve_seq\x18\x03 \x01(\x03R\x11appliedReserveSeq2\x89\x03\n" +
+	"\x13applied_reserve_seq\x18\x03 \x01(\x03R\x11appliedReserveSeq\x12\x15\n" +
+	"\x06run_id\x18\x04 \x01(\tR\x05runId2\x89\x03\n" +
 	"\x12ConcurrencyService\x12\xb9\x01\n" +
 	"\x05Batch\x12N.temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyServiceBatchRequest\x1aO.temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyServiceBatchResponse\"\x0f\x8a\xb5\x18\x02\b\x01\xd2\xc3\x18\x05\x1a\x03key\x12\xb6\x01\n" +
 	"\x04Wait\x12M.temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyServiceWaitRequest\x1aN.temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyServiceWaitResponse\"\x0f\x8a\xb5\x18\x02\b\x02\xd2\xc3\x18\x05\x1a\x03keyB;Z9go.temporal.io/server/chasm/lib/flowcontrol/gen/fcpb;fcpbb\x06proto3"

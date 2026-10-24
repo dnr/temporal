@@ -207,6 +207,7 @@ func (t *transferQueueActiveTaskExecutor) processReleaseLimiterTask(
 			_, err := t.concurrencyServiceClient.Batch(ctx, &fcpb.ConcurrencyServiceBatchRequest{
 				NamespaceId:  task.NamespaceID,
 				Key:          limiter.GetKey(),
+				RunId:        limiter.GetRunId(),
 				ReleaseSlots: []string{limiter.GetSlotId()},
 			})
 			if err != nil {

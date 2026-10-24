@@ -300,6 +300,60 @@ func TestHandlerApplyBatchSlotLifecycle(t *testing.T) {
 	require.Equal(t, int64(3), ress[0].res.Generation)
 }
 
+func TestHandlerApplyBatchByRunID(t *testing.T) {
+	tc := newTestHandlerContext(t)
+	// The test engine doesn't generate run ids, so start with an explicit one.
+	const runID = "test-run"
+	_, err := chasm.StartExecution(
+		tc.ctx,
+		chasm.ExecutionKey{NamespaceID: tc.key.namespaceID, BusinessID: tc.key.key, RunID: runID},
+		initFn,
+		chasmReq{items: []batchReq{{ctx: tc.ctx, req: &fcpb.ConcurrencyServiceBatchRequest{
+			ConfigUpdate:        &taskqueuepb.ConcurrencyLimit{ConcurrentTasks: 3},
+			ConfigUpdateVersion: 1,
+		}}}},
+	)
+	require.NoError(t, err)
+
+	// without a run id, the response tells us the run id
+	ress := tc.apply(&fcpb.ConcurrencyServiceBatchRequest{ReserveSlots: []string{"first"}})
+	require.NoError(t, ress[0].err)
+	require.Equal(t, runID, ress[0].res.RunId)
+
+	// addressed by run id
+	ress = tc.apply(&fcpb.ConcurrencyServiceBatchRequest{RunId: runID, ReserveSlots: []string{"second"}})
+	require.NoError(t, ress[0].err)
+	require.Equal(t, []bool{true}, ress[0].res.ReserveSuccess)
+	require.Equal(t, runID, ress[0].res.RunId)
+
+	// unknown run id: reserve falls back to the current run
+	ress = tc.apply(&fcpb.ConcurrencyServiceBatchRequest{RunId: "unknown-run", ReserveSlots: []string{"third"}})
+	require.NoError(t, ress[0].err)
+	require.Equal(t, []bool{true}, ress[0].res.ReserveSuccess)
+	require.Equal(t, runID, ress[0].res.RunId)
+
+	// unknown run id: commit (no start) also falls back to the current run
+	ress = tc.apply(&fcpb.ConcurrencyServiceBatchRequest{RunId: "unknown-run", CommitSlots: []string{"first"}})
+	require.NoError(t, ress[0].err)
+	require.Equal(t, []bool{true}, ress[0].res.CommitSuccess)
+	require.Equal(t, runID, ress[0].res.RunId)
+
+	// release frees a slot, then Wait works by run id or with a stale one
+	ress = tc.apply(&fcpb.ConcurrencyServiceBatchRequest{RunId: runID, ReleaseSlots: []string{"first"}})
+	require.NoError(t, ress[0].err)
+	for _, reqRunID := range []string{runID, "unknown-run"} {
+		waitRes, err := tc.handler.Wait(tc.ctx, &fcpb.ConcurrencyServiceWaitRequest{
+			NamespaceId: tc.key.namespaceID,
+			Key:         tc.key.key,
+			Generation:  ress[0].res.Generation,
+			RunId:       reqRunID,
+		})
+		require.NoError(t, err)
+		require.Equal(t, int32(1), waitRes.WakeTokens)
+		require.Equal(t, runID, waitRes.RunId)
+	}
+}
+
 func TestHandlerApplyBatchCommitAfterReservationExpiry(t *testing.T) {
 	tc := newTestHandlerContext(t)
 

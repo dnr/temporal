@@ -54,7 +54,7 @@ func TestReleaseLimiterTaskExecute(t *testing.T) {
 	task := &activitypb.ReleaseLimiterTask{Limiters: []*taskqueuespb.LimiterRef{
 		{LimiterType: enumsspb.LIMITER_TYPE_CONCURRENCY, Key: "first-key", SlotId: "bad-slot"},
 		{LimiterType: enumsspb.LIMITER_TYPE_UNSPECIFIED, Key: "ignored-key", SlotId: "ignored-slot"},
-		{LimiterType: enumsspb.LIMITER_TYPE_CONCURRENCY, Key: "second-key", SlotId: "good-slot"},
+		{LimiterType: enumsspb.LIMITER_TYPE_CONCURRENCY, Key: "second-key", SlotId: "good-slot", RunId: "run-id"},
 	}}
 
 	err := handler.Execute(t.Context(), chasm.ComponentRef{ExecutionKey: chasm.ExecutionKey{
@@ -64,6 +64,6 @@ func TestReleaseLimiterTaskExecute(t *testing.T) {
 	require.ErrorIs(t, err, releaseErr)
 	require.Equal(t, []*fcpb.ConcurrencyServiceBatchRequest{
 		{NamespaceId: "namespace-id", Key: "first-key", ReleaseSlots: []string{"bad-slot"}},
-		{NamespaceId: "namespace-id", Key: "second-key", ReleaseSlots: []string{"good-slot"}},
+		{NamespaceId: "namespace-id", Key: "second-key", RunId: "run-id", ReleaseSlots: []string{"good-slot"}},
 	}, requests)
 }

@@ -105,5 +105,6 @@ func (ct *concurrencyTx) ref() *taskqueuespb.LimiterRef {
 		LimiterType: enumsspb.LIMITER_TYPE_CONCURRENCY,
 		Key:         ct.cs.limiterKey(),
 		SlotId:      ct.getSlotID(),
+		RunId:       ct.cs.getRunID(),
 	}
 }

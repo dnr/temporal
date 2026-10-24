@@ -211,6 +211,8 @@ message LimiterRef {
   string key = 2;
   // Identifier for the reserved or committed slot. Empty for limiters that don't allocate slots.
   string slot_id = 3;
+  // Run id of the limiter execution, if known, so the release can address it directly.
+  string run_id = 4;
 }
 
 // LimiterHint carries a matching node's latest knowledge of a flow control limiter's state, so
