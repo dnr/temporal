@@ -33,9 +33,12 @@ type concurrencyState struct {
 	// returning a token if tokens has been superseded since check.
 	tokensSeq int64
 	// outstanding is the number of check tokens taken on this node whose Reserve hasn't
-	// completed yet. Limiter state from the server (hints and wait responses) doesn't reflect
-	// these, so we subtract them when applying it.
+	// completed yet. completed is the cumulative number of those whose Reserve completed.
+	// outstanding+completed is the number of reserves we've claimed, comparable to the
+	// server's applied reserve seq for this client: the difference is the number of our
+	// claimed slots that aren't reflected in server state yet.
 	outstanding int32
+	completed   int64
 	// invariant: {len(waiters) > 0} == {Wait goroutine is running} == {goroCancel != nil}
 	// (for now, until we add eviction)
 	goroCancel         context.CancelFunc
@@ -116,6 +119,7 @@ func (cs *concurrencyState) reserve(
 	slotID string,
 	configUpdate *taskqueuepb.ConcurrencyLimit,
 	configUpdateVersion int64,
+	counted int32,
 ) error {
 	// Note that the BatchingClient reports limiter state from the response to
 	// reportConcurrencySlotsHint.
@@ -124,6 +128,7 @@ func (cs *concurrencyState) reserve(
 		NamespaceId:         cs.namespaceID().String(),
 		Key:                 cs.limiterKey(),
 		ReserveSlots:        []string{slotID},
+		CountedReserves:     counted,
 		ConfigUpdate:        configUpdate,
 		ConfigUpdateVersion: configUpdateVersion,
 	})
@@ -175,32 +180,49 @@ func (cs *concurrencyState) reserveDone() {
 	cs.rs.lock.Lock()
 	defer cs.rs.lock.Unlock()
 	cs.outstanding = max(0, cs.outstanding-1)
+	cs.completed++
+}
+
+// dropOutstanding is called when a checked token is dropped without a Reserve.
+func (cs *concurrencyState) dropOutstanding() {
+	cs.rs.lock.Lock()
+	defer cs.rs.lock.Unlock()
+	cs.outstanding = max(0, cs.outstanding-1)
+}
+
+// claimedLocked returns the number of reserves claimed by this node (see outstanding).
+func (cs *concurrencyState) claimedLocked() int64 {
+	return int64(cs.outstanding) + cs.completed
 }
 
 // reportConcurrencySlotsHint is the BatchingClient's HintHandler. Callers of Batch hold pins on
 // the limiter, so we don't need to create it if it's missing.
-func (r *Readiness) reportConcurrencySlotsHint(namespaceID, key string, gen int64, slots int32, reserved int) {
+func (r *Readiness) reportConcurrencySlotsHint(namespaceID, key string, gen int64, slots int32, appliedSeq int64) {
 	rs := r.getShard(namespace.ID(namespaceID))
 	rs.lock.Lock()
 	cs := rs.concurrencyLimiters[namespaceID+key]
 	rs.lock.Unlock()
 	if cs != nil {
-		cs.reportSlotsHintWithReserved(gen, slots, int32(reserved), notifyAsync)
+		cs.reportSlotsHintWithApplied(gen, slots, appliedSeq, notifyAsync)
 	}
 }
 
 // reportSlotsHint updates cached state from available slots reported by the concurrency
 // service, either directly or passed on by another partition.
 func (cs *concurrencyState) reportSlotsHint(gen int64, slots int32, mode notifyMode) {
-	cs.reportSlotsHintWithReserved(gen, slots, 0, mode)
+	cs.reportSlotsHintWithApplied(gen, slots, -1, mode)
 }
 
-// reportSlotsHintWithReserved is like reportSlotsHint, where reserved of our outstanding
-// reserves were included in the batch that produced the hint.
-func (cs *concurrencyState) reportSlotsHintWithReserved(gen int64, slots, reserved int32, mode notifyMode) {
+// reportSlotsHintWithApplied is like reportSlotsHint, where appliedSeq is the server's applied
+// reserve seq for this node, or -1 if the hint came from another node.
+func (cs *concurrencyState) reportSlotsHintWithApplied(gen int64, slots int32, appliedSeq int64, mode notifyMode) {
 	_ = cs.rs.update(cs, mode, func() error {
-		// Our outstanding reserves that weren't in this batch aren't reflected in slots.
-		local := max(0, slots-max(0, cs.outstanding-reserved))
+		// Our claimed reserves that the server hasn't applied aren't reflected in slots.
+		unreflected := int64(cs.outstanding)
+		if appliedSeq >= 0 {
+			unreflected = max(0, cs.claimedLocked()-appliedSeq)
+		}
+		local := int32(max(0, int64(slots)-unreflected))
 		if cs.updateTokensLocked(gen, local) {
 			cs.slotsHintGeneration = gen
 			cs.slotsHint = slots
@@ -212,9 +234,11 @@ func (cs *concurrencyState) reportSlotsHintWithReserved(gen int64, slots, reserv
 
 // reportWaitResponse updates cached state from a Wait response. Wake tokens are a signal to
 // this node only, so they don't update the slots hint that we pass on to other partitions.
-func (cs *concurrencyState) reportWaitResponse(gen int64, wakeTokens int32, mode notifyMode) {
+func (cs *concurrencyState) reportWaitResponse(gen int64, wakeTokens int32, sentClaimed int64, mode notifyMode) {
 	_ = cs.rs.update(cs, mode, func() error {
-		cs.updateTokensLocked(gen, max(0, wakeTokens-cs.outstanding))
+		// The server already subtracted our unreflected claims as of when we sent the request.
+		// Subtract any claims we've made since then.
+		cs.updateTokensLocked(gen, int32(max(0, int64(wakeTokens)-(cs.claimedLocked()-sentClaimed))))
 		return nil
 	})
 }
@@ -299,6 +323,8 @@ func (cs *concurrencyState) makeWaitRequest() *fcpb.ConcurrencyServiceWaitReques
 		Generation:          cs.generation,
 		WakePriority:        int64(cs.waiterWakePriority),
 		RequestedWakeTokens: int32(len(waiters)),
+		ClientId:            cs.rs.r.clientID,
+		PendingReserveSeq:   cs.claimedLocked(),
 	}
 }
 
@@ -332,7 +358,7 @@ func (cs *concurrencyState) callWait(ctx context.Context) {
 		}
 		retrier.Reset()
 
-		cs.reportWaitResponse(res.Generation, res.WakeTokens, notifySync)
+		cs.reportWaitResponse(res.Generation, res.WakeTokens, req.PendingReserveSeq, notifySync)
 		// note: If we have satisfied all our waiters, then ctx
 		// will be canceled before we continue this loop.
 	}

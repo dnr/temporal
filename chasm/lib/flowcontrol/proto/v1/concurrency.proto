@@ -64,6 +64,16 @@ message ConcurrencyServiceBatchRequest {
   // queue config, so we need to pass them to the chasm object. We just do it on every call.
   temporal.api.taskqueue.v1.ConcurrencyLimit config_update = 7;
   int64 config_update_version = 8;
+
+  // Exact accounting of reserves from one client (matching node). client_id identifies the
+  // client. reserve_seq is the client's cumulative count of counted reserves, including the ones
+  // in this request. The server remembers the highest reserve_seq it has applied per client
+  // (in memory only) and returns it as applied_reserve_seq.
+  string client_id = 9;
+  int64 reserve_seq = 10;
+  // Number of reserve_slots that are counted in reserve_seq. Used between the caller and the
+  // batching client only.
+  int32 counted_reserves = 11;
 }
 
 message ConcurrencyServiceBatchResponse {
@@ -84,6 +94,9 @@ message ConcurrencyServiceBatchResponse {
   // Corresponds 1:1 with ConcurrencyBatchRequest.commit_slots.
   repeated bool commit_success = 4;
   // Note: we don't need a release_success, it's always considered successful.
+
+  // Highest reserve_seq applied for the requesting client_id.
+  int64 applied_reserve_seq = 5;
 }
 
 message ConcurrencyServiceWaitRequest {
@@ -101,6 +114,13 @@ message ConcurrencyServiceWaitRequest {
   // How many queues are known to be waiting for this limiter. The server may take this into
   // account when staging wakes. If this is missing, 1 is assumed.
   int32 requested_wake_tokens = 5;
+
+  // See ConcurrencyServiceBatchRequest.client_id.
+  string client_id = 6;
+  // The client's count of reserves it has claimed (checked locally), whether or not they've
+  // been sent or applied yet. The server subtracts (pending_reserve_seq - applied_reserve_seq)
+  // from available slots before deciding to wake this waiter.
+  int64 pending_reserve_seq = 7;
 }
 
 message ConcurrencyServiceWaitResponse {
@@ -111,6 +131,8 @@ message ConcurrencyServiceWaitResponse {
   // enough available. It may also be less than the number of slots available, if the limiter
   // wants to divide available slots among multiple waiters.
   int32 wake_tokens = 2;
+  // Highest reserve_seq applied for the requesting client_id.
+  int64 applied_reserve_seq = 3;
 }
 
 service ConcurrencyService {

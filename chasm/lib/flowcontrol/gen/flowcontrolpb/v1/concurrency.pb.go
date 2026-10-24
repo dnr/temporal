@@ -150,8 +150,17 @@ type ConcurrencyServiceBatchRequest struct {
 	// queue config, so we need to pass them to the chasm object. We just do it on every call.
 	ConfigUpdate        *v1.ConcurrencyLimit `protobuf:"bytes,7,opt,name=config_update,json=configUpdate,proto3" json:"config_update,omitempty"`
 	ConfigUpdateVersion int64                `protobuf:"varint,8,opt,name=config_update_version,json=configUpdateVersion,proto3" json:"config_update_version,omitempty"`
-	unknownFields       protoimpl.UnknownFields
-	sizeCache           protoimpl.SizeCache
+	// Exact accounting of reserves from one client (matching node). client_id identifies the
+	// client. reserve_seq is the client's cumulative count of counted reserves, including the ones
+	// in this request. The server remembers the highest reserve_seq it has applied per client
+	// (in memory only) and returns it as applied_reserve_seq.
+	ClientId   string `protobuf:"bytes,9,opt,name=client_id,json=clientId,proto3" json:"client_id,omitempty"`
+	ReserveSeq int64  `protobuf:"varint,10,opt,name=reserve_seq,json=reserveSeq,proto3" json:"reserve_seq,omitempty"`
+	// Number of reserve_slots that are counted in reserve_seq. Used between the caller and the
+	// batching client only.
+	CountedReserves int32 `protobuf:"varint,11,opt,name=counted_reserves,json=countedReserves,proto3" json:"counted_reserves,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *ConcurrencyServiceBatchRequest) Reset() {
@@ -240,6 +249,27 @@ func (x *ConcurrencyServiceBatchRequest) GetConfigUpdateVersion() int64 {
 	return 0
 }
 
+func (x *ConcurrencyServiceBatchRequest) GetClientId() string {
+	if x != nil {
+		return x.ClientId
+	}
+	return ""
+}
+
+func (x *ConcurrencyServiceBatchRequest) GetReserveSeq() int64 {
+	if x != nil {
+		return x.ReserveSeq
+	}
+	return 0
+}
+
+func (x *ConcurrencyServiceBatchRequest) GetCountedReserves() int32 {
+	if x != nil {
+		return x.CountedReserves
+	}
+	return 0
+}
+
 type ConcurrencyServiceBatchResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Generation of limiter state.
@@ -256,8 +286,10 @@ type ConcurrencyServiceBatchResponse struct {
 	// Note: we don't need a cancel_reservation_success, it's always considered successful.
 	// Corresponds 1:1 with ConcurrencyBatchRequest.commit_slots.
 	CommitSuccess []bool `protobuf:"varint,4,rep,packed,name=commit_success,json=commitSuccess,proto3" json:"commit_success,omitempty"` // Note: we don't need a release_success, it's always considered successful.
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	// Highest reserve_seq applied for the requesting client_id.
+	AppliedReserveSeq int64 `protobuf:"varint,5,opt,name=applied_reserve_seq,json=appliedReserveSeq,proto3" json:"applied_reserve_seq,omitempty"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
 }
 
 func (x *ConcurrencyServiceBatchResponse) Reset() {
@@ -318,6 +350,13 @@ func (x *ConcurrencyServiceBatchResponse) GetCommitSuccess() []bool {
 	return nil
 }
 
+func (x *ConcurrencyServiceBatchResponse) GetAppliedReserveSeq() int64 {
+	if x != nil {
+		return x.AppliedReserveSeq
+	}
+	return 0
+}
+
 type ConcurrencyServiceWaitRequest struct {
 	state       protoimpl.MessageState `protogen:"open.v1"`
 	NamespaceId string                 `protobuf:"bytes,1,opt,name=namespace_id,json=namespaceId,proto3" json:"namespace_id,omitempty"`
@@ -334,8 +373,14 @@ type ConcurrencyServiceWaitRequest struct {
 	// How many queues are known to be waiting for this limiter. The server may take this into
 	// account when staging wakes. If this is missing, 1 is assumed.
 	RequestedWakeTokens int32 `protobuf:"varint,5,opt,name=requested_wake_tokens,json=requestedWakeTokens,proto3" json:"requested_wake_tokens,omitempty"`
-	unknownFields       protoimpl.UnknownFields
-	sizeCache           protoimpl.SizeCache
+	// See ConcurrencyServiceBatchRequest.client_id.
+	ClientId string `protobuf:"bytes,6,opt,name=client_id,json=clientId,proto3" json:"client_id,omitempty"`
+	// The client's count of reserves it has claimed (checked locally), whether or not they've
+	// been sent or applied yet. The server subtracts (pending_reserve_seq - applied_reserve_seq)
+	// from available slots before deciding to wake this waiter.
+	PendingReserveSeq int64 `protobuf:"varint,7,opt,name=pending_reserve_seq,json=pendingReserveSeq,proto3" json:"pending_reserve_seq,omitempty"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
 }
 
 func (x *ConcurrencyServiceWaitRequest) Reset() {
@@ -403,6 +448,20 @@ func (x *ConcurrencyServiceWaitRequest) GetRequestedWakeTokens() int32 {
 	return 0
 }
 
+func (x *ConcurrencyServiceWaitRequest) GetClientId() string {
+	if x != nil {
+		return x.ClientId
+	}
+	return ""
+}
+
+func (x *ConcurrencyServiceWaitRequest) GetPendingReserveSeq() int64 {
+	if x != nil {
+		return x.PendingReserveSeq
+	}
+	return 0
+}
+
 type ConcurrencyServiceWaitResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Generation of limiter state.
@@ -411,9 +470,11 @@ type ConcurrencyServiceWaitResponse struct {
 	// timed out without slots available. It may be less than requested_tokens if there aren't
 	// enough available. It may also be less than the number of slots available, if the limiter
 	// wants to divide available slots among multiple waiters.
-	WakeTokens    int32 `protobuf:"varint,2,opt,name=wake_tokens,json=wakeTokens,proto3" json:"wake_tokens,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	WakeTokens int32 `protobuf:"varint,2,opt,name=wake_tokens,json=wakeTokens,proto3" json:"wake_tokens,omitempty"`
+	// Highest reserve_seq applied for the requesting client_id.
+	AppliedReserveSeq int64 `protobuf:"varint,3,opt,name=applied_reserve_seq,json=appliedReserveSeq,proto3" json:"applied_reserve_seq,omitempty"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
 }
 
 func (x *ConcurrencyServiceWaitResponse) Reset() {
@@ -456,6 +517,13 @@ func (x *ConcurrencyServiceWaitResponse) GetGeneration() int64 {
 func (x *ConcurrencyServiceWaitResponse) GetWakeTokens() int32 {
 	if x != nil {
 		return x.WakeTokens
+	}
+	return 0
+}
+
+func (x *ConcurrencyServiceWaitResponse) GetAppliedReserveSeq() int64 {
+	if x != nil {
+		return x.AppliedReserveSeq
 	}
 	return 0
 }
@@ -544,7 +612,7 @@ const file_temporal_server_chasm_lib_flowcontrol_proto_v1_concurrency_proto_rawD
 	"\x04Slot\x12\x17\n" +
 	"\aslot_id\x18\x01 \x01(\tR\x06slotId\x12\x1c\n" +
 	"\tcommitted\x18\x02 \x01(\bR\tcommitted\x124\n" +
-	"\aexpires\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampR\aexpires\"\x82\x03\n" +
+	"\aexpires\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampR\aexpires\"\xeb\x03\n" +
 	"\x1eConcurrencyServiceBatchRequest\x12!\n" +
 	"\fnamespace_id\x18\x01 \x01(\tR\vnamespaceId\x12\x10\n" +
 	"\x03key\x18\x02 \x01(\tR\x03key\x12#\n" +
@@ -553,14 +621,20 @@ const file_temporal_server_chasm_lib_flowcontrol_proto_v1_concurrency_proto_rawD
 	"\fcommit_slots\x18\x05 \x03(\tR\vcommitSlots\x12#\n" +
 	"\rrelease_slots\x18\x06 \x03(\tR\freleaseSlots\x12P\n" +
 	"\rconfig_update\x18\a \x01(\v2+.temporal.api.taskqueue.v1.ConcurrencyLimitR\fconfigUpdate\x122\n" +
-	"\x15config_update_version\x18\b \x01(\x03R\x13configUpdateVersion\"\xc3\x01\n" +
+	"\x15config_update_version\x18\b \x01(\x03R\x13configUpdateVersion\x12\x1b\n" +
+	"\tclient_id\x18\t \x01(\tR\bclientId\x12\x1f\n" +
+	"\vreserve_seq\x18\n" +
+	" \x01(\x03R\n" +
+	"reserveSeq\x12)\n" +
+	"\x10counted_reserves\x18\v \x01(\x05R\x0fcountedReserves\"\xf3\x01\n" +
 	"\x1fConcurrencyServiceBatchResponse\x12\x1e\n" +
 	"\n" +
 	"generation\x18\x01 \x01(\x03R\n" +
 	"generation\x120\n" +
 	"\x14available_slots_hint\x18\x02 \x01(\x05R\x12availableSlotsHint\x12'\n" +
 	"\x0freserve_success\x18\x03 \x03(\bR\x0ereserveSuccess\x12%\n" +
-	"\x0ecommit_success\x18\x04 \x03(\bR\rcommitSuccess\"\xcd\x01\n" +
+	"\x0ecommit_success\x18\x04 \x03(\bR\rcommitSuccess\x12.\n" +
+	"\x13applied_reserve_seq\x18\x05 \x01(\x03R\x11appliedReserveSeq\"\x9a\x02\n" +
 	"\x1dConcurrencyServiceWaitRequest\x12!\n" +
 	"\fnamespace_id\x18\x01 \x01(\tR\vnamespaceId\x12\x10\n" +
 	"\x03key\x18\x02 \x01(\tR\x03key\x12\x1e\n" +
@@ -568,13 +642,16 @@ const file_temporal_server_chasm_lib_flowcontrol_proto_v1_concurrency_proto_rawD
 	"generation\x18\x03 \x01(\x03R\n" +
 	"generation\x12#\n" +
 	"\rwake_priority\x18\x04 \x01(\x03R\fwakePriority\x122\n" +
-	"\x15requested_wake_tokens\x18\x05 \x01(\x05R\x13requestedWakeTokens\"a\n" +
+	"\x15requested_wake_tokens\x18\x05 \x01(\x05R\x13requestedWakeTokens\x12\x1b\n" +
+	"\tclient_id\x18\x06 \x01(\tR\bclientId\x12.\n" +
+	"\x13pending_reserve_seq\x18\a \x01(\x03R\x11pendingReserveSeq\"\x91\x01\n" +
 	"\x1eConcurrencyServiceWaitResponse\x12\x1e\n" +
 	"\n" +
 	"generation\x18\x01 \x01(\x03R\n" +
 	"generation\x12\x1f\n" +
 	"\vwake_tokens\x18\x02 \x01(\x05R\n" +
-	"wakeTokens2\x89\x03\n" +
+	"wakeTokens\x12.\n" +
+	"\x13applied_reserve_seq\x18\x03 \x01(\x03R\x11appliedReserveSeq2\x89\x03\n" +
 	"\x12ConcurrencyService\x12\xb9\x01\n" +
 	"\x05Batch\x12N.temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyServiceBatchRequest\x1aO.temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyServiceBatchResponse\"\x0f\x8a\xb5\x18\x02\b\x01\xd2\xc3\x18\x05\x1a\x03key\x12\xb6\x01\n" +
 	"\x04Wait\x12M.temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyServiceWaitRequest\x1aN.temporal.server.chasm.lib.flowcontrol.proto.v1.ConcurrencyServiceWaitResponse\"\x0f\x8a\xb5\x18\x02\b\x02\xd2\xc3\x18\x05\x1a\x03keyB;Z9go.temporal.io/server/chasm/lib/flowcontrol/gen/fcpb;fcpbb\x06proto3"

@@ -56,7 +56,11 @@ func (ct *concurrencyTx) cancelCheck() {
 }
 
 func (ct *concurrencyTx) reserve(ctx context.Context) error {
-	err := ct.cs.reserve(ctx, ct.getSlotID(), ct.configUpdate, ct.configUpdateVersion)
+	counted := int32(0)
+	if ct.outstanding {
+		counted = 1
+	}
+	err := ct.cs.reserve(ctx, ct.getSlotID(), ct.configUpdate, ct.configUpdateVersion, counted)
 	if ct.outstanding {
 		ct.outstanding = false
 		ct.cs.reserveDone()
@@ -74,9 +78,10 @@ func (ct *concurrencyTx) cancelReserve(ctx context.Context) {
 
 func (ct *concurrencyTx) close() {
 	if ct.outstanding {
-		// checked but never reserved or canceled (e.g. dispatch paths that only Check)
+		// checked but never reserved or canceled (e.g. dispatch paths that only Check, or
+		// tasks forwarded to another partition that reserves them)
 		ct.outstanding = false
-		ct.cs.reserveDone()
+		ct.cs.dropOutstanding()
 	}
 	ct.cs.unpin()
 }

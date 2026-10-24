@@ -169,7 +169,7 @@ func TestPoll(t *testing.T) {
 			requestTokens:     2,
 		},
 		{
-			name: "selected waiter may receive no tokens",
+			name: "selected waiter with no tokens keeps waiting",
 			component: &Component{ConcurrencyState: &fcpb.ConcurrencyState{
 				Config:     &taskqueuepb.ConcurrencyLimit{ConcurrentTasks: 1},
 				Generation: 2,
@@ -181,8 +181,8 @@ func TestPoll(t *testing.T) {
 			requestGeneration: 2,
 			requestStartTime:  200,
 			requestTokens:     1,
-			wantGeneration:    2,
-			wantReady:         true,
+			wantGeneration:    0,
+			wantReady:         false,
 		},
 	}
 
@@ -193,6 +193,7 @@ func TestPoll(t *testing.T) {
 				tt.requestGeneration,
 				tt.requestStartTime,
 				tt.requestTokens,
+				0,
 			)
 			require.Equal(t, tt.wantGeneration, generation)
 			require.Equal(t, tt.wantTokens, tokens)

@@ -123,7 +123,9 @@ func (c *Component) release(slotID string) {
 }
 
 // poll is called from PollComponent and should not modify the state.
-func (c *Component) poll(now time.Time, reqGeneration int64, reqStartTime int64, reqTokens int32) (int64, int32, bool) {
+// unreflected is the number of slots the caller has claimed locally that aren't reflected in
+// this state yet. We don't wake the caller unless there are slots available beyond those.
+func (c *Component) poll(now time.Time, reqGeneration int64, reqStartTime int64, reqTokens int32, unreflected int32) (int64, int32, bool) {
 	if reqGeneration < c.Generation {
 		return c.Generation, 0, true // old generation, try again with current
 	} else if reqGeneration > c.Generation {
@@ -132,10 +134,10 @@ func (c *Component) poll(now time.Time, reqGeneration int64, reqStartTime int64,
 
 	wake := c.WakeAll || reqStartTime <= c.WakeUpTo
 	storedAvailable := c.availableSlots()
-	effectiveAvailable := min(c.effectiveAvailableSlots(now), reqTokens)
+	effectiveAvailable := min(c.effectiveAvailableSlots(now)-unreflected, reqTokens)
 	freedByExpiration := storedAvailable == 0 && effectiveAvailable > 0
 
-	if wake || freedByExpiration {
+	if (wake || freedByExpiration) && effectiveAvailable > 0 {
 		// If this waiter is woken, we can return. Also if slots were freed by expiration: we
 		// won't get a state transition to set WakeUpTo/WakeAll, so we just return here.
 		return c.Generation, effectiveAvailable, true

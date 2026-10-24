@@ -60,7 +60,7 @@ func TestBatchingClient(t *testing.T) {
 			IdleTime: time.Minute,
 		},
 		clock.NewRealTimeSource(),
-		func(namespaceID, key string, generation int64, availableSlots int32, _ int) {
+		func(namespaceID, key string, generation int64, availableSlots int32, _ int64) {
 			hints = append(hints, fmt.Sprintf("%s/%s/%d/%d", namespaceID, key, generation, availableSlots))
 			hintCount.Add(1)
 		},
@@ -234,7 +234,7 @@ func TestBatchingClientCallOptionsBypassBatching(t *testing.T) {
 			require.Len(t, opts, 1)
 			return &fcpb.ConcurrencyServiceBatchResponse{Generation: 42, ReserveSuccess: []bool{true}}, nil
 		}},
-		hintHandler: func(_, _ string, generation int64, _ int32, _ int) {
+		hintHandler: func(_, _ string, generation int64, _ int32, _ int64) {
 			hintGeneration = generation
 		},
 	}

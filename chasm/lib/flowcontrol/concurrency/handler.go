@@ -34,6 +34,7 @@ type chasmReq struct {
 	reserveTimeout time.Duration
 	stagedWake     StagedWakeOptions
 	getWakeLevel   func(wantTokens int32) (wakeUpTo int64, wakeAll bool)
+	applied        *appliedSeqs
 }
 
 type batchRes struct {
@@ -74,6 +75,45 @@ type Handler struct {
 
 	waiterSeed   maphash.Seed
 	waiterShards [numWaiterShards]waiterShard
+
+	applied appliedSeqs
+}
+
+// appliedSeqs tracks the highest reserve_seq applied per client per limiter, in memory only.
+// It's read and written only while holding the limiter's execution lease (in updateFn and the
+// Wait predicate), but uses a lock since leases are per-limiter.
+type appliedSeqs struct {
+	lock sync.Mutex
+	m    map[appliedKey]int64
+}
+
+type appliedKey struct {
+	batchKey
+	clientID string
+}
+
+func (a *appliedSeqs) get(k appliedKey) int64 {
+	if a == nil || k.clientID == "" {
+		return 0
+	}
+	a.lock.Lock()
+	defer a.lock.Unlock()
+	return a.m[k]
+}
+
+func (a *appliedSeqs) update(k appliedKey, seq int64) int64 {
+	if a == nil || k.clientID == "" {
+		return 0
+	}
+	a.lock.Lock()
+	defer a.lock.Unlock()
+	if a.m == nil {
+		a.m = make(map[appliedKey]int64)
+	}
+	if seq > a.m[k] {
+		a.m[k] = seq
+	}
+	return a.m[k]
 }
 
 func NewHandler(
@@ -186,9 +226,12 @@ func updateFn(c *Component, cctx chasm.MutableContext, creq chasmReq) ([]*fcpb.C
 
 	// capture Generation after maybe incrementing
 	availableSlots := c.availableSlots()
-	for i := range creq.items {
+	key := batchKey{namespaceID: cctx.ExecutionKey().NamespaceID, key: cctx.ExecutionKey().BusinessID}
+	for i, it := range creq.items {
 		ress[i].Generation = c.Generation
 		ress[i].AvailableSlotsHint = availableSlots
+		ak := appliedKey{batchKey: key, clientID: it.req.GetClientId()}
+		ress[i].AppliedReserveSeq = creq.applied.update(ak, it.req.GetReserveSeq())
 	}
 
 	return ress, nil
@@ -219,6 +262,7 @@ func (h *Handler) applyBatch(
 		reserveTimeout: h.reserveTimeout(),
 		stagedWake:     h.stagedWake(),
 		getWakeLevel:   func(wantTokens int32) (int64, bool) { return h.getWakeLevel(key, wantTokens) },
+		applied:        &h.applied,
 	}
 
 	if needStart {
@@ -325,11 +369,16 @@ func (h *Handler) Wait(ctx context.Context, req *fcpb.ConcurrencyServiceWaitRequ
 				BusinessID:  req.Key,
 			}),
 			func(c *Component, cctx chasm.Context, req *fcpb.ConcurrencyServiceWaitRequest) (*fcpb.ConcurrencyServiceWaitResponse, bool, error) {
-				generation, tokens, ready := c.poll(cctx.Now(c), req.Generation, req.WakePriority, req.RequestedWakeTokens)
+				applied := h.applied.get(appliedKey{batchKey: k, clientID: req.ClientId})
+				unreflected := int32(min(max(0, req.PendingReserveSeq-applied), 1e6))
+				if req.ClientId == "" {
+					unreflected = 0
+				}
+				generation, tokens, ready := c.poll(cctx.Now(c), req.Generation, req.WakePriority, req.RequestedWakeTokens, unreflected)
 				if !ready {
 					return nil, false, nil
 				}
-				return &fcpb.ConcurrencyServiceWaitResponse{Generation: generation, WakeTokens: tokens}, true, nil
+				return &fcpb.ConcurrencyServiceWaitResponse{Generation: generation, WakeTokens: tokens, AppliedReserveSeq: applied}, true, nil
 			},
 			req,
 		)

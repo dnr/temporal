@@ -27,6 +27,7 @@ type (
 		concurrencyServiceClient fcpb.ConcurrencyServiceClient
 		config                   readinessConfig
 		createdAt                time.Time
+		clientID                 string
 
 		// Readiness state sharding and locking:
 		//
@@ -139,12 +140,14 @@ func NewReadiness(
 		createdAt:  timeSource.Now(),
 	}
 	if concurrencyServiceClient != nil {
-		r.concurrencyServiceClient = concurrency.NewBatchingClient(
+		bc := concurrency.NewBatchingClient(
 			concurrencyServiceClient,
 			config.clientBatcherOptions(),
 			timeSource,
 			r.reportConcurrencySlotsHint,
 		)
+		r.clientID = bc.ClientID()
+		r.concurrencyServiceClient = bc
 	}
 	for i := range r.shards {
 		rs := &r.shards[i]

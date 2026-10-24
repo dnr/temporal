@@ -3,6 +3,10 @@ package concurrency
 import (
 	"context"
 	"slices"
+	"sync"
+	"sync/atomic"
+
+	"github.com/google/uuid"
 
 	"go.temporal.io/api/serviceerror"
 	fcpb "go.temporal.io/server/chasm/lib/flowcontrol/gen/flowcontrolpb/v1"
@@ -27,9 +31,9 @@ type clientBatchResult struct {
 }
 
 // HintHandler is called with the limiter state (generation and available slots) from a Batch
-// response. reserved is the number of Reserves that were included in that rpc, which are
-// reflected in availableSlots.
-type HintHandler func(namespaceID, key string, generation int64, availableSlots int32, reserved int)
+// response. appliedReserveSeq is the highest reserve_seq from this client that the server has
+// applied (see ConcurrencyServiceBatchRequest.reserve_seq).
+type HintHandler func(namespaceID, key string, generation int64, availableSlots int32, appliedReserveSeq int64)
 
 // BatchingClient batches calls to ConcurrencyService.Batch by limiter.
 //
@@ -41,6 +45,22 @@ type BatchingClient struct {
 
 	hintHandler HintHandler
 	batchers    *streambatcher.KeyedBatcher[clientBatchKey, clientBatchItem, clientBatchResult]
+
+	clientID   string
+	reserveSeq sync.Map // clientBatchKey -> *atomic.Int64
+}
+
+// ClientID returns the id this client uses for reserve accounting.
+func (c *BatchingClient) ClientID() string {
+	return c.clientID
+}
+
+func (c *BatchingClient) nextReserveSeq(key clientBatchKey, counted int32) int64 {
+	v, ok := c.reserveSeq.Load(key)
+	if !ok {
+		v, _ = c.reserveSeq.LoadOrStore(key, &atomic.Int64{})
+	}
+	return v.(*atomic.Int64).Add(int64(counted)) //nolint:revive
 }
 
 // NewBatchingClient returns a BatchingClient. hintHandler may be nil.
@@ -50,7 +70,11 @@ func NewBatchingClient(
 	timeSource clock.TimeSource,
 	hintHandler HintHandler,
 ) *BatchingClient {
-	c := &BatchingClient{ConcurrencyServiceClient: client, hintHandler: hintHandler}
+	c := &BatchingClient{
+		ConcurrencyServiceClient: client,
+		hintHandler:              hintHandler,
+		clientID:                 uuid.NewString(),
+	}
 	c.batchers = streambatcher.NewKeyedBatcherWithPerItemResults(c.applyBatch, opts, timeSource)
 	return c
 }
@@ -67,7 +91,7 @@ func (c *BatchingClient) Batch(
 		} else if res == nil {
 			return nil, serviceerror.NewInternal("nil response")
 		}
-		c.reportHint(req.GetNamespaceId(), req.GetKey(), res, len(req.GetReserveSlots()))
+		c.reportHint(req.GetNamespaceId(), req.GetKey(), res)
 		return &fcpb.ConcurrencyServiceBatchResponse{
 			ReserveSuccess: res.ReserveSuccess,
 			CommitSuccess:  res.CommitSuccess,
@@ -88,6 +112,7 @@ func (c *BatchingClient) Batch(
 
 func (c *BatchingClient) applyBatch(key clientBatchKey, items []clientBatchItem) []clientBatchResult {
 	var reserveCount, cancelCount, commitCount, releaseCount int
+	var counted int32
 	var configItem *clientBatchItem
 	for i := range items {
 		item := &items[i]
@@ -95,6 +120,7 @@ func (c *BatchingClient) applyBatch(key clientBatchKey, items []clientBatchItem)
 		cancelCount += len(item.req.GetCancelReservationSlots())
 		commitCount += len(item.req.GetCommitSlots())
 		releaseCount += len(item.req.GetReleaseSlots())
+		counted += item.req.GetCountedReserves()
 		if item.req.GetConfigUpdate() != nil &&
 			(configItem == nil || item.req.GetConfigUpdateVersion() > configItem.req.GetConfigUpdateVersion()) {
 			configItem = item
@@ -104,6 +130,8 @@ func (c *BatchingClient) applyBatch(key clientBatchKey, items []clientBatchItem)
 	req := &fcpb.ConcurrencyServiceBatchRequest{
 		NamespaceId: key.namespaceID,
 		Key:         key.key,
+		ClientId:    c.clientID,
+		ReserveSeq:  c.nextReserveSeq(key, counted),
 	}
 	if reserveCount > 0 {
 		req.ReserveSlots = make([]string, 0, reserveCount)
@@ -144,7 +172,7 @@ func (c *BatchingClient) applyBatch(key clientBatchKey, items []clientBatchItem)
 	}
 
 	// Report state once for the whole batch, before any caller sees its result.
-	c.reportHint(key.namespaceID, key.key, res, reserveCount)
+	c.reportHint(key.namespaceID, key.key, res)
 
 	results := make([]clientBatchResult, len(items))
 	reserveOff := 0
@@ -162,8 +190,8 @@ func (c *BatchingClient) applyBatch(key clientBatchKey, items []clientBatchItem)
 	return results
 }
 
-func (c *BatchingClient) reportHint(namespaceID, key string, res *fcpb.ConcurrencyServiceBatchResponse, reserved int) {
+func (c *BatchingClient) reportHint(namespaceID, key string, res *fcpb.ConcurrencyServiceBatchResponse) {
 	if c.hintHandler != nil {
-		c.hintHandler(namespaceID, key, res.GetGeneration(), res.GetAvailableSlotsHint(), reserved)
+		c.hintHandler(namespaceID, key, res.GetGeneration(), res.GetAvailableSlotsHint(), res.GetAppliedReserveSeq())
 	}
 }

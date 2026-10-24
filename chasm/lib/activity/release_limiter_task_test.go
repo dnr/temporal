@@ -39,6 +39,8 @@ func TestReleaseLimiterTaskExecute(t *testing.T) {
 			request *fcpb.ConcurrencyServiceBatchRequest,
 			_ ...grpc.CallOption,
 		) (*fcpb.ConcurrencyServiceBatchResponse, error) {
+			// client id is generated per batching client, ignore it
+			request.ClientId = ""
 			requests = append(requests, request)
 			if request.GetReleaseSlots()[0] == "bad-slot" {
 				return nil, releaseErr
