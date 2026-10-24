@@ -596,6 +596,11 @@ func (d *matcherData) findAndWakeMatches() syncMatchOutcome {
 	}
 }
 
+// WakeDemand implements fc.WakeDemander. It's called from Check in findMatch, with d.lock held.
+func (d *matcherData) WakeDemand() int32 {
+	return int32(min(d.pollers.count, d.tasks.Len()))
+}
+
 // called from flow control; implements fc.ReadinessCallback
 func (d *matcherData) OnReady() {
 	d.lock.Lock()

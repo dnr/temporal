@@ -77,8 +77,9 @@ type (
 	}
 
 	fwdMapEntry struct {
-		pri wakePriority
-		cb  ReadinessCallback
+		pri    wakePriority
+		cb     ReadinessCallback
+		demand int32
 	}
 	revMapEntry struct {
 		limiter limiterState
@@ -244,7 +245,7 @@ func (rs *readinessShard) syncLimiter(limiter limiterState, toNotify *deferedNot
 	rs.updateGCListLocked(limiter)
 }
 
-func (rs *readinessShard) addEdgeLocked(limiter limiterState, cb ReadinessCallback, pri wakePriority) {
+func (rs *readinessShard) addEdgeLocked(limiter limiterState, cb ReadinessCallback, pri wakePriority, demand ...int32) {
 	if cb == nil {
 		return
 	}
@@ -252,7 +253,10 @@ func (rs *readinessShard) addEdgeLocked(limiter limiterState, cb ReadinessCallba
 	// remove the old entry first or we'll leave a stale one behind.
 	rs.removeEdgeLocked(limiter, cb)
 
-	newFEnt := fwdMapEntry{pri: pri, cb: cb}
+	newFEnt := fwdMapEntry{pri: pri, cb: cb, demand: 1}
+	if len(demand) > 0 {
+		newFEnt.demand = demand[0]
+	}
 	fEnts := rs.fwd[limiter]
 	if i, found := slices.BinarySearchFunc(fEnts, newFEnt, fwdMapEntryCmp); found {
 		fEnts[i] = newFEnt

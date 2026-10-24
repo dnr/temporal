@@ -84,9 +84,13 @@ func (rs *readinessShard) getConcurrencyLimiter(nsID namespace.ID, key string) *
 // check takes a check token if available. It returns the sequence of the token taken, to be
 // passed to cancelCheck.
 func (cs *concurrencyState) check(cb ReadinessCallback, pri wakePriority) (tokensSeq int64, err error) {
+	demand := int32(1)
+	if cb != nil {
+		demand = wakeDemand(cb)
+	}
 	err = cs.rs.update(cs, notifyAsync, func() error {
 		if cs.tokens == 0 {
-			cs.rs.addEdgeLocked(cs, cb, pri)
+			cs.rs.addEdgeLocked(cs, cb, pri, demand)
 			return ErrConcurrencyBlocked
 		}
 
@@ -317,12 +321,16 @@ func (cs *concurrencyState) makeWaitRequest() *fcpb.ConcurrencyServiceWaitReques
 	}
 
 	cs.waiterWakePriority = waiters[0].pri
+	demand := int32(0)
+	for _, w := range waiters {
+		demand += w.demand
+	}
 	return &fcpb.ConcurrencyServiceWaitRequest{
 		NamespaceId:         cs.namespaceID().String(),
 		Key:                 cs.limiterKey(),
 		Generation:          cs.generation,
 		WakePriority:        int64(cs.waiterWakePriority),
-		RequestedWakeTokens: int32(len(waiters)),
+		RequestedWakeTokens: demand,
 		ClientId:            cs.rs.r.clientID,
 		PendingReserveSeq:   cs.claimedLocked(),
 	}

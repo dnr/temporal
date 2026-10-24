@@ -47,3 +47,17 @@ type fcTask interface {
 type ReadinessCallback interface {
 	OnReady()
 }
+
+// WakeDemander is optionally implemented by a ReadinessCallback to say how many tokens it could
+// use if woken. It's called from Check, so it may rely on locks held around Check, and must not
+// call back into Readiness.
+type WakeDemander interface {
+	WakeDemand() int32
+}
+
+func wakeDemand(cb ReadinessCallback) int32 {
+	if d, ok := cb.(WakeDemander); ok {
+		return max(1, d.WakeDemand())
+	}
+	return 1
+}
