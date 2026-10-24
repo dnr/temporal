@@ -12,6 +12,7 @@ import (
 	persistencespb "go.temporal.io/server/api/persistence/v1"
 	taskqueuespb "go.temporal.io/server/api/taskqueue/v1"
 	"go.temporal.io/server/common/namespace"
+	serviceerrors "go.temporal.io/server/common/serviceerror"
 	"go.temporal.io/server/common/tqid"
 	"go.temporal.io/server/service/matching/fc"
 	"google.golang.org/grpc"
@@ -222,6 +223,14 @@ func (m *fcManager) localLimiterFairnessKey(fkey string) string {
 		partition = normal.PartitionId()
 	}
 	return fmt.Sprintf("fklim/%s/%d/%d/%s", m.partition.TaskQueue().Name(), partition, m.partition.TaskType(), fkey)
+}
+
+// isFlowControlBlocked returns true if err is a Reserve failure from a concurrency limiter. A
+// task that fails Reserve should go back to the matcher: the Reserve response already updated
+// the readiness cache, so it will block in Check until the limiter has slots again.
+func isFlowControlBlocked(err error) bool {
+	_, ok := errors.AsType[*serviceerrors.FlowControlBlocked](err)
+	return ok
 }
 
 func limiterErrorToSyncMatchOutcome(err error) syncMatchOutcome {

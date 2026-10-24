@@ -191,7 +191,8 @@ func (tr *fairTaskReader) completeTask(task *internalTask, res taskResponse) {
 	// get errRemoteSyncMatchFailed, which is a serviceerror.Canceled error.
 	if common.IsServiceClientTransientError(err) ||
 		common.IsContextDeadlineExceededErr(err) ||
-		common.IsContextCanceledErr(err) {
+		common.IsContextCanceledErr(err) ||
+		isFlowControlBlocked(err) {
 		// TODO(pri): if this was a start error (not a forwarding error): consider adding a
 		// per-task backoff here, in case the error was workflow busy, we don't want to end up
 		// trying the same task immediately. maybe also: after a few attempts on the same task,
