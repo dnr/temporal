@@ -32,6 +32,10 @@ type concurrencyState struct {
 	// a token in check, we record the sequence number, so that in cancelCheck, we can avoid
 	// returning a token if tokens has been superseded since check.
 	tokensSeq int64
+	// outstanding is the number of check tokens taken on this node whose Reserve hasn't
+	// completed yet. Limiter state from the server (hints and wait responses) doesn't reflect
+	// these, so we subtract them when applying it.
+	outstanding int32
 	// invariant: {len(waiters) > 0} == {Wait goroutine is running} == {goroCancel != nil}
 	// (for now, until we add eviction)
 	goroCancel         context.CancelFunc
@@ -87,14 +91,18 @@ func (cs *concurrencyState) check(cb ReadinessCallback, pri wakePriority) (token
 		cs.rs.removeEdgeLocked(cs, cb)
 		// take one check token
 		cs.tokens--
+		cs.outstanding++
 		tokensSeq = cs.tokensSeq
 		return nil
 	})
 	return
 }
 
-func (cs *concurrencyState) cancelCheck(tokensSeq int64) {
+func (cs *concurrencyState) cancelCheck(tokensSeq int64, outstanding bool) {
 	cs.rs.update(cs, notifyAsync, func() error {
+		if outstanding {
+			cs.outstanding = max(0, cs.outstanding-1)
+		}
 		if tokensSeq == cs.tokensSeq {
 			// this could theoretically go over the limit but it doesn't matter here
 			cs.tokens++
@@ -161,23 +169,39 @@ func (cs *concurrencyState) cancelReserve(ctx context.Context, slotID string) {
 	}()
 }
 
+// reserveDone is called when a Reserve for a checked token completes (successfully or not).
+// Its effect on server state, if any, has already been reported through the hint handler.
+func (cs *concurrencyState) reserveDone() {
+	cs.rs.lock.Lock()
+	defer cs.rs.lock.Unlock()
+	cs.outstanding = max(0, cs.outstanding-1)
+}
+
 // reportConcurrencySlotsHint is the BatchingClient's HintHandler. Callers of Batch hold pins on
 // the limiter, so we don't need to create it if it's missing.
-func (r *Readiness) reportConcurrencySlotsHint(namespaceID, key string, gen int64, slots int32) {
+func (r *Readiness) reportConcurrencySlotsHint(namespaceID, key string, gen int64, slots int32, reserved int) {
 	rs := r.getShard(namespace.ID(namespaceID))
 	rs.lock.Lock()
 	cs := rs.concurrencyLimiters[namespaceID+key]
 	rs.lock.Unlock()
 	if cs != nil {
-		cs.reportSlotsHint(gen, slots, notifyAsync)
+		cs.reportSlotsHintWithReserved(gen, slots, int32(reserved), notifyAsync)
 	}
 }
 
 // reportSlotsHint updates cached state from available slots reported by the concurrency
 // service, either directly or passed on by another partition.
 func (cs *concurrencyState) reportSlotsHint(gen int64, slots int32, mode notifyMode) {
+	cs.reportSlotsHintWithReserved(gen, slots, 0, mode)
+}
+
+// reportSlotsHintWithReserved is like reportSlotsHint, where reserved of our outstanding
+// reserves were included in the batch that produced the hint.
+func (cs *concurrencyState) reportSlotsHintWithReserved(gen int64, slots, reserved int32, mode notifyMode) {
 	_ = cs.rs.update(cs, mode, func() error {
-		if cs.updateTokensLocked(gen, slots) {
+		// Our outstanding reserves that weren't in this batch aren't reflected in slots.
+		local := max(0, slots-max(0, cs.outstanding-reserved))
+		if cs.updateTokensLocked(gen, local) {
 			cs.slotsHintGeneration = gen
 			cs.slotsHint = slots
 			cs.hasSlotsHint = true
@@ -190,7 +214,7 @@ func (cs *concurrencyState) reportSlotsHint(gen int64, slots int32, mode notifyM
 // this node only, so they don't update the slots hint that we pass on to other partitions.
 func (cs *concurrencyState) reportWaitResponse(gen int64, wakeTokens int32, mode notifyMode) {
 	_ = cs.rs.update(cs, mode, func() error {
-		cs.updateTokensLocked(gen, wakeTokens)
+		cs.updateTokensLocked(gen, max(0, wakeTokens-cs.outstanding))
 		return nil
 	})
 }

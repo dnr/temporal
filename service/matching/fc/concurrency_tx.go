@@ -16,6 +16,7 @@ type concurrencyTx struct {
 	configUpdateVersion int64
 	pri                 wakePriority
 	checkSeq            int64
+	outstanding         bool // took a check token that's counted in cs.outstanding
 }
 
 func newConcurrencyTx(
@@ -45,15 +46,22 @@ func (ct *concurrencyTx) getSlotID() string {
 func (ct *concurrencyTx) check(cb ReadinessCallback) error {
 	var err error
 	ct.checkSeq, err = ct.cs.check(cb, ct.pri)
+	ct.outstanding = err == nil
 	return err
 }
 
 func (ct *concurrencyTx) cancelCheck() {
-	ct.cs.cancelCheck(ct.checkSeq)
+	ct.cs.cancelCheck(ct.checkSeq, ct.outstanding)
+	ct.outstanding = false
 }
 
 func (ct *concurrencyTx) reserve(ctx context.Context) error {
-	return ct.cs.reserve(ctx, ct.getSlotID(), ct.configUpdate, ct.configUpdateVersion)
+	err := ct.cs.reserve(ctx, ct.getSlotID(), ct.configUpdate, ct.configUpdateVersion)
+	if ct.outstanding {
+		ct.outstanding = false
+		ct.cs.reserveDone()
+	}
+	return err
 }
 
 func (ct *concurrencyTx) commit(ctx context.Context) error {
@@ -65,6 +73,11 @@ func (ct *concurrencyTx) cancelReserve(ctx context.Context) {
 }
 
 func (ct *concurrencyTx) close() {
+	if ct.outstanding {
+		// checked but never reserved or canceled (e.g. dispatch paths that only Check)
+		ct.outstanding = false
+		ct.cs.reserveDone()
+	}
 	ct.cs.unpin()
 }
 

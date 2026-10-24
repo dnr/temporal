@@ -26,8 +26,10 @@ type clientBatchResult struct {
 	err error
 }
 
-// HintHandler is called with the limiter state (generation and available slots) from a Batch response.
-type HintHandler func(namespaceID, key string, generation int64, availableSlots int32)
+// HintHandler is called with the limiter state (generation and available slots) from a Batch
+// response. reserved is the number of Reserves that were included in that rpc, which are
+// reflected in availableSlots.
+type HintHandler func(namespaceID, key string, generation int64, availableSlots int32, reserved int)
 
 // BatchingClient batches calls to ConcurrencyService.Batch by limiter.
 //
@@ -65,7 +67,7 @@ func (c *BatchingClient) Batch(
 		} else if res == nil {
 			return nil, serviceerror.NewInternal("nil response")
 		}
-		c.reportHint(req.GetNamespaceId(), req.GetKey(), res)
+		c.reportHint(req.GetNamespaceId(), req.GetKey(), res, len(req.GetReserveSlots()))
 		return &fcpb.ConcurrencyServiceBatchResponse{
 			ReserveSuccess: res.ReserveSuccess,
 			CommitSuccess:  res.CommitSuccess,
@@ -142,7 +144,7 @@ func (c *BatchingClient) applyBatch(key clientBatchKey, items []clientBatchItem)
 	}
 
 	// Report state once for the whole batch, before any caller sees its result.
-	c.reportHint(key.namespaceID, key.key, res)
+	c.reportHint(key.namespaceID, key.key, res, reserveCount)
 
 	results := make([]clientBatchResult, len(items))
 	reserveOff := 0
@@ -160,8 +162,8 @@ func (c *BatchingClient) applyBatch(key clientBatchKey, items []clientBatchItem)
 	return results
 }
 
-func (c *BatchingClient) reportHint(namespaceID, key string, res *fcpb.ConcurrencyServiceBatchResponse) {
+func (c *BatchingClient) reportHint(namespaceID, key string, res *fcpb.ConcurrencyServiceBatchResponse, reserved int) {
 	if c.hintHandler != nil {
-		c.hintHandler(namespaceID, key, res.GetGeneration(), res.GetAvailableSlotsHint())
+		c.hintHandler(namespaceID, key, res.GetGeneration(), res.GetAvailableSlotsHint(), reserved)
 	}
 }
