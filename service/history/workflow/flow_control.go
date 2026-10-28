@@ -1,6 +1,8 @@
 package workflow
 
 import (
+	"slices"
+
 	enumsspb "go.temporal.io/server/api/enums/v1"
 	taskqueuespb "go.temporal.io/server/api/taskqueue/v1"
 	"go.temporal.io/server/common/definition"
@@ -19,6 +21,13 @@ func (ms *MutableStateImpl) trackRemovedLimiterRefs(
 		}
 		ms.releaseLimiterRefs = append(ms.releaseLimiterRefs, previousRef)
 	}
+}
+
+// MarkLimitersReleased records limiter refs that were already released outside of this
+// transaction (e.g. by frontend before RespondActivityTaskCompleted), so that no release task is
+// generated for them.
+func (ms *MutableStateImpl) MarkLimitersReleased(refs []*taskqueuespb.LimiterRef) {
+	ms.preReleasedLimiterRefs = append(ms.preReleasedLimiterRefs, refs...)
 }
 
 func containsLimiterRef(
@@ -49,6 +58,11 @@ func (ms *MutableStateImpl) closeTransactionGenerateReleaseLimiterTask(
 		for _, activityInfo := range ms.pendingActivityInfoIDs {
 			limiters = append(limiters, activityInfo.Limiters...)
 		}
+	}
+	if len(ms.preReleasedLimiterRefs) > 0 {
+		limiters = slices.DeleteFunc(slices.Clone(limiters), func(ref *taskqueuespb.LimiterRef) bool {
+			return containsLimiterRef(ms.preReleasedLimiterRefs, ref)
+		})
 	}
 	if task := newReleaseLimiterTask(ms.GetWorkflowKey(), limiters); task != nil {
 		ms.AddTasks(task)

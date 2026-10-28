@@ -250,6 +250,7 @@ func (s *WorkflowHandlerSuite) getWorkflowHandler(config *Config) *WorkflowHandl
 			saValidator,
 		),
 		nil,
+		nil, // no limiter pre-releaser
 	)
 }
 

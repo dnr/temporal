@@ -110,6 +110,11 @@ func Invoke(
 			}
 
 			ai, _ = mutableState.GetActivityInfo(scheduledEventID)
+			// Frontend may have released this attempt's limiter slots already. Only refs that
+			// match the activity's current refs are skipped when generating the release task.
+			if released := req.GetReleasedLimiters(); len(released) > 0 {
+				mutableState.MarkLimitersReleased(released)
+			}
 			if _, err = mutableState.AddActivityTaskCompletedEvent(scheduledEventID, ai.StartedEventId, request); err != nil {
 				// Unable to add ActivityTaskCompleted event to history
 				return nil, err

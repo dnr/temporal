@@ -3628,6 +3628,13 @@ func (e *matchingEngineImpl) createPollActivityTaskQueueResponse(
 		componentRef,
 		activityAttemptStamp,
 	)
+	// Same refs that were passed to history in RecordActivityTaskStarted, so frontend can release
+	// them when the worker responds.
+	for _, ref := range task.fcTx.LimiterRefs() {
+		if taskqueue.NeedsRelease(ref) {
+			taskToken.Limiters = append(taskToken.Limiters, ref)
+		}
+	}
 	serializedToken, _ := e.tokenSerializer.Serialize(taskToken)
 
 	// This is here to ensure that this field is never nil as expected by the TS SDK.

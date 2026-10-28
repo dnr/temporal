@@ -3406,6 +3406,18 @@ func (mr *MockMutableStateMockRecorder) LoadHistoryEvent(ctx, token any) *gomock
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "LoadHistoryEvent", reflect.TypeOf((*MockMutableState)(nil).LoadHistoryEvent), ctx, token)
 }
 
+// MarkLimitersReleased mocks base method.
+func (m *MockMutableState) MarkLimitersReleased(arg0 []*taskqueue0.LimiterRef) {
+	m.ctrl.T.Helper()
+	m.ctrl.Call(m, "MarkLimitersReleased", arg0)
+}
+
+// MarkLimitersReleased indicates an expected call of MarkLimitersReleased.
+func (mr *MockMutableStateMockRecorder) MarkLimitersReleased(arg0 any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "MarkLimitersReleased", reflect.TypeOf((*MockMutableState)(nil).MarkLimitersReleased), arg0)
+}
+
 // NextTransitionCount mocks base method.
 func (m *MockMutableState) NextTransitionCount() int64 {
 	m.ctrl.T.Helper()

@@ -11,10 +11,11 @@ import (
 	sync "sync"
 	unsafe "unsafe"
 
-	v13 "go.temporal.io/api/enums/v1"
+	v14 "go.temporal.io/api/enums/v1"
 	v12 "go.temporal.io/server/api/clock/v1"
 	v1 "go.temporal.io/server/api/history/v1"
 	v11 "go.temporal.io/server/api/persistence/v1"
+	v13 "go.temporal.io/server/api/taskqueue/v1"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	timestamppb "google.golang.org/protobuf/types/known/timestamppb"
@@ -253,8 +254,11 @@ type Task struct {
 	// Reference to the associated Chasm component, if provided.
 	ComponentRef         []byte `protobuf:"bytes,14,opt,name=component_ref,json=componentRef,proto3" json:"component_ref,omitempty"`
 	ActivityAttemptStamp int32  `protobuf:"varint,15,opt,name=activity_attempt_stamp,json=activityAttemptStamp,proto3" json:"activity_attempt_stamp,omitempty"`
-	unknownFields        protoimpl.UnknownFields
-	sizeCache            protoimpl.SizeCache
+	// Flow control limiter slots held by this task attempt, so that the frontend can release them
+	// when the worker reports the attempt is done.
+	Limiters      []*v13.LimiterRef `protobuf:"bytes,16,rep,name=limiters,proto3" json:"limiters,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *Task) Reset() {
@@ -392,6 +396,13 @@ func (x *Task) GetActivityAttemptStamp() int32 {
 	return 0
 }
 
+func (x *Task) GetLimiters() []*v13.LimiterRef {
+	if x != nil {
+		return x.Limiters
+	}
+	return nil
+}
+
 type QueryTask struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	NamespaceId   string                 `protobuf:"bytes,1,opt,name=namespace_id,json=namespaceId,proto3" json:"namespace_id,omitempty"`
@@ -457,7 +468,7 @@ type NexusTask struct {
 	NamespaceId   string                 `protobuf:"bytes,1,opt,name=namespace_id,json=namespaceId,proto3" json:"namespace_id,omitempty"`
 	TaskQueue     string                 `protobuf:"bytes,2,opt,name=task_queue,json=taskQueue,proto3" json:"task_queue,omitempty"`
 	TaskId        string                 `protobuf:"bytes,3,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`
-	TaskQueueKind v13.TaskQueueKind      `protobuf:"varint,4,opt,name=task_queue_kind,json=taskQueueKind,proto3,enum=temporal.api.enums.v1.TaskQueueKind" json:"task_queue_kind,omitempty"`
+	TaskQueueKind v14.TaskQueueKind      `protobuf:"varint,4,opt,name=task_queue_kind,json=taskQueueKind,proto3,enum=temporal.api.enums.v1.TaskQueueKind" json:"task_queue_kind,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -513,11 +524,11 @@ func (x *NexusTask) GetTaskId() string {
 	return ""
 }
 
-func (x *NexusTask) GetTaskQueueKind() v13.TaskQueueKind {
+func (x *NexusTask) GetTaskQueueKind() v14.TaskQueueKind {
 	if x != nil {
 		return x.TaskQueueKind
 	}
-	return v13.TaskQueueKind(0)
+	return v14.TaskQueueKind(0)
 }
 
 // A reference for loading a history event.
@@ -672,7 +683,7 @@ var File_temporal_server_api_token_v1_message_proto protoreflect.FileDescriptor
 
 const file_temporal_server_api_token_v1_message_proto_rawDesc = "" +
 	"\n" +
-	"*temporal/server/api/token/v1/message.proto\x12\x1ctemporal.server.api.token.v1\x1a\x1fgoogle/protobuf/timestamp.proto\x1a&temporal/api/enums/v1/task_queue.proto\x1a*temporal/server/api/clock/v1/message.proto\x1a,temporal/server/api/history/v1/message.proto\x1a,temporal/server/api/persistence/v1/hsm.proto\"\xd4\x03\n" +
+	"*temporal/server/api/token/v1/message.proto\x12\x1ctemporal.server.api.token.v1\x1a\x1fgoogle/protobuf/timestamp.proto\x1a&temporal/api/enums/v1/task_queue.proto\x1a*temporal/server/api/clock/v1/message.proto\x1a,temporal/server/api/history/v1/message.proto\x1a,temporal/server/api/persistence/v1/hsm.proto\x1a.temporal/server/api/taskqueue/v1/message.proto\"\xd4\x03\n" +
 	"\x13HistoryContinuation\x12\x15\n" +
 	"\x06run_id\x18\x01 \x01(\tR\x05runId\x12$\n" +
 	"\x0efirst_event_id\x18\x02 \x01(\x03R\ffirstEventId\x12\"\n" +
@@ -696,7 +707,7 @@ const file_temporal_server_api_token_v1_message_proto_rawDesc = "" +
 	"endEventId\x12*\n" +
 	"\x11end_event_version\x18\a \x01(\x03R\x0fendEventVersion\x12+\n" +
 	"\x11persistence_token\x18\b \x01(\fR\x10persistenceToken\x12]\n" +
-	"\x11version_histories\x18\t \x01(\v20.temporal.server.api.history.v1.VersionHistoriesR\x10versionHistoriesJ\x04\b\x01\x10\x02\"\xd8\x04\n" +
+	"\x11version_histories\x18\t \x01(\v20.temporal.server.api.history.v1.VersionHistoriesR\x10versionHistoriesJ\x04\b\x01\x10\x02\"\xa2\x05\n" +
 	"\x04Task\x12!\n" +
 	"\fnamespace_id\x18\x01 \x01(\tR\vnamespaceId\x12\x1f\n" +
 	"\vworkflow_id\x18\x02 \x01(\tR\n" +
@@ -715,7 +726,8 @@ const file_temporal_server_api_token_v1_message_proto_rawDesc = "" +
 	"\fstarted_time\x18\f \x01(\v2\x1a.google.protobuf.TimestampR\vstartedTime\x12#\n" +
 	"\rstart_version\x18\r \x01(\x03R\fstartVersion\x12#\n" +
 	"\rcomponent_ref\x18\x0e \x01(\fR\fcomponentRef\x124\n" +
-	"\x16activity_attempt_stamp\x18\x0f \x01(\x05R\x14activityAttemptStamp\"f\n" +
+	"\x16activity_attempt_stamp\x18\x0f \x01(\x05R\x14activityAttemptStamp\x12H\n" +
+	"\blimiters\x18\x10 \x03(\v2,.temporal.server.api.taskqueue.v1.LimiterRefR\blimiters\"f\n" +
 	"\tQueryTask\x12!\n" +
 	"\fnamespace_id\x18\x01 \x01(\tR\vnamespaceId\x12\x1d\n" +
 	"\n" +
@@ -766,8 +778,9 @@ var file_temporal_server_api_token_v1_message_proto_goTypes = []any{
 	(*v1.VersionHistories)(nil),      // 9: temporal.server.api.history.v1.VersionHistories
 	(*v12.VectorClock)(nil),          // 10: temporal.server.api.clock.v1.VectorClock
 	(*timestamppb.Timestamp)(nil),    // 11: google.protobuf.Timestamp
-	(v13.TaskQueueKind)(0),           // 12: temporal.api.enums.v1.TaskQueueKind
-	(*v11.StateMachineRef)(nil),      // 13: temporal.server.api.persistence.v1.StateMachineRef
+	(*v13.LimiterRef)(nil),           // 12: temporal.server.api.taskqueue.v1.LimiterRef
+	(v14.TaskQueueKind)(0),           // 13: temporal.api.enums.v1.TaskQueueKind
+	(*v11.StateMachineRef)(nil),      // 14: temporal.server.api.persistence.v1.StateMachineRef
 }
 var file_temporal_server_api_token_v1_message_proto_depIdxs = []int32{
 	7,  // 0: temporal.server.api.token.v1.HistoryContinuation.version_history_item:type_name -> temporal.server.api.history.v1.VersionHistoryItem
@@ -775,13 +788,14 @@ var file_temporal_server_api_token_v1_message_proto_depIdxs = []int32{
 	9,  // 2: temporal.server.api.token.v1.RawHistoryContinuation.version_histories:type_name -> temporal.server.api.history.v1.VersionHistories
 	10, // 3: temporal.server.api.token.v1.Task.clock:type_name -> temporal.server.api.clock.v1.VectorClock
 	11, // 4: temporal.server.api.token.v1.Task.started_time:type_name -> google.protobuf.Timestamp
-	12, // 5: temporal.server.api.token.v1.NexusTask.task_queue_kind:type_name -> temporal.api.enums.v1.TaskQueueKind
-	13, // 6: temporal.server.api.token.v1.NexusOperationCompletion.ref:type_name -> temporal.server.api.persistence.v1.StateMachineRef
-	7,  // [7:7] is the sub-list for method output_type
-	7,  // [7:7] is the sub-list for method input_type
-	7,  // [7:7] is the sub-list for extension type_name
-	7,  // [7:7] is the sub-list for extension extendee
-	0,  // [0:7] is the sub-list for field type_name
+	12, // 5: temporal.server.api.token.v1.Task.limiters:type_name -> temporal.server.api.taskqueue.v1.LimiterRef
+	13, // 6: temporal.server.api.token.v1.NexusTask.task_queue_kind:type_name -> temporal.api.enums.v1.TaskQueueKind
+	14, // 7: temporal.server.api.token.v1.NexusOperationCompletion.ref:type_name -> temporal.server.api.persistence.v1.StateMachineRef
+	8,  // [8:8] is the sub-list for method output_type
+	8,  // [8:8] is the sub-list for method input_type
+	8,  // [8:8] is the sub-list for extension type_name
+	8,  // [8:8] is the sub-list for extension extendee
+	0,  // [0:8] is the sub-list for field type_name
 }
 
 func init() { file_temporal_server_api_token_v1_message_proto_init() }

@@ -11,6 +11,8 @@ import (
 	"go.temporal.io/server/chasm"
 	"go.temporal.io/server/chasm/lib/activity"
 	chasmcallback "go.temporal.io/server/chasm/lib/callback"
+	"go.temporal.io/server/chasm/lib/flowcontrol"
+	"go.temporal.io/server/chasm/lib/flowcontrol/concurrency"
 	"go.temporal.io/server/chasm/lib/namespacereplication"
 	namespacereplicationpb "go.temporal.io/server/chasm/lib/namespacereplication/gen/namespacereplicationpb/v1"
 	chasmnexus "go.temporal.io/server/chasm/lib/nexusoperation"
@@ -165,6 +167,7 @@ var Module = fx.Options(
 	chasmcallback.Module,
 	namespacereplication.Module,
 	activity.FrontendModule,
+	flowcontrol.FrontendModule,
 	fx.Provide(visibility.ChasmVisibilityManagerProvider),
 	fx.Provide(chasm.ChasmVisibilityInterceptorProvider),
 )
@@ -1039,6 +1042,7 @@ func HandlerProvider(
 	registry *chasm.Registry,
 	frontendServiceResolver membership.ServiceResolver,
 	chasmNsReplClient namespacereplicationpb.NamespaceReplicationServiceClient,
+	limiterPreReleaser *concurrency.PreReleaser,
 ) Handler {
 	workerDeploymentReadRateLimiter := configs.NewGlobalNamespaceRateLimiter(
 		frontendServiceResolver,
@@ -1086,6 +1090,7 @@ func HandlerProvider(
 			saValidator,
 		),
 		chasmNsReplClient,
+		limiterPreReleaser,
 	)
 	return wfHandler
 }

@@ -140,6 +140,7 @@ type (
 		deleteActivityInfos            map[int64]struct{}                     // Deleted activities from last update.
 		syncActivityTasks              map[int64]struct{}                     // Activity to be sync to remote
 		releaseLimiterRefs             []*taskqueuespb.LimiterRef
+		preReleasedLimiterRefs         []*taskqueuespb.LimiterRef // Already released by the caller this transaction.
 
 		pendingTimerInfoIDs     map[string]*persistencespb.TimerInfo // User Timer ID -> Timer Info.
 		pendingTimerEventIDToID map[int64]string                     // User Timer Start Event ID -> User Timer ID.
@@ -8686,6 +8687,7 @@ func (ms *MutableStateImpl) cleanupTransaction() error {
 	ms.deleteActivityInfos = make(map[int64]struct{})
 	ms.syncActivityTasks = make(map[int64]struct{})
 	ms.releaseLimiterRefs = nil
+	ms.preReleasedLimiterRefs = nil
 
 	ms.updateTimerInfos = make(map[string]*persistencespb.TimerInfo)
 	ms.deleteTimerInfos = make(map[string]struct{})

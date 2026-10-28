@@ -464,6 +464,29 @@ func (s *mutableStateSuite) TestWorkflowCloseReleasesPendingTaskLimiters() {
 	)
 }
 
+func (s *mutableStateSuite) TestPreReleasedLimitersSkipReleaseTask() {
+	s.mutableState.PopTasks()
+	ref := func(slotID string) *taskqueuespb.LimiterRef {
+		return &taskqueuespb.LimiterRef{
+			LimiterType: enumsspb.LIMITER_TYPE_CONCURRENCY,
+			Key:         "limiter",
+			SlotId:      slotID,
+		}
+	}
+
+	// matching pre-released ref: no release task
+	s.mutableState.releaseLimiterRefs = []*taskqueuespb.LimiterRef{ref("slot-1")}
+	s.mutableState.MarkLimitersReleased([]*taskqueuespb.LimiterRef{ref("slot-1")})
+	s.mutableState.closeTransactionGenerateReleaseLimiterTask(historyi.TransactionPolicyActive)
+	s.Empty(s.mutableState.PopTasks()[tasks.CategoryTransfer])
+	s.NoError(s.mutableState.cleanupTransaction())
+
+	// pre-released ref from a different (stale) attempt: still release the current one
+	s.mutableState.releaseLimiterRefs = []*taskqueuespb.LimiterRef{ref("slot-2")}
+	s.mutableState.MarkLimitersReleased([]*taskqueuespb.LimiterRef{ref("slot-1")})
+	s.requireReleaseLimiterTask([]*taskqueuespb.LimiterRef{ref("slot-2")})
+}
+
 func (s *mutableStateSuite) TestPassiveTransactionDoesNotReleaseLimiters() {
 	s.mutableState.PopTasks()
 	s.mutableState.releaseLimiterRefs = []*taskqueuespb.LimiterRef{{

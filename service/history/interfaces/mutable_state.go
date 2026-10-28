@@ -175,6 +175,7 @@ type (
 		GetWorkflowKey() definition.WorkflowKey
 		GetActivityByActivityID(string) (*persistencespb.ActivityInfo, bool)
 		GetActivityInfo(int64) (*persistencespb.ActivityInfo, bool)
+		MarkLimitersReleased([]*taskqueuespb.LimiterRef)
 		GetActivityInfoWithTimerHeartbeat(scheduledEventID int64) (*persistencespb.ActivityInfo, time.Time, bool)
 		GetActivityType(context.Context, *persistencespb.ActivityInfo) (*commonpb.ActivityType, error)
 		GetActivityScheduledEvent(context.Context, int64) (*historypb.HistoryEvent, error)

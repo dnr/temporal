@@ -26,3 +26,11 @@ var MatchingModule = fx.Module(
 		fcpb.NewConcurrencyServiceLayeredClient,
 	),
 )
+
+var FrontendModule = fx.Module(
+	"flowcontrol-frontend",
+	fx.Provide(
+		fcpb.NewConcurrencyServiceLayeredClient,
+		concurrency.NewPreReleaser,
+	),
+)

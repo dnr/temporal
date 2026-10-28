@@ -39,6 +39,7 @@ import (
 	taskqueuespb "go.temporal.io/server/api/taskqueue/v1"
 	"go.temporal.io/server/chasm"
 	"go.temporal.io/server/chasm/lib/activity"
+	"go.temporal.io/server/chasm/lib/flowcontrol/concurrency"
 	namespacereplicationpb "go.temporal.io/server/chasm/lib/namespacereplication/gen/namespacereplicationpb/v1"
 	chasmnexus "go.temporal.io/server/chasm/lib/nexusoperation"
 	chasmscheduler "go.temporal.io/server/chasm/lib/scheduler"
@@ -165,6 +166,7 @@ type (
 		httpEnabled                     bool
 		registry                        *chasm.Registry
 		workerDeploymentReadRateLimiter quotas.RequestRateLimiter
+		limiterPreReleaser              *concurrency.PreReleaser
 	}
 )
 
@@ -346,6 +348,7 @@ func NewWorkflowHandler(
 	workerDeploymentReadRateLimiter quotas.RequestRateLimiter,
 	validator *workflow.RequestValidator,
 	chasmNsReplClient namespacereplicationpb.NamespaceReplicationServiceClient,
+	limiterPreReleaser *concurrency.PreReleaser,
 ) *WorkflowHandler {
 	handler := &WorkflowHandler{
 		ActivityHandler:       activityHandler,
@@ -402,6 +405,7 @@ func NewWorkflowHandler(
 		registry:                        registry,
 		workerDeploymentReadRateLimiter: workerDeploymentReadRateLimiter,
 		validator:                       validator,
+		limiterPreReleaser:              limiterPreReleaser,
 	}
 
 	return handler
@@ -1736,9 +1740,13 @@ func (wh *WorkflowHandler) RespondActivityTaskCompleted(
 			return nil, err
 		}
 	} else {
+		// The worker says this attempt is done, so its limiter slots can be released now, without
+		// waiting for history to record the completion and run a release task.
+		released := wh.limiterPreReleaser.Release(ctx, namespaceId.String(), taskToken.GetLimiters())
 		_, err = wh.historyClient.RespondActivityTaskCompleted(ctx, &historyservice.RespondActivityTaskCompletedRequest{
-			NamespaceId:     namespaceId.String(),
-			CompleteRequest: request,
+			NamespaceId:      namespaceId.String(),
+			CompleteRequest:  request,
+			ReleasedLimiters: released,
 		})
 		if err != nil {
 			return nil, err
