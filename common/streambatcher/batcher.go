@@ -39,7 +39,8 @@ type BatcherOptions struct {
 	// MaxItems is the maximum number of items in a batch.
 	MaxItems int
 	// MinDelay is how long to wait for no more items to come in after any item before
-	// finishing the batch.
+	// finishing the batch. If zero, the batch is finished as soon as no more items are
+	// already waiting, and MaxDelay is ignored.
 	MinDelay time.Duration
 	// MaxDelay is the maximum time to wait after the first item in a batch before finishing
 	// the batch.
@@ -154,24 +155,37 @@ func (b *Batcher[T, R]) loop(runningC *chan struct{}) {
 		idleT.Stop()
 
 		// try to add more items. stop after a gap of MinDelay, total time of MaxDelay,
-		// or MaxItems items.
-		maxWaitC, maxWaitT := b.timeSource.NewTimer(b.opts.MaxDelay)
-	loop:
-		for len(items) < b.opts.MaxItems {
-			gapC, gapT := b.timeSource.NewTimer(b.opts.MinDelay)
-			select {
-			case pair := <-b.submitC:
-				items = append(items, pair.item)
-				resps = append(resps, pair.resp)
-			case <-gapC:
-				break loop
-			case <-maxWaitC:
-				gapT.Stop()
-				break loop
+		// or MaxItems items. If MinDelay is zero, just take whatever is already waiting.
+		if b.opts.MinDelay <= 0 {
+		drain:
+			for len(items) < b.opts.MaxItems {
+				select {
+				case pair := <-b.submitC:
+					items = append(items, pair.item)
+					resps = append(resps, pair.resp)
+				default:
+					break drain
+				}
 			}
-			gapT.Stop()
+		} else {
+			maxWaitC, maxWaitT := b.timeSource.NewTimer(b.opts.MaxDelay)
+		loop:
+			for len(items) < b.opts.MaxItems {
+				gapC, gapT := b.timeSource.NewTimer(b.opts.MinDelay)
+				select {
+				case pair := <-b.submitC:
+					items = append(items, pair.item)
+					resps = append(resps, pair.resp)
+				case <-gapC:
+					break loop
+				case <-maxWaitC:
+					gapT.Stop()
+					break loop
+				}
+				gapT.Stop()
+			}
+			maxWaitT.Stop()
 		}
-		maxWaitT.Stop()
 
 		// process batch
 		results := b.fn(items)
