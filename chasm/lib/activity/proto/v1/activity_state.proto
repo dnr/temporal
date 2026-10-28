@@ -248,6 +248,10 @@ message ActivityAttemptState {
 
   string last_worker_identity = 7;
 
+  // The authenticated principal of the worker that most recently accepted or responded to an activity task.
+  // It is updated with last_worker_identity.
+  temporal.api.common.v1.Principal last_worker_principal = 15;
+
   // The Worker Deployment Version this activity was dispatched to most recently.
   // If nil, the activity has not yet been dispatched or was last dispatched to an unversioned worker.
   temporal.api.deployment.v1.WorkerDeploymentVersion last_deployment_version = 8;
@@ -274,7 +278,7 @@ message ActivityAttemptState {
   ActivityRetryIntervalSource current_retry_interval_source = 13;
 
   // Flow control limiters held by the currently started activity task.
-  repeated temporal.server.api.taskqueue.v1.LimiterRef limiters = 15;
+  repeated temporal.server.api.taskqueue.v1.LimiterRef limiters = 16;
 }
 
 message ActivityHeartbeatState {

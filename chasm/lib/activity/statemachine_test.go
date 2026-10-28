@@ -222,7 +222,6 @@ func TestTransitionEagerStarted(t *testing.T) {
 
 	err := TransitionEagerStarted.Apply(activity, ctx, eagerStartEvent{
 		requestID: "start-request-id",
-		identity:  "starter",
 	})
 	require.NoError(t, err)
 	require.Equal(t, activitypb.ACTIVITY_EXECUTION_STATUS_STARTED, activity.GetStatus())
@@ -231,7 +230,6 @@ func TestTransitionEagerStarted(t *testing.T) {
 	require.EqualValues(t, 1, attempt.GetStamp())
 	require.EqualValues(t, 1, attempt.GetStartedStamp())
 	require.Equal(t, "start-request-id", attempt.GetStartRequestId())
-	require.Equal(t, "starter", attempt.GetLastWorkerIdentity())
 	require.Equal(t, headers.ClientNameGoSDK, attempt.GetSdkName())
 	require.Equal(t, temporal.SDKVersion, attempt.GetSdkVersion())
 
@@ -508,7 +506,6 @@ func TestTransitionStarted(t *testing.T) {
 	require.Equal(t, activitypb.ACTIVITY_EXECUTION_STATUS_STARTED, activity.Status)
 	require.EqualValues(t, 1, attemptState.Count)
 	require.Equal(t, defaultTime, attemptState.StartedTime.AsTime())
-	require.Equal(t, "test-worker", attemptState.LastWorkerIdentity)
 	require.Equal(t, headers.ClientNameGoSDK, attemptState.SdkName)
 	require.Equal(t, temporal.SDKVersion, attemptState.SdkVersion)
 	protorequire.ProtoSliceEqual(t, limiters, attemptState.GetLimiters())
@@ -832,7 +829,6 @@ func TestTransitionCompleted(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, activitypb.ACTIVITY_EXECUTION_STATUS_COMPLETED, activity.Status)
 	require.EqualValues(t, 1, attemptState.Count)
-	require.Equal(t, "worker", attemptState.GetLastWorkerIdentity())
 	require.NotNil(t, attemptState.GetCompleteTime())
 	protorequire.ProtoEqual(t, payload, outcome.GetSuccessful().GetOutput())
 }
@@ -976,7 +972,6 @@ func TestTransitionFailed(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, activitypb.ACTIVITY_EXECUTION_STATUS_FAILED, activity.Status)
 	require.EqualValues(t, 1, attemptState.Count)
-	require.Equal(t, "worker", attemptState.GetLastWorkerIdentity())
 	require.NotNil(t, attemptState.GetCompleteTime())
 	protorequire.ProtoEqual(t, failure, attemptState.GetLastFailureDetails().GetFailure())
 	require.NotNil(t, attemptState.GetLastFailureDetails().GetTime())
@@ -989,8 +984,7 @@ func TestTransitionTerminated(t *testing.T) {
 	ctx := &chasm.MockMutableContext{}
 	ctx.HandleNow = func(chasm.Component) time.Time { return defaultTime }
 	attemptState := &activitypb.ActivityAttemptState{
-		Count:              1,
-		LastWorkerIdentity: "worker",
+		Count: 1,
 	}
 	outcome := &activitypb.ActivityOutcome{}
 
@@ -1030,7 +1024,6 @@ func TestTransitionTerminated(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, activitypb.ACTIVITY_EXECUTION_STATUS_TERMINATED, activity.Status)
 	require.EqualValues(t, 1, attemptState.Count)
-	require.Equal(t, "worker", attemptState.GetLastWorkerIdentity())
 	require.Equal(t, "test-request-id", activity.GetTerminateState().RequestId)
 
 	expectedFailure := &failurepb.Failure{
