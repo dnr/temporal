@@ -602,7 +602,9 @@ func (c *physicalTaskQueueManagerImpl) GetStatsByPriority(includeRates bool) map
 
 		for _, s := range stats {
 			s.RateLimitingActive = rateLimitingActive
-			s.FlowControlActive = rateLimitingActive || concurrencyLimitingActive
+			// TODO(fc): add back after this is in api:
+			// s.FlowControlActive = rateLimitingActive || concurrencyLimitingActive
+			_ = concurrencyLimitingActive
 		}
 	}
 
