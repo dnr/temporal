@@ -1715,6 +1715,10 @@ func (wh *WorkflowHandler) RespondActivityTaskCompleted(
 	sizeLimitError := wh.config.BlobSizeLimitError(namespaceName)
 	sizeLimitWarn := wh.config.BlobSizeLimitWarn(namespaceName)
 
+	// The worker says this attempt is done, so its limiter slots can be released now, without
+	// waiting for history to record the result and run a release task.
+	released := wh.limiterPreReleaser.Release(ctx, namespaceId.String(), taskToken.GetLimiters())
+
 	if err := common.CheckEventBlobSizeLimit(
 		request.GetResult().Size(),
 		sizeLimitWarn,
@@ -1733,16 +1737,14 @@ func (wh *WorkflowHandler) RespondActivityTaskCompleted(
 			Identity:  request.Identity,
 		}
 		_, err = wh.historyClient.RespondActivityTaskFailed(ctx, &historyservice.RespondActivityTaskFailedRequest{
-			NamespaceId:   namespaceId.String(),
-			FailedRequest: failRequest,
+			NamespaceId:      namespaceId.String(),
+			FailedRequest:    failRequest,
+			ReleasedLimiters: released,
 		})
 		if err != nil {
 			return nil, err
 		}
 	} else {
-		// The worker says this attempt is done, so its limiter slots can be released now, without
-		// waiting for history to record the completion and run a release task.
-		released := wh.limiterPreReleaser.Release(ctx, namespaceId.String(), taskToken.GetLimiters())
 		_, err = wh.historyClient.RespondActivityTaskCompleted(ctx, &historyservice.RespondActivityTaskCompletedRequest{
 			NamespaceId:      namespaceId.String(),
 			CompleteRequest:  request,
@@ -1972,9 +1974,13 @@ func (wh *WorkflowHandler) RespondActivityTaskFailed(
 		response.Failures = append(response.Failures, serverFailure)
 	}
 
+	// The worker says this attempt is done, so its limiter slots can be released now, without
+	// waiting for history to record the result and run a release task.
+	released := wh.limiterPreReleaser.Release(ctx, namespaceID.String(), taskToken.GetLimiters())
 	_, err = wh.historyClient.RespondActivityTaskFailed(ctx, &historyservice.RespondActivityTaskFailedRequest{
-		NamespaceId:   namespaceID.String(),
-		FailedRequest: request,
+		NamespaceId:      namespaceID.String(),
+		FailedRequest:    request,
+		ReleasedLimiters: released,
 	})
 	if err != nil {
 		return nil, err
@@ -2152,6 +2158,10 @@ func (wh *WorkflowHandler) RespondActivityTaskCanceled(ctx context.Context, requ
 	sizeLimitError := wh.config.BlobSizeLimitError(namespaceName)
 	sizeLimitWarn := wh.config.BlobSizeLimitWarn(namespaceName)
 
+	// The worker says this attempt is done, so its limiter slots can be released now, without
+	// waiting for history to record the result and run a release task.
+	released := wh.limiterPreReleaser.Release(ctx, namespaceID.String(), taskToken.GetLimiters())
+
 	if err := common.CheckEventBlobSizeLimit(
 		request.GetDetails().Size(),
 		sizeLimitWarn,
@@ -2170,16 +2180,18 @@ func (wh *WorkflowHandler) RespondActivityTaskCanceled(ctx context.Context, requ
 			Identity:  request.Identity,
 		}
 		_, err = wh.historyClient.RespondActivityTaskFailed(ctx, &historyservice.RespondActivityTaskFailedRequest{
-			NamespaceId:   taskToken.GetNamespaceId(),
-			FailedRequest: failRequest,
+			NamespaceId:      taskToken.GetNamespaceId(),
+			FailedRequest:    failRequest,
+			ReleasedLimiters: released,
 		})
 		if err != nil {
 			return nil, err
 		}
 	} else {
 		_, err = wh.historyClient.RespondActivityTaskCanceled(ctx, &historyservice.RespondActivityTaskCanceledRequest{
-			NamespaceId:   taskToken.GetNamespaceId(),
-			CancelRequest: request,
+			NamespaceId:      taskToken.GetNamespaceId(),
+			CancelRequest:    request,
+			ReleasedLimiters: released,
 		})
 		if err != nil {
 			return nil, err

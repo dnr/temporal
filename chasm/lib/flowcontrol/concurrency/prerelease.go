@@ -24,7 +24,7 @@ type PreReleaseOptions struct {
 }
 
 var defaultPreReleaseOptions = PreReleaseOptions{
-	Mode:    PreReleaseModeOff,
+	Mode:    PreReleaseModeSync,
 	Timeout: 500 * time.Millisecond,
 }
 

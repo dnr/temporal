@@ -89,6 +89,10 @@ func Invoke(
 				return nil, consts.ErrActivityTaskNotCancelRequested
 			}
 
+			// Frontend may have released this attempt's limiter slots already.
+			if released := req.GetReleasedLimiters(); len(released) > 0 {
+				mutableState.MarkLimitersReleased(released)
+			}
 			if _, err := mutableState.AddActivityTaskCanceledEvent(
 				scheduledEventID,
 				ai.StartedEventId,

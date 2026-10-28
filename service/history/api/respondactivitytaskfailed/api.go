@@ -105,6 +105,10 @@ func Invoke(
 			hasTimeSkippingClockOffset = workflow.NewTimeSkippingInfoUtil(mutableState.GetExecutionInfo().GetTimeSkippingInfo()).HasTimeSkippingClockOffset()
 			taskQueue = ai.TaskQueue
 			mutableState.RecordLastActivityCompleteTime(ai)
+			// Frontend may have released this attempt's limiter slots already.
+			if released := req.GetReleasedLimiters(); len(released) > 0 {
+				mutableState.MarkLimitersReleased(released)
+			}
 			retryState, err := mutableState.RetryActivity(ai, failure)
 			if err != nil {
 				return nil, err

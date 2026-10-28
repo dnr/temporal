@@ -476,6 +476,9 @@ message RespondActivityTaskFailedRequest {
 
   string namespace_id = 1;
   temporal.api.workflowservice.v1.RespondActivityTaskFailedRequest failed_request = 2;
+  // Limiter slots the frontend already released for this attempt. History doesn't need to
+  // create a release task for these.
+  repeated temporal.server.api.taskqueue.v1.LimiterRef released_limiters = 3;
 }
 
 message RespondActivityTaskFailedResponse {}
@@ -485,6 +488,9 @@ message RespondActivityTaskCanceledRequest {
 
   string namespace_id = 1;
   temporal.api.workflowservice.v1.RespondActivityTaskCanceledRequest cancel_request = 2;
+  // Limiter slots the frontend already released for this attempt. History doesn't need to
+  // create a release task for these.
+  repeated temporal.server.api.taskqueue.v1.LimiterRef released_limiters = 3;
 }
 
 message RespondActivityTaskCanceledResponse {}
