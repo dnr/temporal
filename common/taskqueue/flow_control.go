@@ -13,3 +13,15 @@ func NeedsRelease(ref *taskqueuespb.LimiterRef) bool {
 		return false
 	}
 }
+
+// ContainsLimiterRef returns whether refs contains a ref to the same limiter slot as want.
+func ContainsLimiterRef(refs []*taskqueuespb.LimiterRef, want *taskqueuespb.LimiterRef) bool {
+	for _, ref := range refs {
+		if ref.GetLimiterType() == want.GetLimiterType() &&
+			ref.GetKey() == want.GetKey() &&
+			ref.GetSlotId() == want.GetSlotId() {
+			return true
+		}
+	}
+	return false
+}

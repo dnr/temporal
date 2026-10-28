@@ -358,6 +358,7 @@ func (a *Activity) HandleCompleted(
 	if err := a.validateActivityTaskToken(ctx, event.Token, event.Request.GetNamespaceId(), true); err != nil {
 		return nil, err
 	}
+	a.dropPreReleasedLimiters(ctx, event.Request.GetReleasedLimiters())
 
 	baseHandler := a.baseMetricsHandler(ctx, metrics.HistoryRespondActivityTaskCompletedScope)
 	enrichedHandler := a.completionMetricsHandler(ctx, metrics.HistoryRespondActivityTaskCompletedScope)
@@ -383,6 +384,7 @@ func (a *Activity) HandleFailed(
 	if err := a.validateActivityTaskToken(ctx, event.Token, event.Request.GetNamespaceId(), false); err != nil {
 		return nil, err
 	}
+	a.dropPreReleasedLimiters(ctx, event.Request.GetReleasedLimiters())
 
 	baseHandler := a.baseMetricsHandler(ctx, metrics.HistoryRespondActivityTaskFailedScope)
 	enrichedHandler := a.completionMetricsHandler(ctx, metrics.HistoryRespondActivityTaskFailedScope)
@@ -438,6 +440,7 @@ func (a *Activity) HandleCanceled(
 	if !TransitionCanceled.Possible(a) {
 		return nil, consts.ErrActivityTaskNotCancelRequested
 	}
+	a.dropPreReleasedLimiters(ctx, event.Request.GetReleasedLimiters())
 
 	metricsHandler := a.completionMetricsHandler(ctx, metrics.HistoryRespondActivityTaskCanceledScope)
 

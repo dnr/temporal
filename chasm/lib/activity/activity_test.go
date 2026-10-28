@@ -15,8 +15,10 @@ import (
 	"go.temporal.io/api/serviceerror"
 	taskqueuepb "go.temporal.io/api/taskqueue/v1"
 	"go.temporal.io/api/workflowservice/v1"
+	enumsspb "go.temporal.io/server/api/enums/v1"
 	"go.temporal.io/server/api/historyservice/v1"
 	persistencespb "go.temporal.io/server/api/persistence/v1"
+	taskqueuespb "go.temporal.io/server/api/taskqueue/v1"
 	tokenspb "go.temporal.io/server/api/token/v1"
 	"go.temporal.io/server/chasm"
 	"go.temporal.io/server/chasm/lib/activity/gen/activitypb/v1"
@@ -980,6 +982,72 @@ func TestWorkerResponsesRecordLastWorker(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, "cancel-worker-identity", activity.LastAttempt.Get(ctx).GetLastWorkerIdentity())
 		protorequire.ProtoEqual(t, principal, activity.LastAttempt.Get(ctx).GetLastWorkerPrincipal())
+	})
+}
+
+func TestWorkerResponsesSkipPreReleasedLimiters(t *testing.T) {
+	ref := func(slotID string) *taskqueuespb.LimiterRef {
+		return &taskqueuespb.LimiterRef{LimiterType: enumsspb.LIMITER_TYPE_CONCURRENCY, Key: "limiter", SlotId: slotID}
+	}
+	releasedByTask := func(ctx *chasm.MockMutableContext) []*taskqueuespb.LimiterRef {
+		var refs []*taskqueuespb.LimiterRef
+		for _, task := range ctx.Tasks {
+			if releaseTask, ok := task.Payload.(*activitypb.ReleaseLimiterTask); ok {
+				refs = append(refs, releaseTask.GetLimiters()...)
+			}
+		}
+		return refs
+	}
+
+	t.Run("completed, all pre-released", func(t *testing.T) {
+		ctx, activity, token := newWorkerResponseTestActivity(t, activitypb.ACTIVITY_EXECUTION_STATUS_STARTED)
+		activity.LastAttempt.Get(ctx).Limiters = []*taskqueuespb.LimiterRef{ref("slot-1")}
+		_, err := activity.HandleCompleted(ctx, RespondCompletedEvent{
+			Token: token,
+			Request: &historyservice.RespondActivityTaskCompletedRequest{
+				NamespaceId:      token.GetNamespaceId(),
+				CompleteRequest:  &workflowservice.RespondActivityTaskCompletedRequest{},
+				ReleasedLimiters: []*taskqueuespb.LimiterRef{ref("slot-1")},
+			},
+		})
+		require.NoError(t, err)
+		require.Empty(t, releasedByTask(ctx))
+	})
+
+	t.Run("retryable failure, partly pre-released", func(t *testing.T) {
+		ctx, activity, token := newWorkerResponseTestActivity(t, activitypb.ACTIVITY_EXECUTION_STATUS_STARTED)
+		activity.LastAttempt.Get(ctx).Limiters = []*taskqueuespb.LimiterRef{ref("slot-1"), ref("slot-2")}
+		_, err := activity.HandleFailed(ctx, RespondFailedEvent{
+			Token: token,
+			Request: &historyservice.RespondActivityTaskFailedRequest{
+				NamespaceId: token.GetNamespaceId(),
+				FailedRequest: &workflowservice.RespondActivityTaskFailedRequest{
+					Failure: &failurepb.Failure{
+						FailureInfo: &failurepb.Failure_ApplicationFailureInfo{
+							ApplicationFailureInfo: &failurepb.ApplicationFailureInfo{Type: "retryable"},
+						},
+					},
+				},
+				ReleasedLimiters: []*taskqueuespb.LimiterRef{ref("slot-1")},
+			},
+		})
+		require.NoError(t, err)
+		protorequire.ProtoSliceEqual(t, []*taskqueuespb.LimiterRef{ref("slot-2")}, releasedByTask(ctx))
+	})
+
+	t.Run("canceled, stale pre-released ref", func(t *testing.T) {
+		ctx, activity, token := newWorkerResponseTestActivity(t, activitypb.ACTIVITY_EXECUTION_STATUS_CANCEL_REQUESTED)
+		activity.LastAttempt.Get(ctx).Limiters = []*taskqueuespb.LimiterRef{ref("slot-2")}
+		_, err := activity.HandleCanceled(ctx, RespondCancelledEvent{
+			Token: token,
+			Request: &historyservice.RespondActivityTaskCanceledRequest{
+				NamespaceId:      token.GetNamespaceId(),
+				CancelRequest:    &workflowservice.RespondActivityTaskCanceledRequest{},
+				ReleasedLimiters: []*taskqueuespb.LimiterRef{ref("slot-1")},
+			},
+		})
+		require.NoError(t, err)
+		protorequire.ProtoSliceEqual(t, []*taskqueuespb.LimiterRef{ref("slot-2")}, releasedByTask(ctx))
 	})
 }
 

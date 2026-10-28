@@ -16,7 +16,7 @@ func (ms *MutableStateImpl) trackRemovedLimiterRefs(
 	current []*taskqueuespb.LimiterRef,
 ) {
 	for _, previousRef := range previous {
-		if !commontaskqueue.NeedsRelease(previousRef) || containsLimiterRef(current, previousRef) {
+		if !commontaskqueue.NeedsRelease(previousRef) || commontaskqueue.ContainsLimiterRef(current, previousRef) {
 			continue
 		}
 		ms.releaseLimiterRefs = append(ms.releaseLimiterRefs, previousRef)
@@ -28,20 +28,6 @@ func (ms *MutableStateImpl) trackRemovedLimiterRefs(
 // generated for them.
 func (ms *MutableStateImpl) MarkLimitersReleased(refs []*taskqueuespb.LimiterRef) {
 	ms.preReleasedLimiterRefs = append(ms.preReleasedLimiterRefs, refs...)
-}
-
-func containsLimiterRef(
-	refs []*taskqueuespb.LimiterRef,
-	want *taskqueuespb.LimiterRef,
-) bool {
-	for _, ref := range refs {
-		if ref.GetLimiterType() == want.GetLimiterType() &&
-			ref.GetKey() == want.GetKey() &&
-			ref.GetSlotId() == want.GetSlotId() {
-			return true
-		}
-	}
-	return false
 }
 
 func (ms *MutableStateImpl) closeTransactionGenerateReleaseLimiterTask(
@@ -61,7 +47,7 @@ func (ms *MutableStateImpl) closeTransactionGenerateReleaseLimiterTask(
 	}
 	if len(ms.preReleasedLimiterRefs) > 0 {
 		limiters = slices.DeleteFunc(slices.Clone(limiters), func(ref *taskqueuespb.LimiterRef) bool {
-			return containsLimiterRef(ms.preReleasedLimiterRefs, ref)
+			return commontaskqueue.ContainsLimiterRef(ms.preReleasedLimiterRefs, ref)
 		})
 	}
 	if task := newReleaseLimiterTask(ms.GetWorkflowKey(), limiters); task != nil {

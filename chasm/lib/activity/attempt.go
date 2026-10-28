@@ -450,6 +450,19 @@ func createHeartbeatTimeoutFailure() *failurepb.Failure {
 	}
 }
 
+// dropPreReleasedLimiters removes limiter refs of the current attempt that frontend already
+// released before calling history, so that ending the attempt doesn't create a release task for
+// them. Refs from a stale token don't match the current attempt's refs and are ignored.
+func (a *Activity) dropPreReleasedLimiters(ctx chasm.MutableContext, released []*taskqueuespb.LimiterRef) {
+	if len(released) == 0 {
+		return
+	}
+	attempt := a.LastAttempt.Get(ctx)
+	attempt.Limiters = slices.DeleteFunc(slices.Clone(attempt.GetLimiters()), func(ref *taskqueuespb.LimiterRef) bool {
+		return commontaskqueue.ContainsLimiterRef(released, ref)
+	})
+}
+
 func (a *Activity) releaseAttemptLimiters(ctx chasm.MutableContext) {
 	attempt := a.LastAttempt.Get(ctx)
 	limiters := attempt.GetLimiters()
