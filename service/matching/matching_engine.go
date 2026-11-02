@@ -629,12 +629,12 @@ func (e *matchingEngineImpl) loggerAndMetricsForPartition(
 	nsName := nsEntry.Name().String()
 	nsState := e.namespaceStateTagValue(nsEntry)
 	logger := log.With(e.logger,
-		tag.WorkflowTaskQueueName(partition.RpcName()),
-		tag.WorkflowTaskQueueType(partition.TaskType()),
+		tag.TaskQueueName(partition.RpcName()),
+		tag.TaskQueueType(partition.TaskType()),
 		tag.WorkflowNamespace(nsName))
 	throttledLogger := log.With(e.throttledLogger,
-		tag.WorkflowTaskQueueName(partition.RpcName()),
-		tag.WorkflowTaskQueueType(partition.TaskType()),
+		tag.TaskQueueName(partition.RpcName()),
+		tag.TaskQueueType(partition.TaskType()),
 		tag.WorkflowNamespace(nsName))
 	metricsHandler := metrics.GetPerTaskQueuePartitionIDScope(
 		e.metricsHandler,
@@ -914,7 +914,7 @@ pollLoop:
 				task.finish(dropReasonDataLoss)
 			case *serviceerror.NotFound: // mutable state not found, workflow not running or workflow task not found
 				e.logger.Info("Workflow task not found",
-					tag.WorkflowTaskQueueName(taskQueueName),
+					tag.TaskQueueName(taskQueueName),
 					tag.WorkflowNamespaceID(task.event.Data.GetNamespaceId()),
 					tag.WorkflowID(task.event.Data.GetWorkflowId()),
 					tag.WorkflowRunID(task.event.Data.GetRunId()),
@@ -925,12 +925,12 @@ pollLoop:
 				)
 				task.finish(dropReasonNotFound)
 			case *serviceerrors.TaskAlreadyStarted:
-				e.logger.Debug("Duplicated workflow task", tag.WorkflowTaskQueueName(taskQueueName), tag.TaskID(task.event.GetTaskId()))
+				e.logger.Debug("Duplicated workflow task", tag.TaskQueueName(taskQueueName), tag.TaskID(task.event.GetTaskId()))
 				task.finish(dropReasonInvalid)
 			case *serviceerrors.ObsoleteDispatchBuildId:
 				// history should've scheduled another task on the right build ID. dropping this one.
 				e.logger.Info("dropping workflow task due to invalid build ID",
-					tag.WorkflowTaskQueueName(taskQueueName),
+					tag.TaskQueueName(taskQueueName),
 					tag.WorkflowNamespaceID(task.event.Data.GetNamespaceId()),
 					tag.WorkflowID(task.event.Data.GetWorkflowId()),
 					tag.WorkflowRunID(task.event.Data.GetRunId()),
@@ -943,7 +943,7 @@ pollLoop:
 				// History should've scheduled another task on the right task queue and deployment.
 				// Dropping this one.
 				e.logger.Info("dropping obsolete workflow task",
-					tag.WorkflowTaskQueueName(taskQueueName),
+					tag.TaskQueueName(taskQueueName),
 					tag.WorkflowNamespaceID(task.event.Data.GetNamespaceId()),
 					tag.WorkflowID(task.event.Data.GetWorkflowId()),
 					tag.WorkflowRunID(task.event.Data.GetRunId()),
@@ -1060,8 +1060,8 @@ func (e *matchingEngineImpl) nonRetryableErrorsDropTask(task *internalTask, tqNa
 		tag.WorkflowNamespaceID(task.event.Data.GetNamespaceId()),
 		tag.WorkflowID(task.event.Data.GetWorkflowId()),
 		tag.WorkflowRunID(task.event.Data.GetRunId()),
-		tag.WorkflowTaskQueueName(tqName),
-		tag.WorkflowTaskQueueType(tqType),
+		tag.TaskQueueName(tqName),
+		tag.TaskQueueType(tqType),
 		tag.TaskID(task.event.GetTaskId()),
 		tag.WorkflowScheduledEventID(task.event.Data.GetScheduledEventId()),
 		tag.Error(err),
@@ -1078,8 +1078,8 @@ func (e *matchingEngineImpl) flowControlCommitFailed(task *internalTask, tqName 
 		tag.WorkflowNamespaceID(task.event.Data.GetNamespaceId()),
 		tag.WorkflowID(task.event.Data.GetWorkflowId()),
 		tag.WorkflowRunID(task.event.Data.GetRunId()),
-		tag.WorkflowTaskQueueName(tqName),
-		tag.WorkflowTaskQueueType(tqType),
+		tag.TaskQueueName(tqName),
+		tag.TaskQueueType(tqType),
 		tag.TaskID(task.event.GetTaskId()),
 		tag.WorkflowScheduledEventID(task.event.Data.GetScheduledEventId()),
 		tag.Error(err))
@@ -1182,7 +1182,7 @@ pollLoop:
 					tag.WorkflowNamespaceID(task.event.Data.GetNamespaceId()),
 					tag.WorkflowID(task.event.Data.GetWorkflowId()),
 					tag.WorkflowRunID(task.event.Data.GetRunId()),
-					tag.WorkflowTaskQueueName(taskQueueName),
+					tag.TaskQueueName(taskQueueName),
 					tag.TaskID(task.event.GetTaskId()),
 					tag.TaskVisibilityTimestamp(timestamp.TimeValue(task.event.Data.GetCreateTime())),
 					tag.WorkflowEventID(task.event.Data.GetScheduledEventId()),
@@ -1190,12 +1190,12 @@ pollLoop:
 				)
 				task.finish(dropReasonNotFound)
 			case *serviceerrors.TaskAlreadyStarted:
-				e.logger.Debug("Duplicated activity task", tag.WorkflowTaskQueueName(taskQueueName), tag.TaskID(task.event.GetTaskId()))
+				e.logger.Debug("Duplicated activity task", tag.TaskQueueName(taskQueueName), tag.TaskID(task.event.GetTaskId()))
 				task.finish(dropReasonInvalid)
 			case *serviceerrors.ObsoleteDispatchBuildId:
 				// history should've scheduled another task on the right build ID. dropping this one.
 				e.logger.Info("dropping activity task due to invalid build ID",
-					tag.WorkflowTaskQueueName(taskQueueName),
+					tag.TaskQueueName(taskQueueName),
 					tag.WorkflowNamespaceID(task.event.Data.GetNamespaceId()),
 					tag.WorkflowID(task.event.Data.GetWorkflowId()),
 					tag.WorkflowRunID(task.event.Data.GetRunId()),
@@ -1208,7 +1208,7 @@ pollLoop:
 				// History should've scheduled another task on the right task queue and deployment.
 				// Dropping this one.
 				e.logger.Info("dropping obsolete activity task",
-					tag.WorkflowTaskQueueName(taskQueueName),
+					tag.TaskQueueName(taskQueueName),
 					tag.WorkflowNamespaceID(task.event.Data.GetNamespaceId()),
 					tag.WorkflowID(task.event.Data.GetWorkflowId()),
 					tag.WorkflowRunID(task.event.Data.GetRunId()),
@@ -1226,7 +1226,7 @@ pollLoop:
 			case *serviceerrors.ActivityStartDuringTransition:
 				// History will schedule another task once transition ends. Dropping this one.
 				e.logger.Info("dropping activity task during transition",
-					tag.WorkflowTaskQueueName(taskQueueName),
+					tag.TaskQueueName(taskQueueName),
 					tag.WorkflowNamespaceID(task.event.Data.GetNamespaceId()),
 					tag.WorkflowID(task.event.Data.GetWorkflowId()),
 					tag.WorkflowRunID(task.event.Data.GetRunId()),
@@ -1356,7 +1356,7 @@ func (e *matchingEngineImpl) QueryWorkflow(
 					tag.WorkflowID(queryRequest.GetQueryRequest().GetExecution().GetWorkflowId()),
 					tag.WorkflowRunID(queryRequest.GetQueryRequest().GetExecution().GetRunId()),
 					tag.WorkflowTaskRequestId(taskID),
-					tag.WorkflowTaskQueueName(partition.TaskQueue().Name()))
+					tag.TaskQueueName(partition.TaskQueue().Name()))
 			}
 		}
 		return nil, ctx.Err()
@@ -1442,8 +1442,8 @@ func (e *matchingEngineImpl) cancelOutstandingWorkerPollsForAllPartitions(
 		// triggers root to load via user data fetch chain.
 		e.logger.Debug("Skipping poll cancellation fan-out: root partition not loaded",
 			tag.WorkflowNamespaceID(request.GetNamespaceId()),
-			tag.WorkflowTaskQueueName(rootPartition.TaskQueue().Name()),
-			tag.WorkflowTaskQueueType(request.GetTaskQueueType()),
+			tag.TaskQueueName(rootPartition.TaskQueue().Name()),
+			tag.TaskQueueType(request.GetTaskQueueType()),
 			tag.NewStringTag("worker-instance-key", request.GetWorkerInstanceKey()),
 		)
 		return &matchingservice.CancelOutstandingWorkerPollsResponse{}, nil
@@ -1456,8 +1456,8 @@ func (e *matchingEngineImpl) cancelOutstandingWorkerPollsForAllPartitions(
 
 	e.logger.Debug("Initiating fan-out for worker poll cancellation",
 		tag.WorkflowNamespaceID(request.GetNamespaceId()),
-		tag.WorkflowTaskQueueName(rootPartition.TaskQueue().Name()),
-		tag.WorkflowTaskQueueType(request.GetTaskQueueType()),
+		tag.TaskQueueName(rootPartition.TaskQueue().Name()),
+		tag.TaskQueueType(request.GetTaskQueueType()),
 		tag.NewStringTag("worker-instance-key", request.GetWorkerInstanceKey()),
 		tag.NewInt32("partition-count", int32(numPartitions)),
 	)
@@ -1555,7 +1555,7 @@ func (e *matchingEngineImpl) CancelOutstandingWorkerPollsPartition(
 
 	e.logger.Debug("Cancelling worker polls",
 		tag.WorkflowNamespaceID(request.GetNamespaceId()),
-		tag.WorkflowTaskQueueName(request.GetTaskQueuePartition().GetTaskQueue()),
+		tag.TaskQueueName(request.GetTaskQueuePartition().GetTaskQueue()),
 		tag.NewInt("worker-count", len(request.GetWorkers())),
 		tag.NewInt("partition-count", len(request.GetPartitions())),
 	)
@@ -1601,7 +1601,7 @@ func (e *matchingEngineImpl) removePollerFromHistory(
 	}
 	if pm == nil {
 		e.logger.Debug("Partition manager not loaded, skipping poller history cleanup",
-			tag.WorkflowTaskQueueName(taskQueueName))
+			tag.TaskQueueName(taskQueueName))
 		return
 	}
 
@@ -2706,8 +2706,8 @@ func (e *matchingEngineImpl) recordTaskQueueUserDataMergeConflicts(
 		logTags := []tag.Tag{
 			tag.WorkflowNamespace(ns.Name().String()),
 			tag.WorkflowNamespaceID(req.GetNamespaceId()),
-			tag.WorkflowTaskQueueName(req.GetTaskQueue()),
-			tag.WorkflowTaskQueueType(taskQueueType),
+			tag.TaskQueueName(req.GetTaskQueue()),
+			tag.TaskQueueType(taskQueueType),
 			tag.Deployment(conflict.deploymentName),
 			tag.NewStringTag("conflict-type", conflictType),
 			tag.NewInt64("revision", conflict.revisionNumber),
@@ -3269,8 +3269,8 @@ func (e *matchingEngineImpl) pollTask(
 		if e.shutdownWorkers.Get(workerInstanceKey) != nil {
 			e.logger.Debug("Rejecting poll from recently-shutdown worker",
 				tag.WorkflowNamespaceID(partition.NamespaceId()),
-				tag.WorkflowTaskQueueName(partition.TaskQueue().Name()),
-				tag.WorkflowTaskQueueType(partition.TaskType()),
+				tag.TaskQueueName(partition.TaskQueue().Name()),
+				tag.TaskQueueType(partition.TaskType()),
 				tag.NewStringTag("worker-instance-key", workerInstanceKey),
 			)
 			return nil, false, errNoTasks
@@ -3818,7 +3818,7 @@ func (e *matchingEngineImpl) reviveBuildId(ns *namespace.Namespace, taskQueue st
 	stamp.ClusterId = e.clusterMeta.GetClusterID()
 	e.logger.Info("Revived build ID while applying replication event",
 		tag.WorkflowNamespace(ns.Name().String()),
-		tag.WorkflowTaskQueueName(taskQueue),
+		tag.TaskQueueName(taskQueue),
 		tag.BuildId(buildId.Id))
 	return &persistencespb.BuildId{
 		Id:                     buildId.GetId(),

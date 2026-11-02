@@ -486,11 +486,14 @@ func TestTransitionStarted(t *testing.T) {
 		Key:         "queue-key",
 		SlotId:      "slot-id",
 	}}
+	componentRef := []byte("test-component-ref")
 	err := TransitionStarted.Apply(activity, ctx, &historyservice.RecordActivityTaskStartedRequest{
 		PollRequest: &workflowservice.PollActivityTaskQueueRequest{
-			Identity: "test-worker",
+			Identity:               "test-worker",
+			WorkerControlTaskQueue: "test-control-queue",
 		},
-		Limiters: limiters,
+		Limiters:     limiters,
+		ComponentRef: componentRef,
 		// TODO: change this and serverside once versioning is supported in SAA.
 		// LastDeploymentVersion represents the worker that actually accepted the task,
 		// than when it's scheduled. WFA derives it from PollRequest via
@@ -509,6 +512,8 @@ func TestTransitionStarted(t *testing.T) {
 	require.Equal(t, headers.ClientNameGoSDK, attemptState.SdkName)
 	require.Equal(t, temporal.SDKVersion, attemptState.SdkVersion)
 	protorequire.ProtoSliceEqual(t, limiters, attemptState.GetLimiters())
+	require.Equal(t, componentRef, attemptState.ComponentRef)
+	require.Equal(t, "test-control-queue", attemptState.WorkerControlTaskQueue)
 
 	deploymentVersion := attemptState.GetLastDeploymentVersion()
 	require.Equal(t, "test-deployment", deploymentVersion.GetDeploymentName())

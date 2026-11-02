@@ -207,12 +207,13 @@ message ClientPartitionCounts {
 
 // LimiterRef is a reference to a flow control limiter. Limiters have namespace scope.
 message LimiterRef {
+  // Type of limiter that owns the slot.
   temporal.server.api.enums.v1.LimiterType limiter_type = 1;
+  // Identifier of the limiter within the namespace.
   string key = 2;
   // Identifier for the reserved or committed slot. Empty for limiters that don't allocate slots.
   string slot_id = 3;
 }
-
 // LimiterHint carries a matching node's latest knowledge of a flow control limiter's state, so
 // that it can be shared with other partitions along a forwarding chain.
 message LimiterHint {

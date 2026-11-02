@@ -17,8 +17,7 @@ message ConcurrencyState {
   // independent version.
   int64 config_version = 2;
 
-  // Slots reserved or committed. Entries should be unique by slot_id. Length is bounded by
-  // config.ConcurrentTasks.
+  // Slots reserved or committed. Entries should be unique by slot_id.
   repeated Slot slots = 3;
 
   // Generation is used to ensure Wait is monotonic. See comment in Wait for details.
@@ -56,13 +55,14 @@ message ConcurrencyServiceBatchRequest {
   // Commit promotes a reservation to a committed slot. Succeeds if the reservation was
   // promoted, or was already committed, i.e. idempotent. Durable.
   repeated string commit_slots = 5;
-  // Release frees a comitted slot. Succeeds if the committed slot was released or if there was
+  // Release frees a committed slot. Succeeds if the committed slot was released or if there was
   // no committed slot, i.e. idempotent. Durable.
   repeated string release_slots = 6;
 
   // For whole-task-queue limits, the initial limit and updates to the limit come through task
   // queue config, so we need to pass them to the chasm object. We just do it on every call.
   temporal.api.taskqueue.v1.ConcurrencyLimit config_update = 7;
+  // Version of config_update; only newer versions take effect.
   int64 config_update_version = 8;
 }
 
@@ -78,10 +78,10 @@ message ConcurrencyServiceBatchResponse {
   // doesn't return them to individual callers.
   int32 available_slots_hint = 2;
 
-  // Corresponds 1:1 with ConcurrencyBatchRequest.reserve_slots.
+  // Corresponds 1:1 with ConcurrencyServiceBatchRequest.reserve_slots.
   repeated bool reserve_success = 3;
   // Note: we don't need a cancel_reservation_success, it's always considered successful.
-  // Corresponds 1:1 with ConcurrencyBatchRequest.commit_slots.
+  // Corresponds 1:1 with ConcurrencyServiceBatchRequest.commit_slots.
   repeated bool commit_success = 4;
   // Note: we don't need a release_success, it's always considered successful.
 }
@@ -89,6 +89,7 @@ message ConcurrencyServiceBatchResponse {
 message ConcurrencyServiceWaitRequest {
   string namespace_id = 1;
   string key = 2;
+
   // Generation is used to ensure monotonicity of waits. The caller should pass its last known
   // generation. If it's out of date, the server may retry internally with the current
   // generation, and return a newer one. Before context timeout, the server should return
@@ -130,11 +131,11 @@ service ConcurrencyService {
   rpc Batch(ConcurrencyServiceBatchRequest) returns (ConcurrencyServiceBatchResponse) {
     option (temporal.server.api.routing.v1.routing).business_id = "key";
     option (temporal.server.api.common.v1.api_category).category = API_CATEGORY_STANDARD;
-  };
+  }
 
   // Wait is a long-poll RPC that returns when at least one slot is free, or timeout.
   rpc Wait(ConcurrencyServiceWaitRequest) returns (ConcurrencyServiceWaitResponse) {
     option (temporal.server.api.routing.v1.routing).business_id = "key";
     option (temporal.server.api.common.v1.api_category).category = API_CATEGORY_LONG_POLL;
-  };
+  }
 }

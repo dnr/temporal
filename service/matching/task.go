@@ -381,6 +381,9 @@ func (task *internalTask) setEvicted() {
 // dropReason as err; it is carried on the taskResponse and counted in tasks_dropped by the
 // backlog completion callback (reader.completeTask).
 func (task *internalTask) finish(err error) {
+	if err != nil {
+		task.fcTx.Rollback(context.Background())
+	}
 	if dr, ok := err.(dropReason); ok {
 		task.finishInternal(taskResponse{dropReason: dr})
 	} else {
@@ -390,6 +393,12 @@ func (task *internalTask) finish(err error) {
 
 // finishForward must be called after forwarding a task.
 func (task *internalTask) finishForward(forwardRes any, forwardErr error) {
+	// Don't recycle for query or nexus since forwardErr isn't a remote "start" error for those
+	// (they don't have RecordTaskStarted calls), it's a query/nexus error. This doesn't really
+	// matter since we don't apply rate limits there anyway.
+	if forwardErr != nil && !task.isQuery() && !task.isNexus() {
+		task.fcTx.Rollback(context.Background())
+	}
 	task.finishInternal(taskResponse{forwarded: true, forwardRes: forwardRes, forwardErr: forwardErr})
 }
 

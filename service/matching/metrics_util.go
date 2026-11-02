@@ -15,6 +15,7 @@ const (
 	dropReasonDataLoss
 	dropReasonExpiredRead
 	dropReasonExpiredMemory
+	dropReasonStickyWorkerUnavailable
 	dropReasonInvalid
 	dropReasonFlowControlCommitFailed
 )
@@ -36,12 +37,14 @@ func (r dropReason) tag() metrics.Tag {
 		return metrics.ReasonTag(metrics.DroppedTaskReasonInvalid)
 	case dropReasonFlowControlCommitFailed:
 		return metrics.ReasonTag(metrics.DroppedTaskReasonFlowControlCommitFailed)
+	case dropReasonStickyWorkerUnavailable:
+		return metrics.ReasonTag(metrics.DroppedTaskReasonStickyWorkerUnavailable)
 	default:
 		return metrics.ReasonTag(metrics.DroppedTaskReasonInvalid)
 	}
 }
 
-// implements error
+// implement error to allow dropReason to be used as an error in internalTask.finish
 func (r dropReason) Error() string {
 	return r.tag().Value
 }

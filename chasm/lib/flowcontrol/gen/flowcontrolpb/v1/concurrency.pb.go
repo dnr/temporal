@@ -34,8 +34,7 @@ type ConcurrencyState struct {
 	// task queue config, this is the user data version. For limits set from API, this is its own
 	// independent version.
 	ConfigVersion int64 `protobuf:"varint,2,opt,name=config_version,json=configVersion,proto3" json:"config_version,omitempty"`
-	// Slots reserved or committed. Entries should be unique by slot_id. Length is bounded by
-	// config.ConcurrentTasks.
+	// Slots reserved or committed. Entries should be unique by slot_id.
 	Slots []*ConcurrencyState_Slot `protobuf:"bytes,3,rep,name=slots,proto3" json:"slots,omitempty"`
 	// Generation is used to ensure Wait is monotonic. See comment in Wait for details.
 	Generation int64 `protobuf:"varint,4,opt,name=generation,proto3" json:"generation,omitempty"`
@@ -143,13 +142,14 @@ type ConcurrencyServiceBatchRequest struct {
 	// Commit promotes a reservation to a committed slot. Succeeds if the reservation was
 	// promoted, or was already committed, i.e. idempotent. Durable.
 	CommitSlots []string `protobuf:"bytes,5,rep,name=commit_slots,json=commitSlots,proto3" json:"commit_slots,omitempty"`
-	// Release frees a comitted slot. Succeeds if the committed slot was released or if there was
+	// Release frees a committed slot. Succeeds if the committed slot was released or if there was
 	// no committed slot, i.e. idempotent. Durable.
 	ReleaseSlots []string `protobuf:"bytes,6,rep,name=release_slots,json=releaseSlots,proto3" json:"release_slots,omitempty"`
 	// For whole-task-queue limits, the initial limit and updates to the limit come through task
 	// queue config, so we need to pass them to the chasm object. We just do it on every call.
-	ConfigUpdate        *v1.ConcurrencyLimit `protobuf:"bytes,7,opt,name=config_update,json=configUpdate,proto3" json:"config_update,omitempty"`
-	ConfigUpdateVersion int64                `protobuf:"varint,8,opt,name=config_update_version,json=configUpdateVersion,proto3" json:"config_update_version,omitempty"`
+	ConfigUpdate *v1.ConcurrencyLimit `protobuf:"bytes,7,opt,name=config_update,json=configUpdate,proto3" json:"config_update,omitempty"`
+	// Version of config_update; only newer versions take effect.
+	ConfigUpdateVersion int64 `protobuf:"varint,8,opt,name=config_update_version,json=configUpdateVersion,proto3" json:"config_update_version,omitempty"`
 	unknownFields       protoimpl.UnknownFields
 	sizeCache           protoimpl.SizeCache
 }
@@ -251,10 +251,10 @@ type ConcurrencyServiceBatchResponse struct {
 	// request: matching's BatchingClient passes them to its cache out of band, once per rpc, and
 	// doesn't return them to individual callers.
 	AvailableSlotsHint int32 `protobuf:"varint,2,opt,name=available_slots_hint,json=availableSlotsHint,proto3" json:"available_slots_hint,omitempty"`
-	// Corresponds 1:1 with ConcurrencyBatchRequest.reserve_slots.
+	// Corresponds 1:1 with ConcurrencyServiceBatchRequest.reserve_slots.
 	ReserveSuccess []bool `protobuf:"varint,3,rep,packed,name=reserve_success,json=reserveSuccess,proto3" json:"reserve_success,omitempty"`
 	// Note: we don't need a cancel_reservation_success, it's always considered successful.
-	// Corresponds 1:1 with ConcurrencyBatchRequest.commit_slots.
+	// Corresponds 1:1 with ConcurrencyServiceBatchRequest.commit_slots.
 	CommitSuccess []bool `protobuf:"varint,4,rep,packed,name=commit_success,json=commitSuccess,proto3" json:"commit_success,omitempty"` // Note: we don't need a release_success, it's always considered successful.
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache

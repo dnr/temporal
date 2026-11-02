@@ -242,18 +242,12 @@ func (tm *priTaskMatcher) forwardTask(task *internalTask) (bool, error) {
 	// and we should apply them here, as for workflow/activity tasks.
 	if task.isQuery() {
 		res, err := tm.fwdr.ForwardQueryTask(ctx, task)
-		if err != nil {
-			task.fcTx.Rollback(ctx)
-		}
 		task.finishForward(res, err)
 		return false, err
 	}
 
 	if task.isNexus() {
 		res, err := tm.fwdr.ForwardNexusTask(ctx, task)
-		if err != nil {
-			task.fcTx.Rollback(ctx)
-		}
 		task.finishForward(res, err)
 		return false, err
 	}

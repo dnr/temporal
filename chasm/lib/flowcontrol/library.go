@@ -24,6 +24,8 @@ func newLibrary(
 	}
 }
 
+func NewNilLibrary() *library { return &library{} }
+
 func (l *library) Name() string {
 	return "flowcontrol"
 }

@@ -1065,9 +1065,11 @@ func (x *ClientPartitionCounts) GetBacklogCap() int32 {
 
 // LimiterRef is a reference to a flow control limiter. Limiters have namespace scope.
 type LimiterRef struct {
-	state       protoimpl.MessageState `protogen:"open.v1"`
-	LimiterType v14.LimiterType        `protobuf:"varint,1,opt,name=limiter_type,json=limiterType,proto3,enum=temporal.server.api.enums.v1.LimiterType" json:"limiter_type,omitempty"`
-	Key         string                 `protobuf:"bytes,2,opt,name=key,proto3" json:"key,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Type of limiter that owns the slot.
+	LimiterType v14.LimiterType `protobuf:"varint,1,opt,name=limiter_type,json=limiterType,proto3,enum=temporal.server.api.enums.v1.LimiterType" json:"limiter_type,omitempty"`
+	// Identifier of the limiter within the namespace.
+	Key string `protobuf:"bytes,2,opt,name=key,proto3" json:"key,omitempty"`
 	// Identifier for the reserved or committed slot. Empty for limiters that don't allocate slots.
 	SlotId        string `protobuf:"bytes,3,opt,name=slot_id,json=slotId,proto3" json:"slot_id,omitempty"`
 	unknownFields protoimpl.UnknownFields

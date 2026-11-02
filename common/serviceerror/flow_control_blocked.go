@@ -7,12 +7,14 @@ import (
 )
 
 type (
+	// FlowControlBlocked indicates that a task can't be dispatched due to flow control.
 	FlowControlBlocked struct {
 		Message string
 		st      *status.Status
 	}
 )
 
+// NewFlowControlBlocked returns an error indicating that a task can't be dispatched due to flow control.
 func NewFlowControlBlocked() error {
 	return &FlowControlBlocked{
 		Message: "blocked",
@@ -29,9 +31,7 @@ func (e *FlowControlBlocked) Status() *status.Status {
 	}
 
 	st := status.New(codes.FailedPrecondition, e.Message)
-	st, _ = st.WithDetails(
-		&errordetailsspb.FlowControlBlockedFailure{},
-	)
+	st, _ = st.WithDetails(&errordetailsspb.FlowControlBlockedFailure{})
 	return st
 }
 
