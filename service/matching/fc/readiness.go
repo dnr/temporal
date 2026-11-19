@@ -66,7 +66,7 @@ type (
 		created uint64
 		stopped bool
 
-		// syncScratch is reused by syncLimiter to avoid an allocation per call. It's only used
+		// syncScratch is reused by syncLimiterLocked to avoid an allocation per call. It's only used
 		// with lock held, and syncLocked must not hold on to it.
 		syncScratch readinessSyncUpdate
 
@@ -209,20 +209,22 @@ func (rs *readinessShard) cancelAllCallbacks(cb ReadinessCallback) {
 	// callbacks when we sync it. e.g. a rate limit due to the wall clock time advancing. The
 	// timer would usually get there first but we may need to call some here.
 	var toNotify deferredNotify
-	defer toNotify.notify(notifyAsync) // outside lock
 
 	rs.lock.Lock()
-	defer rs.lock.Unlock()
+	defer func() {
+		rs.lock.Unlock()
+		toNotify.notify(notifyAsync) // outside lock
+	}()
 
 	rEnts := rs.rev[cb]
 	// note: clone slice before iterating over it, removeEdgeLocked may modify slices
 	for _, rEnt := range slices.Clone(rEnts) {
 		rs.removeEdgeLocked(rEnt.limiter, cb)
-		rs.syncLimiter(rEnt.limiter, &toNotify)
+		rs.syncLimiterLocked(rEnt.limiter, &toNotify)
 	}
 }
 
-func (rs *readinessShard) syncLimiter(limiter limiterState, toNotify *deferredNotify) {
+func (rs *readinessShard) syncLimiterLocked(limiter limiterState, toNotify *deferredNotify) {
 	// call syncLocked with current waiter set
 	fEnts := rs.fwd[limiter]
 	rsu := &rs.syncScratch
@@ -301,14 +303,16 @@ func (rs *readinessShard) removeEdgeLocked(limiter limiterState, cb ReadinessCal
 // asynchronous resources (timers, rpcs, etc.) based on the remaining waiters.
 func (rs *readinessShard) update(limiter limiterState, mode notifyMode, f func() error) error {
 	var toNotify deferredNotify
-	defer toNotify.notify(mode) // outside lock
 
 	rs.lock.Lock()
-	defer rs.lock.Unlock()
+	defer func() {
+		rs.lock.Unlock()
+		toNotify.notify(mode) // outside lock
+	}()
 
-	defer rs.syncLimiter(limiter, &toNotify)
-
-	return f()
+	err := f()
+	rs.syncLimiterLocked(limiter, &toNotify)
+	return err
 }
 
 // syncLocked may call this. wake should remove up to n items from the front of rsu.waiters and

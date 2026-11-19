@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 
 	"github.com/google/uuid"
 	commonpb "go.temporal.io/api/common/v1"
@@ -200,21 +201,29 @@ func (t *transferQueueActiveTaskExecutor) processReleaseLimiterTask(
 	ctx, cancel := context.WithTimeout(ctx, taskTimeout)
 	defer cancel()
 
-	var releaseErrors []error
-	for _, limiter := range task.Limiters {
-		switch limiter.GetLimiterType() {
-		case enumsspb.LIMITER_TYPE_CONCURRENCY:
-			_, err := t.concurrencyServiceClient.Batch(ctx, &fcpb.ConcurrencyServiceBatchRequest{
-				NamespaceId:  task.NamespaceID,
-				Key:          limiter.GetKey(),
-				ReleaseSlots: []string{limiter.GetSlotId()},
-			})
-			if err != nil {
-				releaseErrors = append(releaseErrors, err)
+	errs := make([]error, len(task.Limiters))
+	var wg sync.WaitGroup
+	for i, limiter := range task.Limiters {
+		release := func() {
+			switch limiter.GetLimiterType() {
+			case enumsspb.LIMITER_TYPE_CONCURRENCY:
+				_, errs[i] = t.concurrencyServiceClient.Batch(ctx, &fcpb.ConcurrencyServiceBatchRequest{
+					NamespaceId:  task.NamespaceID,
+					Key:          limiter.GetKey(),
+					ReleaseSlots: []string{limiter.GetSlotId()},
+				})
+			default:
+				errs[i] = queues.NewTerminalTaskError(fmt.Sprintf("unexpected limiter type %v", limiter.GetLimiterType()))
 			}
 		}
+		if i == len(task.Limiters)-1 {
+			release()
+		} else {
+			wg.Go(release)
+		}
 	}
-	return errors.Join(releaseErrors...)
+	wg.Wait()
+	return errors.Join(errs...)
 }
 
 func (t *transferQueueActiveTaskExecutor) executeChasmSideEffectTransferTask(

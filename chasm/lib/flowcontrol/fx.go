@@ -13,7 +13,6 @@ var HistoryModule = fx.Module(
 		concurrency.NewHandler,
 		concurrency.NewStagedWakeHandler,
 		newLibrary,
-		fcpb.NewConcurrencyServiceLayeredClient,
 	),
 	fx.Invoke(func(l *library, registry *chasm.Registry) error {
 		return registry.Register(l)

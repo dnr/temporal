@@ -100,7 +100,7 @@ func NewHandler(
 
 func initFn(_ chasm.MutableContext, creq chasmReq) (*Component, error) {
 	// For now (whole-queue limits), we should always have an initial config here.
-	// For per-task limits, this may be missing and set via api later.
+	// For keyed limiters, this may be missing and set via api later.
 	c := &Component{
 		ConcurrencyState: &fcpb.ConcurrencyState{
 			Config: &taskqueuepb.ConcurrencyLimit{
@@ -138,30 +138,30 @@ func updateFn(c *Component, cctx chasm.MutableContext, creq chasmReq) ([]*fcpb.C
 
 	// apply releases
 	for _, it := range creq.items {
-		for _, slotId := range it.req.GetReleaseSlots() {
-			c.release(slotId)
+		for _, slotID := range it.req.GetReleaseSlots() {
+			c.release(slotID)
 		}
 	}
 
 	// apply commits
 	for i, it := range creq.items {
-		for _, slotId := range it.req.GetCommitSlots() {
-			success := c.commit(slotId)
+		for _, slotID := range it.req.GetCommitSlots() {
+			success := c.commit(slotID)
 			ress[i].CommitSuccess = append(ress[i].CommitSuccess, success)
 		}
 	}
 
 	// apply cancels
 	for _, it := range creq.items {
-		for _, slotId := range it.req.GetCancelReservationSlots() {
-			c.cancelReservation(slotId)
+		for _, slotID := range it.req.GetCancelReservationSlots() {
+			c.cancelReservation(slotID)
 		}
 	}
 
 	// apply reserves
 	for i, it := range creq.items {
-		for _, slotId := range it.req.GetReserveSlots() {
-			success := c.reserve(slotId, now, creq.reserveTimeout)
+		for _, slotID := range it.req.GetReserveSlots() {
+			success := c.reserve(slotID, now, creq.reserveTimeout)
 			ress[i].ReserveSuccess = append(ress[i].ReserveSuccess, success)
 		}
 	}
@@ -184,10 +184,11 @@ func updateFn(c *Component, cctx chasm.MutableContext, creq chasmReq) ([]*fcpb.C
 		doWake(cctx, c, creq.stagedWake, creq.getWakeLevel)
 	}
 
-	// capture Generation after maybe incrementing
+	// capture Generation after maybe having incremented
 	availableSlots := c.availableSlots()
 	for i := range creq.items {
 		ress[i].Generation = c.Generation
+		// TODO(fc): per-client hints instead of giving everyone the same one
 		ress[i].AvailableSlotsHint = availableSlots
 	}
 
@@ -313,7 +314,7 @@ func (h *Handler) Wait(ctx context.Context, req *fcpb.ConcurrencyServiceWaitRequ
 	for {
 		// CHASM requires that PollComponent be monotonic: if it returns true at some state,
 		// then it should return true at future states. Our predicate is "is state.wake_up_to
-		// >= req.start_time" (or state.wake_all means wake_upto = forever in the future). But
+		// >= req.start_time" (or state.wake_all means wake_up_to = forever in the future). But
 		// when we go from having slots to not having slots, we need to reset wake_up_to to
 		// some time in the past, so that everyone is blocked again. So we need to add a
 		// "generation" on top of the timestamps. Essentially, the state moves the pair
@@ -333,15 +334,16 @@ func (h *Handler) Wait(ctx context.Context, req *fcpb.ConcurrencyServiceWaitRequ
 			},
 			req,
 		)
+		if res == nil && err == nil {
+			// shouldn't happen but treat as timeout
+			err = context.DeadlineExceeded
+		}
 		if err != nil {
 			if common.IsContextDeadlineExceededErr(err) {
 				// timed out without becoming ready
 				return &fcpb.ConcurrencyServiceWaitResponse{Generation: req.Generation}, nil
 			}
 			return nil, err
-		} else if res == nil {
-			// chasm-imposed timeout
-			return &fcpb.ConcurrencyServiceWaitResponse{Generation: req.Generation}, nil
 		} else if res.Generation != req.Generation {
 			// try again on server with new generation
 			req.Generation = res.Generation
@@ -355,8 +357,8 @@ func (h *Handler) Wait(ctx context.Context, req *fcpb.ConcurrencyServiceWaitRequ
 func (h *Handler) waiterShardFor(key batchKey) *waiterShard {
 	var hash maphash.Hash
 	hash.SetSeed(h.waiterSeed)
-	hash.WriteString(key.namespaceID)
-	hash.WriteString(key.key)
+	_, _ = hash.WriteString(key.namespaceID)
+	_, _ = hash.WriteString(key.key)
 	return &h.waiterShards[hash.Sum64()%numWaiterShards]
 }
 

@@ -1,441 +1,406 @@
 package fc
 
 import (
-	"context"
-	"math"
+	"errors"
+	"slices"
+	"sync"
 	"testing"
 	"time"
-	"unsafe"
 
-	"github.com/stretchr/testify/require"
-	enumsspb "go.temporal.io/server/api/enums/v1"
-	fcpb "go.temporal.io/server/chasm/lib/flowcontrol/gen/flowcontrolpb/v1"
 	"go.temporal.io/server/common/clock"
 	"go.temporal.io/server/common/dynamicconfig"
 	"go.temporal.io/server/common/namespace"
-	"go.temporal.io/server/common/streambatcher"
-	"go.temporal.io/server/common/testing/await"
-	"go.temporal.io/server/service/matching/simplelimiter"
-	"google.golang.org/grpc"
+	"go.temporal.io/server/common/testing/parallelsuite"
+	"go.temporal.io/server/common/testing/testcontext"
 )
 
-type testCallback struct{}
-
-func (*testCallback) OnReady() {}
-
-type testClient struct {
-	fcpb.ConcurrencyServiceClient
-	batch func(context.Context, *fcpb.ConcurrencyServiceBatchRequest) (*fcpb.ConcurrencyServiceBatchResponse, error)
-	wait  func(context.Context, *fcpb.ConcurrencyServiceWaitRequest) (*fcpb.ConcurrencyServiceWaitResponse, error)
+type readinessSuite struct {
+	parallelsuite.Suite[*readinessSuite]
 }
 
-func (c *testClient) Batch(ctx context.Context, req *fcpb.ConcurrencyServiceBatchRequest, _ ...grpc.CallOption) (*fcpb.ConcurrencyServiceBatchResponse, error) {
-	return c.batch(ctx, req)
+func TestReadiness(t *testing.T) {
+	parallelsuite.Run(t, &readinessSuite{})
 }
 
-func (c *testClient) Wait(ctx context.Context, req *fcpb.ConcurrencyServiceWaitRequest, _ ...grpc.CallOption) (*fcpb.ConcurrencyServiceWaitResponse, error) {
-	return c.wait(ctx, req)
+func (s *readinessSuite) newReadiness() *Readiness {
+	r := NewReadiness(clock.NewEventTimeSource(), nil, NewReadinessConfig(dynamicconfig.NewNoopCollection()))
+	s.T().Cleanup(r.Stop)
+	return r
 }
 
-func newTestReadiness(t *testing.T, client fcpb.ConcurrencyServiceClient) (*Readiness, *clock.EventTimeSource) {
-	t.Helper()
-	ts := clock.NewEventTimeSource().Update(time.Now())
-	ts.UseAsyncTimers(true)
-	cfg := NewReadinessConfig(dynamicconfig.NewNoopCollection())
-	// one item per batch, so batching doesn't wait on the fake clock
-	cfg.clientBatcherOptions = func() streambatcher.BatcherOptions {
-		return streambatcher.BatcherOptions{MaxItems: 1, IdleTime: time.Minute}
+type testLimiter struct {
+	limiterStateBase
+	rs        *readinessShard
+	wakeCount int
+	onSync    func(*readinessSyncUpdate)
+}
+
+func (*testLimiter) droppableLocked(gcParameters) bool { return false }
+
+func (l *testLimiter) syncLocked(update *readinessSyncUpdate) {
+	if l.onSync != nil {
+		l.onSync(update)
 	}
-	r := NewReadiness(ts, client, cfg)
-	t.Cleanup(r.Stop)
-	return r, ts
+	update.wake(l.wakeCount)
 }
 
-func requirePins(t *testing.T, lim limiterState, pins int) {
-	t.Helper()
-	b := lim.base()
-	b.rs.lock.Lock()
-	defer b.rs.lock.Unlock()
-	require.Equal(t, int32(pins), b.pins)
+type testCallback struct {
+	onReady func()
 }
 
-func TestTransactionPins(t *testing.T) {
-	for _, name := range []string{"finish", "rollback", "check only"} {
-		t.Run(name, func(t *testing.T) {
-			r, ts := newTestReadiness(t, nil)
-			lim := r.getLocalLimiter(namespace.ID("ns"), "key")
-			tx := &Tx{limiters: []txEntry{{limiterTx: newLocalLimiterTx(lim, simplelimiter.NoLimit(), 0)}}}
-			requirePins(t, lim, 1)
-			lim.rs.cleanup(1000, r.gcParameters())
-			require.Len(t, lim.rs.localLimiters, 1)
-			require.NoError(t, tx.Check())
-			switch name {
-			case "rollback":
-				tx.Rollback(context.Background())
-			case "finish":
-				require.NoError(t, tx.Reserve(context.Background()))
-				require.NoError(t, tx.Commit(context.Background()))
-				tx.Close()
-			default:
-				require.Equal(t, "check only", name)
-			}
-			tx.Close()
-			tx.Rollback(context.Background())
-			requirePins(t, lim, 0)
-			require.ErrorIs(t, tx.Check(), errInvalidTxState)
-			ts.Advance(time.Nanosecond)
-			lim.rs.cleanup(1000, r.gcParameters())
-			require.Empty(t, lim.rs.localLimiters)
-		})
+func (cb *testCallback) OnReady() {
+	if cb.onReady != nil {
+		cb.onReady()
 	}
 }
 
-func TestFailedCheckReleasesAllTransactionPins(t *testing.T) {
-	r, _ := newTestReadiness(t, nil)
-	ns := namespace.ID("ns")
-	first := r.getLocalLimiter(ns, "first")
-	second := r.getLocalLimiter(ns, "second")
-	cb := &testCallback{}
-	tx := &Tx{cb: cb, limiters: []txEntry{
-		{limiterTx: newLocalLimiterTx(first, simplelimiter.MakeParams(0, 0), 0)},
-		{limiterTx: newLocalLimiterTx(second, simplelimiter.NoLimit(), 0)},
-	}}
-	require.ErrorIs(t, tx.Check(), ErrLocalLimiterBlocked)
-	requirePins(t, first, 1) // timer
-	requirePins(t, second, 0)
-	r.CancelAllCallbacks(ns, cb)
-	requirePins(t, first, 0)
+func (s *readinessSuite) newLimiter(r *Readiness, ns namespace.ID) *testLimiter {
+	return &testLimiter{rs: r.getShard(ns), limiterStateBase: limiterStateBase{pins: 1}}
 }
 
-func TestCanceledWaitRetainsPinUntilExit(t *testing.T) {
-	started := make(chan struct{})
-	canceled := make(chan struct{})
-	exit := make(chan struct{})
-	client := &testClient{wait: func(ctx context.Context, _ *fcpb.ConcurrencyServiceWaitRequest) (*fcpb.ConcurrencyServiceWaitResponse, error) {
-		close(started)
-		<-ctx.Done()
-		close(canceled)
-		<-exit
-		return nil, ctx.Err()
-	}}
-	r, ts := newTestReadiness(t, client)
-	ns := namespace.ID("ns")
-	lim := r.getConcurrencyLimiter(ns, "key")
-	lim.tokens = 0
-	cb := &testCallback{}
-	_, err := lim.check(cb, 0)
-	require.ErrorIs(t, err, ErrConcurrencyBlocked)
-	lim.unpin()
-	<-started
-	r.CancelAllCallbacks(ns, cb)
-	<-canceled
-	requirePins(t, lim, 1)
-	lim.rs.cleanup(1000, r.gcParameters())
-	require.Len(t, lim.rs.concurrencyLimiters, 1)
-	close(exit)
-	await.RequireTrue(t, func() bool {
-		lim.rs.lock.Lock()
-		defer lim.rs.lock.Unlock()
-		return lim.pins == 0
-	}, time.Second, time.Millisecond)
-	ts.Advance(concurrencyBlockedRetention)
-	lim.rs.cleanup(1000, r.gcParameters())
-	require.Empty(t, lim.rs.concurrencyLimiters)
+func (s *readinessSuite) newCallback(notifications chan<- string, name string) *testCallback {
+	return &testCallback{onReady: func() { notifications <- name }}
 }
 
-func TestCancelReservationOwnsPinAndDeadline(t *testing.T) {
-	started := make(chan struct{})
-	exit := make(chan struct{})
-	client := &testClient{batch: func(ctx context.Context, _ *fcpb.ConcurrencyServiceBatchRequest) (*fcpb.ConcurrencyServiceBatchResponse, error) {
-		_, hasDeadline := ctx.Deadline()
-		require.True(t, hasDeadline)
-		require.NoError(t, ctx.Err())
-		close(started)
-		<-exit
-		return &fcpb.ConcurrencyServiceBatchResponse{}, nil
-	}}
-	r, _ := newTestReadiness(t, client)
-	lim := r.getConcurrencyLimiter(namespace.ID("ns"), "key")
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-	lim.cancelReserve(ctx, "slot")
-	lim.unpin()
-	<-started
-	requirePins(t, lim, 1)
-	lim.rs.cleanup(1000, r.gcParameters())
-	require.Len(t, lim.rs.concurrencyLimiters, 1)
-	close(exit)
-	await.RequireTrue(t, func() bool {
-		lim.rs.lock.Lock()
-		defer lim.rs.lock.Unlock()
-		return lim.pins == 0
-	}, time.Second, time.Millisecond)
+func (s *readinessSuite) register(limiter *testLimiter, cb ReadinessCallback, pri wakePriority) {
+	limiter.rs.lock.Lock()
+	defer limiter.rs.lock.Unlock()
+	limiter.rs.addEdgeLocked(limiter, cb, pri)
 }
 
-func TestTimerPins(t *testing.T) {
-	r, ts := newTestReadiness(t, nil)
-	ns := namespace.ID("ns")
-	lim := r.getLocalLimiter(ns, "key")
-	cb := &testCallback{}
-	params := simplelimiter.MakeParams(1, 0)
-	require.NoError(t, lim.check(params, cb, 0))
-	require.ErrorIs(t, lim.check(params, cb, 0), ErrLocalLimiterBlocked)
-	requirePins(t, lim, 2)
-	lim.unpin()
-	ts.Advance(time.Second)
-	await.RequireTrue(t, func() bool {
-		lim.rs.lock.Lock()
-		defer lim.rs.lock.Unlock()
-		return lim.pins == 0
-	}, time.Second, time.Millisecond)
+func (s *readinessSuite) unregister(limiter *testLimiter, cb ReadinessCallback) {
+	limiter.rs.lock.Lock()
+	defer limiter.rs.lock.Unlock()
+	limiter.rs.removeEdgeLocked(limiter, cb)
 }
 
-func TestGCListMembership(t *testing.T) {
-	r, _ := newTestReadiness(t, nil)
-	ns := namespace.ID("ns")
-	first := r.getLocalLimiter(ns, "first")
-	second := r.getLocalLimiter(ns, "second")
-	rs := first.rs
-	require.EqualValues(t, 2, rs.created)
-	require.Zero(t, rs.gcList.len)
-	first.unpin()
-	second.unpin()
-	require.Equal(t, 2, rs.gcList.len)
-	require.Same(t, first.base(), rs.gcList.head)
-	require.Same(t, second.base(), rs.gcList.tail)
-	first = r.getLocalLimiter(ns, "first")
-	require.EqualValues(t, 2, rs.created)
-	require.Same(t, second.base(), rs.gcList.head)
-	cb := &testCallback{}
-	rs.lock.Lock()
-	rs.addEdgeLocked(first, cb, 0)
-	rs.lock.Unlock()
-	first.unpin()
-	require.Equal(t, 1, rs.gcList.len)
-	r.CancelAllCallbacks(ns, cb)
-	require.Equal(t, 2, rs.gcList.len)
-	require.Same(t, first.base(), rs.gcList.tail)
-	second = r.getLocalLimiter(ns, "second")
-	require.Same(t, first.base(), rs.gcList.head)
-	require.Same(t, first.base(), rs.gcList.tail)
-	second.unpin()
-	r.Stop()
-	require.Zero(t, rs.gcList.len)
+func (s *readinessSuite) wake(limiter *testLimiter, count int) {
+	s.T().Helper()
+	s.NoError(limiter.rs.update(limiter, notifySync, func() error {
+		limiter.wakeCount = count
+		return nil
+	}))
 }
 
-func TestCleanupCandidates(t *testing.T) {
-	r, ts := newTestReadiness(t, nil)
-	ns := namespace.ID("ns")
-	debt := r.getLocalLimiter(ns, "debt")
-	free := r.getLocalLimiter(ns, "free")
-	zero := r.getLocalLimiter(ns, "zero")
-	pinned := r.getLocalLimiter(ns, "pinned")
-	cb := &testCallback{}
-	require.NoError(t, debt.check(simplelimiter.MakeParams(1, 0), cb, 0))
-	require.ErrorIs(t, zero.check(simplelimiter.MakeParams(0, 0), cb, 0), ErrLocalLimiterBlocked)
-	r.CancelAllCallbacks(ns, cb)
-	debt.unpin()
-	free.unpin()
-	zero.unpin()
-	rs := debt.rs
-	rs.cleanup(1000, r.gcParameters())
-	require.Len(t, rs.localLimiters, 2)
-	require.Same(t, debt, rs.localLimiters[debt.mapKey])
-	require.Same(t, pinned, rs.localLimiters[pinned.mapKey])
-	require.Equal(t, 1, rs.gcList.len)
-	ts.Advance(2 * time.Second)
-	rs.cleanup(1000, r.gcParameters())
-	require.Equal(t, 0, rs.gcList.len)
-	require.Len(t, rs.localLimiters, 1)
-	pinned.unpin()
-	rs.cleanup(1000, r.gcParameters())
-	require.Empty(t, rs.localLimiters)
-}
-
-func TestCleanupWorkerStops(t *testing.T) {
-	r, _ := newTestReadiness(t, nil)
-	r.Start()
-	r.Stop()
-	select {
-	case <-r.cleanupHandle.Done():
-	default:
-		t.Fatal("cleanup worker has not exited")
+func (s *readinessSuite) requireNotifications(notifications <-chan string, expected ...string) {
+	s.T().Helper()
+	// Synchronous updates must deliver all selected notifications before returning.
+	s.Len(notifications, len(expected))
+	for _, name := range expected {
+		s.Equal(name, s.Rcv(notifications))
 	}
 }
 
-type testTask struct {
-	limiters []Limiter
+func (s *readinessSuite) TestRepeatedRegistrationNotifiesOnce() {
+	r := s.newReadiness()
+	limiter := s.newLimiter(r, "namespace")
+	notifications := make(chan string, 8)
+	cb := s.newCallback(notifications, "callback")
+	s.register(limiter, cb, 10)
+	s.register(limiter, cb, 10)
+
+	s.wake(limiter, 10)
+	s.requireNotifications(notifications, "callback")
+	s.wake(limiter, 10)
+	s.requireNotifications(notifications)
 }
 
-func (t *testTask) Limiters() []Limiter { return t.limiters }
+func (s *readinessSuite) TestRegistrationUpdatesPriority() {
+	r := s.newReadiness()
+	limiter := s.newLimiter(r, "namespace")
+	notifications := make(chan string, 8)
+	first, second := s.newCallback(notifications, "first"), s.newCallback(notifications, "second")
+	s.register(limiter, first, 20)
+	s.register(limiter, second, 10)
+	s.register(limiter, first, 5)
 
-func (*testTask) PriorityAndAge() (int32, time.Time) { return 1, time.Time{} }
+	s.wake(limiter, 1)
+	s.requireNotifications(notifications, "first")
+	s.wake(limiter, 10)
+	s.requireNotifications(notifications, "second")
+	s.wake(limiter, 10)
+	s.requireNotifications(notifications)
+}
 
-func TestOptimisticConcurrencyReserve(t *testing.T) {
-	for _, allow := range []bool{false, true} {
-		name := "blocked"
-		if allow {
-			name = "allowed"
-		}
-		t.Run(name, func(t *testing.T) {
-			batches := 0
-			client := &testClient{batch: func(_ context.Context, req *fcpb.ConcurrencyServiceBatchRequest) (*fcpb.ConcurrencyServiceBatchResponse, error) {
-				batches++
-				res := &fcpb.ConcurrencyServiceBatchResponse{}
-				if len(req.ReserveSlots) > 0 {
-					res.ReserveSuccess = []bool{allow}
-				}
-				if len(req.CommitSlots) > 0 {
-					res.CommitSuccess = []bool{true}
-				}
-				return res, nil
-			}}
-			r, _ := newTestReadiness(t, client)
-			task := &testTask{limiters: []Limiter{{
-				Type: enumsspb.LIMITER_TYPE_CONCURRENCY, Source: LimiterSourceConfig, Key: "key",
-			}}}
-			tx := r.NewTx(namespace.ID("ns"), task, &testCallback{})
-			defer tx.Close()
-			lim := tx.limiters[0].limiterTx.(*concurrencyTx).cs
-			require.EqualValues(t, 1, lim.tokens)
-			require.NoError(t, tx.Check())
-			require.Zero(t, batches)
-			err := tx.Reserve(context.Background())
-			if allow {
-				require.NoError(t, err)
-				require.NoError(t, tx.Commit(context.Background()))
-				require.Equal(t, 2, batches)
-			} else {
-				require.Error(t, err)
-				require.Equal(t, 1, batches)
-				require.Zero(t, lim.tokens)
-			}
-			tx.Close()
-			requirePins(t, lim, 0)
-		})
+func (s *readinessSuite) TestEqualPriorityCallbacks() {
+	r := s.newReadiness()
+	limiter := s.newLimiter(r, "namespace")
+	notifications := make(chan string, 8)
+	s.register(limiter, s.newCallback(notifications, "first"), 10)
+	s.register(limiter, s.newCallback(notifications, "second"), 10)
+
+	s.wake(limiter, 1)
+	s.Len(notifications, 1)
+	first := s.Rcv(notifications)
+	s.wake(limiter, 1)
+	s.Len(notifications, 1)
+	second := s.Rcv(notifications)
+	s.ElementsMatch([]string{"first", "second"}, []string{first, second})
+	s.wake(limiter, 10)
+	s.requireNotifications(notifications)
+}
+
+func (s *readinessSuite) TestNilCallback() {
+	r := s.newReadiness()
+	limiter := s.newLimiter(r, "namespace")
+	notifications := make(chan string, 8)
+	s.register(limiter, nil, 5)
+	s.register(limiter, s.newCallback(notifications, "callback"), 10)
+
+	s.wake(limiter, 10)
+	s.requireNotifications(notifications, "callback")
+}
+
+func (s *readinessSuite) TestRemoveRegistrationPreservesOtherWaiters() {
+	r := s.newReadiness()
+	first, second := s.newLimiter(r, "namespace"), s.newLimiter(r, "namespace")
+	notifications := make(chan string, 8)
+	cb, other := s.newCallback(notifications, "callback"), s.newCallback(notifications, "other")
+	s.register(first, cb, 10)
+	s.register(second, cb, 20)
+	s.register(first, other, 30)
+
+	s.unregister(first, &testCallback{})
+	s.unregister(s.newLimiter(r, "namespace"), cb)
+	r.CancelAllCallbacks("namespace", &testCallback{})
+	s.unregister(first, cb)
+	s.unregister(first, cb)
+
+	s.wake(first, 10)
+	s.requireNotifications(notifications, "other")
+	s.wake(second, 10)
+	s.requireNotifications(notifications, "callback")
+	s.wake(first, 10)
+	s.wake(second, 10)
+	s.requireNotifications(notifications)
+}
+
+func (s *readinessSuite) TestCancelAllCallbacks() {
+	r := s.newReadiness()
+	notifications := make(chan string, 8)
+	canceled, other := s.newCallback(notifications, "canceled"), s.newCallback(notifications, "other")
+	limiters := []*testLimiter{s.newLimiter(r, "namespace"), s.newLimiter(r, "namespace"), s.newLimiter(r, "namespace")}
+	for _, limiter := range limiters {
+		s.register(limiter, canceled, 10)
+		s.register(limiter, other, 20)
+	}
+
+	r.CancelAllCallbacks("namespace", canceled)
+	r.CancelAllCallbacks("namespace", canceled)
+
+	for _, limiter := range limiters {
+		s.wake(limiter, 10)
+		s.requireNotifications(notifications, "other")
 	}
 }
 
-func TestBlockedConcurrencyRetention(t *testing.T) {
-	r, ts := newTestReadiness(t, nil)
-	ns := namespace.ID("ns")
-	lim := r.getConcurrencyLimiter(ns, "key")
-	lim.tokens = 0
-	lim.unpin()
-	lim.rs.cleanup(1000, r.gcParameters())
-	require.Len(t, lim.rs.concurrencyLimiters, 1)
-	ts.Advance(concurrencyBlockedRetention / 2)
-	reused := r.getConcurrencyLimiter(ns, "key")
-	require.Same(t, lim, reused)
-	reused.unpin()
-	ts.Advance(concurrencyBlockedRetention / 2)
-	lim.rs.cleanup(1000, r.gcParameters())
-	require.Len(t, lim.rs.concurrencyLimiters, 1)
-	ts.Advance(concurrencyBlockedRetention / 2)
-	lim.rs.cleanup(1000, r.gcParameters())
-	require.Empty(t, lim.rs.concurrencyLimiters)
-
-	recreated := r.getConcurrencyLimiter(ns, "key")
-	require.NotSame(t, lim, recreated)
-	require.EqualValues(t, 1, recreated.tokens)
-	recreated.unpin()
-	recreated.rs.cleanup(1000, r.gcParameters())
-	require.Empty(t, recreated.rs.concurrencyLimiters)
-}
-
-type pendingTimerClock struct {
-	clock.TimeSource
-	timer *pendingTimer
-}
-
-type pendingTimer struct {
-	active   bool
-	callback func()
-}
-
-func (c *pendingTimerClock) AfterFunc(_ time.Duration, callback func()) clock.Timer {
-	c.timer = &pendingTimer{active: true, callback: callback}
-	return c.timer
-}
-
-func (t *pendingTimer) Reset(time.Duration) bool {
-	active := t.active
-	t.active = true
-	return active
-}
-
-func (t *pendingTimer) Stop() bool {
-	active := t.active
-	t.active = false
-	return active
-}
-
-func TestPendingTimerCallbackRetainsPin(t *testing.T) {
-	ts := &pendingTimerClock{TimeSource: clock.NewEventTimeSource().Update(time.Now())}
-	r := NewReadiness(ts, nil, NewReadinessConfig(dynamicconfig.NewNoopCollection()))
-	t.Cleanup(r.Stop)
-	ns := namespace.ID("ns")
-	lim := r.getLocalLimiter(ns, "key")
-	cb := &testCallback{}
-	params := simplelimiter.MakeParams(1, 0)
-	require.NoError(t, lim.check(params, cb, 0))
-	require.ErrorIs(t, lim.check(params, cb, 0), ErrLocalLimiterBlocked)
-	requirePins(t, lim, 2)
-	// The timer has fired, but its callback has not acquired the shard lock yet.
-	ts.timer.active = false
-	require.ErrorIs(t, lim.check(params, cb, 0), ErrLocalLimiterBlocked)
-	requirePins(t, lim, 3)
-	r.CancelAllCallbacks(ns, cb)
-	lim.unpin()
-	requirePins(t, lim, 1)
-	require.Zero(t, lim.rs.gcList.len)
-	ts.timer.callback()
-	requirePins(t, lim, 0)
-	require.Equal(t, 1, lim.rs.gcList.len)
-}
-
-func TestLocalLimiterDroppableFullBurst(t *testing.T) {
-	r, ts := newTestReadiness(t, nil)
-	lim := r.getLocalLimiter(namespace.ID("ns"), "key")
-	params := simplelimiter.MakeParams(1, 2*time.Second)
+func (s *readinessSuite) TestCancellationCanWakeOtherCallbacks() {
+	r := s.newReadiness()
+	notifications := make(chan string, 8)
+	canceled, other := s.newCallback(notifications, "canceled"), s.newCallback(notifications, "other")
 	for range 3 {
-		require.NoError(t, lim.check(params, &testCallback{}, 0))
+		limiter := s.newLimiter(r, "namespace")
+		s.register(limiter, canceled, 10)
+		s.register(limiter, other, 20)
+		limiter.wakeCount = 1
 	}
-	lim.unpin()
-	ts.Advance(time.Second)
-	require.Zero(t, lim.lim.Delay(ts.Now().UnixNano()))
-	require.False(t, lim.droppableLocked(r.gcParameters()))
-	ts.Advance(2*time.Second - time.Nanosecond)
-	require.False(t, lim.droppableLocked(r.gcParameters()))
-	ts.Advance(time.Nanosecond)
-	require.True(t, lim.droppableLocked(r.gcParameters()))
+
+	r.CancelAllCallbacks("namespace", canceled)
+
+	for range 3 {
+		s.Equal("other", s.Rcv(notifications))
+	}
 }
 
-func TestLimiterIdentityAndGC(t *testing.T) {
-	r, _ := newTestReadiness(t, nil)
-	ns := namespace.ID("01234567-89ab-cdef-0123-456789abcdef")
-	cs := r.getConcurrencyLimiter(ns, "same-key")
-	lls := r.getLocalLimiter(ns, "same-key")
-	require.Equal(t, ns, cs.namespaceID())
-	require.Equal(t, "same-key", cs.limiterKey())
-	require.Equal(t, cs.mapKey, lls.mapKey)
-	cs.unpin()
-	lls.unpin()
-	require.Equal(t, 2, cs.rs.cleanup(1000, r.gcParameters()))
-	require.Empty(t, cs.rs.concurrencyLimiters)
-	require.Empty(t, cs.rs.localLimiters)
-	t.Logf("concurrency state: %d bytes; local limiter state: %d bytes", unsafe.Sizeof(*cs), unsafe.Sizeof(*lls))
+func (s *readinessSuite) TestNamespaceScoping() {
+	r := s.newReadiness()
+	firstNamespace := namespace.ID("11111111-1111-1111-1111-111111111111")
+	secondNamespace := namespace.ID("22222222-2222-2222-2222-222222222222")
+	first, second := s.newLimiter(r, firstNamespace), s.newLimiter(r, secondNamespace)
+	notifications := make(chan string, 8)
+	firstCallback, secondCallback := s.newCallback(notifications, "first"), s.newCallback(notifications, "second")
+	s.register(first, firstCallback, 10)
+	s.register(second, secondCallback, 20)
+
+	r.CancelAllCallbacks(firstNamespace, firstCallback)
+
+	s.wake(first, 10)
+	s.requireNotifications(notifications)
+	s.wake(second, 10)
+	s.requireNotifications(notifications, "second")
 }
 
-func TestConcurrencyRetentionSecondsWrap(t *testing.T) {
-	r, ts := newTestReadiness(t, nil)
-	ts.Advance(time.Duration(math.MaxInt32-20) * time.Second)
-	lim := r.getConcurrencyLimiter(namespace.ID("ns"), "key")
-	lim.tokens = 0
-	lim.unpin()
-	ts.Advance(concurrencyBlockedRetention - time.Second)
-	require.Negative(t, r.elapsedSeconds(ts.Now()))
-	require.False(t, lim.droppableLocked(r.gcParameters()))
-	ts.Advance(time.Second)
-	require.True(t, lim.droppableLocked(r.gcParameters()))
+func (s *readinessSuite) TestWakePrefix() {
+	r := s.newReadiness()
+	limiter := s.newLimiter(r, "namespace")
+	notifications := make(chan string, 16)
+	best := s.newCallback(notifications, "best")
+	s.register(limiter, s.newCallback(notifications, "last"), 40)
+	s.register(limiter, s.newCallback(notifications, "second"), 20)
+	s.register(limiter, s.newCallback(notifications, "third"), 30)
+	s.register(limiter, best, 10)
+
+	// No wake leaves every registration intact.
+	s.wake(limiter, 0)
+	s.requireNotifications(notifications)
+
+	// Priority wins over registration order.
+	s.wake(limiter, 1)
+	s.requireNotifications(notifications, "best")
+	s.wake(limiter, 2)
+	s.requireNotifications(notifications, "second", "third")
+
+	// Excess wake capacity is clipped to the remaining waiter count.
+	s.wake(limiter, 10)
+	s.requireNotifications(notifications, "last")
+	s.wake(limiter, 10)
+	s.requireNotifications(notifications)
+
+	// Re-registration makes the callback eligible for another notification.
+	s.register(limiter, best, 5)
+	s.wake(limiter, 1)
+	s.requireNotifications(notifications, "best")
+}
+
+func (s *readinessSuite) TestUpdateErrorStillSynchronizes() {
+	r := s.newReadiness()
+	limiter := s.newLimiter(r, "namespace")
+	notifications := make(chan string, 8)
+	s.register(limiter, s.newCallback(notifications, "callback"), 10)
+	updated, synchronizedAfterUpdate := false, false
+	limiter.onSync = func(*readinessSyncUpdate) { synchronizedAfterUpdate = updated }
+	updateErr := errors.New("update failed")
+
+	err := limiter.rs.update(limiter, notifySync, func() error {
+		updated = true
+		limiter.wakeCount = 1
+		return updateErr
+	})
+
+	s.ErrorIs(err, updateErr)
+	s.True(synchronizedAfterUpdate)
+	s.requireNotifications(notifications, "callback")
+}
+
+func (s *readinessSuite) TestSyncUsesCurrentWaiters() {
+	r := s.newReadiness()
+	first, second := s.newLimiter(r, "namespace"), s.newLimiter(r, "namespace")
+	firstCallback, secondCallback := &testCallback{}, &testCallback{}
+	s.register(first, firstCallback, 10)
+	s.register(second, secondCallback, 20)
+	var observed [][]fwdMapEntry
+	observe := func(update *readinessSyncUpdate) { observed = append(observed, slices.Clone(update.waiters)) }
+	first.onSync, second.onSync = observe, observe
+
+	s.wake(first, 1)
+	s.wake(second, 0)
+	s.wake(first, 1)
+
+	s.Equal([][]fwdMapEntry{{{cb: firstCallback, pri: 10}}, {{cb: secondCallback, pri: 20}}, nil}, observed)
+}
+
+func (s *readinessSuite) TestAsynchronousNotifications() {
+	ctx := testcontext.For(s.T(), testcontext.WithTimeout(5*time.Second))
+	r := s.newReadiness()
+	limiter := s.newLimiter(r, "namespace")
+	entered, release, finished := make(chan struct{}), make(chan struct{}), make(chan struct{})
+	unblock := sync.OnceFunc(func() { close(release) })
+	s.T().Cleanup(unblock)
+	cb := &testCallback{onReady: func() {
+		close(entered)
+		select {
+		case <-release:
+		case <-ctx.Done():
+		}
+		close(finished)
+	}}
+	s.register(limiter, cb, 10)
+	returned := make(chan error, 1)
+
+	go func() {
+		returned <- limiter.rs.update(limiter, notifyAsync, func() error {
+			limiter.wakeCount = 1
+			return nil
+		})
+	}()
+	s.Rcv(entered)
+	s.NoError(s.Rcv(returned))
+	select {
+	case <-finished:
+		s.T().Fatal("update should return while the callback is still blocked")
+	default:
+	}
+	unblock()
+	s.Rcv(finished)
+}
+
+func (s *readinessSuite) TestCallbacksCanReenterReadiness_Sync() {
+	s.testCallbacksCanReenterReadiness(notifySync)
+}
+
+func (s *readinessSuite) TestCallbacksCanReenterReadiness_Async() {
+	s.testCallbacksCanReenterReadiness(notifyAsync)
+}
+
+func (s *readinessSuite) testCallbacksCanReenterReadiness(mode notifyMode) {
+	testcontext.For(s.T(), testcontext.WithTimeout(5*time.Second))
+	// A lock-order regression can deadlock these goroutines, so stop only after they return.
+	r := NewReadiness(clock.NewEventTimeSource(), nil, NewReadinessConfig(dynamicconfig.NewNoopCollection()))
+	limiter := s.newLimiter(r, "namespace")
+	notifications := make(chan string, 8)
+	replacement := s.newCallback(notifications, "replacement")
+	reentered := make(chan struct{})
+	cb := &testCallback{onReady: func() {
+		s.register(limiter, replacement, 20)
+		r.CancelAllCallbacks("namespace", replacement)
+		close(reentered)
+	}}
+	s.register(limiter, cb, 10)
+	returned := make(chan error, 1)
+
+	go func() {
+		returned <- limiter.rs.update(limiter, mode, func() error {
+			limiter.wakeCount = 1
+			return nil
+		})
+	}()
+	s.Rcv(reentered)
+	s.NoError(s.Rcv(returned))
+	s.wake(limiter, 10)
+	s.requireNotifications(notifications)
+	r.Stop()
+}
+
+func (s *readinessSuite) TestRegistrationCleanup() {
+	r := s.newReadiness()
+	first, second := s.newLimiter(r, "namespace"), s.newLimiter(r, "namespace")
+	cb, other := &testCallback{}, &testCallback{}
+	s.register(first, cb, 10)
+	s.register(second, cb, 20)
+	s.register(first, other, 30)
+
+	s.unregister(first, cb)
+	r.CancelAllCallbacks("namespace", cb)
+
+	// Stale indexes can retain callbacks even when notification behavior is correct.
+	s.Equal(map[limiterState][]fwdMapEntry{first: {{cb: other, pri: 30}}}, first.rs.fwd)
+	s.Equal(map[ReadinessCallback][]revMapEntry{other: {{limiter: first, pri: 30}}}, first.rs.rev)
+	s.wake(first, 10)
+	s.Empty(first.rs.fwd)
+	s.Empty(first.rs.rev)
+}
+
+func (s *readinessSuite) TestStopClearsRegistrations() {
+	r := s.newReadiness()
+	for _, ns := range []namespace.ID{"11111111-1111-1111-1111-111111111111", "22222222-2222-2222-2222-222222222222"} {
+		s.register(s.newLimiter(r, ns), &testCallback{}, 10)
+	}
+
+	r.Stop()
+	r.Stop()
+
+	for i := range r.shards {
+		s.Empty(r.shards[i].fwd)
+		s.Empty(r.shards[i].rev)
+	}
 }
