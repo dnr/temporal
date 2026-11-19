@@ -112,7 +112,7 @@ type (
 	readinessSyncUpdate struct {
 		waiters []fwdMapEntry
 	}
-	deferedNotify []ReadinessCallback
+	deferredNotify []ReadinessCallback
 
 	// notifyMode controls how ReadinessCallbacks are called after an update.
 	notifyMode int
@@ -208,7 +208,7 @@ func (rs *readinessShard) cancelAllCallbacks(cb ReadinessCallback) {
 	// It would be quite unlikely, but it's possible for a limiter to decide to notify _other_
 	// callbacks when we sync it. e.g. a rate limit due to the wall clock time advancing. The
 	// timer would usually get there first but we may need to call some here.
-	var toNotify deferedNotify
+	var toNotify deferredNotify
 	defer toNotify.notify(notifyAsync) // outside lock
 
 	rs.lock.Lock()
@@ -222,7 +222,7 @@ func (rs *readinessShard) cancelAllCallbacks(cb ReadinessCallback) {
 	}
 }
 
-func (rs *readinessShard) syncLimiter(limiter limiterState, toNotify *deferedNotify) {
+func (rs *readinessShard) syncLimiter(limiter limiterState, toNotify *deferredNotify) {
 	// call syncLocked with current waiter set
 	fEnts := rs.fwd[limiter]
 	rsu := &rs.syncScratch
@@ -300,7 +300,7 @@ func (rs *readinessShard) removeEdgeLocked(limiter limiterState, cb ReadinessCal
 // f, and then call limiter.syncLocked, which may wake some waiters, and then should update any
 // asynchronous resources (timers, rpcs, etc.) based on the remaining waiters.
 func (rs *readinessShard) update(limiter limiterState, mode notifyMode, f func() error) error {
-	var toNotify deferedNotify
+	var toNotify deferredNotify
 	defer toNotify.notify(mode) // outside lock
 
 	rs.lock.Lock()
@@ -318,7 +318,7 @@ func (rsu *readinessSyncUpdate) wake(n int) {
 	rsu.waiters = rsu.waiters[take:]
 }
 
-func (dn *deferedNotify) notify(mode notifyMode) {
+func (dn *deferredNotify) notify(mode notifyMode) {
 	cbs := *dn
 	if len(cbs) == 0 {
 		return
@@ -335,7 +335,7 @@ func (dn *deferedNotify) notify(mode notifyMode) {
 	}
 }
 
-func (dn *deferedNotify) add(cb ...ReadinessCallback) {
+func (dn *deferredNotify) add(cb ...ReadinessCallback) {
 	*dn = append(*dn, cb...)
 }
 
