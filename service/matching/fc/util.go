@@ -21,7 +21,8 @@ func makeWakePriority(pri int32, age time.Time) wakePriority {
 	// pri is [1-60] (matching.maxPriorityLevels), so we can fit pri and age into 63 bits:
 	// 00000000[--pri-][----------------------age---------------------]
 	pri = min(max(pri, 0), 255)
-	return wakePriority(pri)<<48 | wakePriority(age.UnixMilli())
+	ms := min(max(age.UnixMilli(), 0), 1<<48-1)
+	return wakePriority(pri)<<48 | wakePriority(ms)
 }
 
 // betterWakePriority returns true if a beats b in priority by a "significant" amount.
