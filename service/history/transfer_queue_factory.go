@@ -117,6 +117,13 @@ func (f *transferQueueFactory) CreateQueue(
 		metricsHandler,
 	)
 
+	shardScheduler = queues.NewNamespaceStateGateScheduler(
+		shardScheduler,
+		f.NamespaceRegistry,
+		queues.IsExemptFromNamespaceStateGate,
+		metricsHandler,
+	)
+
 	rescheduler := queues.NewRescheduler(
 		shardScheduler,
 		shardContext.GetTimeSource(),

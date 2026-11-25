@@ -6,7 +6,7 @@ import (
 	"time"
 )
 
-// Maximum total limiters that can apply to any task. (Currently this includes whole-queue
+// MaxLimiters is the maximum total limiters that can apply to any task. (Currently this includes whole-queue
 // limiters, in the future we may allow whole-queue limiters to be separate from this limit.)
 const MaxLimiters = 3
 

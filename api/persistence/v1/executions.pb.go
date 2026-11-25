@@ -160,6 +160,7 @@ type WorkflowExecutionInfo struct {
 	WorkflowTaskTimeout                     *durationpb.Duration             `protobuf:"bytes,25,opt,name=workflow_task_timeout,json=workflowTaskTimeout,proto3" json:"workflow_task_timeout,omitempty"`
 	WorkflowTaskAttempt                     int32                            `protobuf:"varint,26,opt,name=workflow_task_attempt,json=workflowTaskAttempt,proto3" json:"workflow_task_attempt,omitempty"`
 	WorkflowTaskStartedTime                 *timestamppb.Timestamp           `protobuf:"bytes,27,opt,name=workflow_task_started_time,json=workflowTaskStartedTime,proto3" json:"workflow_task_started_time,omitempty"`
+	WorkflowTaskWorkerControlQueue          string                           `protobuf:"bytes,119,opt,name=workflow_task_worker_control_queue,json=workflowTaskWorkerControlQueue,proto3" json:"workflow_task_worker_control_queue,omitempty"`
 	WorkflowTaskScheduledTime               *timestamppb.Timestamp           `protobuf:"bytes,28,opt,name=workflow_task_scheduled_time,json=workflowTaskScheduledTime,proto3" json:"workflow_task_scheduled_time,omitempty"`
 	WorkflowTaskOriginalScheduledTime       *timestamppb.Timestamp           `protobuf:"bytes,30,opt,name=workflow_task_original_scheduled_time,json=workflowTaskOriginalScheduledTime,proto3" json:"workflow_task_original_scheduled_time,omitempty"`
 	WorkflowTaskRequestId                   string                           `protobuf:"bytes,31,opt,name=workflow_task_request_id,json=workflowTaskRequestId,proto3" json:"workflow_task_request_id,omitempty"`
@@ -188,7 +189,7 @@ type WorkflowExecutionInfo struct {
 	//     aip.dev/not-precedent: "since" is needed here. --)
 	WorkflowTaskAttemptsSinceLastSuccess int32 `protobuf:"varint,111,opt,name=workflow_task_attempts_since_last_success,json=workflowTaskAttemptsSinceLastSuccess,proto3" json:"workflow_task_attempts_since_last_success,omitempty"`
 	// Flow control limiters held by the currently started workflow task.
-	WorkflowTaskLimiters []*v12.LimiterRef `protobuf:"bytes,119,rep,name=workflow_task_limiters,json=workflowTaskLimiters,proto3" json:"workflow_task_limiters,omitempty"`
+	WorkflowTaskLimiters []*v12.LimiterRef `protobuf:"bytes,120,rep,name=workflow_task_limiters,json=workflowTaskLimiters,proto3" json:"workflow_task_limiters,omitempty"`
 	CancelRequested      bool              `protobuf:"varint,29,opt,name=cancel_requested,json=cancelRequested,proto3" json:"cancel_requested,omitempty"`
 	CancelRequestId      string            `protobuf:"bytes,32,opt,name=cancel_request_id,json=cancelRequestId,proto3" json:"cancel_request_id,omitempty"`
 	StickyTaskQueue      string            `protobuf:"bytes,33,opt,name=sticky_task_queue,json=stickyTaskQueue,proto3" json:"sticky_task_queue,omitempty"`
@@ -572,6 +573,13 @@ func (x *WorkflowExecutionInfo) GetWorkflowTaskStartedTime() *timestamppb.Timest
 		return x.WorkflowTaskStartedTime
 	}
 	return nil
+}
+
+func (x *WorkflowExecutionInfo) GetWorkflowTaskWorkerControlQueue() string {
+	if x != nil {
+		return x.WorkflowTaskWorkerControlQueue
+	}
+	return ""
 }
 
 func (x *WorkflowExecutionInfo) GetWorkflowTaskScheduledTime() *timestamppb.Timestamp {
@@ -5171,7 +5179,7 @@ const file_temporal_server_api_persistence_v1_executions_proto_rawDesc = "" +
 	"\x03key\x18\x01 \x01(\x05R\x03key\x12D\n" +
 	"\x05value\x18\x02 \x01(\v2..temporal.server.api.persistence.v1.QueueStateR\x05value:\x028\x01J\x04\b\x04\x10\x05J\x04\b\x05\x10\x06J\x04\b\b\x10\tJ\x04\b\t\x10\n" +
 	"J\x04\b\n" +
-	"\x10\vJ\x04\b\v\x10\fJ\x04\b\f\x10\rJ\x04\b\x0e\x10\x0fJ\x04\b\x0f\x10\x10J\x04\b\x10\x10\x11\"\xd0E\n" +
+	"\x10\vJ\x04\b\v\x10\fJ\x04\b\f\x10\rJ\x04\b\x0e\x10\x0fJ\x04\b\x0f\x10\x10J\x04\b\x10\x10\x11\"\x9cF\n" +
 	"\x15WorkflowExecutionInfo\x12!\n" +
 	"\fnamespace_id\x18\x01 \x01(\tR\vnamespaceId\x12\x1f\n" +
 	"\vworkflow_id\x18\x02 \x01(\tR\n" +
@@ -5199,7 +5207,8 @@ const file_temporal_server_api_persistence_v1_executions_proto_rawDesc = "" +
 	"\x1eworkflow_task_started_event_id\x18\x18 \x01(\x03R\x1aworkflowTaskStartedEventId\x12M\n" +
 	"\x15workflow_task_timeout\x18\x19 \x01(\v2\x19.google.protobuf.DurationR\x13workflowTaskTimeout\x122\n" +
 	"\x15workflow_task_attempt\x18\x1a \x01(\x05R\x13workflowTaskAttempt\x12W\n" +
-	"\x1aworkflow_task_started_time\x18\x1b \x01(\v2\x1a.google.protobuf.TimestampR\x17workflowTaskStartedTime\x12[\n" +
+	"\x1aworkflow_task_started_time\x18\x1b \x01(\v2\x1a.google.protobuf.TimestampR\x17workflowTaskStartedTime\x12J\n" +
+	"\"workflow_task_worker_control_queue\x18w \x01(\tR\x1eworkflowTaskWorkerControlQueue\x12[\n" +
 	"\x1cworkflow_task_scheduled_time\x18\x1c \x01(\v2\x1a.google.protobuf.TimestampR\x19workflowTaskScheduledTime\x12l\n" +
 	"%workflow_task_original_scheduled_time\x18\x1e \x01(\v2\x1a.google.protobuf.TimestampR!workflowTaskOriginalScheduledTime\x127\n" +
 	"\x18workflow_task_request_id\x18\x1f \x01(\tR\x15workflowTaskRequestId\x12\\\n" +
@@ -5211,7 +5220,7 @@ const file_temporal_server_api_persistence_v1_executions_proto_rawDesc = "" +
 	"'workflow_task_build_id_redirect_counter\x18Y \x01(\x03R\"workflowTaskBuildIdRedirectCounter\x12.\n" +
 	"\x13workflow_task_stamp\x18m \x01(\x05R\x11workflowTaskStamp\x12W\n" +
 	")workflow_task_attempts_since_last_success\x18o \x01(\x05R$workflowTaskAttemptsSinceLastSuccess\x12b\n" +
-	"\x16workflow_task_limiters\x18w \x03(\v2,.temporal.server.api.taskqueue.v1.LimiterRefR\x14workflowTaskLimiters\x12)\n" +
+	"\x16workflow_task_limiters\x18x \x03(\v2,.temporal.server.api.taskqueue.v1.LimiterRefR\x14workflowTaskLimiters\x12)\n" +
 	"\x10cancel_requested\x18\x1d \x01(\bR\x0fcancelRequested\x12*\n" +
 	"\x11cancel_request_id\x18  \x01(\tR\x0fcancelRequestId\x12*\n" +
 	"\x11sticky_task_queue\x18! \x01(\tR\x0fstickyTaskQueue\x12a\n" +

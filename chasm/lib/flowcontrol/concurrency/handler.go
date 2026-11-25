@@ -16,6 +16,7 @@ import (
 	"go.temporal.io/server/common/contextutil"
 	"go.temporal.io/server/common/dynamicconfig"
 	"go.temporal.io/server/common/log"
+	"go.temporal.io/server/common/log/tag"
 	"go.temporal.io/server/common/streambatcher"
 )
 
@@ -198,7 +199,15 @@ func updateFn(c *Component, cctx chasm.MutableContext, creq chasmReq) ([]*fcpb.C
 func (h *Handler) applyBatch(
 	key batchKey,
 	items []batchReq,
-) []batchRes {
+) (retBatchRes []batchRes) {
+	defer func() {
+		if r := recover(); r != nil {
+			// log, then fill results with an Internal error for each item
+			h.logger.Error("panic in applyBatch", tag.Value(r))
+			retBatchRes = makeBatchResults(len(items), nil, serviceerror.NewInternal("panic in applyBatch"))
+		}
+	}()
+
 	needStart := false
 	canSpeculate := true
 
@@ -222,13 +231,18 @@ func (h *Handler) applyBatch(
 		getWakeLevel:   func(wantTokens int32) (int64, bool) { return h.getWakeLevel(key, wantTokens) },
 	}
 
+	// TODO(fc): instead of depending on some arbitrary context, we should take the longest
+	// deadline among the input calls, create a detached context from that, add that deadline,
+	// and run the batch with that one.
+	batchCtx := items[0].ctx
+
 	if needStart {
 		opts = append(opts, chasm.WithBusinessIDPolicy(
 			chasm.BusinessIDReusePolicyAllowDuplicate,
 			chasm.BusinessIDConflictPolicyUseExisting,
 		))
 		updateRes, err := chasm.UpdateWithStartExecution(
-			items[0].ctx,
+			batchCtx,
 			chasm.ExecutionKey{
 				NamespaceID: key.namespaceID,
 				BusinessID:  key.key,
@@ -242,7 +256,7 @@ func (h *Handler) applyBatch(
 	}
 
 	ress, _, err := chasm.UpdateComponent(
-		items[0].ctx,
+		batchCtx,
 		chasm.NewComponentRef[*Component](chasm.ExecutionKey{
 			NamespaceID: key.namespaceID,
 			BusinessID:  key.key,

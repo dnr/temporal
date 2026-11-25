@@ -14,6 +14,12 @@ var defaultServerBatcherOptions = streambatcher.BatcherOptions{
 	IdleTime:      time.Minute,
 	ClearInterval: time.Hour,
 }
+var ServerBatcherOptions = dynamicconfig.NewGlobalTypedSetting(
+	"flowcontrol.concurrency.serverBatcher",
+	defaultServerBatcherOptions,
+	`Batcher options for concurrency limiter requests on server. Requires server restart.`,
+)
+
 var defaultClientBatcherOptions = streambatcher.BatcherOptions{
 	MaxItems:      50,
 	MinDelay:      5 * time.Millisecond,
@@ -22,11 +28,6 @@ var defaultClientBatcherOptions = streambatcher.BatcherOptions{
 	ClearInterval: time.Hour,
 }
 
-var ServerBatcherOptions = dynamicconfig.NewGlobalTypedSetting(
-	"flowcontrol.concurrency.serverBatcher",
-	defaultServerBatcherOptions,
-	`Batcher options for concurrency limiter requests on server. Requires server restart.`,
-)
 var MatchingClientBatcherOptions = dynamicconfig.NewGlobalTypedSetting(
 	"flowcontrol.concurrency.matchingClientBatcher",
 	defaultClientBatcherOptions,

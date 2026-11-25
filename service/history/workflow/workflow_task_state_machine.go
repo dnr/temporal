@@ -210,6 +210,7 @@ func (m *workflowTaskStateMachine) ApplyWorkflowTaskStartedEvent(
 		Attempt:                     workflowTask.Attempt,
 		AttemptsSinceLastSuccess:    workflowTask.AttemptsSinceLastSuccess,
 		StartedTime:                 startedTime,
+		WorkerControlQueue:          workflowTask.WorkerControlQueue,
 		ScheduledTime:               workflowTask.ScheduledTime,
 		TaskQueue:                   workflowTask.TaskQueue,
 		OriginalScheduledTime:       workflowTask.OriginalScheduledTime,
@@ -462,6 +463,7 @@ func (m *workflowTaskStateMachine) AddWorkflowTaskStartedEvent(
 	updateReg update.Registry,
 	targetDeploymentVersion *deploymentpb.WorkerDeploymentVersion,
 	targetRevisionNumber int64,
+	workerControlQueue string,
 ) (*historypb.HistoryEvent, *historyi.WorkflowTaskInfo, error) {
 	opTag := tag.WorkflowActionWorkflowTaskStarted
 	workflowTask := m.GetWorkflowTaskByID(scheduledEventID)
@@ -607,6 +609,8 @@ func (m *workflowTaskStateMachine) AddWorkflowTaskStartedEvent(
 		m.ms.hBuilder.FlushAndCreateNewBatch()
 		startedEventID = startedEvent.GetEventId()
 	}
+
+	workflowTask.WorkerControlQueue = workerControlQueue
 
 	workflowTask, err = m.ApplyWorkflowTaskStartedEvent(
 		workflowTask,
@@ -1159,6 +1163,7 @@ func (m *workflowTaskStateMachine) UpdateWorkflowTask(
 	if !workflowTask.StartedTime.IsZero() {
 		m.ms.executionInfo.WorkflowTaskStartedTime = timestamppb.New(workflowTask.StartedTime)
 	}
+	m.ms.executionInfo.WorkflowTaskWorkerControlQueue = workflowTask.WorkerControlQueue
 	if !workflowTask.ScheduledTime.IsZero() {
 		m.ms.executionInfo.WorkflowTaskScheduledTime = timestamppb.New(workflowTask.ScheduledTime)
 	}
@@ -1298,6 +1303,7 @@ func (m *workflowTaskStateMachine) getWorkflowTaskInfo() *historyi.WorkflowTaskI
 		Attempt:                     m.ms.executionInfo.WorkflowTaskAttempt,
 		AttemptsSinceLastSuccess:    m.ms.executionInfo.WorkflowTaskAttemptsSinceLastSuccess,
 		StartedTime:                 m.ms.executionInfo.WorkflowTaskStartedTime.AsTime(),
+		WorkerControlQueue:          m.ms.executionInfo.WorkflowTaskWorkerControlQueue,
 		ScheduledTime:               m.ms.executionInfo.WorkflowTaskScheduledTime.AsTime(),
 		TaskQueue:                   m.ms.CurrentTaskQueue(),
 		OriginalScheduledTime:       m.ms.executionInfo.WorkflowTaskOriginalScheduledTime.AsTime(),

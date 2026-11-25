@@ -129,6 +129,7 @@ type (
 		localPollStartTime        time.Time
 		workerInstanceKey         string
 		workerControlTaskQueue    string
+		workflowTaskCapabilities  *workflowservice.PollWorkflowTaskQueueRequest_Capabilities
 	}
 
 	userDataUpdate struct {
@@ -962,6 +963,7 @@ pollLoop:
 			conditions:                req.Conditions,
 			workerInstanceKey:         request.WorkerInstanceKey,
 			workerControlTaskQueue:    request.WorkerControlTaskQueue,
+			workflowTaskCapabilities:  request.Capabilities,
 		}
 		task, versionSetUsed, err := e.pollTask(pollerCtx, partition, pollMetadata)
 		if err != nil {

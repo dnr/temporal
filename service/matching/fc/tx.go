@@ -1,3 +1,5 @@
+//go:generate mockgen -package $GOPACKAGE -source $GOFILE -destination tx_mock_test.go
+
 package fc
 
 import (
@@ -16,7 +18,7 @@ import (
 var errCommitFailure = serviceerror.NewFailedPrecondition("commit failed")
 var errInvalidTxState = serviceerror.NewInternal("invalid fc tx state")
 
-// A client of the flow control system should call NewTx when it it's ready to match a task, to
+// NewTx should be called when a client of the flow control system is ready to match a task, to
 // perform the flow control commit protocol. It should then call:
 //   - tx.Check() -> checks readiness, if not ready atomically registers cb to be called when
 //     possibly ready (or tx.SkipCheck() for a task forwarded from another partition)
@@ -79,7 +81,7 @@ func (r *Readiness) makeLimiterTx(nsID namespace.ID, task fcTask, lim Limiter) l
 	}
 }
 
-// Holds state for an invocation of the flow control commit protocol. See Readiness.NewTx.
+// Tx holds state for an invocation of the flow control commit protocol. See Readiness.NewTx.
 type Tx struct {
 	limiters     []txEntry // points into limitersBuf unless there are more than MaxLimiters
 	limitersBuf  [MaxLimiters]txEntry
@@ -136,10 +138,8 @@ func (tx *Tx) LimiterRefs() []*taskqueuespb.LimiterRef {
 }
 
 // Check checks and consumes local tokens for each limiter.
-// // ReadinessState gets the readiness state of a limiter. If it's blocked and cb is not nil,
-// // cb.OnReady will be called once when the state of the limiter transitions to ready. If it is
-// // ready, the callback will be removed from the limiter
-// TODO(fc): comment more here
+// If it's not ready and a callback was passed to NewTx, the callback will be registered to be
+// called when the limiter may be ready. If it is ready, a registered callback will be removed.
 func (tx *Tx) Check() (retErr error) {
 	if tx == nil {
 		return nil // no limiters
@@ -148,7 +148,7 @@ func (tx *Tx) Check() (retErr error) {
 	}
 	defer func() {
 		if retErr != nil {
-			tx.Rollback(nil)
+			tx.Rollback(context.Background())
 		}
 	}()
 
@@ -202,6 +202,7 @@ func (tx *Tx) Reserve(ctx context.Context) (retErr error) {
 	}
 	defer func() {
 		if retErr != nil {
+			// TODO(fc): use disconnected context in case this one is canceled/deadline exceeded
 			tx.Rollback(ctx)
 		}
 	}()
@@ -221,7 +222,7 @@ func (tx *Tx) Reserve(ctx context.Context) (retErr error) {
 }
 
 // Commit turns reservations into committed slots.
-// Reserve may make RPC calls.
+// Commit may make RPC calls.
 func (tx *Tx) Commit(ctx context.Context) (retErr error) {
 	if tx == nil {
 		return nil // no limiters
